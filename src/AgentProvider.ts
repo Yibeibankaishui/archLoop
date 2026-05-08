@@ -217,7 +217,7 @@ export const cursor = (
       ? " --force --sandbox disabled"
       : "";
     return {
-      command: `cursor-agent --print --output-format stream-json --stream-partial-output --trust --model ${shellEscape(model)}${modeFlag}${forceFlags} -`,
+      command: `cursor-agent --print --output-format stream-json --stream-partial-output --trust --model ${shellEscape(model)}${modeFlag}${forceFlags} "$(cat)"`,
       stdin: prompt,
     };
   },

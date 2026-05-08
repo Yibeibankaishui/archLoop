@@ -717,7 +717,7 @@ describe("cursor factory", () => {
   it("buildPrintCommand delivers prompt via stdin, not argv", () => {
     const provider = cursor("auto");
     const { command, stdin } = provider.buildPrintCommand(opts("it's a test"));
-    expect(command).toContain(" -");
+    expect(command).toContain('"$(cat)"');
     expect(command).not.toContain("it's a test");
     expect(stdin).toBe("it's a test");
   });

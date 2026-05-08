@@ -22,13 +22,26 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+# macOS often uses GID 20 ("staff"), which already exists in Debian images.
+RUN set -eux; \
+  if ! getent group "$AGENT_GID" >/dev/null; then \
+    groupmod -g "$AGENT_GID" node; \
+  fi; \
+  usermod -u "$AGENT_UID" -g "$AGENT_GID" -d /home/agent -m -l agent node; \
+  mkdir -p /home/agent/.config; \
+  chown -R "$AGENT_UID:$AGENT_GID" /home/agent
+
+# Install Codex CLI (run as root before USER agent)
+RUN npm install -g @openai/codex
+
+# Switch to the sandbox user before installing user-scoped agent CLIs.
 USER ${AGENT_UID}:${AGENT_GID}
+ENV HOME="/home/agent"
 
-# Install Claude Code CLI
-RUN curl -fsSL https://claude.ai/install.sh | bash
+# Install Cursor Agent CLI
+RUN curl https://cursor.com/install -fsS | bash
 
-# Add Claude to PATH
+# Add user-scoped agent CLIs to PATH
 ENV PATH="/home/agent/.local/bin:$PATH"
 
 WORKDIR /home/agent
