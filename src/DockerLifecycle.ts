@@ -1,13 +1,15 @@
 import { Effect } from "effect";
 import { execFile } from "node:child_process";
 import { resolve } from "node:path";
+import { dockerCommand } from "./dockerCommand.js";
 import { DockerError } from "./errors.js";
 import { formatVolumeMount, type SelinuxLabel } from "./mountUtils.js";
 
 const dockerExec = (args: string[]): Effect.Effect<string, DockerError> =>
   Effect.async((resume) => {
+    const dockerBin = dockerCommand();
     execFile(
-      "docker",
+      dockerBin,
       args,
       { maxBuffer: 10 * 1024 * 1024 },
       (error, stdout, stderr) => {
@@ -15,7 +17,7 @@ const dockerExec = (args: string[]): Effect.Effect<string, DockerError> =>
           resume(
             Effect.fail(
               new DockerError({
-                message: `docker ${args[0]} failed: ${stderr?.toString() || error.message}`,
+                message: `${dockerBin} ${args[0]} failed: ${stderr?.toString() || error.message}`,
               }),
             ),
           );

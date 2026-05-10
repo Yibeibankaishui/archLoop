@@ -41,6 +41,18 @@ const hooks = {
 // platform-specific binaries and any packages added since the last copy.
 const copyToWorktree = ["node_modules"];
 
+const sandboxProvider = docker({
+  mounts: [
+    { hostPath: ".sandcastle/auth/codex", sandboxPath: "/home/agent/.codex" },
+    { hostPath: ".sandcastle/auth/cursor", sandboxPath: "/home/agent/.cursor" },
+    {
+      hostPath: ".sandcastle/auth/cursor-config",
+      sandboxPath: "/home/agent/.config/cursor",
+    },
+    { hostPath: ".sandcastle/auth/gh", sandboxPath: "/home/agent/.config/gh" },
+  ],
+});
+
 // ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
@@ -55,7 +67,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // This gives both agents a real, named branch that persists across phases.
   const sandbox = await sandcastle.createSandbox({
     branch,
-    sandbox: docker(),
+    sandbox: sandboxProvider,
     hooks,
     copyToWorktree,
   });

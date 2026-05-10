@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 
 const GITIGNORE = `.env
+auth/
 logs/
 worktrees/
 `;
@@ -74,8 +75,16 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+# macOS commonly uses GID 20 ("staff"), which already exists in Debian images.
+RUN set -eux; \\
+  if ! getent group "$AGENT_GID" >/dev/null; then \\
+    groupmod -g "$AGENT_GID" node; \\
+  fi; \\
+  usermod -u "$AGENT_UID" -g "$AGENT_GID" -d /home/agent -m -l agent node; \\
+  mkdir -p /home/agent/.config; \\
+  chown -R "$AGENT_UID:$AGENT_GID" /home/agent
 USER \${AGENT_UID}:\${AGENT_GID}
+ENV HOME="/home/agent"
 
 # Install Claude Code CLI
 RUN curl -fsSL https://claude.ai/install.sh | bash
@@ -109,12 +118,19 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+RUN set -eux; \\
+  if ! getent group "$AGENT_GID" >/dev/null; then \\
+    groupmod -g "$AGENT_GID" node; \\
+  fi; \\
+  usermod -u "$AGENT_UID" -g "$AGENT_GID" -d /home/agent -m -l agent node; \\
+  mkdir -p /home/agent/.config; \\
+  chown -R "$AGENT_UID:$AGENT_GID" /home/agent
 
 # Install pi coding agent (run as root before USER agent)
 RUN npm install -g @mariozechner/pi-coding-agent
 
 USER \${AGENT_UID}:\${AGENT_GID}
+ENV HOME="/home/agent"
 
 WORKDIR /home/agent
 
@@ -142,12 +158,19 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+RUN set -eux; \\
+  if ! getent group "$AGENT_GID" >/dev/null; then \\
+    groupmod -g "$AGENT_GID" node; \\
+  fi; \\
+  usermod -u "$AGENT_UID" -g "$AGENT_GID" -d /home/agent -m -l agent node; \\
+  mkdir -p /home/agent/.config; \\
+  chown -R "$AGENT_UID:$AGENT_GID" /home/agent
 
 # Install Codex CLI (run as root before USER agent)
 RUN npm install -g @openai/codex
 
 USER \${AGENT_UID}:\${AGENT_GID}
+ENV HOME="/home/agent"
 
 WORKDIR /home/agent
 
@@ -175,9 +198,16 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+RUN set -eux; \\
+  if ! getent group "$AGENT_GID" >/dev/null; then \\
+    groupmod -g "$AGENT_GID" node; \\
+  fi; \\
+  usermod -u "$AGENT_UID" -g "$AGENT_GID" -d /home/agent -m -l agent node; \\
+  mkdir -p /home/agent/.config; \\
+  chown -R "$AGENT_UID:$AGENT_GID" /home/agent
 
 USER \${AGENT_UID}:\${AGENT_GID}
+ENV HOME="/home/agent"
 
 # Install Cursor Agent CLI
 RUN curl https://cursor.com/install -fsS | bash
@@ -211,12 +241,19 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+RUN set -eux; \\
+  if ! getent group "$AGENT_GID" >/dev/null; then \\
+    groupmod -g "$AGENT_GID" node; \\
+  fi; \\
+  usermod -u "$AGENT_UID" -g "$AGENT_GID" -d /home/agent -m -l agent node; \\
+  mkdir -p /home/agent/.config; \\
+  chown -R "$AGENT_UID:$AGENT_GID" /home/agent
 
 # Install OpenCode CLI (run as root before USER agent)
 RUN npm install -g opencode-ai@latest
 
 USER \${AGENT_UID}:\${AGENT_GID}
+ENV HOME="/home/agent"
 
 WORKDIR /home/agent
 
@@ -321,7 +358,7 @@ const BACKLOG_MANAGER_REGISTRY: BacklogManagerEntry[] = [
     name: "github-issues",
     label: "GitHub Issues",
     templateArgs: {
-      LIST_TASKS_COMMAND: `gh issue list --state open --label Sandcastle --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
+      LIST_TASKS_COMMAND: `gh issue list --state open -l Sandcastle --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
       VIEW_TASK_COMMAND: "gh issue view <ID>",
       CLOSE_TASK_COMMAND: `gh issue close <ID> --comment "Completed by Sandcastle"`,
       BACKLOG_MANAGER_TOOLS: GITHUB_CLI_TOOLS,
@@ -542,6 +579,7 @@ const rewriteMainTs = (
 
 /**
  * When the user opted out of the Sandcastle label, strip ` --label Sandcastle`
+ * and ` -l Sandcastle`
  * from all `.md` files in the scaffolded config directory so that `gh issue list`
  * commands work without a label filter.
  */
@@ -561,7 +599,9 @@ const rewritePromptFiles = (
           const content = yield* fs
             .readFileString(filePath)
             .pipe(Effect.mapError((e) => new Error(e.message)));
-          const updated = content.replace(/ --label Sandcastle/g, "");
+          const updated = content
+            .replace(/ --label Sandcastle/g, "")
+            .replace(/ -l Sandcastle/g, "");
           if (updated !== content) {
             yield* fs
               .writeFileString(filePath, updated)
@@ -732,6 +772,9 @@ export const scaffold = (
           .pipe(Effect.mapError((e) => new Error(e.message))),
         fs
           .writeFileString(join(configDir, ".env.example"), envExampleContent)
+          .pipe(Effect.mapError((e) => new Error(e.message))),
+        fs
+          .writeFileString(join(configDir, ".env"), envExampleContent)
           .pipe(Effect.mapError((e) => new Error(e.message))),
         copyTemplateFiles(templateDir, configDir, mainFilename),
       ],
