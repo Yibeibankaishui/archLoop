@@ -80,6 +80,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           agent: implementerAgent,
           promptFile: "./.sandcastle/implement-prompt.md",
           promptArgs: {
+            ISSUE_NUMBER: String(issue.number),
             TASK_ID: String(issue.number),
             ISSUE_TITLE: issue.title,
             BRANCH: issue.branch,
@@ -92,6 +93,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
             agent: reviewerAgent,
             promptFile: "./.sandcastle/review-prompt.md",
             promptArgs: {
+              ISSUE_NUMBER: String(issue.number),
               TASK_ID: String(issue.number),
               ISSUE_TITLE: issue.title,
               BRANCH: issue.branch,
