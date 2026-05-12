@@ -515,6 +515,75 @@ describe("InitService scaffold", () => {
     },
   );
 
+  it("deduplicates selected runtime env hints in .env.example and .env", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      installedRuntimes: [
+        getAgentRuntime("claude-code")!,
+        getAgentRuntime("pi")!,
+        getAgentRuntime("codex")!,
+      ],
+      backlogManager: getBacklogManager("github-issues"),
+    });
+
+    const configDir = join(dir, ".sandcastle");
+    const envExample = await readFile(join(configDir, ".env.example"), "utf-8");
+    const env = await readFile(join(configDir, ".env"), "utf-8");
+
+    for (const content of [envExample, env]) {
+      expect(content).toContain("ANTHROPIC_API_KEY=");
+      expect(content).toContain("OPENAI_KEY=");
+      expect(content).toContain("GH_TOKEN=");
+      expect(content.match(/^ANTHROPIC_API_KEY=/gm)).toHaveLength(1);
+    }
+  });
+
+  it("scaffolds auth mounts for selected runtimes and backlog manager only", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      templateName: "simple-loop",
+      installedRuntimes: [getAgentRuntime("codex")!],
+      backlogManager: getBacklogManager("github-issues"),
+    });
+
+    const mainTs = await readFile(
+      join(dir, ".sandcastle", "main.mts"),
+      "utf-8",
+    );
+
+    expect(mainTs).toContain(".sandcastle/auth/codex");
+    expect(mainTs).toContain("/home/agent/.codex");
+    expect(mainTs).toContain(".sandcastle/auth/gh");
+    expect(mainTs).toContain("/home/agent/.config/gh");
+    expect(mainTs).not.toContain(".sandcastle/auth/cursor");
+    expect(mainTs).not.toContain(".sandcastle/auth/cursor-config");
+  });
+
+  it("scaffolds combined auth mounts for multiple selected runtimes", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      templateName: "simple-loop",
+      installedRuntimes: [
+        getAgentRuntime("codex")!,
+        getAgentRuntime("cursor")!,
+      ],
+      backlogManager: getBacklogManager("beads"),
+    });
+
+    const mainTs = await readFile(
+      join(dir, ".sandcastle", "main.mts"),
+      "utf-8",
+    );
+
+    expect(mainTs).toContain(".sandcastle/auth/codex");
+    expect(mainTs).toContain("/home/agent/.codex");
+    expect(mainTs).toContain(".sandcastle/auth/cursor");
+    expect(mainTs).toContain("/home/agent/.cursor");
+    expect(mainTs).toContain(".sandcastle/auth/cursor-config");
+    expect(mainTs).toContain("/home/agent/.config/cursor");
+    expect(mainTs).not.toContain(".sandcastle/auth/gh");
+  });
+
   // --- Template-specific tests ---
 
   it("simple-loop template produces main.mts and prompt.md", async () => {
