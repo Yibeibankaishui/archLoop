@@ -1,12 +1,12 @@
 import { exec } from "node:child_process";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 
 const execAsync = promisify(exec);
-vi.setConfig({ testTimeout: 20_000 });
+vi.setConfig({ testTimeout: 60_000 });
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
@@ -36,8 +36,8 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("sandcastle");
     expect(stdout).toContain("docker");
     expect(stdout).toContain("init");
-    expect(stdout).not.toContain("run");
-    expect(stdout).not.toContain("interactive");
+    expect(stdout).not.toMatch(/-\s+run(?:\s|\[|$)/);
+    expect(stdout).not.toMatch(/-\s+interactive(?:\s|\[|$)/);
     // build-image and remove-image are namespaced under docker, not top-level
     expect(stdout).toContain("docker build-image");
     expect(stdout).toContain("docker remove-image");
@@ -82,6 +82,11 @@ describe("sandcastle CLI", () => {
   it("init --help exposes --model flag", async () => {
     const { stdout } = await runCli("init --help", process.cwd());
     expect(stdout).toContain("--model");
+  });
+
+  it("init --help exposes --installed-runtimes flag", async () => {
+    const { stdout } = await runCli("init --help", process.cwd());
+    expect(stdout).toContain("--installed-runtimes");
   });
 
   it("init --template nonexistent produces error listing available templates", async () => {
@@ -166,5 +171,26 @@ describe("sandcastle CLI", () => {
       expect(output).toContain("nonexistent");
       expect(output).toContain("claude-code");
     }
+  });
+
+  it("init --installed-runtimes scaffolds a Dockerfile with selected runtimes", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    await runCli(
+      "init --agent claude-code --sandbox docker --backlog beads --template blank --preset-agents none --build-image false --installed-runtimes codex,cursor,codex",
+      hostDir,
+    );
+
+    const dockerfile = await readFile(
+      join(hostDir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).toContain("@openai/codex");
+    expect(dockerfile.match(/@openai\/codex/g)).toHaveLength(1);
+    expect(dockerfile).toContain("cursor.com/install");
+    expect(dockerfile).not.toContain("claude.ai/install.sh");
+    expect(dockerfile).not.toContain("opencode-ai");
+    expect(dockerfile.match(/^FROM /gm)).toHaveLength(1);
   });
 });

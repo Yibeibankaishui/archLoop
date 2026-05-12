@@ -23,10 +23,13 @@ import {
   listSandboxProviders,
   getSandboxProvider,
   getNextStepsLines,
+  listAgentRuntimes,
+  getAgentRuntime,
 } from "./InitService.js";
 import { defaultImageName } from "./sandboxes/docker.js";
 import type {
   AgentEntry,
+  AgentRuntimeEntry,
   BacklogManagerEntry,
   SandboxProviderEntry,
 } from "./InitService.js";
@@ -95,6 +98,13 @@ const templateOption = Options.text("template").pipe(
 
 const agentOption = Options.text("agent").pipe(
   Options.withDescription("Agent to use (e.g. claude-code)"),
+  Options.optional,
+);
+
+const installedRuntimesOption = Options.text("installed-runtimes").pipe(
+  Options.withDescription(
+    "Comma-separated agent runtimes to install in the sandbox image (e.g. claude-code,codex). Omit to choose interactively.",
+  ),
   Options.optional,
 );
 
@@ -183,12 +193,47 @@ const parsePresetAgentsCliValue = (
   return Effect.succeed(ids);
 };
 
+const parseInstalledRuntimesCliValue = (
+  raw: string,
+): Effect.Effect<readonly AgentRuntimeEntry[], InitError, never> => {
+  const ids = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+    .filter((id, index, all) => all.indexOf(id) === index);
+  if (ids.length === 0) {
+    return Effect.fail(
+      new InitError({
+        message: "At least one runtime is required in --installed-runtimes.",
+      }),
+    );
+  }
+
+  const runtimes: AgentRuntimeEntry[] = [];
+  for (const id of ids) {
+    const runtime = getAgentRuntime(id);
+    if (!runtime) {
+      const names = listAgentRuntimes()
+        .map((r) => r.name)
+        .join(", ");
+      return Effect.fail(
+        new InitError({
+          message: `Unknown agent runtime "${id}" in --installed-runtimes. Available: ${names}`,
+        }),
+      );
+    }
+    runtimes.push(runtime);
+  }
+  return Effect.succeed(runtimes);
+};
+
 const initCommand = Command.make(
   "init",
   {
     imageName: imageNameOption,
     template: templateOption,
     agent: agentOption,
+    installedRuntimes: installedRuntimesOption,
     model: initModelOption,
     sandbox: initSandboxOption,
     backlog: initBacklogOption,
@@ -200,6 +245,7 @@ const initCommand = Command.make(
     imageName: imageNameFlag,
     template,
     agent: agentFlag,
+    installedRuntimes: installedRuntimesFlag,
     model: modelFlag,
     sandbox: sandboxCli,
     backlog: backlogCli,
@@ -265,6 +311,48 @@ const initCommand = Command.make(
         modelFlag._tag === "Some"
           ? modelFlag.value
           : selectedAgent.defaultModel;
+
+      // Resolve installed agent runtimes: CLI flag > interactive multiselect
+      let selectedInstalledRuntimes: readonly AgentRuntimeEntry[];
+      if (installedRuntimesFlag._tag === "Some") {
+        selectedInstalledRuntimes = yield* parseInstalledRuntimesCliValue(
+          installedRuntimesFlag.value,
+        );
+      } else {
+        const agentRuntimes = listAgentRuntimes();
+        const initialRuntimeIds = agentRuntimes.some(
+          (runtime) => runtime.name === selectedAgent.name,
+        )
+          ? [selectedAgent.name]
+          : undefined;
+        const selected = yield* Effect.promise(() =>
+          clack.multiselect({
+            message:
+              "Select agent runtimes to install in the sandbox image (space to toggle, enter when done):",
+            options: agentRuntimes.map((runtime) => ({
+              value: runtime.name,
+              label: runtime.label,
+              hint:
+                runtime.name === selectedAgent.name
+                  ? "default selected agent"
+                  : undefined,
+            })),
+            initialValues: initialRuntimeIds,
+            cursorAt: selectedAgent.name,
+            required: true,
+          }),
+        );
+        if (clack.isCancel(selected)) {
+          yield* Effect.fail(
+            new InitError({
+              message: "Agent runtime selection cancelled.",
+            }),
+          );
+        }
+        selectedInstalledRuntimes = (selected as string[]).map(
+          (name) => getAgentRuntime(name)!,
+        );
+      }
 
       // Resolve sandbox provider: CLI flag > interactive select
       const sandboxProviders = listSandboxProviders();
@@ -435,6 +523,7 @@ const initCommand = Command.make(
           createLabel: shouldCreateLabel === true,
           backlogManager: selectedBacklogManager,
           sandboxProvider: selectedSandboxProvider,
+          installedRuntimes: selectedInstalledRuntimes,
           ...(presetAgentIds !== undefined && presetAgentIds.length > 0
             ? { presetAgentIds }
             : {}),

@@ -43,6 +43,9 @@ const runScaffold = (repoDir: string, options?: Partial<ScaffoldOptions>) =>
     ),
   );
 
+const countOccurrences = (content: string, pattern: RegExp): number =>
+  content.match(pattern)?.length ?? 0;
+
 // ---------------------------------------------------------------------------
 // Agent registry
 // ---------------------------------------------------------------------------
@@ -433,6 +436,84 @@ describe("InitService scaffold", () => {
     expect(envExample).toContain("OPENAI_KEY=");
     expect(envExample).toContain("CURSOR_API_KEY=");
   });
+
+  it("assembles a Dockerfile from multiple selected runtime snippets once", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      installedRuntimes: [
+        getAgentRuntime("codex")!,
+        getAgentRuntime("cursor")!,
+      ],
+    });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+
+    expect(dockerfile).toContain("@openai/codex");
+    expect(dockerfile).toContain("cursor.com/install");
+    expect(dockerfile).not.toContain("claude.ai/install.sh");
+    expect(dockerfile).not.toContain("@mariozechner/pi-coding-agent");
+    expect(dockerfile).not.toContain("opencode-ai");
+    expect(countOccurrences(dockerfile, /^FROM /gm)).toBe(1);
+    expect(countOccurrences(dockerfile, /Install system dependencies/g)).toBe(
+      1,
+    );
+    expect(
+      countOccurrences(dockerfile, /^USER \$\{AGENT_UID\}:\$\{AGENT_GID\}/gm),
+    ).toBe(1);
+    expect(countOccurrences(dockerfile, /^ENTRYPOINT /gm)).toBe(1);
+  });
+
+  it("assembles a Containerfile from multiple selected runtime snippets once", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      sandboxProvider: getSandboxProvider("podman")!,
+      installedRuntimes: [
+        getAgentRuntime("codex")!,
+        getAgentRuntime("cursor")!,
+      ],
+    });
+
+    const containerfile = await readFile(
+      join(dir, ".sandcastle", "Containerfile"),
+      "utf-8",
+    );
+
+    expect(containerfile).toContain("@openai/codex");
+    expect(containerfile).toContain("cursor.com/install");
+    expect(containerfile).not.toContain("claude.ai/install.sh");
+    expect(containerfile).not.toContain("opencode-ai");
+    expect(countOccurrences(containerfile, /^FROM /gm)).toBe(1);
+    expect(countOccurrences(containerfile, /^ENTRYPOINT /gm)).toBe(1);
+  });
+
+  it.each([
+    ["docker", "Dockerfile"],
+    ["podman", "Containerfile"],
+  ] as const)(
+    "keeps one selected runtime output valid for %s",
+    async (sandboxProviderName, containerfileName) => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        sandboxProvider: getSandboxProvider(sandboxProviderName)!,
+        installedRuntimes: [getAgentRuntime("codex")!],
+      });
+
+      const containerfile = await readFile(
+        join(dir, ".sandcastle", containerfileName),
+        "utf-8",
+      );
+
+      expect(containerfile).toContain("FROM node:22-bookworm");
+      expect(containerfile).toContain("@openai/codex");
+      expect(containerfile).not.toContain("cursor.com/install");
+      expect(containerfile).not.toContain("claude.ai/install.sh");
+      expect(countOccurrences(containerfile, /^FROM /gm)).toBe(1);
+      expect(countOccurrences(containerfile, /^ENTRYPOINT /gm)).toBe(1);
+    },
+  );
 
   // --- Template-specific tests ---
 
