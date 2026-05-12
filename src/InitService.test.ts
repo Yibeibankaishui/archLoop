@@ -812,6 +812,13 @@ describe("InitService scaffold", () => {
       expect(joined).toContain("npm run sandcastle");
     });
 
+    it("next steps explain main file can mix installed providers after init", () => {
+      const lines = getNextStepsLines("simple-loop", "main.ts");
+      const joined = lines.join("\n");
+      expect(joined).toContain("main.ts");
+      expect(joined).toContain("mix installed agent providers");
+    });
+
     it("non-blank template includes a note about customizing the install command", () => {
       const lines = getNextStepsLines("simple-loop", "main.mts");
       const joined = lines.join("\n");

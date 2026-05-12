@@ -711,7 +711,7 @@ export function getNextStepsLines(
       `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
       "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
       `${step++}. Read and customize .sandcastle/prompt.md to describe what you want the agent to do`,
-      `${step++}. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs`,
+      `${step++}. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs and can mix installed agent providers after init`,
       `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
     ];
     if (presetHintText) {
@@ -727,6 +727,7 @@ export function getNextStepsLines(
       `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
       "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
       `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
+      `${step++}. Edit .sandcastle/${mainFilename} to mix installed agent providers after init; the selected default agent only seeds the scaffolded example`,
       `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. Adjust both if you use a different package manager`,
       `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
     ];

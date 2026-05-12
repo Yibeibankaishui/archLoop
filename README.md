@@ -652,7 +652,28 @@ After you choose a template, init can optionally add **preset agent roles**. In 
 
 ### `sandcastle init`
 
-Scaffolds the `.sandcastle/` config directory and builds the container image. This is the first command you run in a new repo. Interactive init asks for a default scaffold agent and then which agent runtimes to install in the image. For scripted init, omit `--runtimes` to install the selected `--agent` runtime, or pass a comma-separated list such as `--runtimes codex,cursor`. You choose a sandbox provider (Docker or Podman) during init — selecting Podman writes a `Containerfile` instead of `Dockerfile` and uses `sandcastle podman build-image` for the build step. The generated container file installs the selected agent runtimes, and `.env.example` includes the token placeholders needed by those runtimes and backlog manager.
+Scaffolds the `.sandcastle/` config directory and builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a default scaffold agent and then which agent runtimes to install in the image. You choose a sandbox provider (Docker or Podman) during init — selecting Podman writes a `Containerfile` instead of `Dockerfile` and uses `sandcastle podman build-image` for the build step.
+
+Think of the init agent choices as two layers:
+
+- The default scaffold agent (`--agent`) chooses the agent provider and model used in the generated `main.mts` or `main.ts` example.
+- The installed runtimes (`--runtimes`) choose which agent CLIs are installed in the sandbox image, which auth directories are mounted, and which token placeholders appear in `.env.example`.
+
+`main.mts`/`main.ts` remains the orchestration surface after init. If you install multiple runtimes, edit that file to import and call the providers you want for each `run()` or `createSandbox()` flow. For scripted init, omit `--runtimes` to install the selected `--agent` runtime, or pass a comma-separated list.
+
+```bash
+npx sandcastle init \
+  --agent claude-code \
+  --runtimes claude-code,codex,cursor \
+  --sandbox docker \
+  --backlog github-issues \
+  --template simple-loop \
+  --preset-agents none \
+  --create-sandcastle-label false \
+  --build-image false
+```
+
+Existing single-runtime projects remain valid. `sandcastle init` does not automatically migrate an existing `.sandcastle/` config directory; it errors instead of overwriting your customizations.
 
 | Option                      | Required | Default                                           | Description                                                                                               |
 | --------------------------- | -------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
