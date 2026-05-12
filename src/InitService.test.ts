@@ -2269,7 +2269,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, {
         agent: claudeCodeAgent,
         model: "claude-opus-4-6",
-        installedRuntimes: [getAgentRuntime("codex")!],
+        installedRuntimes: [codexRuntime],
         presetAgentIds: ["miniprogram"],
       });
 

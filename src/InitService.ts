@@ -691,6 +691,9 @@ export const getSandboxProvider = (
 // Next steps
 // ---------------------------------------------------------------------------
 
+const PRESET_AGENT_NEXT_STEP =
+  "Preset agent roles are in .sandcastle/agents/ with bundled skills under .sandcastle/skills/. See .sandcastle/agent-profiles.json for recommended provider/model; compose prompts from main.mts using run() as needed. Recommendations may require matching installed runtimes.";
+
 export function getNextStepsLines(
   template: string,
   mainFilename: string,
@@ -698,7 +701,7 @@ export function getNextStepsLines(
 ): string[] {
   const presetHintText =
     options?.presetAgentIds && options.presetAgentIds.length > 0
-      ? "Preset agent roles are in .sandcastle/agents/ with bundled skills under .sandcastle/skills/. See .sandcastle/agent-profiles.json for recommended provider/model; compose prompts from main.mts using run() as needed. Recommendations may require matching installed runtimes."
+      ? PRESET_AGENT_NEXT_STEP
       : undefined;
 
   if (template === "blank") {
