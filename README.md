@@ -652,20 +652,20 @@ After you choose a template, init can optionally add **preset agent roles**. In 
 
 ### `sandcastle init`
 
-Scaffolds the `.sandcastle/` config directory and builds the container image. This is the first command you run in a new repo. You choose a sandbox provider (Docker or Podman) during init — selecting Podman writes a `Containerfile` instead of `Dockerfile` and uses `sandcastle podman build-image` for the build step. The generated container file installs the selected agent runtimes, and `.env.example` includes the token placeholders needed by those runtimes and backlog manager.
+Scaffolds the `.sandcastle/` config directory and builds the container image. This is the first command you run in a new repo. Interactive init asks for a default scaffold agent and then which agent runtimes to install in the image. For scripted init, omit `--runtimes` to install the selected `--agent` runtime, or pass a comma-separated list such as `--runtimes codex,cursor`. You choose a sandbox provider (Docker or Podman) during init — selecting Podman writes a `Containerfile` instead of `Dockerfile` and uses `sandcastle podman build-image` for the build step. The generated container file installs the selected agent runtimes, and `.env.example` includes the token placeholders needed by those runtimes and backlog manager.
 
-| Option                      | Required | Default                      | Description                                                          |
-| --------------------------- | -------- | ---------------------------- | -------------------------------------------------------------------- |
-| `--image-name`              | No       | `sandcastle:<repo-dir-name>` | Docker image name                                                    |
-| `--agent`                   | No       | Interactive prompt           | Agent to use (`claude-code`, `pi`, `codex`, `cursor`, `opencode`)    |
-| `--installed-runtimes`      | No       | Interactive prompt           | Comma-separated runtimes to install (`claude-code,codex`)            |
-| `--model`                   | No       | Agent's default model        | Model to use (e.g. `claude-sonnet-4-6`). Defaults to agent's default |
-| `--template`                | No       | Interactive prompt           | Template to scaffold (e.g. `blank`, `simple-loop`)                   |
-| `--sandbox`                 | No       | Interactive prompt           | Sandbox provider (`docker` or `podman`)                              |
-| `--backlog`                 | No       | Interactive prompt           | Backlog manager (`github-issues` or `beads`)                         |
-| `--preset-agents`           | No       | Interactive prompt           | Comma-separated preset ids (e.g. `reviewer,planner`) or `none`       |
-| `--create-sandcastle-label` | No       | Interactive prompt           | `true`/`false` for creating the `Sandcastle` GitHub label            |
-| `--build-image`             | No       | Interactive prompt           | `true`/`false` to build sandbox image after scaffold                 |
+| Option                      | Required | Default                                           | Description                                                                                               |
+| --------------------------- | -------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `--image-name`              | No       | `sandcastle:<repo-dir-name>`                      | Docker image name                                                                                         |
+| `--agent`                   | No       | Interactive prompt                                | Default scaffold agent (`claude-code`, `pi`, `codex`, `cursor`, `opencode`)                               |
+| `--runtimes`                | No       | Selected `--agent` runtime, or interactive prompt | Comma-separated runtimes to install (`claude-code,codex`); `--installed-runtimes` is accepted as an alias |
+| `--model`                   | No       | Agent's default model                             | Model to use (e.g. `claude-sonnet-4-6`). Defaults to agent's default                                      |
+| `--template`                | No       | Interactive prompt                                | Template to scaffold (e.g. `blank`, `simple-loop`)                                                        |
+| `--sandbox`                 | No       | Interactive prompt                                | Sandbox provider (`docker` or `podman`)                                                                   |
+| `--backlog`                 | No       | Interactive prompt                                | Backlog manager (`github-issues` or `beads`)                                                              |
+| `--preset-agents`           | No       | Interactive prompt                                | Comma-separated preset ids (e.g. `reviewer,planner`) or `none`                                            |
+| `--create-sandcastle-label` | No       | Interactive prompt                                | `true`/`false` for creating the `Sandcastle` GitHub label                                                 |
+| `--build-image`             | No       | Interactive prompt                                | `true`/`false` to build sandbox image after scaffold                                                      |
 
 Creates the following files (plus optional `agents/`, `skills/`, and `agent-profiles.json` when you add preset roles):
 

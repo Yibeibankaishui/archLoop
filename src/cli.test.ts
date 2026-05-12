@@ -1,5 +1,5 @@
 import { exec } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -84,7 +84,12 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("--model");
   });
 
-  it("init --help exposes --installed-runtimes flag", async () => {
+  it("init --help exposes --runtimes flag", async () => {
+    const { stdout } = await runCli("init --help", process.cwd());
+    expect(stdout).toContain("--runtimes");
+  });
+
+  it("init --help exposes --installed-runtimes alias", async () => {
     const { stdout } = await runCli("init --help", process.cwd());
     expect(stdout).toContain("--installed-runtimes");
   });
@@ -173,6 +178,29 @@ describe("sandcastle CLI", () => {
     }
   });
 
+  it("init with --agent and omitted runtimes installs the selected agent runtime", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    await runCli(
+      "init --agent cursor --sandbox docker --backlog beads --template blank --preset-agents none --build-image false",
+      hostDir,
+    );
+
+    const dockerfile = await readFile(
+      join(hostDir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    const mainTs = await readFile(
+      join(hostDir, ".sandcastle", "main.mts"),
+      "utf-8",
+    );
+    expect(dockerfile).toContain("cursor.com/install");
+    expect(dockerfile).not.toContain("claude.ai/install.sh");
+    expect(dockerfile).not.toContain("@openai/codex");
+    expect(mainTs).toContain('cursor("auto")');
+  });
+
   it("init --installed-runtimes scaffolds a Dockerfile with selected runtimes", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
@@ -192,5 +220,48 @@ describe("sandcastle CLI", () => {
     expect(dockerfile).not.toContain("claude.ai/install.sh");
     expect(dockerfile).not.toContain("opencode-ai");
     expect(dockerfile.match(/^FROM /gm)).toHaveLength(1);
+  });
+
+  it("init --runtimes scaffolds a Dockerfile with selected runtimes", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    await runCli(
+      "init --agent claude-code --sandbox docker --backlog beads --template blank --preset-agents none --build-image false --runtimes codex,cursor",
+      hostDir,
+    );
+
+    const dockerfile = await readFile(
+      join(hostDir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    const envExample = await readFile(
+      join(hostDir, ".sandcastle", ".env.example"),
+      "utf-8",
+    );
+    expect(dockerfile).toContain("@openai/codex");
+    expect(dockerfile).toContain("cursor.com/install");
+    expect(dockerfile).not.toContain("claude.ai/install.sh");
+    expect(envExample).toContain("OPENAI_KEY=");
+    expect(envExample).toContain("CURSOR_API_KEY=");
+    expect(envExample).not.toContain("ANTHROPIC_API_KEY=");
+  });
+
+  it("init --runtimes rejects unknown runtimes before scaffolding", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli(
+        "init --agent claude-code --sandbox docker --backlog beads --template blank --preset-agents none --build-image false --runtimes not-a-runtime",
+        hostDir,
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const { stdout, stderr } = err as { stdout: string; stderr: string };
+      const output = stdout + stderr;
+      expect(output).toContain('Unknown agent runtime "not-a-runtime"');
+      await expect(access(join(hostDir, ".sandcastle"))).rejects.toThrow();
+    }
   });
 });

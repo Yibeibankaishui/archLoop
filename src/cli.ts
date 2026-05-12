@@ -97,13 +97,14 @@ const templateOption = Options.text("template").pipe(
 );
 
 const agentOption = Options.text("agent").pipe(
-  Options.withDescription("Agent to use (e.g. claude-code)"),
+  Options.withDescription("Default scaffold agent to use (e.g. claude-code)"),
   Options.optional,
 );
 
-const installedRuntimesOption = Options.text("installed-runtimes").pipe(
+const installedRuntimesOption = Options.text("runtimes").pipe(
+  Options.withAlias("installed-runtimes"),
   Options.withDescription(
-    "Comma-separated agent runtimes to install in the sandbox image (e.g. claude-code,codex). Omit to choose interactively.",
+    "Comma-separated agent runtimes to install in the sandbox image (e.g. claude-code,codex). Omit to install the selected --agent runtime in scripted init or choose interactively.",
   ),
   Options.optional,
 );
@@ -224,7 +225,7 @@ const resolveAgentRuntimeNames = (
           .join(", ");
         return yield* Effect.fail(
           new InitError({
-            message: `Unknown agent runtime "${name}" in --installed-runtimes. Available: ${availableNames}`,
+            message: `Unknown agent runtime "${name}" in --runtimes. Available: ${availableNames}`,
           }),
         );
       }
@@ -256,12 +257,27 @@ const parseInstalledRuntimesCliValue = (
   if (names.length === 0) {
     return Effect.fail(
       new InitError({
-        message: "At least one runtime is required in --installed-runtimes.",
+        message: "At least one runtime is required in --runtimes.",
       }),
     );
   }
 
   return resolveAgentRuntimeNames(names);
+};
+
+const resolveDefaultAgentRuntime = (
+  agent: AgentEntry,
+): Effect.Effect<readonly AgentRuntimeEntry[], InitError, never> => {
+  const runtime = getAgentRuntime(agent.name);
+  if (runtime) {
+    return Effect.succeed([runtime]);
+  }
+
+  return Effect.fail(
+    new InitError({
+      message: `No agent runtime found for default scaffold agent "${agent.name}".`,
+    }),
+  );
 };
 
 const initCommand = Command.make(
@@ -326,7 +342,7 @@ const initCommand = Command.make(
       } else {
         const selected = yield* Effect.promise(() =>
           clack.select({
-            message: "Select an agent:",
+            message: "Select the default scaffold agent:",
             initialValue: "claude-code",
             options: agents.map((a) => ({
               value: a.name,
@@ -355,6 +371,9 @@ const initCommand = Command.make(
         selectedInstalledRuntimes = yield* parseInstalledRuntimesCliValue(
           installedRuntimesFlag.value,
         );
+      } else if (agentFlag._tag === "Some") {
+        selectedInstalledRuntimes =
+          yield* resolveDefaultAgentRuntime(selectedAgent);
       } else {
         const agentRuntimes = listAgentRuntimes();
         const defaultInstalledRuntime = getAgentRuntime(selectedAgent.name);
