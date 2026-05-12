@@ -62,15 +62,17 @@ export interface AgentEntry {
   readonly factoryImport: string;
 }
 
+interface AgentRuntimeDockerfileInstall {
+  readonly root?: string;
+  readonly user?: string;
+  readonly pathEntries?: readonly string[];
+}
+
 export interface AgentRuntimeEntry {
   /** Filesystem-safe runtime identifier. */
   readonly name: string;
   readonly label: string;
-  readonly dockerfileInstall: {
-    readonly root?: string;
-    readonly user?: string;
-    readonly pathEntries?: readonly string[];
-  };
+  readonly dockerfileInstall: AgentRuntimeDockerfileInstall;
   readonly dockerfileTemplate: string;
   /** Lines to include in the generated `.env.example` for this runtime's API key. */
   readonly envExample: string;
@@ -384,6 +386,18 @@ export const listAgentRuntimes = (): AgentRuntimeEntry[] =>
 export const getAgentRuntime = (name: string): AgentRuntimeEntry | undefined =>
   AGENT_RUNTIME_REGISTRY.find((runtime) => runtime.name === name);
 
+const DOCKERFILE_SECTION_SEPARATOR = "\n\n";
+const MULTI_RUNTIME_USER_MARKER = "USER ${AGENT_UID}:${AGENT_GID}";
+const MULTI_RUNTIME_FOOTER_MARKER = "WORKDIR /home/agent";
+const MULTI_RUNTIME_USER_BLOCK = `${MULTI_RUNTIME_USER_MARKER}
+ENV HOME="/home/agent"`;
+
+const isDockerfileInstallSection = (
+  install: string | undefined,
+): install is string => install !== undefined && install.length > 0;
+
+const hasDockerfileContent = (part: string): boolean => part.trim().length > 0;
+
 const renderInstalledRuntimesDockerfile = (
   runtimes: readonly AgentRuntimeEntry[],
 ): string => {
@@ -391,18 +405,20 @@ const renderInstalledRuntimesDockerfile = (
     return runtimes[0]!.dockerfileTemplate;
   }
 
-  const userMarker = "USER ${AGENT_UID}:${AGENT_GID}";
-  const footerMarker = "WORKDIR /home/agent";
-  const userMarkerIndex = CLAUDE_CODE_DOCKERFILE.indexOf(userMarker);
-  const footerMarkerIndex = CLAUDE_CODE_DOCKERFILE.indexOf(footerMarker);
+  const userMarkerIndex = CLAUDE_CODE_DOCKERFILE.indexOf(
+    MULTI_RUNTIME_USER_MARKER,
+  );
+  const footerMarkerIndex = CLAUDE_CODE_DOCKERFILE.indexOf(
+    MULTI_RUNTIME_FOOTER_MARKER,
+  );
   const base = CLAUDE_CODE_DOCKERFILE.slice(0, userMarkerIndex).trimEnd();
   const footer = CLAUDE_CODE_DOCKERFILE.slice(footerMarkerIndex).trimStart();
   const rootInstalls = runtimes
     .map((runtime) => runtime.dockerfileInstall.root)
-    .filter((install): install is string => Boolean(install));
+    .filter(isDockerfileInstallSection);
   const userInstalls = runtimes
     .map((runtime) => runtime.dockerfileInstall.user)
-    .filter((install): install is string => Boolean(install));
+    .filter(isDockerfileInstallSection);
   const pathEntries = [
     ...new Set(
       runtimes.flatMap(
@@ -418,14 +434,14 @@ ENV PATH="${pathEntries.join(":")}:$PATH"`
 
   return [
     base,
-    rootInstalls.join("\n\n"),
-    'USER ${AGENT_UID}:${AGENT_GID}\nENV HOME="/home/agent"',
-    userInstalls.join("\n\n"),
+    rootInstalls.join(DOCKERFILE_SECTION_SEPARATOR),
+    MULTI_RUNTIME_USER_BLOCK,
+    userInstalls.join(DOCKERFILE_SECTION_SEPARATOR),
     pathBlock,
     footer,
   ]
-    .filter((part) => part.trim().length > 0)
-    .join("\n\n");
+    .filter(hasDockerfileContent)
+    .join(DOCKERFILE_SECTION_SEPARATOR);
 };
 
 const resolveInstalledRuntimes = (
@@ -443,12 +459,13 @@ const resolveInstalledRuntimes = (
     }
 
     const defaultRuntime = getAgentRuntime(agent.name);
-    if (!defaultRuntime) {
-      yield* Effect.fail(
-        new Error(`No agent runtime found for default agent "${agent.name}".`),
-      );
+    if (defaultRuntime) {
+      return [defaultRuntime];
     }
-    return [defaultRuntime!];
+
+    return yield* Effect.fail(
+      new Error(`No agent runtime found for default agent "${agent.name}".`),
+    );
   });
 
 // ---------------------------------------------------------------------------

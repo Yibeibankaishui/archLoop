@@ -157,7 +157,7 @@ GOOGLE_API_KEY=`,
 }
 ```
 
-The split keeps the default scaffold agent/model separate from the agent runtimes installed into the generated image. Add a Dockerfile constant alongside the existing ones. Use `CLAUDE_CODE_DOCKERFILE` as a structural reference — keep the `usermod` block, the `{{BACKLOG_MANAGER_TOOLS}}` placeholder, the `USER agent` line, and the `ENTRYPOINT ["sleep", "infinity"]`. Only the install line should differ.
+The split keeps the default scaffold agent/model separate from the agent runtimes installed into the generated image. Add a Dockerfile constant alongside the existing ones. Use `CLAUDE_CODE_DOCKERFILE` as a structural reference — keep the `usermod` block, the `{{BACKLOG_MANAGER_TOOLS}}` placeholder, the `USER ${AGENT_UID}:${AGENT_GID}` line, and the `ENTRYPOINT ["sleep", "infinity"]`. Only the install line should differ.
 
 ## Implementation checklist
 
