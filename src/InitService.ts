@@ -719,29 +719,29 @@ export function getNextStepsLines(
     }
     lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
     return lines;
-  } else {
-    const hasReviewer = template.includes("review");
-    let step = 1;
-    const lines: string[] = [
-      "Next steps:",
-      `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
-      "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
-      `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
-      `${step++}. Edit .sandcastle/${mainFilename} to mix installed agent providers after init; the selected default agent only seeds the scaffolded example`,
-      `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. Adjust both if you use a different package manager`,
-      `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
-    ];
-    if (hasReviewer) {
-      lines.push(
-        `${step++}. Customize .sandcastle/CODING_STANDARDS.md with your project's standards — the reviewer agent loads it during review`,
-      );
-    }
-    if (presetHintText) {
-      lines.push(`${step++}. ${presetHintText}`);
-    }
-    lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
-    return lines;
   }
+
+  const hasReviewer = template.includes("review");
+  let step = 1;
+  const lines: string[] = [
+    "Next steps:",
+    `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
+    "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
+    `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
+    `${step++}. Edit .sandcastle/${mainFilename} to mix installed agent providers after init; the selected default agent only seeds the scaffolded example`,
+    `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. Adjust both if you use a different package manager`,
+    `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
+  ];
+  if (hasReviewer) {
+    lines.push(
+      `${step++}. Customize .sandcastle/CODING_STANDARDS.md with your project's standards — the reviewer agent loads it during review`,
+    );
+  }
+  if (presetHintText) {
+    lines.push(`${step++}. ${presetHintText}`);
+  }
+  lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
+  return lines;
 }
 
 // ---------------------------------------------------------------------------
