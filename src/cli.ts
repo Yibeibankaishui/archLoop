@@ -193,15 +193,67 @@ const parsePresetAgentsCliValue = (
   return Effect.succeed(ids);
 };
 
+const parseUniqueRuntimeNames = (raw: string): string[] => {
+  const names: string[] = [];
+  const seen = new Set<string>();
+
+  for (const part of raw.split(",")) {
+    const name = part.trim();
+    if (name.length === 0 || seen.has(name)) {
+      continue;
+    }
+
+    seen.add(name);
+    names.push(name);
+  }
+
+  return names;
+};
+
+const resolveAgentRuntimeNames = (
+  names: readonly string[],
+): Effect.Effect<readonly AgentRuntimeEntry[], InitError, never> =>
+  Effect.gen(function* () {
+    const runtimes: AgentRuntimeEntry[] = [];
+
+    for (const name of names) {
+      const runtime = getAgentRuntime(name);
+      if (!runtime) {
+        const availableNames = listAgentRuntimes()
+          .map((entry) => entry.name)
+          .join(", ");
+        return yield* Effect.fail(
+          new InitError({
+            message: `Unknown agent runtime "${name}" in --installed-runtimes. Available: ${availableNames}`,
+          }),
+        );
+      }
+
+      runtimes.push(runtime);
+    }
+
+    return runtimes;
+  });
+
+const resolveRuntimePromptSelection = (
+  selection: readonly string[] | symbol,
+): Effect.Effect<readonly string[], InitError, never> => {
+  if (typeof selection === "symbol") {
+    return Effect.fail(
+      new InitError({
+        message: "Agent runtime selection cancelled.",
+      }),
+    );
+  }
+
+  return Effect.succeed(selection);
+};
+
 const parseInstalledRuntimesCliValue = (
   raw: string,
 ): Effect.Effect<readonly AgentRuntimeEntry[], InitError, never> => {
-  const ids = raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
-    .filter((id, index, all) => all.indexOf(id) === index);
-  if (ids.length === 0) {
+  const names = parseUniqueRuntimeNames(raw);
+  if (names.length === 0) {
     return Effect.fail(
       new InitError({
         message: "At least one runtime is required in --installed-runtimes.",
@@ -209,22 +261,7 @@ const parseInstalledRuntimesCliValue = (
     );
   }
 
-  const runtimes: AgentRuntimeEntry[] = [];
-  for (const id of ids) {
-    const runtime = getAgentRuntime(id);
-    if (!runtime) {
-      const names = listAgentRuntimes()
-        .map((r) => r.name)
-        .join(", ");
-      return Effect.fail(
-        new InitError({
-          message: `Unknown agent runtime "${id}" in --installed-runtimes. Available: ${names}`,
-        }),
-      );
-    }
-    runtimes.push(runtime);
-  }
-  return Effect.succeed(runtimes);
+  return resolveAgentRuntimeNames(names);
 };
 
 const initCommand = Command.make(
@@ -320,11 +357,7 @@ const initCommand = Command.make(
         );
       } else {
         const agentRuntimes = listAgentRuntimes();
-        const initialRuntimeIds = agentRuntimes.some(
-          (runtime) => runtime.name === selectedAgent.name,
-        )
-          ? [selectedAgent.name]
-          : undefined;
+        const defaultInstalledRuntime = getAgentRuntime(selectedAgent.name);
         const selected = yield* Effect.promise(() =>
           clack.multiselect({
             message:
@@ -337,21 +370,17 @@ const initCommand = Command.make(
                   ? "default selected agent"
                   : undefined,
             })),
-            initialValues: initialRuntimeIds,
-            cursorAt: selectedAgent.name,
+            initialValues: defaultInstalledRuntime
+              ? [defaultInstalledRuntime.name]
+              : undefined,
+            cursorAt: defaultInstalledRuntime?.name,
             required: true,
           }),
         );
-        if (clack.isCancel(selected)) {
-          yield* Effect.fail(
-            new InitError({
-              message: "Agent runtime selection cancelled.",
-            }),
-          );
-        }
-        selectedInstalledRuntimes = (selected as string[]).map(
-          (name) => getAgentRuntime(name)!,
-        );
+        const selectedRuntimeNames =
+          yield* resolveRuntimePromptSelection(selected);
+        selectedInstalledRuntimes =
+          yield* resolveAgentRuntimeNames(selectedRuntimeNames);
       }
 
       // Resolve sandbox provider: CLI flag > interactive select
