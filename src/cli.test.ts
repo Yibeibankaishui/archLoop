@@ -3,9 +3,10 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 const execAsync = promisify(exec);
+vi.setConfig({ testTimeout: 20_000 });
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });

@@ -39,7 +39,7 @@ npm install --save-dev @ai-hero/sandcastle
 npx sandcastle init
 ```
 
-3. Edit `.sandcastle/.env` and fill in your default values for `ANTHROPIC_API_KEY`. If you want to use your Claude subscription instead of an API key, see [#191](https://github.com/mattpocock/sandcastle/issues/191).
+3. Edit `.sandcastle/.env` and fill in the token values generated for your selected agent runtime and backlog manager.
 
 ```bash
 cp .sandcastle/.env.example .sandcastle/.env
@@ -652,7 +652,7 @@ After you choose a template, init can optionally add **preset agent roles**. In 
 
 ### `sandcastle init`
 
-Scaffolds the `.sandcastle/` config directory and builds the container image. This is the first command you run in a new repo. You choose a sandbox provider (Docker or Podman) during init — selecting Podman writes a `Containerfile` instead of `Dockerfile` and uses `sandcastle podman build-image` for the build step.
+Scaffolds the `.sandcastle/` config directory and builds the container image. This is the first command you run in a new repo. You choose a sandbox provider (Docker or Podman) during init — selecting Podman writes a `Containerfile` instead of `Dockerfile` and uses `sandcastle podman build-image` for the build step. The generated container file installs the selected agent runtime, and `.env.example` includes the token placeholders needed by that runtime and backlog manager.
 
 | Option                      | Required | Default                      | Description                                                          |
 | --------------------------- | -------- | ---------------------------- | -------------------------------------------------------------------- |
