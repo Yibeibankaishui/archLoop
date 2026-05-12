@@ -1,9 +1,10 @@
 import { NodeFileSystem } from "@effect/platform-node";
 import { Effect } from "effect";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { validatePresetRegistries } from "./presetAgents.js";
 import {
   scaffold,
   getNextStepsLines,
@@ -669,6 +670,15 @@ describe("InitService scaffold", () => {
       const lines = getNextStepsLines("blank", "main.mts");
       const joined = lines.join("\n");
       expect(joined).not.toContain("CODING_STANDARDS.md");
+    });
+
+    it("mentions preset paths when presetAgentIds are provided", () => {
+      const lines = getNextStepsLines("blank", "main.mts", {
+        presetAgentIds: ["reviewer"],
+      });
+      const joined = lines.join("\n");
+      expect(joined).toContain(".sandcastle/agents/");
+      expect(joined).toContain("agent-profiles.json");
     });
   });
 
@@ -1987,6 +1997,103 @@ describe("InitService scaffold", () => {
       await expect(
         access(join(dir, ".sandcastle", "Containerfile")),
       ).rejects.toThrow();
+    });
+  });
+
+  describe("preset agent scaffold", () => {
+    it("validatePresetRegistries passes", () => {
+      expect(() => validatePresetRegistries()).not.toThrow();
+    });
+
+    it("rejects unknown preset agent id", async () => {
+      const dir = await makeDir();
+      await expect(
+        runScaffold(dir, { presetAgentIds: ["not-a-real-preset"] }),
+      ).rejects.toThrow(/Unknown preset agent/);
+    });
+
+    it("writes agents, skills, and manifest for a single preset", async () => {
+      const dir = await makeDir();
+      const result = await runScaffold(dir, { presetAgentIds: ["reviewer"] });
+      expect(result.mainFilename).toBeDefined();
+
+      const agentMd = await readFile(
+        join(dir, ".sandcastle", "agents", "reviewer.md"),
+        "utf-8",
+      );
+      expect(agentMd).toContain(".sandcastle/skills/role-guidance/SKILL.md");
+
+      const skillMd = await readFile(
+        join(dir, ".sandcastle", "skills", "role-guidance", "SKILL.md"),
+        "utf-8",
+      );
+      expect(skillMd).toContain("Sandcastle");
+
+      const manifest = JSON.parse(
+        await readFile(
+          join(dir, ".sandcastle", "agent-profiles.json"),
+          "utf-8",
+        ),
+      ) as {
+        version: number;
+        profiles: Record<string, { promptRelativePath: string }>;
+      };
+      expect(manifest.version).toBe(1);
+      expect(manifest.profiles.reviewer?.promptRelativePath).toBe(
+        "agents/reviewer.md",
+      );
+    });
+
+    it("deduplicates shared skills when multiple presets are selected", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { presetAgentIds: ["reviewer", "planner"] });
+      const skillDirs = await readdir(join(dir, ".sandcastle", "skills"));
+      expect(skillDirs.sort()).toEqual(["role-guidance"]);
+    });
+
+    it("includes distinct skills when presets do not overlap", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        presetAgentIds: ["reviewer", "merger", "miniprogram"],
+      });
+      const skillDirs = (
+        await readdir(join(dir, ".sandcastle", "skills"))
+      ).sort();
+      expect(skillDirs).toEqual([
+        "merge-playbook",
+        "miniprogram-context",
+        "role-guidance",
+      ]);
+    });
+
+    it("adds preset agent and skill paths to inline copyToWorktree arrays", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        presetAgentIds: ["reviewer"],
+      });
+      const main = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(main).toContain(
+        'copyToWorktree: ["node_modules", ".sandcastle/agents", ".sandcastle/skills"]',
+      );
+    });
+
+    it("adds preset agent and skill paths to copyToWorktree constants", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner",
+        presetAgentIds: ["reviewer"],
+      });
+      const main = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(main).toContain(
+        'const copyToWorktree = ["node_modules", ".sandcastle/agents", ".sandcastle/skills"];',
+      );
     });
   });
 });

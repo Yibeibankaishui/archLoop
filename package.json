@@ -36,7 +36,7 @@
   },
   "scripts": {
     "build": "tsgo --project tsconfig.build.json",
-    "postbuild": "rm -rf dist/templates && cp -r src/templates dist/templates",
+    "postbuild": "rm -rf dist/templates dist/preset-bundles && cp -r src/templates dist/templates && cp -r src/preset-bundles dist/preset-bundles",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsgo --noEmit",

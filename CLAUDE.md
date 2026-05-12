@@ -10,7 +10,7 @@ When changing public-facing behavior, check `README.md` to see if the documentat
 
 ### Issue tracker
 
-Issues live as GitHub issues in `mattpocock/sandcastle`. See `docs/agents/issue-tracker.md`.
+Issues are GitHub issues in the repository `gh` resolves for this clone (`gh repo view`). See `docs/agents/issue-tracker.md` for how to point `gh issue` at a fork (`gh repo set-default`). Upstream source repository: `mattpocock/sandcastle`.
 
 ### Triage labels
 

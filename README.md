@@ -644,20 +644,29 @@ console.log(result.output.score); // typed as number
 
 Select a template during `sandcastle init` when prompted, or re-run init in a fresh repo to try a different one.
 
+### Preset agent roles (optional)
+
+After you choose a template, init can optionally add **preset agent roles**. In this mental model, the **template** is the default **workflow**, while a **preset** is an extra **reusable role** (for example reviewer, planner, merger, or WeChat Mini Program–oriented work) with bundled Markdown skills. Selected roles are copied to `.sandcastle/agents/` and `.sandcastle/skills/`, and `.sandcastle/agent-profiles.json` records suggested agent provider, model, and effort. Compose those prompts from `main.mts` with `run()` when you want to involve a role; nothing is auto-wired into the template loop in v1.
+
 ## CLI commands
 
 ### `sandcastle init`
 
 Scaffolds the `.sandcastle/` config directory and builds the container image. This is the first command you run in a new repo. You choose a sandbox provider (Docker or Podman) during init — selecting Podman writes a `Containerfile` instead of `Dockerfile` and uses `sandcastle podman build-image` for the build step.
 
-| Option         | Required | Default                      | Description                                                          |
-| -------------- | -------- | ---------------------------- | -------------------------------------------------------------------- |
-| `--image-name` | No       | `sandcastle:<repo-dir-name>` | Docker image name                                                    |
-| `--agent`      | No       | Interactive prompt           | Agent to use (`claude-code`, `pi`, `codex`, `cursor`, `opencode`)    |
-| `--model`      | No       | Agent's default model        | Model to use (e.g. `claude-sonnet-4-6`). Defaults to agent's default |
-| `--template`   | No       | Interactive prompt           | Template to scaffold (e.g. `blank`, `simple-loop`)                   |
+| Option                      | Required | Default                      | Description                                                          |
+| --------------------------- | -------- | ---------------------------- | -------------------------------------------------------------------- |
+| `--image-name`              | No       | `sandcastle:<repo-dir-name>` | Docker image name                                                    |
+| `--agent`                   | No       | Interactive prompt           | Agent to use (`claude-code`, `pi`, `codex`, `cursor`, `opencode`)    |
+| `--model`                   | No       | Agent's default model        | Model to use (e.g. `claude-sonnet-4-6`). Defaults to agent's default |
+| `--template`                | No       | Interactive prompt           | Template to scaffold (e.g. `blank`, `simple-loop`)                   |
+| `--sandbox`                 | No       | Interactive prompt           | Sandbox provider (`docker` or `podman`)                              |
+| `--backlog`                 | No       | Interactive prompt           | Backlog manager (`github-issues` or `beads`)                         |
+| `--preset-agents`           | No       | Interactive prompt           | Comma-separated preset ids (e.g. `reviewer,planner`) or `none`       |
+| `--create-sandcastle-label` | No       | Interactive prompt           | `true`/`false` for creating the `Sandcastle` GitHub label            |
+| `--build-image`             | No       | Interactive prompt           | `true`/`false` to build sandbox image after scaffold                 |
 
-Creates the following files:
+Creates the following files (plus optional `agents/`, `skills/`, and `agent-profiles.json` when you add preset roles):
 
 ```
 .sandcastle/

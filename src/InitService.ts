@@ -1,7 +1,15 @@
 import { FileSystem } from "@effect/platform";
 import { Effect } from "effect";
+import { cp } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  getPresetAgentDefinition,
+  getPresetBundlesRoot,
+  PRESET_AGENT_DEFINITIONS,
+  validatePresetRegistries,
+  type PresetAgentDefinition,
+} from "./presetAgents.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 
 const GITIGNORE = `.env
@@ -433,17 +441,28 @@ export const getSandboxProvider = (
 export function getNextStepsLines(
   template: string,
   mainFilename: string,
+  options?: { presetAgentIds?: readonly string[] },
 ): string[] {
+  const presetHintText =
+    options?.presetAgentIds && options.presetAgentIds.length > 0
+      ? "Preset agent roles are in .sandcastle/agents/ with bundled skills under .sandcastle/skills/. See .sandcastle/agent-profiles.json for recommended provider/model; compose prompts from main.mts using run() as needed."
+      : undefined;
+
   if (template === "blank") {
-    return [
+    let step = 1;
+    const lines: string[] = [
       "Next steps:",
-      `1. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
+      `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
       "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
-      "2. Read and customize .sandcastle/prompt.md to describe what you want the agent to do",
-      `3. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs`,
-      `4. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
-      "5. Run `npm run sandcastle` to start the agent",
+      `${step++}. Read and customize .sandcastle/prompt.md to describe what you want the agent to do`,
+      `${step++}. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs`,
+      `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
     ];
+    if (presetHintText) {
+      lines.push(`${step++}. ${presetHintText}`);
+    }
+    lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
+    return lines;
   } else {
     const hasReviewer = template.includes("review");
     let step = 1;
@@ -459,6 +478,9 @@ export function getNextStepsLines(
       lines.push(
         `${step++}. Customize .sandcastle/CODING_STANDARDS.md with your project's standards — the reviewer agent loads it during review`,
       );
+    }
+    if (presetHintText) {
+      lines.push(`${step++}. ${presetHintText}`);
     }
     lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
     return lines;
@@ -527,6 +549,97 @@ const copyTemplateFiles = (
     );
   });
 
+const copyPresetAgentsIntoConfig = (
+  configDir: string,
+  presetAgentIds: readonly string[],
+): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    if (presetAgentIds.length === 0) {
+      return;
+    }
+    validatePresetRegistries();
+    const bundlesRoot = getPresetBundlesRoot();
+    const fs = yield* FileSystem.FileSystem;
+
+    const agents: PresetAgentDefinition[] = [];
+    for (const id of presetAgentIds) {
+      const def = getPresetAgentDefinition(id);
+      if (!def) {
+        yield* Effect.fail(
+          new Error(
+            `Unknown preset agent: "${id}". Available: ${PRESET_AGENT_DEFINITIONS.map((a) => a.id).join(", ")}`,
+          ),
+        );
+      }
+      agents.push(def!);
+    }
+
+    const skillIdSet = new Set<string>();
+    for (const a of agents) {
+      for (const sid of a.skillIds) {
+        skillIdSet.add(sid);
+      }
+    }
+    const skillIds = [...skillIdSet].sort((a, b) => a.localeCompare(b));
+
+    yield* fs
+      .makeDirectory(join(configDir, "agents"), { recursive: true })
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+    yield* fs
+      .makeDirectory(join(configDir, "skills"), { recursive: true })
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+
+    for (const skillId of skillIds) {
+      const src = join(bundlesRoot, "skills", skillId);
+      const dest = join(configDir, "skills", skillId);
+      yield* Effect.tryPromise({
+        try: () => cp(src, dest, { recursive: true }),
+        catch: (e) =>
+          new Error(
+            `Failed to copy skill "${skillId}": ${e instanceof Error ? e.message : String(e)}`,
+          ),
+      });
+    }
+
+    for (const agent of agents) {
+      const from = join(bundlesRoot, "agents", agent.promptFile);
+      const to = join(configDir, "agents", `${agent.id}.md`);
+      yield* fs
+        .copyFile(from, to)
+        .pipe(Effect.mapError((e) => new Error(e.message)));
+    }
+
+    const profiles: Record<
+      string,
+      {
+        promptRelativePath: string;
+        recommendedAgentName: string;
+        recommendedModel: string;
+        recommendedEffort?: string;
+        skillIds: string[];
+      }
+    > = {};
+    for (const agent of agents) {
+      profiles[agent.id] = {
+        promptRelativePath: `agents/${agent.id}.md`,
+        recommendedAgentName: agent.recommendedAgentName,
+        recommendedModel: agent.recommendedModel,
+        ...(agent.recommendedEffort
+          ? { recommendedEffort: agent.recommendedEffort }
+          : {}),
+        skillIds: [...agent.skillIds],
+      };
+    }
+
+    const manifest = { version: 1 as const, profiles };
+    yield* fs
+      .writeFileString(
+        join(configDir, "agent-profiles.json"),
+        JSON.stringify(manifest, null, 2) + "\n",
+      )
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+  });
+
 /**
  * Replace the agent factory import and call in a scaffolded main.ts.
  *
@@ -570,6 +683,58 @@ const rewriteMainTs = (
     content = content.replace(
       factoryCallRe,
       `${agent.factoryImport}("${model}")`,
+    );
+
+    yield* fs
+      .writeFileString(mainTsPath, content)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+  });
+
+const PRESET_COPY_TO_WORKTREE_PATHS = [
+  ".sandcastle/agents",
+  ".sandcastle/skills",
+] as const;
+
+const parseQuotedArrayItems = (raw: string): string[] =>
+  [...raw.matchAll(/["']([^"']+)["']/g)].map((m) => m[1]!.trim());
+
+const mergeCopyToWorktreeItems = (existingRaw: string): string => {
+  const items = parseQuotedArrayItems(existingRaw);
+  for (const p of PRESET_COPY_TO_WORKTREE_PATHS) {
+    if (!items.includes(p)) items.push(p);
+  }
+  return items.map((p) => `"${p}"`).join(", ");
+};
+
+const rewriteMainCopyToWorktreeForPresets = (
+  configDir: string,
+  mainFilename: string,
+): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const mainTsPath = join(configDir, mainFilename);
+
+    const exists = yield* fs
+      .exists(mainTsPath)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+    if (!exists) return;
+
+    let content = yield* fs
+      .readFileString(mainTsPath)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+
+    // Handle both template styles:
+    // - copyToWorktree: ["node_modules"]
+    // - const copyToWorktree = ["node_modules"];
+    content = content.replace(
+      /copyToWorktree:\s*\[([^\]]*)\]/g,
+      (_m, items: string) =>
+        `copyToWorktree: [${mergeCopyToWorktreeItems(items)}]`,
+    );
+    content = content.replace(
+      /const copyToWorktree = \[([^\]]*)\];/g,
+      (_m, items: string) =>
+        `const copyToWorktree = [${mergeCopyToWorktreeItems(items)}];`,
     );
 
     yield* fs
@@ -686,10 +851,13 @@ export interface ScaffoldOptions {
   createLabel?: boolean;
   backlogManager?: BacklogManagerEntry;
   sandboxProvider?: SandboxProviderEntry;
+  /** Optional preset agent role ids (see `presetAgents.ts`). */
+  presetAgentIds?: readonly string[];
 }
 
 export interface ScaffoldResult {
   mainFilename: string;
+  presetAgentIds?: readonly string[];
 }
 
 /**
@@ -729,6 +897,7 @@ export const scaffold = (
       createLabel = true,
       backlogManager = BACKLOG_MANAGER_REGISTRY[0]!, // default: github-issues
       sandboxProvider = SANDBOX_PROVIDER_REGISTRY[0]!, // default: docker
+      presetAgentIds = [],
     } = options;
     const fs = yield* FileSystem.FileSystem;
     const configDir = join(repoDir, ".sandcastle");
@@ -792,5 +961,15 @@ export const scaffold = (
       yield* rewritePromptFiles(configDir);
     }
 
-    return { mainFilename };
+    if (presetAgentIds.length > 0) {
+      yield* copyPresetAgentsIntoConfig(configDir, presetAgentIds);
+      yield* rewriteMainCopyToWorktreeForPresets(configDir, mainFilename);
+    }
+
+    return {
+      mainFilename,
+      ...(presetAgentIds.length > 0
+        ? { presetAgentIds: [...presetAgentIds] }
+        : {}),
+    };
   });

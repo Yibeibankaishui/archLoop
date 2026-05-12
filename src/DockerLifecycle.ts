@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { execFile } from "node:child_process";
 import { resolve } from "node:path";
-import { dockerCommand } from "./dockerCommand.js";
+import { dockerCliEnv, dockerCommand } from "./dockerCommand.js";
 import { DockerError } from "./errors.js";
 import { formatVolumeMount, type SelinuxLabel } from "./mountUtils.js";
 
@@ -11,7 +11,10 @@ const dockerExec = (args: string[]): Effect.Effect<string, DockerError> =>
     execFile(
       dockerBin,
       args,
-      { maxBuffer: 10 * 1024 * 1024 },
+      {
+        maxBuffer: 10 * 1024 * 1024,
+        env: dockerCliEnv(),
+      },
       (error, stdout, stderr) => {
         if (error) {
           resume(

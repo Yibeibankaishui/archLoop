@@ -31,6 +31,10 @@ import type {
   SandboxProviderEntry,
 } from "./InitService.js";
 import { ConfigDirError, InitError } from "./errors.js";
+import {
+  getPresetAgentDefinition,
+  listPresetAgentsForInit,
+} from "./presetAgents.js";
 
 const require = createRequire(import.meta.url);
 const VERSION = (require("../package.json") as { version: string }).version;
@@ -101,6 +105,84 @@ const initModelOption = Options.text("model").pipe(
   Options.optional,
 );
 
+const initSandboxOption = Options.text("sandbox").pipe(
+  Options.withDescription(
+    "Sandbox provider (docker or podman). Omit to choose interactively.",
+  ),
+  Options.optional,
+);
+
+const initBacklogOption = Options.text("backlog").pipe(
+  Options.withDescription(
+    "Backlog manager (github-issues or beads). Omit to choose interactively.",
+  ),
+  Options.optional,
+);
+
+const initPresetAgentsOption = Options.text("preset-agents").pipe(
+  Options.withDescription(
+    "Comma-separated preset agent ids, or 'none' to skip presets without prompting. Omit for interactive prompts.",
+  ),
+  Options.optional,
+);
+
+const initCreateSandcastleLabelOption = Options.text(
+  "create-sandcastle-label",
+).pipe(
+  Options.withDescription(
+    "true or false when using github-issues (skips prompt when set). Omit to be prompted.",
+  ),
+  Options.optional,
+);
+
+const initBuildImageOption = Options.text("build-image").pipe(
+  Options.withDescription(
+    "true or false to build the sandbox image after scaffold (skips prompt when set). Omit to be prompted.",
+  ),
+  Options.optional,
+);
+
+const parseStrictBoolean = (
+  flagLabel: string,
+  raw: string,
+): Effect.Effect<boolean, InitError, never> => {
+  const v = raw.trim().toLowerCase();
+  if (v === "true" || v === "1" || v === "yes") {
+    return Effect.succeed(true);
+  }
+  if (v === "false" || v === "0" || v === "no") {
+    return Effect.succeed(false);
+  }
+  return Effect.fail(
+    new InitError({
+      message: `Invalid value for --${flagLabel}: "${raw}". Expected true or false.`,
+    }),
+  );
+};
+
+const parsePresetAgentsCliValue = (
+  raw: string,
+): Effect.Effect<readonly string[] | undefined, InitError, never> => {
+  const t = raw.trim();
+  if (t === "" || t.toLowerCase() === "none") {
+    return Effect.succeed(undefined);
+  }
+  const ids = t
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  for (const id of ids) {
+    if (!getPresetAgentDefinition(id)) {
+      return Effect.fail(
+        new InitError({
+          message: `Unknown preset agent id in --preset-agents: "${id}".`,
+        }),
+      );
+    }
+  }
+  return Effect.succeed(ids);
+};
+
 const initCommand = Command.make(
   "init",
   {
@@ -108,12 +190,22 @@ const initCommand = Command.make(
     template: templateOption,
     agent: agentOption,
     model: initModelOption,
+    sandbox: initSandboxOption,
+    backlog: initBacklogOption,
+    presetAgents: initPresetAgentsOption,
+    createSandcastleLabel: initCreateSandcastleLabelOption,
+    buildImage: initBuildImageOption,
   },
   ({
     imageName: imageNameFlag,
     template,
     agent: agentFlag,
     model: modelFlag,
+    sandbox: sandboxCli,
+    backlog: backlogCli,
+    presetAgents: presetAgentsCli,
+    createSandcastleLabel: createSandcastleLabelCli,
+    buildImage: buildImageCli,
   }) =>
     Effect.gen(function* () {
       const d = yield* Display;
@@ -174,10 +266,21 @@ const initCommand = Command.make(
           ? modelFlag.value
           : selectedAgent.defaultModel;
 
-      // Resolve sandbox provider: interactive select (no default — user must choose)
+      // Resolve sandbox provider: CLI flag > interactive select
       const sandboxProviders = listSandboxProviders();
       let selectedSandboxProvider: SandboxProviderEntry;
-      {
+      if (sandboxCli._tag === "Some") {
+        const entry = getSandboxProvider(sandboxCli.value);
+        if (!entry) {
+          const names = sandboxProviders.map((p) => p.name).join(", ");
+          yield* Effect.fail(
+            new InitError({
+              message: `Unknown sandbox provider "${sandboxCli.value}". Available: ${names}`,
+            }),
+          );
+        }
+        selectedSandboxProvider = entry!;
+      } else {
         const selected = yield* Effect.promise(() =>
           clack.select({
             message: "Select a sandbox provider:",
@@ -197,10 +300,21 @@ const initCommand = Command.make(
         selectedSandboxProvider = getSandboxProvider(selected as string)!;
       }
 
-      // Resolve backlog manager: interactive select
+      // Resolve backlog manager: CLI flag > interactive select
       const backlogManagers = listBacklogManagers();
       let selectedBacklogManager: BacklogManagerEntry;
-      {
+      if (backlogCli._tag === "Some") {
+        const entry = getBacklogManager(backlogCli.value);
+        if (!entry) {
+          const names = backlogManagers.map((b) => b.name).join(", ");
+          yield* Effect.fail(
+            new InitError({
+              message: `Unknown backlog manager "${backlogCli.value}". Available: ${names}`,
+            }),
+          );
+        }
+        selectedBacklogManager = entry!;
+      } else {
         const selected = yield* Effect.promise(() =>
           clack.select({
             message: "Select a backlog manager:",
@@ -245,16 +359,60 @@ const initCommand = Command.make(
         selectedTemplate = selected as string;
       }
 
+      let presetAgentIds: readonly string[] | undefined;
+      if (presetAgentsCli._tag === "Some") {
+        presetAgentIds = yield* parsePresetAgentsCliValue(
+          presetAgentsCli.value,
+        );
+      } else {
+        const addPresets = yield* Effect.promise(() =>
+          clack.confirm({
+            message: "Add preset agent roles (reviewer, planner, …)?",
+            initialValue: false,
+          }),
+        );
+        if (clack.isCancel(addPresets)) {
+          yield* Effect.fail(
+            new InitError({ message: "Preset agent selection cancelled." }),
+          );
+        }
+        if (addPresets === true) {
+          const picked = yield* Effect.promise(() =>
+            clack.multiselect({
+              message:
+                "Select preset roles (space to toggle, enter when done):",
+              options: listPresetAgentsForInit(),
+              required: false,
+            }),
+          );
+          if (clack.isCancel(picked)) {
+            yield* Effect.fail(
+              new InitError({ message: "Preset agent selection cancelled." }),
+            );
+          }
+          if (Array.isArray(picked) && picked.length > 0) {
+            presetAgentIds = picked;
+          }
+        }
+      }
+
       // Offer to create the "Sandcastle" label on the repo (skip for non-GitHub backlog managers)
       let shouldCreateLabel: boolean | symbol = false;
       if (selectedBacklogManager.name === "github-issues") {
-        shouldCreateLabel = yield* Effect.promise(() =>
-          clack.confirm({
-            message:
-              'Create a "Sandcastle" GitHub label? (Templates filter issues by this label)',
-            initialValue: true,
-          }),
-        );
+        if (createSandcastleLabelCli._tag === "Some") {
+          shouldCreateLabel = yield* parseStrictBoolean(
+            "create-sandcastle-label",
+            createSandcastleLabelCli.value,
+          );
+        } else {
+          shouldCreateLabel = yield* Effect.promise(() =>
+            clack.confirm({
+              message:
+                'Create a "Sandcastle" GitHub label? (Templates filter issues by this label)',
+              initialValue: true,
+            }),
+          );
+        }
 
         if (shouldCreateLabel === true) {
           yield* Effect.try({
@@ -277,6 +435,9 @@ const initCommand = Command.make(
           createLabel: shouldCreateLabel === true,
           backlogManager: selectedBacklogManager,
           sandboxProvider: selectedSandboxProvider,
+          ...(presetAgentIds !== undefined && presetAgentIds.length > 0
+            ? { presetAgentIds }
+            : {}),
         }).pipe(
           Effect.mapError(
             (e) =>
@@ -287,14 +448,22 @@ const initCommand = Command.make(
         ),
       );
 
-      // Prompt user before building image
+      // Prompt user before building image (unless --build-image is set)
       const providerLabel = selectedSandboxProvider.label;
-      const shouldBuild = yield* Effect.promise(() =>
-        clack.confirm({
-          message: `Build the default ${providerLabel} image now?`,
-          initialValue: true,
-        }),
-      );
+      let shouldBuild: boolean | symbol;
+      if (buildImageCli._tag === "Some") {
+        shouldBuild = yield* parseStrictBoolean(
+          "build-image",
+          buildImageCli.value,
+        );
+      } else {
+        shouldBuild = yield* Effect.promise(() =>
+          clack.confirm({
+            message: `Build the default ${providerLabel} image now?`,
+            initialValue: true,
+          }),
+        );
+      }
 
       if (shouldBuild === true) {
         const containerfileDir = join(cwd, CONFIG_DIR);
@@ -323,6 +492,9 @@ const initCommand = Command.make(
       const nextSteps = getNextStepsLines(
         selectedTemplate,
         scaffoldResult.mainFilename,
+        {
+          presetAgentIds: scaffoldResult.presetAgentIds,
+        },
       );
       for (const [i, line] of nextSteps.entries()) {
         yield* d.text(i === 0 ? line : styleText("dim", line));
