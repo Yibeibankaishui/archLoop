@@ -36,6 +36,22 @@ const runNonInteractiveInit = (cwd: string, args: string) =>
     cwd,
   );
 
+const cliFailureOutput = (err: unknown): string => {
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    "stdout" in err &&
+    "stderr" in err
+  ) {
+    const failure = err as Partial<Record<"stdout" | "stderr", unknown>>;
+    const stdout = typeof failure.stdout === "string" ? failure.stdout : "";
+    const stderr = typeof failure.stderr === "string" ? failure.stderr : "";
+    return stdout + stderr;
+  }
+
+  throw err;
+};
+
 describe("sandcastle CLI", () => {
   it("shows help with --help flag", async () => {
     const { stdout } = await runCli("--help", process.cwd());
@@ -69,9 +85,7 @@ describe("sandcastle CLI", () => {
       await runCli("docker build-image", hostDir);
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("No .sandcastle/ found");
+      expect(cliFailureOutput(err)).toContain("No .sandcastle/ found");
     }
   });
 
@@ -108,8 +122,7 @@ describe("sandcastle CLI", () => {
       await runCli("init --agent claude-code --template nonexistent", hostDir);
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
+      const output = cliFailureOutput(err);
       expect(output).toContain("nonexistent");
       expect(output).toContain("blank");
       expect(output).toContain("simple-loop");
@@ -163,9 +176,7 @@ describe("sandcastle CLI", () => {
       await runCli("podman build-image", hostDir);
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain("No .sandcastle/ found");
+      expect(cliFailureOutput(err)).toContain("No .sandcastle/ found");
     }
   });
 
@@ -177,8 +188,7 @@ describe("sandcastle CLI", () => {
       await runCli("init --agent nonexistent", hostDir);
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
+      const output = cliFailureOutput(err);
       expect(output).toContain("nonexistent");
       expect(output).toContain("claude-code");
     }
@@ -261,9 +271,9 @@ describe("sandcastle CLI", () => {
       );
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
-      const { stdout, stderr } = err as { stdout: string; stderr: string };
-      const output = stdout + stderr;
-      expect(output).toContain('Unknown agent runtime "not-a-runtime"');
+      expect(cliFailureOutput(err)).toContain(
+        'Unknown agent runtime "not-a-runtime"',
+      );
       await expect(access(join(hostDir, ".sandcastle"))).rejects.toThrow();
     }
   });

@@ -42,6 +42,13 @@ import {
 const require = createRequire(import.meta.url);
 const VERSION = (require("../package.json") as { version: string }).version;
 
+type OptionalTextFlag = import("effect").Option.Option<string>;
+type RuntimePromptOption = {
+  readonly value: string;
+  readonly label: string;
+  readonly hint: string | undefined;
+};
+
 // --- Shared options ---
 
 const imageNameOption = Options.text("image-name").pipe(
@@ -49,10 +56,8 @@ const imageNameOption = Options.text("image-name").pipe(
   Options.optional,
 );
 
-const resolveImageName = (
-  cliFlag: import("effect").Option.Option<string>,
-  cwd: string,
-): string => (cliFlag._tag === "Some" ? cliFlag.value : defaultImageName(cwd));
+const resolveImageName = (cliFlag: OptionalTextFlag, cwd: string): string =>
+  cliFlag._tag === "Some" ? cliFlag.value : defaultImageName(cwd);
 
 // --- UID build-args ---
 
@@ -280,6 +285,68 @@ const resolveDefaultAgentRuntime = (
   );
 };
 
+const runtimePromptOption = (
+  runtime: AgentRuntimeEntry,
+  defaultAgentName: string,
+): RuntimePromptOption => {
+  const option: RuntimePromptOption = {
+    value: runtime.name,
+    label: runtime.label,
+    hint: undefined,
+  };
+
+  if (runtime.name === defaultAgentName) {
+    return { ...option, hint: "default selected agent" };
+  }
+
+  return option;
+};
+
+const promptForInstalledRuntimes = (
+  selectedAgent: AgentEntry,
+): Effect.Effect<readonly AgentRuntimeEntry[], InitError, never> =>
+  Effect.gen(function* () {
+    const agentRuntimes = listAgentRuntimes();
+    const defaultInstalledRuntime = getAgentRuntime(selectedAgent.name);
+    const defaultInstalledRuntimeName = defaultInstalledRuntime?.name;
+    const selected = yield* Effect.promise(() =>
+      clack.multiselect({
+        message:
+          "Select agent runtimes to install in the sandbox image (space to toggle, enter when done):",
+        options: agentRuntimes.map((runtime) =>
+          runtimePromptOption(runtime, selectedAgent.name),
+        ),
+        initialValues: defaultInstalledRuntimeName
+          ? [defaultInstalledRuntimeName]
+          : undefined,
+        cursorAt: defaultInstalledRuntimeName,
+        required: true,
+      }),
+    );
+    const selectedRuntimeNames = yield* resolveRuntimePromptSelection(selected);
+    return yield* resolveAgentRuntimeNames(selectedRuntimeNames);
+  });
+
+const resolveInstalledRuntimes = ({
+  selectedAgent,
+  agentFlag,
+  runtimesFlag,
+}: {
+  selectedAgent: AgentEntry;
+  agentFlag: OptionalTextFlag;
+  runtimesFlag: OptionalTextFlag;
+}): Effect.Effect<readonly AgentRuntimeEntry[], InitError, never> => {
+  if (runtimesFlag._tag === "Some") {
+    return parseRuntimesCliValue(runtimesFlag.value);
+  }
+
+  if (agentFlag._tag === "Some") {
+    return resolveDefaultAgentRuntime(selectedAgent);
+  }
+
+  return promptForInstalledRuntimes(selectedAgent);
+};
+
 const initCommand = Command.make(
   "init",
   {
@@ -366,41 +433,11 @@ const initCommand = Command.make(
           : selectedAgent.defaultModel;
 
       // Resolve installed agent runtimes: CLI flag > selected --agent runtime > interactive multiselect
-      let selectedInstalledRuntimes: readonly AgentRuntimeEntry[];
-      if (runtimesFlag._tag === "Some") {
-        selectedInstalledRuntimes = yield* parseRuntimesCliValue(
-          runtimesFlag.value,
-        );
-      } else if (agentFlag._tag === "Some") {
-        selectedInstalledRuntimes =
-          yield* resolveDefaultAgentRuntime(selectedAgent);
-      } else {
-        const agentRuntimes = listAgentRuntimes();
-        const defaultInstalledRuntime = getAgentRuntime(selectedAgent.name);
-        const selected = yield* Effect.promise(() =>
-          clack.multiselect({
-            message:
-              "Select agent runtimes to install in the sandbox image (space to toggle, enter when done):",
-            options: agentRuntimes.map((runtime) => ({
-              value: runtime.name,
-              label: runtime.label,
-              hint:
-                runtime.name === selectedAgent.name
-                  ? "default selected agent"
-                  : undefined,
-            })),
-            initialValues: defaultInstalledRuntime
-              ? [defaultInstalledRuntime.name]
-              : undefined,
-            cursorAt: defaultInstalledRuntime?.name,
-            required: true,
-          }),
-        );
-        const selectedRuntimeNames =
-          yield* resolveRuntimePromptSelection(selected);
-        selectedInstalledRuntimes =
-          yield* resolveAgentRuntimeNames(selectedRuntimeNames);
-      }
+      const selectedInstalledRuntimes = yield* resolveInstalledRuntimes({
+        selectedAgent,
+        agentFlag,
+        runtimesFlag,
+      });
 
       // Resolve sandbox provider: CLI flag > interactive select
       const sandboxProviders = listSandboxProviders();
