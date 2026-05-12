@@ -68,14 +68,29 @@ interface AgentRuntimeDockerfileInstall {
   readonly pathEntries?: readonly string[];
 }
 
+interface EnvExampleBlock {
+  readonly envVars: readonly string[];
+  readonly content: string;
+}
+
+interface AuthMountEntry {
+  readonly hostPath: string;
+  readonly sandboxPath: string;
+  readonly readonly?: boolean;
+}
+
 export interface AgentRuntimeEntry {
   /** Filesystem-safe runtime identifier. */
   readonly name: string;
   readonly label: string;
   readonly dockerfileInstall: AgentRuntimeDockerfileInstall;
   readonly dockerfileTemplate: string;
+  /** Env vars represented by envExample, used to deduplicate shared auth hints. */
+  readonly envVars: readonly string[];
   /** Lines to include in the generated `.env.example` for this runtime's API key. */
   readonly envExample: string;
+  /** Host auth/config directories to mount for this runtime. */
+  readonly authMounts?: readonly AuthMountEntry[];
 }
 
 const CLAUDE_CODE_DOCKERFILE = `FROM node:22-bookworm
@@ -329,6 +344,7 @@ RUN curl -fsSL https://claude.ai/install.sh | bash`,
       pathEntries: ["/home/agent/.local/bin"],
     },
     dockerfileTemplate: CLAUDE_CODE_DOCKERFILE,
+    envVars: ["ANTHROPIC_API_KEY"],
     envExample: `# Anthropic API key
 # If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191
 ANTHROPIC_API_KEY=`,
@@ -341,6 +357,7 @@ ANTHROPIC_API_KEY=`,
 RUN npm install -g @mariozechner/pi-coding-agent`,
     },
     dockerfileTemplate: PI_DOCKERFILE,
+    envVars: ["ANTHROPIC_API_KEY"],
     envExample: `# Anthropic API key
 ANTHROPIC_API_KEY=`,
   },
@@ -352,8 +369,12 @@ ANTHROPIC_API_KEY=`,
 RUN npm install -g @openai/codex`,
     },
     dockerfileTemplate: CODEX_DOCKERFILE,
+    envVars: ["OPENAI_KEY"],
     envExample: `# OpenAI API key
 OPENAI_KEY=`,
+    authMounts: [
+      { hostPath: ".sandcastle/auth/codex", sandboxPath: "/home/agent/.codex" },
+    ],
   },
   {
     name: "cursor",
@@ -364,8 +385,19 @@ RUN curl https://cursor.com/install -fsS | bash`,
       pathEntries: ["/home/agent/.local/bin"],
     },
     dockerfileTemplate: CURSOR_DOCKERFILE,
+    envVars: ["CURSOR_API_KEY"],
     envExample: `# Cursor API key
 CURSOR_API_KEY=`,
+    authMounts: [
+      {
+        hostPath: ".sandcastle/auth/cursor",
+        sandboxPath: "/home/agent/.cursor",
+      },
+      {
+        hostPath: ".sandcastle/auth/cursor-config",
+        sandboxPath: "/home/agent/.config/cursor",
+      },
+    ],
   },
   {
     name: "opencode",
@@ -375,6 +407,7 @@ CURSOR_API_KEY=`,
 RUN npm install -g opencode-ai@latest`,
     },
     dockerfileTemplate: OPENCODE_DOCKERFILE,
+    envVars: ["OPENCODE_API_KEY"],
     envExample: `# OpenCode API key
 OPENCODE_API_KEY=`,
   },
@@ -468,6 +501,66 @@ const resolveInstalledRuntimes = (
     );
   });
 
+const renderEnvExample = (blocks: readonly EnvExampleBlock[]): string => {
+  const seenEnvVars = new Set<string>();
+  const parts: string[] = [];
+
+  for (const block of blocks) {
+    if (!block.content) continue;
+
+    const hasNewEnvVar = block.envVars.some(
+      (envVar) => !seenEnvVars.has(envVar),
+    );
+    if (!hasNewEnvVar) continue;
+
+    parts.push(block.content);
+    for (const envVar of block.envVars) {
+      seenEnvVars.add(envVar);
+    }
+  }
+
+  return parts.join("\n") + "\n";
+};
+
+const dedupeAuthMounts = (
+  mounts: readonly AuthMountEntry[],
+): AuthMountEntry[] => {
+  const seen = new Set<string>();
+  const deduped: AuthMountEntry[] = [];
+
+  for (const mount of mounts) {
+    const key = `${mount.hostPath}\0${mount.sandboxPath}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(mount);
+  }
+
+  return deduped;
+};
+
+const renderAuthMount = (mount: AuthMountEntry): string => {
+  const fields = [
+    `hostPath: ${JSON.stringify(mount.hostPath)}`,
+    `sandboxPath: ${JSON.stringify(mount.sandboxPath)}`,
+  ];
+  if (mount.readonly) {
+    fields.push("readonly: true");
+  }
+  return `    { ${fields.join(", ")} },`;
+};
+
+const renderAuthMountsProperty = (
+  mounts: readonly AuthMountEntry[],
+): string => {
+  if (mounts.length === 0) {
+    return "  mounts: [],";
+  }
+
+  return `  mounts: [
+${mounts.map(renderAuthMount).join("\n")}
+  ],`;
+};
+
 // ---------------------------------------------------------------------------
 // Backlog manager registry (internal — not part of public API)
 // ---------------------------------------------------------------------------
@@ -481,8 +574,12 @@ export interface BacklogManagerEntry {
     readonly CLOSE_TASK_COMMAND: string;
     readonly BACKLOG_MANAGER_TOOLS: string;
   };
+  /** Env vars represented by envExample, used to deduplicate shared auth hints. */
+  readonly envVars: readonly string[];
   /** Lines to append to `.env.example` for this backlog manager, or empty string if none needed. */
   readonly envExample: string;
+  /** Host auth/config directories to mount for this backlog manager. */
+  readonly authMounts?: readonly AuthMountEntry[];
 }
 
 const GITHUB_CLI_TOOLS = `# Install GitHub CLI
@@ -517,8 +614,15 @@ const BACKLOG_MANAGER_REGISTRY: BacklogManagerEntry[] = [
       CLOSE_TASK_COMMAND: `gh issue close <ID> --comment "Completed by Sandcastle"`,
       BACKLOG_MANAGER_TOOLS: GITHUB_CLI_TOOLS,
     },
+    envVars: ["GH_TOKEN"],
     envExample: `# GitHub personal access token
 GH_TOKEN=`,
+    authMounts: [
+      {
+        hostPath: ".sandcastle/auth/gh",
+        sandboxPath: "/home/agent/.config/gh",
+      },
+    ],
   },
   {
     name: "beads",
@@ -529,6 +633,7 @@ GH_TOKEN=`,
       CLOSE_TASK_COMMAND: `bd close <ID> "Completed by Sandcastle"`,
       BACKLOG_MANAGER_TOOLS: BEADS_TOOLS,
     },
+    envVars: [],
     envExample: "",
   },
 ];
@@ -836,6 +941,35 @@ const rewriteMainTs = (
       .pipe(Effect.mapError((e) => new Error(e.message)));
   });
 
+const rewriteMainAuthMounts = (
+  configDir: string,
+  mainFilename: string,
+  mounts: readonly AuthMountEntry[],
+): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const mainTsPath = join(configDir, mainFilename);
+
+    const exists = yield* fs
+      .exists(mainTsPath)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+    if (!exists) return;
+
+    const content = yield* fs
+      .readFileString(mainTsPath)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+    const updated = content.replace(
+      "  mounts: [],",
+      renderAuthMountsProperty(mounts),
+    );
+
+    if (updated !== content) {
+      yield* fs
+        .writeFileString(mainTsPath, updated)
+        .pipe(Effect.mapError((e) => new Error(e.message)));
+    }
+  });
+
 const PRESET_COPY_TO_WORKTREE_PATHS = [
   ".sandcastle/agents",
   ".sandcastle/skills",
@@ -946,12 +1080,12 @@ const isTextFile = (filename: string): boolean => {
 };
 
 /**
- * Replace `{{KEY}}` template arguments from the backlog manager's
- * `templateArgs` map in all text files in the scaffolded config directory.
+ * Replace `{{KEY}}` template arguments in all text files in the scaffolded
+ * config directory.
  */
 const substituteTemplateArgs = (
   configDir: string,
-  backlogManager: BacklogManagerEntry,
+  templateArgs: Record<string, string>,
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -967,9 +1101,7 @@ const substituteTemplateArgs = (
             .readFileString(filePath)
             .pipe(Effect.mapError((e) => new Error(e.message)));
           const original = content;
-          for (const [key, value] of Object.entries(
-            backlogManager.templateArgs,
-          )) {
+          for (const [key, value] of Object.entries(templateArgs)) {
             content = content.replace(
               new RegExp(`\\{\\{${key}\\}\\}`, "g"),
               value,
@@ -1068,6 +1200,10 @@ export const scaffold = (
     );
     const dockerfileTemplate =
       renderInstalledRuntimesDockerfile(selectedRuntimes);
+    const selectedAuthMounts = dedupeAuthMounts([
+      ...selectedRuntimes.flatMap((runtime) => runtime.authMounts ?? []),
+      ...(backlogManager.authMounts ?? []),
+    ]);
 
     yield* fs
       .makeDirectory(configDir, { recursive: false })
@@ -1076,13 +1212,16 @@ export const scaffold = (
     const templateDir = yield* getTemplateDir(templateName);
 
     // Build .env.example from installed runtime + backlog manager env blocks
-    const envExampleParts = selectedRuntimes.map(
-      (runtime) => runtime.envExample,
-    );
-    if (backlogManager.envExample) {
-      envExampleParts.push(backlogManager.envExample);
-    }
-    const envExampleContent = envExampleParts.join("\n") + "\n";
+    const envExampleContent = renderEnvExample([
+      ...selectedRuntimes.map((runtime) => ({
+        envVars: runtime.envVars,
+        content: runtime.envExample,
+      })),
+      {
+        envVars: backlogManager.envVars,
+        content: backlogManager.envExample,
+      },
+    ]);
 
     yield* Effect.all(
       [
@@ -1108,9 +1247,10 @@ export const scaffold = (
 
     // Rewrite main file with the selected agent factory and model
     yield* rewriteMainTs(configDir, agent, model, mainFilename);
+    yield* rewriteMainAuthMounts(configDir, mainFilename, selectedAuthMounts);
 
     // Replace backlog manager template arguments in all text files (must run before label stripping)
-    yield* substituteTemplateArgs(configDir, backlogManager);
+    yield* substituteTemplateArgs(configDir, backlogManager.templateArgs);
 
     // Strip --label Sandcastle from prompt files when the user declined label creation
     if (!createLabel) {

@@ -39,7 +39,7 @@ npm install --save-dev @ai-hero/sandcastle
 npx sandcastle init
 ```
 
-3. Edit `.sandcastle/.env` and fill in the token values generated for your selected agent runtime and backlog manager.
+3. Edit `.sandcastle/.env` and fill in the token values generated for your selected installed agent runtimes and backlog manager.
 
 ```bash
 cp .sandcastle/.env.example .sandcastle/.env
