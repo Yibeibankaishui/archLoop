@@ -137,14 +137,27 @@ For the agent to appear in `sandcastle init`, add an entry to `AGENT_REGISTRY` i
   name: "gemini",
   label: "Gemini",
   defaultModel: "gemini-2.5-pro",
-  factoryImport: "gemini",          // matches the export from index.ts
+  factoryImport: "gemini", // matches the export from index.ts
+}
+```
+
+Then add the installation metadata to `AGENT_RUNTIME_REGISTRY`:
+
+```ts
+{
+  name: "gemini",
+  label: "Gemini",
+  dockerfileInstall: {
+    root: `# Install Gemini CLI
+RUN npm install -g @google/gemini-cli`,
+  },
   dockerfileTemplate: GEMINI_DOCKERFILE,
   envExample: `# Google AI API key
 GOOGLE_API_KEY=`,
 }
 ```
 
-And a Dockerfile constant alongside the existing ones. Use `CLAUDE_CODE_DOCKERFILE` as a structural reference — keep the `usermod` block, the `{{BACKLOG_MANAGER_TOOLS}}` placeholder, the `USER agent` line, and the `ENTRYPOINT ["sleep", "infinity"]`. Only the install line should differ.
+The split keeps the default scaffold agent/model separate from the agent runtimes installed into the generated image. Add a Dockerfile constant alongside the existing ones. Use `CLAUDE_CODE_DOCKERFILE` as a structural reference — keep the `usermod` block, the `{{BACKLOG_MANAGER_TOOLS}}` placeholder, the `USER agent` line, and the `ENTRYPOINT ["sleep", "infinity"]`. Only the install line should differ.
 
 ## Implementation checklist
 

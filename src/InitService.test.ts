@@ -15,8 +15,10 @@ import {
   getBacklogManager,
   listSandboxProviders,
   getSandboxProvider,
+  listAgentRuntimes,
+  getAgentRuntime,
 } from "./InitService.js";
-import type { AgentEntry, ScaffoldOptions } from "./InitService.js";
+import type { ScaffoldOptions } from "./InitService.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import { SKELETON_PROMPT } from "./templates.js";
 
@@ -27,6 +29,7 @@ const piAgent = getAgent("pi")!;
 const codexAgent = getAgent("codex")!;
 const cursorAgent = getAgent("cursor")!;
 const opencodeAgent = getAgent("opencode")!;
+const codexRuntime = getAgentRuntime("codex")!;
 
 const defaultOptions: ScaffoldOptions = {
   agent: claudeCodeAgent,
@@ -56,7 +59,8 @@ describe("Agent registry", () => {
     expect(agent!.name).toBe("claude-code");
     expect(agent!.defaultModel).toBe("claude-opus-4-6");
     expect(agent!.factoryImport).toBe("claudeCode");
-    expect(agent!.dockerfileTemplate).toContain("FROM");
+    expect(agent).not.toHaveProperty("dockerfileTemplate");
+    expect(agent).not.toHaveProperty("envExample");
   });
 
   it("getAgent returns undefined for unknown agent", () => {
@@ -74,10 +78,8 @@ describe("Agent registry", () => {
     expect(agent!.name).toBe("pi");
     expect(agent!.defaultModel).toBe("claude-sonnet-4-6");
     expect(agent!.factoryImport).toBe("pi");
-    expect(agent!.dockerfileTemplate).toContain("FROM");
-    expect(agent!.dockerfileTemplate).toContain(
-      "@mariozechner/pi-coding-agent",
-    );
+    expect(agent).not.toHaveProperty("dockerfileTemplate");
+    expect(agent).not.toHaveProperty("envExample");
   });
 
   it("listAgents includes codex", () => {
@@ -91,8 +93,8 @@ describe("Agent registry", () => {
     expect(agent!.name).toBe("codex");
     expect(agent!.defaultModel).toBe("gpt-5.4-mini");
     expect(agent!.factoryImport).toBe("codex");
-    expect(agent!.dockerfileTemplate).toContain("FROM");
-    expect(agent!.dockerfileTemplate).toContain("@openai/codex");
+    expect(agent).not.toHaveProperty("dockerfileTemplate");
+    expect(agent).not.toHaveProperty("envExample");
   });
 
   it("listAgents includes cursor", () => {
@@ -106,8 +108,8 @@ describe("Agent registry", () => {
     expect(agent!.name).toBe("cursor");
     expect(agent!.defaultModel).toBe("auto");
     expect(agent!.factoryImport).toBe("cursor");
-    expect(agent!.dockerfileTemplate).toContain("FROM");
-    expect(agent!.dockerfileTemplate).toContain("cursor.com/install");
+    expect(agent).not.toHaveProperty("dockerfileTemplate");
+    expect(agent).not.toHaveProperty("envExample");
   });
 
   it("listAgents includes opencode", () => {
@@ -121,8 +123,31 @@ describe("Agent registry", () => {
     expect(agent!.name).toBe("opencode");
     expect(agent!.defaultModel).toBe("opencode/big-pickle");
     expect(agent!.factoryImport).toBe("opencode");
-    expect(agent!.dockerfileTemplate).toContain("FROM");
-    expect(agent!.dockerfileTemplate).toContain("opencode-ai");
+    expect(agent).not.toHaveProperty("dockerfileTemplate");
+    expect(agent).not.toHaveProperty("envExample");
+  });
+});
+
+describe("Agent runtime registry", () => {
+  it("listAgentRuntimes returns at least claude-code", () => {
+    const runtimes = listAgentRuntimes();
+    expect(runtimes.some((runtime) => runtime.name === "claude-code")).toBe(
+      true,
+    );
+  });
+
+  it("getAgentRuntime returns install metadata for codex", () => {
+    const runtime = getAgentRuntime("codex");
+    expect(runtime).toBeDefined();
+    expect(runtime!.name).toBe("codex");
+    expect(runtime!.dockerfileInstall.root).toContain("@openai/codex");
+    expect(runtime!.dockerfileTemplate).toContain("FROM");
+    expect(runtime!.dockerfileTemplate).toContain("@openai/codex");
+    expect(runtime!.envExample).toContain("OPENAI_KEY=");
+  });
+
+  it("getAgentRuntime returns undefined for unknown runtime", () => {
+    expect(getAgentRuntime("nonexistent")).toBeUndefined();
   });
 });
 
@@ -131,7 +156,7 @@ describe("Agent registry", () => {
 // ---------------------------------------------------------------------------
 
 describe("InitService scaffold", () => {
-  it("uses agent dockerfileTemplate for Dockerfile (with templateArgs substitution)", async () => {
+  it("uses default runtime Dockerfile metadata for Dockerfile (with templateArgs substitution)", async () => {
     const dir = await makeDir();
     await runScaffold(dir);
 
@@ -364,6 +389,49 @@ describe("InitService scaffold", () => {
       "utf-8",
     );
     expect(mainTs).toContain('claudeCode("claude-opus-4-6")');
+  });
+
+  it("uses the selected agent in main.mts while installing the selected runtime", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      agent: claudeCodeAgent,
+      model: "claude-opus-4-6",
+      installedRuntimes: [codexRuntime],
+    });
+
+    const configDir = join(dir, ".sandcastle");
+    const mainTs = await readFile(join(configDir, "main.mts"), "utf-8");
+    const dockerfile = await readFile(join(configDir, "Dockerfile"), "utf-8");
+    const envExample = await readFile(join(configDir, ".env.example"), "utf-8");
+
+    expect(mainTs).toContain('claudeCode("claude-opus-4-6")');
+    expect(dockerfile).toContain("@openai/codex");
+    expect(dockerfile).not.toContain("claude.ai/install.sh");
+    expect(envExample).toContain("OPENAI_KEY=");
+    expect(envExample).not.toContain("ANTHROPIC_API_KEY=");
+  });
+
+  it("can scaffold multiple installed runtimes without changing the default main agent", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      agent: claudeCodeAgent,
+      model: "claude-opus-4-6",
+      installedRuntimes: [
+        getAgentRuntime("codex")!,
+        getAgentRuntime("cursor")!,
+      ],
+    });
+
+    const configDir = join(dir, ".sandcastle");
+    const mainTs = await readFile(join(configDir, "main.mts"), "utf-8");
+    const dockerfile = await readFile(join(configDir, "Dockerfile"), "utf-8");
+    const envExample = await readFile(join(configDir, ".env.example"), "utf-8");
+
+    expect(mainTs).toContain('claudeCode("claude-opus-4-6")');
+    expect(dockerfile).toContain("@openai/codex");
+    expect(dockerfile).toContain("cursor.com/install");
+    expect(envExample).toContain("OPENAI_KEY=");
+    expect(envExample).toContain("CURSOR_API_KEY=");
   });
 
   // --- Template-specific tests ---

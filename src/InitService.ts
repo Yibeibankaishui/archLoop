@@ -60,8 +60,19 @@ export interface AgentEntry {
   readonly label: string;
   readonly defaultModel: string;
   readonly factoryImport: string;
+}
+
+export interface AgentRuntimeEntry {
+  /** Filesystem-safe runtime identifier. */
+  readonly name: string;
+  readonly label: string;
+  readonly dockerfileInstall: {
+    readonly root?: string;
+    readonly user?: string;
+    readonly pathEntries?: readonly string[];
+  };
   readonly dockerfileTemplate: string;
-  /** Lines to include in the generated `.env.example` for this agent's API key. */
+  /** Lines to include in the generated `.env.example` for this runtime's API key. */
   readonly envExample: string;
 }
 
@@ -277,6 +288,44 @@ const AGENT_REGISTRY: AgentEntry[] = [
     label: "Claude Code",
     defaultModel: "claude-opus-4-6",
     factoryImport: "claudeCode",
+  },
+  {
+    name: "pi",
+    label: "Pi",
+    defaultModel: "claude-sonnet-4-6",
+    factoryImport: "pi",
+  },
+  {
+    name: "codex",
+    label: "Codex",
+    defaultModel: "gpt-5.4-mini",
+    factoryImport: "codex",
+  },
+  {
+    name: "cursor",
+    label: "Cursor",
+    defaultModel: "auto",
+    factoryImport: "cursor",
+  },
+  {
+    name: "opencode",
+    label: "OpenCode",
+    defaultModel: "opencode/big-pickle",
+    factoryImport: "opencode",
+  },
+];
+
+export const listAgents = (): AgentEntry[] => AGENT_REGISTRY;
+
+const AGENT_RUNTIME_REGISTRY: AgentRuntimeEntry[] = [
+  {
+    name: "claude-code",
+    label: "Claude Code",
+    dockerfileInstall: {
+      user: `# Install Claude Code CLI
+RUN curl -fsSL https://claude.ai/install.sh | bash`,
+      pathEntries: ["/home/agent/.local/bin"],
+    },
     dockerfileTemplate: CLAUDE_CODE_DOCKERFILE,
     envExample: `# Anthropic API key
 # If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191
@@ -285,8 +334,10 @@ ANTHROPIC_API_KEY=`,
   {
     name: "pi",
     label: "Pi",
-    defaultModel: "claude-sonnet-4-6",
-    factoryImport: "pi",
+    dockerfileInstall: {
+      root: `# Install pi coding agent (run as root before USER agent)
+RUN npm install -g @mariozechner/pi-coding-agent`,
+    },
     dockerfileTemplate: PI_DOCKERFILE,
     envExample: `# Anthropic API key
 ANTHROPIC_API_KEY=`,
@@ -294,8 +345,10 @@ ANTHROPIC_API_KEY=`,
   {
     name: "codex",
     label: "Codex",
-    defaultModel: "gpt-5.4-mini",
-    factoryImport: "codex",
+    dockerfileInstall: {
+      root: `# Install Codex CLI (run as root before USER agent)
+RUN npm install -g @openai/codex`,
+    },
     dockerfileTemplate: CODEX_DOCKERFILE,
     envExample: `# OpenAI API key
 OPENAI_KEY=`,
@@ -303,8 +356,11 @@ OPENAI_KEY=`,
   {
     name: "cursor",
     label: "Cursor",
-    defaultModel: "auto",
-    factoryImport: "cursor",
+    dockerfileInstall: {
+      user: `# Install Cursor Agent CLI
+RUN curl https://cursor.com/install -fsS | bash`,
+      pathEntries: ["/home/agent/.local/bin"],
+    },
     dockerfileTemplate: CURSOR_DOCKERFILE,
     envExample: `# Cursor API key
 CURSOR_API_KEY=`,
@@ -312,15 +368,88 @@ CURSOR_API_KEY=`,
   {
     name: "opencode",
     label: "OpenCode",
-    defaultModel: "opencode/big-pickle",
-    factoryImport: "opencode",
+    dockerfileInstall: {
+      root: `# Install OpenCode CLI (run as root before USER agent)
+RUN npm install -g opencode-ai@latest`,
+    },
     dockerfileTemplate: OPENCODE_DOCKERFILE,
     envExample: `# OpenCode API key
 OPENCODE_API_KEY=`,
   },
 ];
 
-export const listAgents = (): AgentEntry[] => AGENT_REGISTRY;
+export const listAgentRuntimes = (): AgentRuntimeEntry[] =>
+  AGENT_RUNTIME_REGISTRY;
+
+export const getAgentRuntime = (name: string): AgentRuntimeEntry | undefined =>
+  AGENT_RUNTIME_REGISTRY.find((runtime) => runtime.name === name);
+
+const renderInstalledRuntimesDockerfile = (
+  runtimes: readonly AgentRuntimeEntry[],
+): string => {
+  if (runtimes.length === 1) {
+    return runtimes[0]!.dockerfileTemplate;
+  }
+
+  const userMarker = "USER ${AGENT_UID}:${AGENT_GID}";
+  const footerMarker = "WORKDIR /home/agent";
+  const userMarkerIndex = CLAUDE_CODE_DOCKERFILE.indexOf(userMarker);
+  const footerMarkerIndex = CLAUDE_CODE_DOCKERFILE.indexOf(footerMarker);
+  const base = CLAUDE_CODE_DOCKERFILE.slice(0, userMarkerIndex).trimEnd();
+  const footer = CLAUDE_CODE_DOCKERFILE.slice(footerMarkerIndex).trimStart();
+  const rootInstalls = runtimes
+    .map((runtime) => runtime.dockerfileInstall.root)
+    .filter((install): install is string => Boolean(install));
+  const userInstalls = runtimes
+    .map((runtime) => runtime.dockerfileInstall.user)
+    .filter((install): install is string => Boolean(install));
+  const pathEntries = [
+    ...new Set(
+      runtimes.flatMap(
+        (runtime) => runtime.dockerfileInstall.pathEntries ?? [],
+      ),
+    ),
+  ];
+  const pathBlock =
+    pathEntries.length > 0
+      ? `# Add agent CLIs to PATH
+ENV PATH="${pathEntries.join(":")}:$PATH"`
+      : "";
+
+  return [
+    base,
+    rootInstalls.join("\n\n"),
+    'USER ${AGENT_UID}:${AGENT_GID}\nENV HOME="/home/agent"',
+    userInstalls.join("\n\n"),
+    pathBlock,
+    footer,
+  ]
+    .filter((part) => part.trim().length > 0)
+    .join("\n\n");
+};
+
+const resolveInstalledRuntimes = (
+  agent: AgentEntry,
+  installedRuntimes: readonly AgentRuntimeEntry[] | undefined,
+): Effect.Effect<readonly AgentRuntimeEntry[], Error, never> =>
+  Effect.gen(function* () {
+    if (installedRuntimes !== undefined) {
+      if (installedRuntimes.length === 0) {
+        yield* Effect.fail(
+          new Error("At least one installed agent runtime is required."),
+        );
+      }
+      return installedRuntimes;
+    }
+
+    const defaultRuntime = getAgentRuntime(agent.name);
+    if (!defaultRuntime) {
+      yield* Effect.fail(
+        new Error(`No agent runtime found for default agent "${agent.name}".`),
+      );
+    }
+    return [defaultRuntime!];
+  });
 
 // ---------------------------------------------------------------------------
 // Backlog manager registry (internal — not part of public API)
@@ -847,6 +976,7 @@ const substituteTemplateArgs = (
 export interface ScaffoldOptions {
   agent: AgentEntry;
   model: string;
+  installedRuntimes?: readonly AgentRuntimeEntry[];
   templateName?: string;
   createLabel?: boolean;
   backlogManager?: BacklogManagerEntry;
@@ -893,6 +1023,7 @@ export const scaffold = (
     const {
       agent,
       model,
+      installedRuntimes,
       templateName = "blank",
       createLabel = true,
       backlogManager = BACKLOG_MANAGER_REGISTRY[0]!, // default: github-issues
@@ -914,6 +1045,12 @@ export const scaffold = (
     }
 
     const mainFilename = yield* detectMainFilename(repoDir);
+    const selectedRuntimes = yield* resolveInstalledRuntimes(
+      agent,
+      installedRuntimes,
+    );
+    const dockerfileTemplate =
+      renderInstalledRuntimesDockerfile(selectedRuntimes);
 
     yield* fs
       .makeDirectory(configDir, { recursive: false })
@@ -921,8 +1058,10 @@ export const scaffold = (
 
     const templateDir = yield* getTemplateDir(templateName);
 
-    // Build .env.example from agent + backlog manager env blocks
-    const envExampleParts = [agent.envExample];
+    // Build .env.example from installed runtime + backlog manager env blocks
+    const envExampleParts = selectedRuntimes.map(
+      (runtime) => runtime.envExample,
+    );
     if (backlogManager.envExample) {
       envExampleParts.push(backlogManager.envExample);
     }
@@ -933,7 +1072,7 @@ export const scaffold = (
         fs
           .writeFileString(
             join(configDir, sandboxProvider.containerfileName),
-            agent.dockerfileTemplate,
+            dockerfileTemplate,
           )
           .pipe(Effect.mapError((e) => new Error(e.message))),
         fs
