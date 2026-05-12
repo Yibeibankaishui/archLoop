@@ -549,11 +549,13 @@ const renderAuthMount = (mount: AuthMountEntry): string => {
   return `    { ${fields.join(", ")} },`;
 };
 
+const EMPTY_AUTH_MOUNTS_PROPERTY = "  mounts: [],";
+
 const renderAuthMountsProperty = (
   mounts: readonly AuthMountEntry[],
 ): string => {
   if (mounts.length === 0) {
-    return "  mounts: [],";
+    return EMPTY_AUTH_MOUNTS_PROPERTY;
   }
 
   return `  mounts: [
@@ -892,16 +894,18 @@ const copyPresetAgentsIntoConfig = (
   });
 
 /**
- * Replace the agent factory import and call in a scaffolded main.ts.
+ * Rewrite generated main file values that depend on init selections.
  *
- * Templates use `claudeCode` as the default factory. When a different agent or
- * model is selected, this function rewrites the import and factory calls.
+ * Templates use `claudeCode` and an empty `mounts` array as placeholders. When
+ * init selects a different agent, model, or auth mount set, this function
+ * rewrites those placeholders in one pass.
  */
-const rewriteMainTs = (
+const rewriteMainFile = (
   configDir: string,
   agent: AgentEntry,
   model: string,
   mainFilename: string,
+  authMounts: readonly AuthMountEntry[],
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -936,38 +940,14 @@ const rewriteMainTs = (
       `${agent.factoryImport}("${model}")`,
     );
 
+    content = content.replace(
+      EMPTY_AUTH_MOUNTS_PROPERTY,
+      renderAuthMountsProperty(authMounts),
+    );
+
     yield* fs
       .writeFileString(mainTsPath, content)
       .pipe(Effect.mapError((e) => new Error(e.message)));
-  });
-
-const rewriteMainAuthMounts = (
-  configDir: string,
-  mainFilename: string,
-  mounts: readonly AuthMountEntry[],
-): Effect.Effect<void, Error, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const mainTsPath = join(configDir, mainFilename);
-
-    const exists = yield* fs
-      .exists(mainTsPath)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
-    if (!exists) return;
-
-    const content = yield* fs
-      .readFileString(mainTsPath)
-      .pipe(Effect.mapError((e) => new Error(e.message)));
-    const updated = content.replace(
-      "  mounts: [],",
-      renderAuthMountsProperty(mounts),
-    );
-
-    if (updated !== content) {
-      yield* fs
-        .writeFileString(mainTsPath, updated)
-        .pipe(Effect.mapError((e) => new Error(e.message)));
-    }
   });
 
 const PRESET_COPY_TO_WORKTREE_PATHS = [
@@ -1245,9 +1225,13 @@ export const scaffold = (
       { concurrency: "unbounded" },
     );
 
-    // Rewrite main file with the selected agent factory and model
-    yield* rewriteMainTs(configDir, agent, model, mainFilename);
-    yield* rewriteMainAuthMounts(configDir, mainFilename, selectedAuthMounts);
+    yield* rewriteMainFile(
+      configDir,
+      agent,
+      model,
+      mainFilename,
+      selectedAuthMounts,
+    );
 
     // Replace backlog manager template arguments in all text files (must run before label stripping)
     yield* substituteTemplateArgs(configDir, backlogManager.templateArgs);
