@@ -30,6 +30,12 @@ const cliPath = join(import.meta.dirname, "..", "dist", "main.js");
 const runCli = (args: string, cwd: string) =>
   execAsync(`node ${cliPath} ${args}`, { cwd });
 
+const runNonInteractiveInit = (cwd: string, args: string) =>
+  runCli(
+    `init --sandbox docker --backlog beads --template blank --preset-agents none --build-image false ${args}`,
+    cwd,
+  );
+
 describe("sandcastle CLI", () => {
   it("shows help with --help flag", async () => {
     const { stdout } = await runCli("--help", process.cwd());
@@ -182,10 +188,7 @@ describe("sandcastle CLI", () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
 
-    await runCli(
-      "init --agent cursor --sandbox docker --backlog beads --template blank --preset-agents none --build-image false",
-      hostDir,
-    );
+    await runNonInteractiveInit(hostDir, "--agent cursor");
 
     const dockerfile = await readFile(
       join(hostDir, ".sandcastle", "Dockerfile"),
@@ -205,9 +208,9 @@ describe("sandcastle CLI", () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
 
-    await runCli(
-      "init --agent claude-code --sandbox docker --backlog beads --template blank --preset-agents none --build-image false --installed-runtimes codex,cursor,codex",
+    await runNonInteractiveInit(
       hostDir,
+      "--agent claude-code --installed-runtimes codex,cursor,codex",
     );
 
     const dockerfile = await readFile(
@@ -226,9 +229,9 @@ describe("sandcastle CLI", () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
 
-    await runCli(
-      "init --agent claude-code --sandbox docker --backlog beads --template blank --preset-agents none --build-image false --runtimes codex,cursor",
+    await runNonInteractiveInit(
       hostDir,
+      "--agent claude-code --runtimes codex,cursor",
     );
 
     const dockerfile = await readFile(
@@ -252,9 +255,9 @@ describe("sandcastle CLI", () => {
     await initRepo(hostDir);
 
     try {
-      await runCli(
-        "init --agent claude-code --sandbox docker --backlog beads --template blank --preset-agents none --build-image false --runtimes not-a-runtime",
+      await runNonInteractiveInit(
         hostDir,
+        "--agent claude-code --runtimes not-a-runtime",
       );
       expect.fail("Expected command to fail");
     } catch (err: unknown) {

@@ -101,7 +101,7 @@ const agentOption = Options.text("agent").pipe(
   Options.optional,
 );
 
-const installedRuntimesOption = Options.text("runtimes").pipe(
+const runtimesOption = Options.text("runtimes").pipe(
   Options.withAlias("installed-runtimes"),
   Options.withDescription(
     "Comma-separated agent runtimes to install in the sandbox image (e.g. claude-code,codex). Omit to install the selected --agent runtime in scripted init or choose interactively.",
@@ -250,7 +250,7 @@ const resolveRuntimePromptSelection = (
   return Effect.succeed(selection);
 };
 
-const parseInstalledRuntimesCliValue = (
+const parseRuntimesCliValue = (
   raw: string,
 ): Effect.Effect<readonly AgentRuntimeEntry[], InitError, never> => {
   const names = parseUniqueRuntimeNames(raw);
@@ -286,7 +286,7 @@ const initCommand = Command.make(
     imageName: imageNameOption,
     template: templateOption,
     agent: agentOption,
-    installedRuntimes: installedRuntimesOption,
+    runtimes: runtimesOption,
     model: initModelOption,
     sandbox: initSandboxOption,
     backlog: initBacklogOption,
@@ -298,7 +298,7 @@ const initCommand = Command.make(
     imageName: imageNameFlag,
     template,
     agent: agentFlag,
-    installedRuntimes: installedRuntimesFlag,
+    runtimes: runtimesFlag,
     model: modelFlag,
     sandbox: sandboxCli,
     backlog: backlogCli,
@@ -365,11 +365,11 @@ const initCommand = Command.make(
           ? modelFlag.value
           : selectedAgent.defaultModel;
 
-      // Resolve installed agent runtimes: CLI flag > interactive multiselect
+      // Resolve installed agent runtimes: CLI flag > selected --agent runtime > interactive multiselect
       let selectedInstalledRuntimes: readonly AgentRuntimeEntry[];
-      if (installedRuntimesFlag._tag === "Some") {
-        selectedInstalledRuntimes = yield* parseInstalledRuntimesCliValue(
-          installedRuntimesFlag.value,
+      if (runtimesFlag._tag === "Some") {
+        selectedInstalledRuntimes = yield* parseRuntimesCliValue(
+          runtimesFlag.value,
         );
       } else if (agentFlag._tag === "Some") {
         selectedInstalledRuntimes =
