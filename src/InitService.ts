@@ -698,7 +698,7 @@ export function getNextStepsLines(
 ): string[] {
   const presetHintText =
     options?.presetAgentIds && options.presetAgentIds.length > 0
-      ? "Preset agent roles are in .sandcastle/agents/ with bundled skills under .sandcastle/skills/. See .sandcastle/agent-profiles.json for recommended provider/model; compose prompts from main.mts using run() as needed."
+      ? "Preset agent roles are in .sandcastle/agents/ with bundled skills under .sandcastle/skills/. See .sandcastle/agent-profiles.json for recommended provider/model; compose prompts from main.mts using run() as needed. Recommendations may require matching installed runtimes."
       : undefined;
 
   if (template === "blank") {

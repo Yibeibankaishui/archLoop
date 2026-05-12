@@ -897,6 +897,8 @@ describe("InitService scaffold", () => {
       const joined = lines.join("\n");
       expect(joined).toContain(".sandcastle/agents/");
       expect(joined).toContain("agent-profiles.json");
+      expect(joined).toContain("recommended provider/model");
+      expect(joined).toContain("matching installed runtimes");
     });
   });
 
@@ -2260,6 +2262,43 @@ describe("InitService scaffold", () => {
       expect(manifest.profiles.reviewer?.promptRelativePath).toBe(
         "agents/reviewer.md",
       );
+    });
+
+    it("keeps preset recommendations as metadata when explicit installed runtimes differ from the default agent", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        agent: claudeCodeAgent,
+        model: "claude-opus-4-6",
+        installedRuntimes: [getAgentRuntime("codex")!],
+        presetAgentIds: ["miniprogram"],
+      });
+
+      const configDir = join(dir, ".sandcastle");
+      const main = await readFile(join(configDir, "main.mts"), "utf-8");
+      const dockerfile = await readFile(join(configDir, "Dockerfile"), "utf-8");
+      const envExample = await readFile(
+        join(configDir, ".env.example"),
+        "utf-8",
+      );
+      const manifest = JSON.parse(
+        await readFile(join(configDir, "agent-profiles.json"), "utf-8"),
+      ) as {
+        profiles: Record<
+          string,
+          { recommendedAgentName: string; recommendedModel: string }
+        >;
+      };
+
+      expect(main).toContain('claudeCode("claude-opus-4-6")');
+      expect(main).not.toContain("codex(");
+      expect(dockerfile).toContain("@openai/codex");
+      expect(dockerfile).not.toContain("claude.ai/install.sh");
+      expect(envExample).toContain("OPENAI_KEY=");
+      expect(envExample).not.toContain("ANTHROPIC_API_KEY=");
+      expect(manifest.profiles.miniprogram).toMatchObject({
+        recommendedAgentName: "codex",
+        recommendedModel: "gpt-5.4-mini",
+      });
     });
 
     it("deduplicates shared skills when multiple presets are selected", async () => {

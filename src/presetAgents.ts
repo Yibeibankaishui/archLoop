@@ -56,8 +56,8 @@ export const PRESET_AGENT_DEFINITIONS: readonly PresetAgentDefinition[] = [
     id: "miniprogram",
     description: "WeChat Mini Program development and CloudBase-aware flows",
     promptFile: "miniprogram.prompt.md",
-    recommendedAgentName: "claude-code",
-    recommendedModel: "claude-opus-4-6",
+    recommendedAgentName: "codex",
+    recommendedModel: "gpt-5.4-mini",
     skillIds: ["miniprogram-context"],
   },
 ] as const;

@@ -646,7 +646,7 @@ Select a template during `sandcastle init` when prompted, or re-run init in a fr
 
 ### Preset agent roles (optional)
 
-After you choose a template, init can optionally add **preset agent roles**. In this mental model, the **template** is the default **workflow**, while a **preset** is an extra **reusable role** (for example reviewer, planner, merger, or WeChat Mini Program–oriented work) with bundled Markdown skills. Selected roles are copied to `.sandcastle/agents/` and `.sandcastle/skills/`, and `.sandcastle/agent-profiles.json` records suggested agent provider, model, and effort. Compose those prompts from `main.mts` with `run()` when you want to involve a role; nothing is auto-wired into the template loop in v1.
+After you choose a template, init can optionally add **preset agent roles**. In this mental model, the **template** is the default **workflow**, while a **preset** is an extra **reusable role** (for example reviewer, planner, merger, or WeChat Mini Program–oriented work) with bundled Markdown skills. Selected roles are copied to `.sandcastle/agents/` and `.sandcastle/skills/`, and `.sandcastle/agent-profiles.json` records suggested agent provider, model, and effort. Compose those prompts from `main.mts` with `run()` when you want to involve a role; nothing is auto-wired into the template loop in v1. Provider recommendations are metadata only and may require choosing matching installed runtimes during init.
 
 ## CLI commands
 
