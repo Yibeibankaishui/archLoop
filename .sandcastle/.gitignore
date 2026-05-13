@@ -1,4 +1,4 @@
 .env
-auth
-logs
-worktrees
+auth/
+logs/
+worktrees/

@@ -1,7 +1,7 @@
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
-export const plannerAgent = sandcastle.codex("gpt-5.4", { effort: "high" });
+export const plannerAgent = sandcastle.codex("gpt-5.4", { effort: "medium" });
 export const implementerAgent = sandcastle.cursor("auto");
 export const reviewerAgent = sandcastle.codex("gpt-5.4", { effort: "medium" });
 export const mergerAgent = sandcastle.codex("gpt-5.4", { effort: "medium" });
