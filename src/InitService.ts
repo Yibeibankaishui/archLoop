@@ -1,7 +1,7 @@
 import { FileSystem } from "@effect/platform";
 import { Effect } from "effect";
 import { cp } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   getPresetAgentDefinition,
@@ -77,6 +77,18 @@ interface AuthMountEntry {
   readonly hostPath: string;
   readonly sandboxPath: string;
   readonly readonly?: boolean;
+}
+
+export interface AuthRequirement {
+  readonly id: string;
+  readonly label: string;
+  readonly envVars: readonly string[];
+  readonly authMounts: readonly AuthMountEntry[];
+  readonly githubLoginSupported?: boolean;
+}
+
+export interface AuthSetupSummary {
+  readonly lines: readonly string[];
 }
 
 export interface AgentRuntimeEntry {
@@ -538,6 +550,30 @@ const dedupeAuthMounts = (
   return deduped;
 };
 
+const prepareAuthMountHostDirectories = (
+  fs: FileSystem.FileSystem,
+  repoDir: string,
+  mounts: readonly AuthMountEntry[],
+): Effect.Effect<void, Error> => {
+  const directories = new Set<string>();
+  for (const mount of mounts) {
+    directories.add(
+      isAbsolute(mount.hostPath)
+        ? mount.hostPath
+        : join(repoDir, mount.hostPath),
+    );
+  }
+
+  return Effect.all(
+    [...directories].map((directory) =>
+      fs
+        .makeDirectory(directory, { recursive: true })
+        .pipe(Effect.mapError((e) => new Error(e.message))),
+    ),
+    { concurrency: "unbounded" },
+  ).pipe(Effect.asVoid);
+};
+
 const renderAuthMount = (mount: AuthMountEntry): string => {
   const fields = [
     `hostPath: ${JSON.stringify(mount.hostPath)}`,
@@ -648,6 +684,35 @@ export const getBacklogManager = (
 ): BacklogManagerEntry | undefined =>
   BACKLOG_MANAGER_REGISTRY.find((b) => b.name === name);
 
+export const collectAuthRequirements = ({
+  installedRuntimes,
+  backlogManager,
+}: {
+  installedRuntimes: readonly AgentRuntimeEntry[];
+  backlogManager: BacklogManagerEntry;
+}): AuthRequirement[] => {
+  const runtimeRequirements: AuthRequirement[] = installedRuntimes.map(
+    (runtime) => ({
+      id: runtime.name,
+      label: runtime.label,
+      envVars: runtime.envVars,
+      authMounts: runtime.authMounts ?? [],
+    }),
+  );
+
+  const backlogRequirement: AuthRequirement = {
+    id: backlogManager.name,
+    label: backlogManager.label,
+    envVars: backlogManager.envVars,
+    authMounts: backlogManager.authMounts ?? [],
+    ...(backlogManager.name === "github-issues"
+      ? { githubLoginSupported: true }
+      : {}),
+  };
+
+  return [...runtimeRequirements, backlogRequirement];
+};
+
 export const getAgent = (name: string): AgentEntry | undefined =>
   AGENT_REGISTRY.find((a) => a.name === name);
 
@@ -697,12 +762,16 @@ const PRESET_AGENT_NEXT_STEP =
 export function getNextStepsLines(
   template: string,
   mainFilename: string,
-  options?: { presetAgentIds?: readonly string[] },
+  options?: {
+    presetAgentIds?: readonly string[];
+    authSetupSummary?: AuthSetupSummary;
+  },
 ): string[] {
   const presetHintText =
     options?.presetAgentIds && options.presetAgentIds.length > 0
       ? PRESET_AGENT_NEXT_STEP
       : undefined;
+  const authSetupLines = options?.authSetupSummary?.lines ?? [];
 
   if (template === "blank") {
     let step = 1;
@@ -716,6 +785,9 @@ export function getNextStepsLines(
     ];
     if (presetHintText) {
       lines.push(`${step++}. ${presetHintText}`);
+    }
+    for (const line of authSetupLines) {
+      lines.push(`${step++}. ${line}`);
     }
     lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
     return lines;
@@ -739,6 +811,9 @@ export function getNextStepsLines(
   }
   if (presetHintText) {
     lines.push(`${step++}. ${presetHintText}`);
+  }
+  for (const line of authSetupLines) {
+    lines.push(`${step++}. ${line}`);
   }
   lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
   return lines;
@@ -1182,16 +1257,20 @@ export const scaffold = (
       agent,
       installedRuntimes,
     );
+    const authRequirements = collectAuthRequirements({
+      installedRuntimes: selectedRuntimes,
+      backlogManager,
+    });
     const dockerfileTemplate =
       renderInstalledRuntimesDockerfile(selectedRuntimes);
-    const selectedAuthMounts = dedupeAuthMounts([
-      ...selectedRuntimes.flatMap((runtime) => runtime.authMounts ?? []),
-      ...(backlogManager.authMounts ?? []),
-    ]);
+    const selectedAuthMounts = dedupeAuthMounts(
+      authRequirements.flatMap((requirement) => requirement.authMounts),
+    );
 
     yield* fs
       .makeDirectory(configDir, { recursive: false })
       .pipe(Effect.mapError((e) => new Error(e.message)));
+    yield* prepareAuthMountHostDirectories(fs, repoDir, selectedAuthMounts);
 
     const templateDir = yield* getTemplateDir(templateName);
 

@@ -1,7 +1,13 @@
 import { NodeFileSystem } from "@effect/platform-node";
 import { Effect } from "effect";
 import { tmpdir } from "node:os";
-import { mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdtemp,
+  readFile,
+  readdir,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { validatePresetRegistries } from "./presetAgents.js";
@@ -17,6 +23,7 @@ import {
   getSandboxProvider,
   listAgentRuntimes,
   getAgentRuntime,
+  collectAuthRequirements,
 } from "./InitService.js";
 import type { ScaffoldOptions } from "./InitService.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
@@ -151,6 +158,47 @@ describe("Agent runtime registry", () => {
 
   it("getAgentRuntime returns undefined for unknown runtime", () => {
     expect(getAgentRuntime("nonexistent")).toBeUndefined();
+  });
+});
+
+describe("Auth requirement collection", () => {
+  it("collects auth requirements from selected runtimes and backlog manager", () => {
+    const requirements = collectAuthRequirements({
+      installedRuntimes: [
+        getAgentRuntime("codex")!,
+        getAgentRuntime("cursor")!,
+      ],
+      backlogManager: getBacklogManager("github-issues")!,
+    });
+
+    expect(requirements.map((requirement) => requirement.id)).toEqual([
+      "codex",
+      "cursor",
+      "github-issues",
+    ]);
+    expect(
+      requirements.find((requirement) => requirement.id === "codex"),
+    ).toMatchObject({
+      envVars: ["OPENAI_KEY"],
+      authMounts: [
+        {
+          hostPath: ".sandcastle/auth/codex",
+          sandboxPath: "/home/agent/.codex",
+        },
+      ],
+    });
+    expect(
+      requirements.find((requirement) => requirement.id === "github-issues"),
+    ).toMatchObject({
+      envVars: ["GH_TOKEN"],
+      authMounts: [
+        {
+          hostPath: ".sandcastle/auth/gh",
+          sandboxPath: "/home/agent/.config/gh",
+        },
+      ],
+      githubLoginSupported: true,
+    });
   });
 });
 
@@ -557,6 +605,19 @@ describe("InitService scaffold", () => {
     expect(mainTs).toContain("/home/agent/.config/gh");
     expect(mainTs).not.toContain(".sandcastle/auth/cursor");
     expect(mainTs).not.toContain(".sandcastle/auth/cursor-config");
+
+    await expect(
+      access(join(dir, ".sandcastle", "auth", "codex")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(dir, ".sandcastle", "auth", "gh")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(dir, ".sandcastle", "auth", "cursor")),
+    ).rejects.toThrow();
+    await expect(
+      access(join(dir, ".sandcastle", "auth", "cursor-config")),
+    ).rejects.toThrow();
   });
 
   it("scaffolds combined auth mounts for multiple selected runtimes", async () => {
@@ -582,6 +643,19 @@ describe("InitService scaffold", () => {
     expect(mainTs).toContain(".sandcastle/auth/cursor-config");
     expect(mainTs).toContain("/home/agent/.config/cursor");
     expect(mainTs).not.toContain(".sandcastle/auth/gh");
+
+    await expect(
+      access(join(dir, ".sandcastle", "auth", "codex")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(dir, ".sandcastle", "auth", "cursor")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(dir, ".sandcastle", "auth", "cursor-config")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(dir, ".sandcastle", "auth", "gh")),
+    ).rejects.toThrow();
   });
 
   // --- Template-specific tests ---

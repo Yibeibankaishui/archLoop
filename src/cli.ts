@@ -25,6 +25,7 @@ import {
   getNextStepsLines,
   listAgentRuntimes,
   getAgentRuntime,
+  collectAuthRequirements,
 } from "./InitService.js";
 import { defaultImageName } from "./sandboxes/docker.js";
 import type {
@@ -347,6 +348,46 @@ const resolveInstalledRuntimes = ({
   return promptForInstalledRuntimes(selectedAgent);
 };
 
+interface AuthSetupResult {
+  readonly nextStepLines: readonly string[];
+}
+
+const buildAuthSetupNextStepLines = (options: {
+  readonly githubChoice?: "env" | "login" | "skip" | "deferred";
+  readonly hasCodex: boolean;
+  readonly hasCursor: boolean;
+}): string[] => {
+  const lines: string[] = [];
+
+  if (options.githubChoice === "env") {
+    lines.push(
+      "Add GH_TOKEN to .sandcastle/.env before running GitHub Issues templates.",
+    );
+  } else if (options.githubChoice === "skip") {
+    lines.push(
+      "Set up GitHub auth later with GH_TOKEN in .sandcastle/.env or `GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login`.",
+    );
+  } else if (options.githubChoice === "deferred") {
+    lines.push(
+      "This scripted init skipped interactive GitHub auth setup. Use GH_TOKEN in .sandcastle/.env or `GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login` before running GitHub Issues templates.",
+    );
+  }
+
+  if (options.hasCodex) {
+    lines.push(
+      "Prepare Codex auth before sandbox runs: use OPENAI_KEY in .sandcastle/.env or sync credentials into .sandcastle/auth/codex.",
+    );
+  }
+
+  if (options.hasCursor) {
+    lines.push(
+      "Prepare Cursor auth before sandbox runs: use CURSOR_API_KEY in .sandcastle/.env or sync credentials into .sandcastle/auth/cursor and .sandcastle/auth/cursor-config.",
+    );
+  }
+
+  return lines;
+};
+
 const initCommand = Command.make(
   "init",
   {
@@ -622,6 +663,124 @@ const initCommand = Command.make(
         ),
       );
 
+      const authRequirements = collectAuthRequirements({
+        installedRuntimes: selectedInstalledRuntimes,
+        backlogManager: selectedBacklogManager,
+      });
+      const hasCodexAuth = authRequirements.some(
+        (requirement) => requirement.id === "codex",
+      );
+      const hasCursorAuth = authRequirements.some(
+        (requirement) => requirement.id === "cursor",
+      );
+      const isFullyScriptedInit =
+        agentFlag._tag === "Some" &&
+        sandboxCli._tag === "Some" &&
+        backlogCli._tag === "Some" &&
+        template._tag === "Some" &&
+        presetAgentsCli._tag === "Some" &&
+        buildImageCli._tag === "Some" &&
+        (runtimesFlag._tag === "Some" || agentFlag._tag === "Some") &&
+        (selectedBacklogManager.name !== "github-issues" ||
+          createSandcastleLabelCli._tag === "Some");
+
+      const githubAuthRequirement = authRequirements.find(
+        (requirement) =>
+          requirement.id === "github-issues" &&
+          requirement.githubLoginSupported,
+      );
+      let githubAuthChoice: "env" | "login" | "skip" | "deferred" | undefined;
+
+      if (githubAuthRequirement) {
+        if (isFullyScriptedInit) {
+          githubAuthChoice = "deferred";
+        } else {
+          const authChoice = yield* Effect.promise(() =>
+            clack.select({
+              message: "Set up GitHub authentication now?",
+              initialValue: "env",
+              options: [
+                {
+                  value: "env",
+                  label: "Use GH_TOKEN in .sandcastle/.env",
+                },
+                {
+                  value: "login",
+                  label: "Run gh auth login into .sandcastle/auth/gh",
+                },
+                {
+                  value: "skip",
+                  label: "Skip for now",
+                },
+              ],
+            }),
+          );
+          if (clack.isCancel(authChoice)) {
+            yield* Effect.fail(
+              new InitError({ message: "GitHub auth setup cancelled." }),
+            );
+          }
+
+          if (authChoice === "env") {
+            githubAuthChoice = "env";
+            yield* d.status(
+              "Add GH_TOKEN to .sandcastle/.env when you're ready. Sandcastle will not write secrets for you.",
+              "info",
+            );
+          } else if (authChoice === "login") {
+            githubAuthChoice = "login";
+            yield* Effect.try({
+              try: () =>
+                execSync("gh auth login", {
+                  cwd,
+                  stdio: "inherit",
+                  env: {
+                    ...process.env,
+                    GH_CONFIG_DIR: join(cwd, ".sandcastle", "auth", "gh"),
+                  },
+                }),
+              catch: () =>
+                new InitError({
+                  message:
+                    "GitHub login failed. You can retry with `GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login`.",
+                }),
+            });
+          } else {
+            githubAuthChoice = "skip";
+            yield* d.status(
+              "Skipped GitHub auth setup for now. Configure GH_TOKEN or gh auth login later.",
+              "info",
+            );
+          }
+        }
+      }
+
+      if (hasCodexAuth) {
+        yield* d.text(
+          styleText(
+            "dim",
+            "Codex auth: sign in manually and sync credentials to .sandcastle/auth/codex before running in the sandbox.",
+          ),
+        );
+      }
+
+      if (hasCursorAuth) {
+        yield* d.text(
+          styleText(
+            "dim",
+            "Cursor auth: sign in manually and sync credentials to .sandcastle/auth/cursor (and .sandcastle/auth/cursor-config) before running in the sandbox.",
+          ),
+        );
+      }
+
+      const authSetupResult: AuthSetupResult = {
+        nextStepLines: buildAuthSetupNextStepLines({
+          githubChoice: githubAuthChoice,
+          hasCodex: hasCodexAuth,
+          hasCursor: hasCursorAuth,
+        }),
+      };
+
       // Prompt user before building image (unless --build-image is set)
       const providerLabel = selectedSandboxProvider.label;
       let shouldBuild: boolean | symbol;
@@ -668,6 +827,9 @@ const initCommand = Command.make(
         scaffoldResult.mainFilename,
         {
           presetAgentIds: scaffoldResult.presetAgentIds,
+          authSetupSummary: {
+            lines: authSetupResult.nextStepLines,
+          },
         },
       );
       for (const [i, line] of nextSteps.entries()) {

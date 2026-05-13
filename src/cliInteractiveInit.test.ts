@@ -10,6 +10,15 @@ import type { DisplayEntry } from "./Display.js";
 const mockSelect = vi.fn();
 const mockMultiselect = vi.fn();
 const mockConfirm = vi.fn();
+const mockExecSync = vi.fn();
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    execSync: (...args: unknown[]) => mockExecSync(...args),
+  };
+});
 
 vi.mock("@clack/prompts", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -115,6 +124,213 @@ describe("sandcastle init interactive runtime selection", () => {
         _tag: "status",
         message:
           "Init complete! Run `sandcastle docker build-image` to build the Docker image later.",
+      }),
+    );
+  });
+
+  it("offers GitHub auth setup and supports the GH_TOKEN env path", async () => {
+    mockSelect.mockImplementation(async (opts: { message: string }) => {
+      if (opts.message === "Select the default scaffold agent:") return "codex";
+      if (opts.message === "Select a sandbox provider:") return "docker";
+      if (opts.message === "Select a backlog manager:") return "github-issues";
+      if (opts.message === "Select a template:") return "blank";
+      if (opts.message === "Set up GitHub authentication now?") return "env";
+      throw new Error(`Unexpected select prompt: ${opts.message}`);
+    });
+    mockMultiselect.mockResolvedValue(["codex"]);
+    mockConfirm.mockImplementation(async (opts: { message: string }) => {
+      if (opts.message.startsWith('Create a "Sandcastle" GitHub label?'))
+        return false;
+      if (opts.message.startsWith("Add preset agent roles")) return false;
+      if (opts.message.startsWith("Build the default Docker image now"))
+        return false;
+      throw new Error(`Unexpected confirm prompt: ${opts.message}`);
+    });
+
+    const entries = await Effect.runPromise(
+      Effect.gen(function* () {
+        const ref = yield* Ref.make<ReadonlyArray<DisplayEntry>>([]);
+        yield* cli(["node", "sandcastle", "init"]).pipe(
+          Effect.provide(SilentDisplay.layer(ref)),
+          Effect.provide(NodeContext.layer),
+        );
+        return yield* Ref.get(ref);
+      }),
+    );
+
+    expect(mockExecSync).not.toHaveBeenCalledWith(
+      expect.stringContaining("gh auth login"),
+      expect.anything(),
+    );
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "status",
+        message: expect.stringContaining("Add GH_TOKEN to .sandcastle/.env"),
+      }),
+    );
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "text",
+        message: expect.stringContaining(
+          "Add GH_TOKEN to .sandcastle/.env before running GitHub Issues templates.",
+        ),
+      }),
+    );
+  });
+
+  it("runs gh auth login with GH_CONFIG_DIR when GitHub login path is selected", async () => {
+    mockSelect.mockImplementation(async (opts: { message: string }) => {
+      if (opts.message === "Select the default scaffold agent:") return "codex";
+      if (opts.message === "Select a sandbox provider:") return "docker";
+      if (opts.message === "Select a backlog manager:") return "github-issues";
+      if (opts.message === "Select a template:") return "blank";
+      if (opts.message === "Set up GitHub authentication now?") return "login";
+      throw new Error(`Unexpected select prompt: ${opts.message}`);
+    });
+    mockMultiselect.mockResolvedValue(["codex", "cursor"]);
+    mockConfirm.mockImplementation(async (opts: { message: string }) => {
+      if (opts.message.startsWith('Create a "Sandcastle" GitHub label?'))
+        return false;
+      if (opts.message.startsWith("Add preset agent roles")) return false;
+      if (opts.message.startsWith("Build the default Docker image now"))
+        return false;
+      throw new Error(`Unexpected confirm prompt: ${opts.message}`);
+    });
+
+    const entries = await Effect.runPromise(
+      Effect.gen(function* () {
+        const ref = yield* Ref.make<ReadonlyArray<DisplayEntry>>([]);
+        yield* cli(["node", "sandcastle", "init"]).pipe(
+          Effect.provide(SilentDisplay.layer(ref)),
+          Effect.provide(NodeContext.layer),
+        );
+        return yield* Ref.get(ref);
+      }),
+    );
+
+    expect(mockExecSync).toHaveBeenCalledWith(
+      "gh auth login",
+      expect.objectContaining({
+        env: expect.objectContaining({
+          GH_CONFIG_DIR: expect.stringContaining(".sandcastle/auth/gh"),
+        }),
+      }),
+    );
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "text",
+        message: expect.stringContaining("Codex auth: sign in manually"),
+      }),
+    );
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "text",
+        message: expect.stringContaining("Cursor auth: sign in manually"),
+      }),
+    );
+  });
+
+  it("supports skipping GitHub auth setup", async () => {
+    mockSelect.mockImplementation(async (opts: { message: string }) => {
+      if (opts.message === "Select the default scaffold agent:") return "codex";
+      if (opts.message === "Select a sandbox provider:") return "docker";
+      if (opts.message === "Select a backlog manager:") return "github-issues";
+      if (opts.message === "Select a template:") return "blank";
+      if (opts.message === "Set up GitHub authentication now?") return "skip";
+      throw new Error(`Unexpected select prompt: ${opts.message}`);
+    });
+    mockMultiselect.mockResolvedValue(["codex"]);
+    mockConfirm.mockImplementation(async (opts: { message: string }) => {
+      if (opts.message.startsWith('Create a "Sandcastle" GitHub label?'))
+        return false;
+      if (opts.message.startsWith("Add preset agent roles")) return false;
+      if (opts.message.startsWith("Build the default Docker image now"))
+        return false;
+      throw new Error(`Unexpected confirm prompt: ${opts.message}`);
+    });
+
+    const entries = await Effect.runPromise(
+      Effect.gen(function* () {
+        const ref = yield* Ref.make<ReadonlyArray<DisplayEntry>>([]);
+        yield* cli(["node", "sandcastle", "init"]).pipe(
+          Effect.provide(SilentDisplay.layer(ref)),
+          Effect.provide(NodeContext.layer),
+        );
+        return yield* Ref.get(ref);
+      }),
+    );
+
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "status",
+        message: expect.stringContaining("Skipped GitHub auth setup"),
+      }),
+    );
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "text",
+        message: expect.stringContaining(
+          "Set up GitHub auth later with GH_TOKEN in .sandcastle/.env",
+        ),
+      }),
+    );
+  });
+
+  it("scripted init with github-issues skips the interactive auth prompt and appends next steps", async () => {
+    mockSelect.mockImplementation(async (opts: { message: string }) => {
+      throw new Error(`Unexpected select prompt: ${opts.message}`);
+    });
+    mockExecSync.mockImplementation(() => undefined);
+
+    const entries = await Effect.runPromise(
+      Effect.gen(function* () {
+        const ref = yield* Ref.make<ReadonlyArray<DisplayEntry>>([]);
+        yield* cli([
+          "node",
+          "sandcastle",
+          "init",
+          "--agent",
+          "codex",
+          "--runtimes",
+          "codex",
+          "--sandbox",
+          "docker",
+          "--backlog",
+          "github-issues",
+          "--template",
+          "blank",
+          "--preset-agents",
+          "none",
+          "--create-sandcastle-label",
+          "false",
+          "--build-image",
+          "false",
+        ]).pipe(
+          Effect.provide(SilentDisplay.layer(ref)),
+          Effect.provide(NodeContext.layer),
+        );
+        return yield* Ref.get(ref);
+      }),
+    );
+
+    expect(mockExecSync).not.toHaveBeenCalledWith(
+      "gh auth login",
+      expect.anything(),
+    );
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "text",
+        message: expect.stringContaining(
+          "This scripted init skipped interactive GitHub auth setup.",
+        ),
+      }),
+    );
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "text",
+        message: expect.stringContaining(
+          "Prepare Codex auth before sandbox runs: use OPENAI_KEY in .sandcastle/.env or sync credentials into .sandcastle/auth/codex.",
+        ),
       }),
     );
   });
