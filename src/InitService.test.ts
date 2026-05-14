@@ -1,9 +1,16 @@
 import { NodeFileSystem } from "@effect/platform-node";
 import { Effect } from "effect";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import {
+  access,
+  mkdtemp,
+  readFile,
+  readdir,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { validatePresetRegistries } from "./presetAgents.js";
 import {
   scaffold,
   getNextStepsLines,
@@ -14,8 +21,11 @@ import {
   getBacklogManager,
   listSandboxProviders,
   getSandboxProvider,
+  listAgentRuntimes,
+  getAgentRuntime,
+  collectAuthRequirements,
 } from "./InitService.js";
-import type { AgentEntry, ScaffoldOptions } from "./InitService.js";
+import type { ScaffoldOptions } from "./InitService.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import { SKELETON_PROMPT } from "./templates.js";
 
@@ -24,7 +34,9 @@ const makeDir = () => mkdtemp(join(tmpdir(), "init-service-"));
 const claudeCodeAgent = getAgent("claude-code")!;
 const piAgent = getAgent("pi")!;
 const codexAgent = getAgent("codex")!;
+const cursorAgent = getAgent("cursor")!;
 const opencodeAgent = getAgent("opencode")!;
+const codexRuntime = getAgentRuntime("codex")!;
 
 const defaultOptions: ScaffoldOptions = {
   agent: claudeCodeAgent,
@@ -37,6 +49,9 @@ const runScaffold = (repoDir: string, options?: Partial<ScaffoldOptions>) =>
       Effect.provide(NodeFileSystem.layer),
     ),
   );
+
+const countOccurrences = (content: string, pattern: RegExp): number =>
+  content.match(pattern)?.length ?? 0;
 
 // ---------------------------------------------------------------------------
 // Agent registry
@@ -54,7 +69,8 @@ describe("Agent registry", () => {
     expect(agent!.name).toBe("claude-code");
     expect(agent!.defaultModel).toBe("claude-opus-4-6");
     expect(agent!.factoryImport).toBe("claudeCode");
-    expect(agent!.dockerfileTemplate).toContain("FROM");
+    expect(agent).not.toHaveProperty("dockerfileTemplate");
+    expect(agent).not.toHaveProperty("envExample");
   });
 
   it("getAgent returns undefined for unknown agent", () => {
@@ -72,10 +88,8 @@ describe("Agent registry", () => {
     expect(agent!.name).toBe("pi");
     expect(agent!.defaultModel).toBe("claude-sonnet-4-6");
     expect(agent!.factoryImport).toBe("pi");
-    expect(agent!.dockerfileTemplate).toContain("FROM");
-    expect(agent!.dockerfileTemplate).toContain(
-      "@mariozechner/pi-coding-agent",
-    );
+    expect(agent).not.toHaveProperty("dockerfileTemplate");
+    expect(agent).not.toHaveProperty("envExample");
   });
 
   it("listAgents includes codex", () => {
@@ -89,8 +103,23 @@ describe("Agent registry", () => {
     expect(agent!.name).toBe("codex");
     expect(agent!.defaultModel).toBe("gpt-5.4-mini");
     expect(agent!.factoryImport).toBe("codex");
-    expect(agent!.dockerfileTemplate).toContain("FROM");
-    expect(agent!.dockerfileTemplate).toContain("@openai/codex");
+    expect(agent).not.toHaveProperty("dockerfileTemplate");
+    expect(agent).not.toHaveProperty("envExample");
+  });
+
+  it("listAgents includes cursor", () => {
+    const agents = listAgents();
+    expect(agents.some((a) => a.name === "cursor")).toBe(true);
+  });
+
+  it("getAgent returns cursor entry with expected fields", () => {
+    const agent = getAgent("cursor");
+    expect(agent).toBeDefined();
+    expect(agent!.name).toBe("cursor");
+    expect(agent!.defaultModel).toBe("auto");
+    expect(agent!.factoryImport).toBe("cursor");
+    expect(agent).not.toHaveProperty("dockerfileTemplate");
+    expect(agent).not.toHaveProperty("envExample");
   });
 
   it("listAgents includes opencode", () => {
@@ -104,8 +133,72 @@ describe("Agent registry", () => {
     expect(agent!.name).toBe("opencode");
     expect(agent!.defaultModel).toBe("opencode/big-pickle");
     expect(agent!.factoryImport).toBe("opencode");
-    expect(agent!.dockerfileTemplate).toContain("FROM");
-    expect(agent!.dockerfileTemplate).toContain("opencode-ai");
+    expect(agent).not.toHaveProperty("dockerfileTemplate");
+    expect(agent).not.toHaveProperty("envExample");
+  });
+});
+
+describe("Agent runtime registry", () => {
+  it("listAgentRuntimes returns at least claude-code", () => {
+    const runtimes = listAgentRuntimes();
+    expect(runtimes.some((runtime) => runtime.name === "claude-code")).toBe(
+      true,
+    );
+  });
+
+  it("getAgentRuntime returns install metadata for codex", () => {
+    const runtime = getAgentRuntime("codex");
+    expect(runtime).toBeDefined();
+    expect(runtime!.name).toBe("codex");
+    expect(runtime!.dockerfileInstall.root).toContain("@openai/codex");
+    expect(runtime!.dockerfileTemplate).toContain("FROM");
+    expect(runtime!.dockerfileTemplate).toContain("@openai/codex");
+    expect(runtime!.envExample).toContain("OPENAI_KEY=");
+  });
+
+  it("getAgentRuntime returns undefined for unknown runtime", () => {
+    expect(getAgentRuntime("nonexistent")).toBeUndefined();
+  });
+});
+
+describe("Auth requirement collection", () => {
+  it("collects auth requirements from selected runtimes and backlog manager", () => {
+    const requirements = collectAuthRequirements({
+      installedRuntimes: [
+        getAgentRuntime("codex")!,
+        getAgentRuntime("cursor")!,
+      ],
+      backlogManager: getBacklogManager("github-issues")!,
+    });
+
+    expect(requirements.map((requirement) => requirement.id)).toEqual([
+      "codex",
+      "cursor",
+      "github-issues",
+    ]);
+    expect(
+      requirements.find((requirement) => requirement.id === "codex"),
+    ).toMatchObject({
+      envVars: ["OPENAI_KEY"],
+      authMounts: [
+        {
+          hostPath: ".sandcastle/auth/codex",
+          sandboxPath: "/home/agent/.codex",
+        },
+      ],
+    });
+    expect(
+      requirements.find((requirement) => requirement.id === "github-issues"),
+    ).toMatchObject({
+      envVars: ["GH_TOKEN"],
+      authMounts: [
+        {
+          hostPath: ".sandcastle/auth/gh",
+          sandboxPath: "/home/agent/.config/gh",
+        },
+      ],
+      githubLoginSupported: true,
+    });
   });
 });
 
@@ -114,7 +207,7 @@ describe("Agent registry", () => {
 // ---------------------------------------------------------------------------
 
 describe("InitService scaffold", () => {
-  it("uses agent dockerfileTemplate for Dockerfile (with templateArgs substitution)", async () => {
+  it("uses default runtime Dockerfile metadata for Dockerfile (with templateArgs substitution)", async () => {
     const dir = await makeDir();
     await runScaffold(dir);
 
@@ -349,6 +442,225 @@ describe("InitService scaffold", () => {
     expect(mainTs).toContain('claudeCode("claude-opus-4-6")');
   });
 
+  it("uses the selected agent in main.mts while installing the selected runtime", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      agent: claudeCodeAgent,
+      model: "claude-opus-4-6",
+      installedRuntimes: [codexRuntime],
+    });
+
+    const configDir = join(dir, ".sandcastle");
+    const mainTs = await readFile(join(configDir, "main.mts"), "utf-8");
+    const dockerfile = await readFile(join(configDir, "Dockerfile"), "utf-8");
+    const envExample = await readFile(join(configDir, ".env.example"), "utf-8");
+
+    expect(mainTs).toContain('claudeCode("claude-opus-4-6")');
+    expect(dockerfile).toContain("@openai/codex");
+    expect(dockerfile).not.toContain("claude.ai/install.sh");
+    expect(envExample).toContain("OPENAI_KEY=");
+    expect(envExample).not.toContain("ANTHROPIC_API_KEY=");
+  });
+
+  it("can scaffold multiple installed runtimes without changing the default main agent", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      agent: claudeCodeAgent,
+      model: "claude-opus-4-6",
+      installedRuntimes: [
+        getAgentRuntime("codex")!,
+        getAgentRuntime("cursor")!,
+      ],
+    });
+
+    const configDir = join(dir, ".sandcastle");
+    const mainTs = await readFile(join(configDir, "main.mts"), "utf-8");
+    const dockerfile = await readFile(join(configDir, "Dockerfile"), "utf-8");
+    const envExample = await readFile(join(configDir, ".env.example"), "utf-8");
+
+    expect(mainTs).toContain('claudeCode("claude-opus-4-6")');
+    expect(dockerfile).toContain("@openai/codex");
+    expect(dockerfile).toContain("cursor.com/install");
+    expect(dockerfile).toContain('test -x "$HOME/.local/bin/agent"');
+    expect(envExample).toContain("OPENAI_KEY=");
+    expect(envExample).toContain("CURSOR_API_KEY=");
+  });
+
+  it("assembles a Dockerfile from multiple selected runtime snippets once", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      installedRuntimes: [
+        getAgentRuntime("codex")!,
+        getAgentRuntime("cursor")!,
+      ],
+    });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+
+    expect(dockerfile).toContain("@openai/codex");
+    expect(dockerfile).toContain("cursor.com/install");
+    expect(dockerfile).toContain('test -x "$HOME/.local/bin/agent"');
+    expect(dockerfile).not.toContain("claude.ai/install.sh");
+    expect(dockerfile).not.toContain("@mariozechner/pi-coding-agent");
+    expect(dockerfile).not.toContain("opencode-ai");
+    expect(countOccurrences(dockerfile, /^FROM /gm)).toBe(1);
+    expect(countOccurrences(dockerfile, /Install system dependencies/g)).toBe(
+      1,
+    );
+    expect(
+      countOccurrences(dockerfile, /^USER \$\{AGENT_UID\}:\$\{AGENT_GID\}/gm),
+    ).toBe(1);
+    expect(countOccurrences(dockerfile, /^ENTRYPOINT /gm)).toBe(1);
+  });
+
+  it("assembles a Containerfile from multiple selected runtime snippets once", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      sandboxProvider: getSandboxProvider("podman")!,
+      installedRuntimes: [
+        getAgentRuntime("codex")!,
+        getAgentRuntime("cursor")!,
+      ],
+    });
+
+    const containerfile = await readFile(
+      join(dir, ".sandcastle", "Containerfile"),
+      "utf-8",
+    );
+
+    expect(containerfile).toContain("@openai/codex");
+    expect(containerfile).toContain("cursor.com/install");
+    expect(containerfile).toContain('test -x "$HOME/.local/bin/agent"');
+    expect(containerfile).not.toContain("claude.ai/install.sh");
+    expect(containerfile).not.toContain("opencode-ai");
+    expect(countOccurrences(containerfile, /^FROM /gm)).toBe(1);
+    expect(countOccurrences(containerfile, /^ENTRYPOINT /gm)).toBe(1);
+  });
+
+  it.each([
+    ["docker", "Dockerfile"],
+    ["podman", "Containerfile"],
+  ] as const)(
+    "keeps one selected runtime output valid for %s",
+    async (sandboxProviderName, containerfileName) => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        sandboxProvider: getSandboxProvider(sandboxProviderName)!,
+        installedRuntimes: [getAgentRuntime("codex")!],
+      });
+
+      const containerfile = await readFile(
+        join(dir, ".sandcastle", containerfileName),
+        "utf-8",
+      );
+
+      expect(containerfile).toContain("FROM node:22-bookworm");
+      expect(containerfile).toContain("@openai/codex");
+      expect(containerfile).not.toContain("cursor.com/install");
+      expect(containerfile).not.toContain("claude.ai/install.sh");
+      expect(countOccurrences(containerfile, /^FROM /gm)).toBe(1);
+      expect(countOccurrences(containerfile, /^ENTRYPOINT /gm)).toBe(1);
+    },
+  );
+
+  it("deduplicates selected runtime env hints in .env.example and .env", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      installedRuntimes: [
+        getAgentRuntime("claude-code")!,
+        getAgentRuntime("pi")!,
+        getAgentRuntime("codex")!,
+      ],
+      backlogManager: getBacklogManager("github-issues"),
+    });
+
+    const configDir = join(dir, ".sandcastle");
+    const envExample = await readFile(join(configDir, ".env.example"), "utf-8");
+    const env = await readFile(join(configDir, ".env"), "utf-8");
+
+    for (const content of [envExample, env]) {
+      expect(content).toContain("ANTHROPIC_API_KEY=");
+      expect(content).toContain("OPENAI_KEY=");
+      expect(content).toContain("GH_TOKEN=");
+      expect(content.match(/^ANTHROPIC_API_KEY=/gm)).toHaveLength(1);
+    }
+  });
+
+  it("scaffolds auth mounts for selected runtimes and backlog manager only", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      templateName: "simple-loop",
+      installedRuntimes: [getAgentRuntime("codex")!],
+      backlogManager: getBacklogManager("github-issues"),
+    });
+
+    const mainTs = await readFile(
+      join(dir, ".sandcastle", "main.mts"),
+      "utf-8",
+    );
+
+    expect(mainTs).toContain(".sandcastle/auth/codex");
+    expect(mainTs).toContain("/home/agent/.codex");
+    expect(mainTs).toContain(".sandcastle/auth/gh");
+    expect(mainTs).toContain("/home/agent/.config/gh");
+    expect(mainTs).not.toContain(".sandcastle/auth/cursor");
+    expect(mainTs).not.toContain(".sandcastle/auth/cursor-config");
+
+    await expect(
+      access(join(dir, ".sandcastle", "auth", "codex")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(dir, ".sandcastle", "auth", "gh")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(dir, ".sandcastle", "auth", "cursor")),
+    ).rejects.toThrow();
+    await expect(
+      access(join(dir, ".sandcastle", "auth", "cursor-config")),
+    ).rejects.toThrow();
+  });
+
+  it("scaffolds combined auth mounts for multiple selected runtimes", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      templateName: "simple-loop",
+      installedRuntimes: [
+        getAgentRuntime("codex")!,
+        getAgentRuntime("cursor")!,
+      ],
+      backlogManager: getBacklogManager("beads"),
+    });
+
+    const mainTs = await readFile(
+      join(dir, ".sandcastle", "main.mts"),
+      "utf-8",
+    );
+
+    expect(mainTs).toContain(".sandcastle/auth/codex");
+    expect(mainTs).toContain("/home/agent/.codex");
+    expect(mainTs).toContain(".sandcastle/auth/cursor");
+    expect(mainTs).toContain("/home/agent/.cursor");
+    expect(mainTs).toContain(".sandcastle/auth/cursor-config");
+    expect(mainTs).toContain("/home/agent/.config/cursor");
+    expect(mainTs).not.toContain(".sandcastle/auth/gh");
+
+    await expect(
+      access(join(dir, ".sandcastle", "auth", "codex")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(dir, ".sandcastle", "auth", "cursor")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(dir, ".sandcastle", "auth", "cursor-config")),
+    ).resolves.toBeUndefined();
+    await expect(
+      access(join(dir, ".sandcastle", "auth", "gh")),
+    ).rejects.toThrow();
+  });
+
   // --- Template-specific tests ---
 
   it("simple-loop template produces main.mts and prompt.md", async () => {
@@ -577,6 +889,20 @@ describe("InitService scaffold", () => {
       expect(joined).toContain("npm run sandcastle");
     });
 
+    it("blank template next steps explain the main file can mix installed providers after init", () => {
+      const lines = getNextStepsLines("blank", "main.ts");
+      const joined = lines.join("\n");
+      expect(joined).toContain("main.ts");
+      expect(joined).toContain("mix installed agent providers");
+    });
+
+    it("non-blank template next steps explain the main file can mix installed providers after init", () => {
+      const lines = getNextStepsLines("simple-loop", "main.ts");
+      const joined = lines.join("\n");
+      expect(joined).toContain("main.ts");
+      expect(joined).toContain("mix installed agent providers");
+    });
+
     it("non-blank template includes a note about customizing the install command", () => {
       const lines = getNextStepsLines("simple-loop", "main.mts");
       const joined = lines.join("\n");
@@ -654,6 +980,17 @@ describe("InitService scaffold", () => {
       const joined = lines.join("\n");
       expect(joined).not.toContain("CODING_STANDARDS.md");
     });
+
+    it("mentions preset paths when presetAgentIds are provided", () => {
+      const lines = getNextStepsLines("blank", "main.mts", {
+        presetAgentIds: ["reviewer"],
+      });
+      const joined = lines.join("\n");
+      expect(joined).toContain(".sandcastle/agents/");
+      expect(joined).toContain("agent-profiles.json");
+      expect(joined).toContain("recommended provider/model");
+      expect(joined).toContain("matching installed runtimes");
+    });
   });
 
   it("scaffolds pi agent with pi Dockerfile", async () => {
@@ -706,9 +1043,34 @@ describe("InitService scaffold", () => {
     expect(mainTs).not.toContain("claudeCode");
   });
 
+  it("scaffolds cursor agent with Cursor Agent Dockerfile", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, { agent: cursorAgent, model: "auto" });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).toContain("FROM node:22-bookworm");
+    expect(dockerfile).toContain("cursor.com/install");
+    expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
+  });
+
+  it("scaffolds main.mts with cursor factory import when cursor agent selected", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, { agent: cursorAgent, model: "auto" });
+
+    const mainTs = await readFile(
+      join(dir, ".sandcastle", "main.mts"),
+      "utf-8",
+    );
+    expect(mainTs).toContain('cursor("auto")');
+    expect(mainTs).not.toContain("claudeCode");
+  });
+
   // --- createLabel option ---
 
-  it("simple-loop prompt.md retains --label Sandcastle when createLabel is true", async () => {
+  it("simple-loop prompt.md retains -l Sandcastle when createLabel is true", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop", createLabel: true });
 
@@ -716,10 +1078,10 @@ describe("InitService scaffold", () => {
       join(dir, ".sandcastle", "prompt.md"),
       "utf-8",
     );
-    expect(prompt).toContain("--label Sandcastle");
+    expect(prompt).toContain("-l Sandcastle");
   });
 
-  it("simple-loop prompt.md strips --label Sandcastle when createLabel is false", async () => {
+  it("simple-loop prompt.md strips -l Sandcastle when createLabel is false", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop", createLabel: false });
 
@@ -727,14 +1089,14 @@ describe("InitService scaffold", () => {
       join(dir, ".sandcastle", "prompt.md"),
       "utf-8",
     );
-    expect(prompt).not.toContain("--label Sandcastle");
+    expect(prompt).not.toContain("-l Sandcastle");
     // The gh issue list command should still be valid
     expect(prompt).toContain("gh issue list");
     // No double spaces in gh commands from removal
     expect(prompt).not.toMatch(/gh issue list {2}/);
   });
 
-  it("parallel-planner plan-prompt.md strips --label Sandcastle when createLabel is false", async () => {
+  it("parallel-planner plan-prompt.md strips -l Sandcastle when createLabel is false", async () => {
     const dir = await makeDir();
     await runScaffold(dir, {
       templateName: "parallel-planner",
@@ -745,11 +1107,11 @@ describe("InitService scaffold", () => {
       join(dir, ".sandcastle", "plan-prompt.md"),
       "utf-8",
     );
-    expect(prompt).not.toContain("--label Sandcastle");
+    expect(prompt).not.toContain("-l Sandcastle");
     expect(prompt).toContain("gh issue list");
   });
 
-  it("sequential-reviewer implement-prompt.md strips --label Sandcastle when createLabel is false", async () => {
+  it("sequential-reviewer implement-prompt.md strips -l Sandcastle when createLabel is false", async () => {
     const dir = await makeDir();
     await runScaffold(dir, {
       templateName: "sequential-reviewer",
@@ -760,7 +1122,7 @@ describe("InitService scaffold", () => {
       join(dir, ".sandcastle", "implement-prompt.md"),
       "utf-8",
     );
-    expect(prompt).not.toContain("--label Sandcastle");
+    expect(prompt).not.toContain("-l Sandcastle");
     expect(prompt).toContain("gh issue list");
   });
 
@@ -792,7 +1154,7 @@ describe("InitService scaffold", () => {
       join(dir, ".sandcastle", "prompt.md"),
       "utf-8",
     );
-    expect(prompt).toContain("--label Sandcastle");
+    expect(prompt).toContain("-l Sandcastle");
   });
 
   it("unknown template name throws a clear error", async () => {
@@ -1244,7 +1606,7 @@ describe("InitService scaffold", () => {
       expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
     });
 
-    it("simple-loop with beads skips --label Sandcastle (no label to strip)", async () => {
+    it("simple-loop with beads skips -l Sandcastle (no label to strip)", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
         templateName: "simple-loop",
@@ -1255,10 +1617,10 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "prompt.md"),
         "utf-8",
       );
-      expect(prompt).not.toContain("--label Sandcastle");
+      expect(prompt).not.toContain("-l Sandcastle");
     });
 
-    it("simple-loop with github-issues retains --label Sandcastle when createLabel is true", async () => {
+    it("simple-loop with github-issues retains -l Sandcastle when createLabel is true", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
         templateName: "simple-loop",
@@ -1270,10 +1632,10 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "prompt.md"),
         "utf-8",
       );
-      expect(prompt).toContain("--label Sandcastle");
+      expect(prompt).toContain("-l Sandcastle");
     });
 
-    it("simple-loop with github-issues strips --label Sandcastle when createLabel is false", async () => {
+    it("simple-loop with github-issues strips -l Sandcastle when createLabel is false", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
         templateName: "simple-loop",
@@ -1285,7 +1647,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "prompt.md"),
         "utf-8",
       );
-      expect(prompt).not.toContain("--label Sandcastle");
+      expect(prompt).not.toContain("-l Sandcastle");
       expect(prompt).toContain("gh issue list");
     });
 
@@ -1946,6 +2308,140 @@ describe("InitService scaffold", () => {
       await expect(
         access(join(dir, ".sandcastle", "Containerfile")),
       ).rejects.toThrow();
+    });
+  });
+
+  describe("preset agent scaffold", () => {
+    it("validatePresetRegistries passes", () => {
+      expect(() => validatePresetRegistries()).not.toThrow();
+    });
+
+    it("rejects unknown preset agent id", async () => {
+      const dir = await makeDir();
+      await expect(
+        runScaffold(dir, { presetAgentIds: ["not-a-real-preset"] }),
+      ).rejects.toThrow(/Unknown preset agent/);
+    });
+
+    it("writes agents, skills, and manifest for a single preset", async () => {
+      const dir = await makeDir();
+      const result = await runScaffold(dir, { presetAgentIds: ["reviewer"] });
+      expect(result.mainFilename).toBeDefined();
+
+      const agentMd = await readFile(
+        join(dir, ".sandcastle", "agents", "reviewer.md"),
+        "utf-8",
+      );
+      expect(agentMd).toContain(".sandcastle/skills/role-guidance/SKILL.md");
+
+      const skillMd = await readFile(
+        join(dir, ".sandcastle", "skills", "role-guidance", "SKILL.md"),
+        "utf-8",
+      );
+      expect(skillMd).toContain("Sandcastle");
+
+      const manifest = JSON.parse(
+        await readFile(
+          join(dir, ".sandcastle", "agent-profiles.json"),
+          "utf-8",
+        ),
+      ) as {
+        version: number;
+        profiles: Record<string, { promptRelativePath: string }>;
+      };
+      expect(manifest.version).toBe(1);
+      expect(manifest.profiles.reviewer?.promptRelativePath).toBe(
+        "agents/reviewer.md",
+      );
+    });
+
+    it("keeps preset recommendations as metadata when explicit installed runtimes differ from the default agent", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        agent: claudeCodeAgent,
+        model: "claude-opus-4-6",
+        installedRuntimes: [codexRuntime],
+        presetAgentIds: ["miniprogram"],
+      });
+
+      const configDir = join(dir, ".sandcastle");
+      const main = await readFile(join(configDir, "main.mts"), "utf-8");
+      const dockerfile = await readFile(join(configDir, "Dockerfile"), "utf-8");
+      const envExample = await readFile(
+        join(configDir, ".env.example"),
+        "utf-8",
+      );
+      const manifest = JSON.parse(
+        await readFile(join(configDir, "agent-profiles.json"), "utf-8"),
+      ) as {
+        profiles: Record<
+          string,
+          { recommendedAgentName: string; recommendedModel: string }
+        >;
+      };
+
+      expect(main).toContain('claudeCode("claude-opus-4-6")');
+      expect(main).not.toContain("codex(");
+      expect(dockerfile).toContain("@openai/codex");
+      expect(dockerfile).not.toContain("claude.ai/install.sh");
+      expect(envExample).toContain("OPENAI_KEY=");
+      expect(envExample).not.toContain("ANTHROPIC_API_KEY=");
+      expect(manifest.profiles.miniprogram).toMatchObject({
+        recommendedAgentName: "codex",
+        recommendedModel: "gpt-5.4-mini",
+      });
+    });
+
+    it("deduplicates shared skills when multiple presets are selected", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { presetAgentIds: ["reviewer", "planner"] });
+      const skillDirs = await readdir(join(dir, ".sandcastle", "skills"));
+      expect(skillDirs.sort()).toEqual(["role-guidance"]);
+    });
+
+    it("includes distinct skills when presets do not overlap", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        presetAgentIds: ["reviewer", "merger", "miniprogram"],
+      });
+      const skillDirs = (
+        await readdir(join(dir, ".sandcastle", "skills"))
+      ).sort();
+      expect(skillDirs).toEqual([
+        "merge-playbook",
+        "miniprogram-context",
+        "role-guidance",
+      ]);
+    });
+
+    it("adds preset agent and skill paths to inline copyToWorktree arrays", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        presetAgentIds: ["reviewer"],
+      });
+      const main = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(main).toContain(
+        'copyToWorktree: ["node_modules", ".sandcastle/agents", ".sandcastle/skills"]',
+      );
+    });
+
+    it("adds preset agent and skill paths to copyToWorktree constants", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner",
+        presetAgentIds: ["reviewer"],
+      });
+      const main = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(main).toContain(
+        'const copyToWorktree = ["node_modules", ".sandcastle/agents", ".sandcastle/skills"];',
+      );
     });
   });
 });

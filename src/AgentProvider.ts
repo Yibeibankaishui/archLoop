@@ -21,7 +21,11 @@ const TOOL_ARG_FIELDS: Record<string, string> = {
 const extractErrorMessage = (obj: any): string | undefined => {
   const err = obj.error;
   if (typeof err === "string") return err;
-  if (typeof err === "object" && err !== null && typeof err.message === "string") {
+  if (
+    typeof err === "object" &&
+    err !== null &&
+    typeof err.message === "string"
+  ) {
     return err.message;
   }
   if (typeof obj.message === "string") return obj.message;
@@ -122,6 +126,113 @@ export interface AgentProvider {
 }
 
 export const DEFAULT_MODEL = "claude-opus-4-6";
+
+// ---------------------------------------------------------------------------
+// Cursor agent provider
+// ---------------------------------------------------------------------------
+
+const parseCursorToolCall = (toolCall: unknown): ParsedStreamEvent[] => {
+  if (typeof toolCall !== "object" || toolCall === null) return [];
+
+  for (const [key, value] of Object.entries(
+    toolCall as Record<string, unknown>,
+  )) {
+    if (!key.endsWith("ToolCall")) continue;
+    if (typeof value !== "object" || value === null) continue;
+
+    const args = (value as { args?: Record<string, unknown> }).args;
+    if (!args) continue;
+
+    const displayArg =
+      args.command ?? args.path ?? args.query ?? args.pattern ?? args.url;
+    if (typeof displayArg !== "string") continue;
+
+    return [
+      {
+        type: "tool_call",
+        name: key.replace(/ToolCall$/, ""),
+        args: displayArg,
+      },
+    ];
+  }
+
+  return [];
+};
+
+const parseCursorStreamLine = (line: string): ParsedStreamEvent[] => {
+  if (!line.startsWith("{")) return [];
+  try {
+    const obj = JSON.parse(line);
+
+    if (obj.type === "assistant" && Array.isArray(obj.message?.content)) {
+      const texts: string[] = [];
+      for (const block of obj.message.content as { text?: unknown }[]) {
+        if (typeof block.text === "string") texts.push(block.text);
+      }
+      return texts.length > 0 ? [{ type: "text", text: texts.join("") }] : [];
+    }
+
+    if (obj.type === "tool_call" && obj.subtype === "started") {
+      return parseCursorToolCall(obj.tool_call);
+    }
+
+    if (obj.type === "result" && typeof obj.result === "string") {
+      return [{ type: "result", result: obj.result }];
+    }
+
+    if (obj.type === "error") {
+      const msg = extractErrorMessage(obj);
+      return msg ? [{ type: "result", result: msg }] : [];
+    }
+  } catch {
+    // Not valid JSON — skip
+  }
+  return [];
+};
+
+/** Options for the Cursor agent provider. */
+export interface CursorOptions {
+  /** Cursor execution mode. Omit for full coding mode. */
+  readonly mode?: "plan" | "ask";
+  /** Environment variables injected by this agent provider. */
+  readonly env?: Record<string, string>;
+}
+
+export const cursor = (
+  model: string,
+  options?: CursorOptions,
+): AgentProvider => ({
+  name: "cursor",
+  env: options?.env ?? {},
+  captureSessions: false,
+
+  buildPrintCommand({
+    prompt,
+    dangerouslySkipPermissions,
+  }: AgentCommandOptions): PrintCommand {
+    const modeFlag = options?.mode
+      ? ` --mode ${shellEscape(options.mode)}`
+      : "";
+    const forceFlags = dangerouslySkipPermissions
+      ? " --force --sandbox disabled"
+      : "";
+    return {
+      command: `agent --print --output-format stream-json --stream-partial-output --trust --model ${shellEscape(model)}${modeFlag}${forceFlags} "$(cat)"`,
+      stdin: prompt,
+    };
+  },
+
+  buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
+    const args = ["agent", "--model", model];
+    if (options?.mode) args.push("--mode", options.mode);
+    if (prompt) args.push(prompt);
+    return args;
+  },
+
+  parseStreamLine(line: string): ParsedStreamEvent[] {
+    return parseCursorStreamLine(line);
+  },
+});
 
 // ---------------------------------------------------------------------------
 // Pi agent provider

@@ -330,7 +330,8 @@ describe("docker()", () => {
 
     const cpCall = mockExecFile.mock.calls.find(
       ([cmd, args]) =>
-        cmd === "docker" &&
+        typeof cmd === "string" &&
+        cmd.endsWith("docker") &&
         Array.isArray(args) &&
         args[0] === "cp" &&
         args[1] === "/host/file.txt",
@@ -366,7 +367,8 @@ describe("docker()", () => {
 
     const cpCall = mockExecFile.mock.calls.find(
       ([cmd, args]) =>
-        cmd === "docker" &&
+        typeof cmd === "string" &&
+        cmd.endsWith("docker") &&
         Array.isArray(args) &&
         args[0] === "cp" &&
         args[2] === "/host/output.txt",
@@ -490,7 +492,8 @@ describe("docker()", () => {
     // Find the docker exec call for mkdir+chown
     const mkdirCall = mockExecFile.mock.calls.find(
       ([cmd, args]) =>
-        cmd === "docker" &&
+        typeof cmd === "string" &&
+        cmd.endsWith("docker") &&
         Array.isArray(args) &&
         args[0] === "exec" &&
         args.some(
@@ -535,7 +538,8 @@ describe("docker()", () => {
     // Should NOT have any docker exec for mkdir
     const mkdirCall = mockExecFile.mock.calls.find(
       ([cmd, args]) =>
-        cmd === "docker" &&
+        typeof cmd === "string" &&
+        cmd.endsWith("docker") &&
         Array.isArray(args) &&
         args[0] === "exec" &&
         args.some((a: string) => typeof a === "string" && a.includes("mkdir")),

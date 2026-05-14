@@ -43,6 +43,10 @@ const hooks = {
 // platform-specific binaries and any packages added since the last copy.
 const copyToWorktree = ["node_modules"];
 
+const sandboxProvider = docker({
+  mounts: [],
+});
+
 // ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
@@ -61,7 +65,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // -------------------------------------------------------------------------
   const plan = await sandcastle.run({
     hooks,
-    sandbox: docker(),
+    sandbox: sandboxProvider,
     name: "planner",
     // One iteration is enough: the planner just needs to read and reason,
     // not write code.
@@ -111,7 +115,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     issues.map(async (issue) => {
       const sandbox = await sandcastle.createSandbox({
         branch: issue.branch,
-        sandbox: docker(),
+        sandbox: sandboxProvider,
         hooks,
         copyToWorktree,
       });
@@ -203,7 +207,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // -------------------------------------------------------------------------
   await sandcastle.run({
     hooks,
-    sandbox: docker(),
+    sandbox: sandboxProvider,
     name: "merger",
     maxIterations: 1,
     agent: sandcastle.claudeCode("claude-sonnet-4-6"),

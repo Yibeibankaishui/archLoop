@@ -38,6 +38,10 @@ const hooks = {
 // platform-specific binaries and any packages added since the last copy.
 const copyToWorktree = ["node_modules"];
 
+const sandboxProvider = docker({
+  mounts: [],
+});
+
 // ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
@@ -56,7 +60,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // -------------------------------------------------------------------------
   const plan = await sandcastle.run({
     hooks,
-    sandbox: docker(),
+    sandbox: sandboxProvider,
     name: "planner",
     // One iteration is enough: the planner just needs to read and reason,
     // not write code.
@@ -107,7 +111,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         hooks,
         copyToWorktree,
         // Each agent starts on its own branch via branchStrategy on run().
-        sandbox: docker(),
+        sandbox: sandboxProvider,
         branchStrategy: { type: "branch", branch: issue.branch },
         name: "implementer",
         // Give each agent plenty of room to implement and iterate on tests.
@@ -180,7 +184,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // -------------------------------------------------------------------------
   await sandcastle.run({
     hooks,
-    sandbox: docker(),
+    sandbox: sandboxProvider,
     name: "merger",
     maxIterations: 1,
     // Sonnet is sufficient for merge conflict resolution.

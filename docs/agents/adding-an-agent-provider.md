@@ -137,14 +137,36 @@ For the agent to appear in `sandcastle init`, add an entry to `AGENT_REGISTRY` i
   name: "gemini",
   label: "Gemini",
   defaultModel: "gemini-2.5-pro",
-  factoryImport: "gemini",          // matches the export from index.ts
-  dockerfileTemplate: GEMINI_DOCKERFILE,
-  envExample: `# Google AI API key
-GOOGLE_API_KEY=`,
+  factoryImport: "gemini", // matches the export from index.ts
 }
 ```
 
-And a Dockerfile constant alongside the existing ones. Use `CLAUDE_CODE_DOCKERFILE` as a structural reference — keep the `usermod` block, the `{{BACKLOG_MANAGER_TOOLS}}` placeholder, the `USER agent` line, and the `ENTRYPOINT ["sleep", "infinity"]`. Only the install line should differ.
+Then add the installation metadata to `AGENT_RUNTIME_REGISTRY`:
+
+```ts
+{
+  name: "gemini",
+  label: "Gemini",
+  dockerfileInstall: {
+    root: `# Install Gemini CLI
+RUN npm install -g @google/gemini-cli`,
+  },
+  dockerfileTemplate: GEMINI_DOCKERFILE,
+  envVars: ["GOOGLE_API_KEY"],
+  envExample: `# Google AI API key
+GOOGLE_API_KEY=`,
+  authMounts: [
+    {
+      hostPath: ".sandcastle/auth/gemini",
+      sandboxPath: "/home/agent/.config/gemini",
+    },
+  ],
+}
+```
+
+The split keeps the default scaffold agent/model separate from the agent runtimes installed into the generated image. Add a Dockerfile constant alongside the existing ones. Use `CLAUDE_CODE_DOCKERFILE` as a structural reference — keep the `usermod` block, the `{{BACKLOG_MANAGER_TOOLS}}` placeholder, the `USER ${AGENT_UID}:${AGENT_GID}` line, and the `ENTRYPOINT ["sleep", "infinity"]`. Only the install line should differ.
+
+Use `envVars` to name the env vars represented by `envExample`; init uses it to deduplicate shared hints when multiple runtimes need the same credential. Add `authMounts` only for runtime-specific host auth/config directories that should be mounted into the sandbox when that runtime is selected.
 
 ## Implementation checklist
 
@@ -159,6 +181,6 @@ For a new agent provider `foo`:
 - [ ] Tests covering `sessionStorage` round-trip: write, read, transfer host↔sandbox, content preserved (and rewritten correctly if `foo`'s format requires it).
 - [ ] Public export from [`src/index.ts`](../../src/index.ts): the `foo` factory and the `FooOptions` type.
 - [ ] `AGENT_REGISTRY` entry in [`src/InitService.ts`](../../src/InitService.ts).
-- [ ] `FOO_DOCKERFILE` constant in `src/InitService.ts`.
+- [ ] `FOO_DOCKERFILE` constant and runtime `envVars`/`authMounts` metadata in `src/InitService.ts`.
 - [ ] Changeset in `.changeset/` (patch, since pre-1.0). See [`CLAUDE.md`](../../CLAUDE.md).
 - [ ] `README.md` update if the public-facing list of supported agents is mentioned there.

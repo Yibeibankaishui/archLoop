@@ -16,6 +16,7 @@ import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { Effect } from "effect";
 import { startContainer, removeContainer } from "../DockerLifecycle.js";
+import { dockerCommand } from "../dockerCommand.js";
 import {
   createBindMountSandboxProvider,
   type SandboxProvider,
@@ -83,6 +84,7 @@ export interface DockerOptions {
  * for the worktree and git directories.
  */
 export const docker = (options?: DockerOptions): SandboxProvider => {
+  const dockerBin = dockerCommand();
   const configuredImageName = options?.imageName;
   const selinuxLabel = options?.selinuxLabel ?? "z";
   const sandboxHomedir = "/home/agent";
@@ -126,7 +128,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
       const containerGid = options?.containerGid ?? process.getgid?.() ?? 1000;
 
       // Pre-flight: verify image exists and UID matches
-      await checkImageUid(imageName, containerUid);
+      await checkImageUid(dockerBin, imageName, containerUid);
 
       // Start container
       await Effect.runPromise(
@@ -151,7 +153,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
       for (const dir of parentDirsToCreate) {
         await new Promise<void>((resolve, reject) => {
           execFile(
-            "docker",
+            dockerBin,
             [
               "exec",
               "--user",
@@ -182,7 +184,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
       // Set up signal handlers for cleanup
       const onExit = () => {
         try {
-          execFileSync("docker", ["rm", "-f", containerName], {
+          execFileSync(dockerBin, ["rm", "-f", containerName], {
             stdio: "ignore",
           });
         } catch {
@@ -216,7 +218,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
           args.push(containerName, "sh", "-c", effectiveCommand);
 
           return new Promise((resolve, reject) => {
-            const proc = spawn("docker", args, {
+            const proc = spawn(dockerBin, args, {
               stdio: [
                 opts?.stdin !== undefined ? "pipe" : "ignore",
                 "pipe",
@@ -250,7 +252,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             });
 
             proc.on("error", (error) => {
-              reject(new Error(`docker exec failed: ${error.message}`));
+              reject(new Error(`${dockerBin} exec failed: ${error.message}`));
             });
 
             proc.on("close", (code) => {
@@ -281,12 +283,12 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             if (opts.cwd) dockerArgs.push("-w", opts.cwd);
             dockerArgs.push(containerName, ...args);
 
-            const proc = spawn("docker", dockerArgs, {
+            const proc = spawn(dockerBin, dockerArgs, {
               stdio: [opts.stdin, opts.stdout, opts.stderr] as StdioOptions,
             });
 
             proc.on("error", (error: Error) => {
-              reject(new Error(`docker exec failed: ${error.message}`));
+              reject(new Error(`${dockerBin} exec failed: ${error.message}`));
             });
 
             proc.on("close", (code: number | null) => {
@@ -298,11 +300,13 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
         copyFileIn: (hostPath: string, sandboxPath: string): Promise<void> =>
           new Promise((resolve, reject) => {
             execFile(
-              "docker",
+              dockerBin,
               ["cp", hostPath, `${containerName}:${sandboxPath}`],
               (error) => {
                 if (error) {
-                  reject(new Error(`docker cp (in) failed: ${error.message}`));
+                  reject(
+                    new Error(`${dockerBin} cp (in) failed: ${error.message}`),
+                  );
                 } else {
                   resolve();
                 }
@@ -313,11 +317,13 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
         copyFileOut: (sandboxPath: string, hostPath: string): Promise<void> =>
           new Promise((resolve, reject) => {
             execFile(
-              "docker",
+              dockerBin,
               ["cp", `${containerName}:${sandboxPath}`, hostPath],
               (error) => {
                 if (error) {
-                  reject(new Error(`docker cp (out) failed: ${error.message}`));
+                  reject(
+                    new Error(`${dockerBin} cp (out) failed: ${error.message}`),
+                  );
                 } else {
                   resolve();
                 }
@@ -341,10 +347,14 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
 // Re-export for backwards compatibility
 export { defaultImageName };
 
-const checkImageUid = (imageName: string, expectedUid: number): Promise<void> =>
+const checkImageUid = (
+  dockerBin: string,
+  imageName: string,
+  expectedUid: number,
+): Promise<void> =>
   new Promise<void>((resolve, reject) => {
     execFile(
-      "docker",
+      dockerBin,
       ["image", "inspect", imageName, "--format", "{{.Config.User}}"],
       (error, stdout) => {
         if (error) {

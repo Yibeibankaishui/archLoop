@@ -1,10 +1,19 @@
 import { FileSystem } from "@effect/platform";
 import { Effect } from "effect";
-import { dirname, join } from "node:path";
+import { cp } from "node:fs/promises";
+import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  getPresetAgentDefinition,
+  getPresetBundlesRoot,
+  PRESET_AGENT_DEFINITIONS,
+  validatePresetRegistries,
+  type PresetAgentDefinition,
+} from "./presetAgents.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 
 const GITIGNORE = `.env
+auth/
 logs/
 worktrees/
 `;
@@ -51,9 +60,49 @@ export interface AgentEntry {
   readonly label: string;
   readonly defaultModel: string;
   readonly factoryImport: string;
+}
+
+interface AgentRuntimeDockerfileInstall {
+  readonly root?: string;
+  readonly user?: string;
+  readonly pathEntries?: readonly string[];
+}
+
+interface EnvExampleBlock {
+  readonly envVars: readonly string[];
+  readonly content: string;
+}
+
+interface AuthMountEntry {
+  readonly hostPath: string;
+  readonly sandboxPath: string;
+  readonly readonly?: boolean;
+}
+
+export interface AuthRequirement {
+  readonly id: string;
+  readonly label: string;
+  readonly envVars: readonly string[];
+  readonly authMounts: readonly AuthMountEntry[];
+  readonly githubLoginSupported?: boolean;
+}
+
+export interface AuthSetupSummary {
+  readonly lines: readonly string[];
+}
+
+export interface AgentRuntimeEntry {
+  /** Filesystem-safe runtime identifier. */
+  readonly name: string;
+  readonly label: string;
+  readonly dockerfileInstall: AgentRuntimeDockerfileInstall;
   readonly dockerfileTemplate: string;
-  /** Lines to include in the generated `.env.example` for this agent's API key. */
+  /** Env vars represented by envExample, used to deduplicate shared auth hints. */
+  readonly envVars: readonly string[];
+  /** Lines to include in the generated `.env.example` for this runtime's API key. */
   readonly envExample: string;
+  /** Host auth/config directories to mount for this runtime. */
+  readonly authMounts?: readonly AuthMountEntry[];
 }
 
 const CLAUDE_CODE_DOCKERFILE = `FROM node:22-bookworm
@@ -74,8 +123,16 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+# macOS commonly uses GID 20 ("staff"), which already exists in Debian images.
+RUN set -eux; \\
+  if ! getent group "$AGENT_GID" >/dev/null; then \\
+    groupmod -g "$AGENT_GID" node; \\
+  fi; \\
+  usermod -u "$AGENT_UID" -g "$AGENT_GID" -d /home/agent -m -l agent node; \\
+  mkdir -p /home/agent/.config; \\
+  chown -R "$AGENT_UID:$AGENT_GID" /home/agent
 USER \${AGENT_UID}:\${AGENT_GID}
+ENV HOME="/home/agent"
 
 # Install Claude Code CLI
 RUN curl -fsSL https://claude.ai/install.sh | bash
@@ -109,12 +166,19 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+RUN set -eux; \\
+  if ! getent group "$AGENT_GID" >/dev/null; then \\
+    groupmod -g "$AGENT_GID" node; \\
+  fi; \\
+  usermod -u "$AGENT_UID" -g "$AGENT_GID" -d /home/agent -m -l agent node; \\
+  mkdir -p /home/agent/.config; \\
+  chown -R "$AGENT_UID:$AGENT_GID" /home/agent
 
 # Install pi coding agent (run as root before USER agent)
 RUN npm install -g @mariozechner/pi-coding-agent
 
 USER \${AGENT_UID}:\${AGENT_GID}
+ENV HOME="/home/agent"
 
 WORKDIR /home/agent
 
@@ -142,12 +206,63 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+RUN set -eux; \\
+  if ! getent group "$AGENT_GID" >/dev/null; then \\
+    groupmod -g "$AGENT_GID" node; \\
+  fi; \\
+  usermod -u "$AGENT_UID" -g "$AGENT_GID" -d /home/agent -m -l agent node; \\
+  mkdir -p /home/agent/.config; \\
+  chown -R "$AGENT_UID:$AGENT_GID" /home/agent
 
 # Install Codex CLI (run as root before USER agent)
 RUN npm install -g @openai/codex
 
 USER \${AGENT_UID}:\${AGENT_GID}
+ENV HOME="/home/agent"
+
+WORKDIR /home/agent
+
+# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at ${SANDBOX_REPO_DIR}
+# and overrides the working directory to ${SANDBOX_REPO_DIR} at container start.
+# Structure your Dockerfile so that ${SANDBOX_REPO_DIR} can serve as the project root.
+ENTRYPOINT ["sleep", "infinity"]
+`;
+
+const CURSOR_DOCKERFILE = `FROM node:22-bookworm
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \\
+  git \\
+  curl \\
+  jq \\
+  && rm -rf /var/lib/apt/lists/*
+
+{{BACKLOG_MANAGER_TOOLS}}
+
+# Build-args for UID/GID alignment: sandcastle docker build-image
+# defaults these to the host user's UID/GID so image-built files
+# and bind-mounted files share an owner without runtime chown.
+ARG AGENT_UID=1000
+ARG AGENT_GID=1000
+
+# Rename the base image's "node" user to "agent" and align UID/GID.
+RUN set -eux; \\
+  if ! getent group "$AGENT_GID" >/dev/null; then \\
+    groupmod -g "$AGENT_GID" node; \\
+  fi; \\
+  usermod -u "$AGENT_UID" -g "$AGENT_GID" -d /home/agent -m -l agent node; \\
+  mkdir -p /home/agent/.config; \\
+  chown -R "$AGENT_UID:$AGENT_GID" /home/agent
+
+USER \${AGENT_UID}:\${AGENT_GID}
+ENV HOME="/home/agent"
+
+# Install Cursor Agent CLI
+RUN curl https://cursor.com/install -fsS | bash \\
+  && test -x "$HOME/.local/bin/agent"
+
+# Add Cursor Agent to PATH
+ENV PATH="/home/agent/.local/bin:$PATH"
 
 WORKDIR /home/agent
 
@@ -175,12 +290,19 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-RUN groupmod -g $AGENT_GID node && usermod -u $AGENT_UID -g $AGENT_GID -d /home/agent -m -l agent node
+RUN set -eux; \\
+  if ! getent group "$AGENT_GID" >/dev/null; then \\
+    groupmod -g "$AGENT_GID" node; \\
+  fi; \\
+  usermod -u "$AGENT_UID" -g "$AGENT_GID" -d /home/agent -m -l agent node; \\
+  mkdir -p /home/agent/.config; \\
+  chown -R "$AGENT_UID:$AGENT_GID" /home/agent
 
 # Install OpenCode CLI (run as root before USER agent)
 RUN npm install -g opencode-ai@latest
 
 USER \${AGENT_UID}:\${AGENT_GID}
+ENV HOME="/home/agent"
 
 WORKDIR /home/agent
 
@@ -196,7 +318,46 @@ const AGENT_REGISTRY: AgentEntry[] = [
     label: "Claude Code",
     defaultModel: "claude-opus-4-6",
     factoryImport: "claudeCode",
+  },
+  {
+    name: "pi",
+    label: "Pi",
+    defaultModel: "claude-sonnet-4-6",
+    factoryImport: "pi",
+  },
+  {
+    name: "codex",
+    label: "Codex",
+    defaultModel: "gpt-5.4-mini",
+    factoryImport: "codex",
+  },
+  {
+    name: "cursor",
+    label: "Cursor",
+    defaultModel: "auto",
+    factoryImport: "cursor",
+  },
+  {
+    name: "opencode",
+    label: "OpenCode",
+    defaultModel: "opencode/big-pickle",
+    factoryImport: "opencode",
+  },
+];
+
+export const listAgents = (): AgentEntry[] => AGENT_REGISTRY;
+
+const AGENT_RUNTIME_REGISTRY: AgentRuntimeEntry[] = [
+  {
+    name: "claude-code",
+    label: "Claude Code",
+    dockerfileInstall: {
+      user: `# Install Claude Code CLI
+RUN curl -fsSL https://claude.ai/install.sh | bash`,
+      pathEntries: ["/home/agent/.local/bin"],
+    },
     dockerfileTemplate: CLAUDE_CODE_DOCKERFILE,
+    envVars: ["ANTHROPIC_API_KEY"],
     envExample: `# Anthropic API key
 # If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191
 ANTHROPIC_API_KEY=`,
@@ -204,33 +365,241 @@ ANTHROPIC_API_KEY=`,
   {
     name: "pi",
     label: "Pi",
-    defaultModel: "claude-sonnet-4-6",
-    factoryImport: "pi",
+    dockerfileInstall: {
+      root: `# Install pi coding agent (run as root before USER agent)
+RUN npm install -g @mariozechner/pi-coding-agent`,
+    },
     dockerfileTemplate: PI_DOCKERFILE,
+    envVars: ["ANTHROPIC_API_KEY"],
     envExample: `# Anthropic API key
 ANTHROPIC_API_KEY=`,
   },
   {
     name: "codex",
     label: "Codex",
-    defaultModel: "gpt-5.4-mini",
-    factoryImport: "codex",
+    dockerfileInstall: {
+      root: `# Install Codex CLI (run as root before USER agent)
+RUN npm install -g @openai/codex`,
+    },
     dockerfileTemplate: CODEX_DOCKERFILE,
+    envVars: ["OPENAI_KEY"],
     envExample: `# OpenAI API key
 OPENAI_KEY=`,
+    authMounts: [
+      { hostPath: ".sandcastle/auth/codex", sandboxPath: "/home/agent/.codex" },
+    ],
+  },
+  {
+    name: "cursor",
+    label: "Cursor",
+    dockerfileInstall: {
+      user: `# Install Cursor Agent CLI
+RUN curl https://cursor.com/install -fsS | bash \\
+  && test -x "$HOME/.local/bin/agent"`,
+      pathEntries: ["/home/agent/.local/bin"],
+    },
+    dockerfileTemplate: CURSOR_DOCKERFILE,
+    envVars: ["CURSOR_API_KEY"],
+    envExample: `# Cursor API key
+CURSOR_API_KEY=`,
+    authMounts: [
+      {
+        hostPath: ".sandcastle/auth/cursor",
+        sandboxPath: "/home/agent/.cursor",
+      },
+      {
+        hostPath: ".sandcastle/auth/cursor-config",
+        sandboxPath: "/home/agent/.config/cursor",
+      },
+    ],
   },
   {
     name: "opencode",
     label: "OpenCode",
-    defaultModel: "opencode/big-pickle",
-    factoryImport: "opencode",
+    dockerfileInstall: {
+      root: `# Install OpenCode CLI (run as root before USER agent)
+RUN npm install -g opencode-ai@latest`,
+    },
     dockerfileTemplate: OPENCODE_DOCKERFILE,
+    envVars: ["OPENCODE_API_KEY"],
     envExample: `# OpenCode API key
 OPENCODE_API_KEY=`,
   },
 ];
 
-export const listAgents = (): AgentEntry[] => AGENT_REGISTRY;
+export const listAgentRuntimes = (): AgentRuntimeEntry[] =>
+  AGENT_RUNTIME_REGISTRY;
+
+export const getAgentRuntime = (name: string): AgentRuntimeEntry | undefined =>
+  AGENT_RUNTIME_REGISTRY.find((runtime) => runtime.name === name);
+
+const DOCKERFILE_SECTION_SEPARATOR = "\n\n";
+const MULTI_RUNTIME_USER_MARKER = "USER ${AGENT_UID}:${AGENT_GID}";
+const MULTI_RUNTIME_FOOTER_MARKER = "WORKDIR /home/agent";
+const MULTI_RUNTIME_USER_BLOCK = `${MULTI_RUNTIME_USER_MARKER}
+ENV HOME="/home/agent"`;
+
+const isDockerfileInstallSection = (
+  install: string | undefined,
+): install is string => install !== undefined && install.length > 0;
+
+const hasDockerfileContent = (part: string): boolean => part.trim().length > 0;
+
+const renderInstalledRuntimesDockerfile = (
+  runtimes: readonly AgentRuntimeEntry[],
+): string => {
+  if (runtimes.length === 1) {
+    return runtimes[0]!.dockerfileTemplate;
+  }
+
+  const userMarkerIndex = CLAUDE_CODE_DOCKERFILE.indexOf(
+    MULTI_RUNTIME_USER_MARKER,
+  );
+  const footerMarkerIndex = CLAUDE_CODE_DOCKERFILE.indexOf(
+    MULTI_RUNTIME_FOOTER_MARKER,
+  );
+  const base = CLAUDE_CODE_DOCKERFILE.slice(0, userMarkerIndex).trimEnd();
+  const footer = CLAUDE_CODE_DOCKERFILE.slice(footerMarkerIndex).trimStart();
+  const rootInstalls = runtimes
+    .map((runtime) => runtime.dockerfileInstall.root)
+    .filter(isDockerfileInstallSection);
+  const userInstalls = runtimes
+    .map((runtime) => runtime.dockerfileInstall.user)
+    .filter(isDockerfileInstallSection);
+  const pathEntries = [
+    ...new Set(
+      runtimes.flatMap(
+        (runtime) => runtime.dockerfileInstall.pathEntries ?? [],
+      ),
+    ),
+  ];
+  const pathBlock =
+    pathEntries.length > 0
+      ? `# Add agent CLIs to PATH
+ENV PATH="${pathEntries.join(":")}:$PATH"`
+      : "";
+
+  return [
+    base,
+    rootInstalls.join(DOCKERFILE_SECTION_SEPARATOR),
+    MULTI_RUNTIME_USER_BLOCK,
+    userInstalls.join(DOCKERFILE_SECTION_SEPARATOR),
+    pathBlock,
+    footer,
+  ]
+    .filter(hasDockerfileContent)
+    .join(DOCKERFILE_SECTION_SEPARATOR);
+};
+
+const resolveInstalledRuntimes = (
+  agent: AgentEntry,
+  installedRuntimes: readonly AgentRuntimeEntry[] | undefined,
+): Effect.Effect<readonly AgentRuntimeEntry[], Error, never> =>
+  Effect.gen(function* () {
+    if (installedRuntimes !== undefined) {
+      if (installedRuntimes.length === 0) {
+        yield* Effect.fail(
+          new Error("At least one installed agent runtime is required."),
+        );
+      }
+      return installedRuntimes;
+    }
+
+    const defaultRuntime = getAgentRuntime(agent.name);
+    if (defaultRuntime) {
+      return [defaultRuntime];
+    }
+
+    return yield* Effect.fail(
+      new Error(`No agent runtime found for default agent "${agent.name}".`),
+    );
+  });
+
+const renderEnvExample = (blocks: readonly EnvExampleBlock[]): string => {
+  const seenEnvVars = new Set<string>();
+  const parts: string[] = [];
+
+  for (const block of blocks) {
+    if (!block.content) continue;
+
+    const hasNewEnvVar = block.envVars.some(
+      (envVar) => !seenEnvVars.has(envVar),
+    );
+    if (!hasNewEnvVar) continue;
+
+    parts.push(block.content);
+    for (const envVar of block.envVars) {
+      seenEnvVars.add(envVar);
+    }
+  }
+
+  return parts.join("\n") + "\n";
+};
+
+const dedupeAuthMounts = (
+  mounts: readonly AuthMountEntry[],
+): AuthMountEntry[] => {
+  const seen = new Set<string>();
+  const deduped: AuthMountEntry[] = [];
+
+  for (const mount of mounts) {
+    const key = `${mount.hostPath}\0${mount.sandboxPath}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(mount);
+  }
+
+  return deduped;
+};
+
+const prepareAuthMountHostDirectories = (
+  fs: FileSystem.FileSystem,
+  repoDir: string,
+  mounts: readonly AuthMountEntry[],
+): Effect.Effect<void, Error> => {
+  const directories = new Set<string>();
+  for (const mount of mounts) {
+    directories.add(
+      isAbsolute(mount.hostPath)
+        ? mount.hostPath
+        : join(repoDir, mount.hostPath),
+    );
+  }
+
+  return Effect.all(
+    [...directories].map((directory) =>
+      fs
+        .makeDirectory(directory, { recursive: true })
+        .pipe(Effect.mapError((e) => new Error(e.message))),
+    ),
+    { concurrency: "unbounded" },
+  ).pipe(Effect.asVoid);
+};
+
+const renderAuthMount = (mount: AuthMountEntry): string => {
+  const fields = [
+    `hostPath: ${JSON.stringify(mount.hostPath)}`,
+    `sandboxPath: ${JSON.stringify(mount.sandboxPath)}`,
+  ];
+  if (mount.readonly) {
+    fields.push("readonly: true");
+  }
+  return `    { ${fields.join(", ")} },`;
+};
+
+const EMPTY_AUTH_MOUNTS_PROPERTY = "  mounts: [],";
+
+const renderAuthMountsProperty = (
+  mounts: readonly AuthMountEntry[],
+): string => {
+  if (mounts.length === 0) {
+    return EMPTY_AUTH_MOUNTS_PROPERTY;
+  }
+
+  return `  mounts: [
+${mounts.map(renderAuthMount).join("\n")}
+  ],`;
+};
 
 // ---------------------------------------------------------------------------
 // Backlog manager registry (internal — not part of public API)
@@ -245,8 +614,12 @@ export interface BacklogManagerEntry {
     readonly CLOSE_TASK_COMMAND: string;
     readonly BACKLOG_MANAGER_TOOLS: string;
   };
+  /** Env vars represented by envExample, used to deduplicate shared auth hints. */
+  readonly envVars: readonly string[];
   /** Lines to append to `.env.example` for this backlog manager, or empty string if none needed. */
   readonly envExample: string;
+  /** Host auth/config directories to mount for this backlog manager. */
+  readonly authMounts?: readonly AuthMountEntry[];
 }
 
 const GITHUB_CLI_TOOLS = `# Install GitHub CLI
@@ -276,13 +649,20 @@ const BACKLOG_MANAGER_REGISTRY: BacklogManagerEntry[] = [
     name: "github-issues",
     label: "GitHub Issues",
     templateArgs: {
-      LIST_TASKS_COMMAND: `gh issue list --state open --label Sandcastle --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
+      LIST_TASKS_COMMAND: `gh issue list --state open -l Sandcastle --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
       VIEW_TASK_COMMAND: "gh issue view <ID>",
       CLOSE_TASK_COMMAND: `gh issue close <ID> --comment "Completed by Sandcastle"`,
       BACKLOG_MANAGER_TOOLS: GITHUB_CLI_TOOLS,
     },
+    envVars: ["GH_TOKEN"],
     envExample: `# GitHub personal access token
 GH_TOKEN=`,
+    authMounts: [
+      {
+        hostPath: ".sandcastle/auth/gh",
+        sandboxPath: "/home/agent/.config/gh",
+      },
+    ],
   },
   {
     name: "beads",
@@ -293,6 +673,7 @@ GH_TOKEN=`,
       CLOSE_TASK_COMMAND: `bd close <ID> "Completed by Sandcastle"`,
       BACKLOG_MANAGER_TOOLS: BEADS_TOOLS,
     },
+    envVars: [],
     envExample: "",
   },
 ];
@@ -304,6 +685,35 @@ export const getBacklogManager = (
   name: string,
 ): BacklogManagerEntry | undefined =>
   BACKLOG_MANAGER_REGISTRY.find((b) => b.name === name);
+
+export const collectAuthRequirements = ({
+  installedRuntimes,
+  backlogManager,
+}: {
+  installedRuntimes: readonly AgentRuntimeEntry[];
+  backlogManager: BacklogManagerEntry;
+}): AuthRequirement[] => {
+  const runtimeRequirements: AuthRequirement[] = installedRuntimes.map(
+    (runtime) => ({
+      id: runtime.name,
+      label: runtime.label,
+      envVars: runtime.envVars,
+      authMounts: runtime.authMounts ?? [],
+    }),
+  );
+
+  const backlogRequirement: AuthRequirement = {
+    id: backlogManager.name,
+    label: backlogManager.label,
+    envVars: backlogManager.envVars,
+    authMounts: backlogManager.authMounts ?? [],
+    ...(backlogManager.name === "github-issues"
+      ? { githubLoginSupported: true }
+      : {}),
+  };
+
+  return [...runtimeRequirements, backlogRequirement];
+};
 
 export const getAgent = (name: string): AgentEntry | undefined =>
   AGENT_REGISTRY.find((a) => a.name === name);
@@ -348,39 +758,67 @@ export const getSandboxProvider = (
 // Next steps
 // ---------------------------------------------------------------------------
 
+const PRESET_AGENT_NEXT_STEP =
+  "Preset agent roles are in .sandcastle/agents/ with bundled skills under .sandcastle/skills/. See .sandcastle/agent-profiles.json for recommended provider/model; compose prompts from main.mts using run() as needed. Recommendations may require matching installed runtimes.";
+
 export function getNextStepsLines(
   template: string,
   mainFilename: string,
+  options?: {
+    presetAgentIds?: readonly string[];
+    authSetupSummary?: AuthSetupSummary;
+  },
 ): string[] {
+  const presetHintText =
+    options?.presetAgentIds && options.presetAgentIds.length > 0
+      ? PRESET_AGENT_NEXT_STEP
+      : undefined;
+  const authSetupLines = options?.authSetupSummary?.lines ?? [];
+
   if (template === "blank") {
-    return [
-      "Next steps:",
-      `1. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
-      "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
-      "2. Read and customize .sandcastle/prompt.md to describe what you want the agent to do",
-      `3. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs`,
-      `4. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
-      "5. Run `npm run sandcastle` to start the agent",
-    ];
-  } else {
-    const hasReviewer = template.includes("review");
     let step = 1;
     const lines: string[] = [
       "Next steps:",
       `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
       "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
+      `${step++}. Read and customize .sandcastle/prompt.md to describe what you want the agent to do`,
+      `${step++}. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs and can mix installed agent providers after init`,
       `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
-      `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. Adjust both if you use a different package manager`,
-      `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
     ];
-    if (hasReviewer) {
-      lines.push(
-        `${step++}. Customize .sandcastle/CODING_STANDARDS.md with your project's standards — the reviewer agent loads it during review`,
-      );
+    if (presetHintText) {
+      lines.push(`${step++}. ${presetHintText}`);
+    }
+    for (const line of authSetupLines) {
+      lines.push(`${step++}. ${line}`);
     }
     lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
     return lines;
   }
+
+  const hasReviewer = template.includes("review");
+  let step = 1;
+  const lines: string[] = [
+    "Next steps:",
+    `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
+    "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
+    `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
+    `${step++}. Edit .sandcastle/${mainFilename} to mix installed agent providers after init; the selected default agent only seeds the scaffolded example`,
+    `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. Adjust both if you use a different package manager`,
+    `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
+  ];
+  if (hasReviewer) {
+    lines.push(
+      `${step++}. Customize .sandcastle/CODING_STANDARDS.md with your project's standards — the reviewer agent loads it during review`,
+    );
+  }
+  if (presetHintText) {
+    lines.push(`${step++}. ${presetHintText}`);
+  }
+  for (const line of authSetupLines) {
+    lines.push(`${step++}. ${line}`);
+  }
+  lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
+  return lines;
 }
 
 // ---------------------------------------------------------------------------
@@ -445,17 +883,110 @@ const copyTemplateFiles = (
     );
   });
 
+const copyPresetAgentsIntoConfig = (
+  configDir: string,
+  presetAgentIds: readonly string[],
+): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    if (presetAgentIds.length === 0) {
+      return;
+    }
+    validatePresetRegistries();
+    const bundlesRoot = getPresetBundlesRoot();
+    const fs = yield* FileSystem.FileSystem;
+
+    const agents: PresetAgentDefinition[] = [];
+    for (const id of presetAgentIds) {
+      const def = getPresetAgentDefinition(id);
+      if (!def) {
+        yield* Effect.fail(
+          new Error(
+            `Unknown preset agent: "${id}". Available: ${PRESET_AGENT_DEFINITIONS.map((a) => a.id).join(", ")}`,
+          ),
+        );
+      }
+      agents.push(def!);
+    }
+
+    const skillIdSet = new Set<string>();
+    for (const a of agents) {
+      for (const sid of a.skillIds) {
+        skillIdSet.add(sid);
+      }
+    }
+    const skillIds = [...skillIdSet].sort((a, b) => a.localeCompare(b));
+
+    yield* fs
+      .makeDirectory(join(configDir, "agents"), { recursive: true })
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+    yield* fs
+      .makeDirectory(join(configDir, "skills"), { recursive: true })
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+
+    for (const skillId of skillIds) {
+      const src = join(bundlesRoot, "skills", skillId);
+      const dest = join(configDir, "skills", skillId);
+      yield* Effect.tryPromise({
+        try: () => cp(src, dest, { recursive: true }),
+        catch: (e) =>
+          new Error(
+            `Failed to copy skill "${skillId}": ${e instanceof Error ? e.message : String(e)}`,
+          ),
+      });
+    }
+
+    for (const agent of agents) {
+      const from = join(bundlesRoot, "agents", agent.promptFile);
+      const to = join(configDir, "agents", `${agent.id}.md`);
+      yield* fs
+        .copyFile(from, to)
+        .pipe(Effect.mapError((e) => new Error(e.message)));
+    }
+
+    const profiles: Record<
+      string,
+      {
+        promptRelativePath: string;
+        recommendedAgentName: string;
+        recommendedModel: string;
+        recommendedEffort?: string;
+        skillIds: string[];
+      }
+    > = {};
+    for (const agent of agents) {
+      profiles[agent.id] = {
+        promptRelativePath: `agents/${agent.id}.md`,
+        recommendedAgentName: agent.recommendedAgentName,
+        recommendedModel: agent.recommendedModel,
+        ...(agent.recommendedEffort
+          ? { recommendedEffort: agent.recommendedEffort }
+          : {}),
+        skillIds: [...agent.skillIds],
+      };
+    }
+
+    const manifest = { version: 1 as const, profiles };
+    yield* fs
+      .writeFileString(
+        join(configDir, "agent-profiles.json"),
+        JSON.stringify(manifest, null, 2) + "\n",
+      )
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+  });
+
 /**
- * Replace the agent factory import and call in a scaffolded main.ts.
+ * Rewrite generated main file values that depend on init selections.
  *
- * Templates use `claudeCode` as the default factory. When a different agent or
- * model is selected, this function rewrites the import and factory calls.
+ * Templates use `claudeCode` and an empty `mounts` array as placeholders. When
+ * init selects a different agent, model, or auth mount set, this function
+ * rewrites those placeholders in one pass.
  */
-const rewriteMainTs = (
+const rewriteMainFile = (
   configDir: string,
   agent: AgentEntry,
   model: string,
   mainFilename: string,
+  authMounts: readonly AuthMountEntry[],
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -490,6 +1021,63 @@ const rewriteMainTs = (
       `${agent.factoryImport}("${model}")`,
     );
 
+    content = content.replace(
+      EMPTY_AUTH_MOUNTS_PROPERTY,
+      renderAuthMountsProperty(authMounts),
+    );
+
+    yield* fs
+      .writeFileString(mainTsPath, content)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+  });
+
+const PRESET_COPY_TO_WORKTREE_PATHS = [
+  ".sandcastle/agents",
+  ".sandcastle/skills",
+] as const;
+
+const parseQuotedArrayItems = (raw: string): string[] =>
+  [...raw.matchAll(/["']([^"']+)["']/g)].map((m) => m[1]!.trim());
+
+const mergeCopyToWorktreeItems = (existingRaw: string): string => {
+  const items = parseQuotedArrayItems(existingRaw);
+  for (const p of PRESET_COPY_TO_WORKTREE_PATHS) {
+    if (!items.includes(p)) items.push(p);
+  }
+  return items.map((p) => `"${p}"`).join(", ");
+};
+
+const rewriteMainCopyToWorktreeForPresets = (
+  configDir: string,
+  mainFilename: string,
+): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const mainTsPath = join(configDir, mainFilename);
+
+    const exists = yield* fs
+      .exists(mainTsPath)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+    if (!exists) return;
+
+    let content = yield* fs
+      .readFileString(mainTsPath)
+      .pipe(Effect.mapError((e) => new Error(e.message)));
+
+    // Handle both template styles:
+    // - copyToWorktree: ["node_modules"]
+    // - const copyToWorktree = ["node_modules"];
+    content = content.replace(
+      /copyToWorktree:\s*\[([^\]]*)\]/g,
+      (_m, items: string) =>
+        `copyToWorktree: [${mergeCopyToWorktreeItems(items)}]`,
+    );
+    content = content.replace(
+      /const copyToWorktree = \[([^\]]*)\];/g,
+      (_m, items: string) =>
+        `const copyToWorktree = [${mergeCopyToWorktreeItems(items)}];`,
+    );
+
     yield* fs
       .writeFileString(mainTsPath, content)
       .pipe(Effect.mapError((e) => new Error(e.message)));
@@ -497,6 +1085,7 @@ const rewriteMainTs = (
 
 /**
  * When the user opted out of the Sandcastle label, strip ` --label Sandcastle`
+ * and ` -l Sandcastle`
  * from all `.md` files in the scaffolded config directory so that `gh issue list`
  * commands work without a label filter.
  */
@@ -516,7 +1105,9 @@ const rewritePromptFiles = (
           const content = yield* fs
             .readFileString(filePath)
             .pipe(Effect.mapError((e) => new Error(e.message)));
-          const updated = content.replace(/ --label Sandcastle/g, "");
+          const updated = content
+            .replace(/ --label Sandcastle/g, "")
+            .replace(/ -l Sandcastle/g, "");
           if (updated !== content) {
             yield* fs
               .writeFileString(filePath, updated)
@@ -550,12 +1141,12 @@ const isTextFile = (filename: string): boolean => {
 };
 
 /**
- * Replace `{{KEY}}` template arguments from the backlog manager's
- * `templateArgs` map in all text files in the scaffolded config directory.
+ * Replace `{{KEY}}` template arguments in all text files in the scaffolded
+ * config directory.
  */
 const substituteTemplateArgs = (
   configDir: string,
-  backlogManager: BacklogManagerEntry,
+  templateArgs: Record<string, string>,
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -571,9 +1162,7 @@ const substituteTemplateArgs = (
             .readFileString(filePath)
             .pipe(Effect.mapError((e) => new Error(e.message)));
           const original = content;
-          for (const [key, value] of Object.entries(
-            backlogManager.templateArgs,
-          )) {
+          for (const [key, value] of Object.entries(templateArgs)) {
             content = content.replace(
               new RegExp(`\\{\\{${key}\\}\\}`, "g"),
               value,
@@ -597,14 +1186,18 @@ const substituteTemplateArgs = (
 export interface ScaffoldOptions {
   agent: AgentEntry;
   model: string;
+  installedRuntimes?: readonly AgentRuntimeEntry[];
   templateName?: string;
   createLabel?: boolean;
   backlogManager?: BacklogManagerEntry;
   sandboxProvider?: SandboxProviderEntry;
+  /** Optional preset agent role ids (see `presetAgents.ts`). */
+  presetAgentIds?: readonly string[];
 }
 
 export interface ScaffoldResult {
   mainFilename: string;
+  presetAgentIds?: readonly string[];
 }
 
 /**
@@ -640,10 +1233,12 @@ export const scaffold = (
     const {
       agent,
       model,
+      installedRuntimes,
       templateName = "blank",
       createLabel = true,
       backlogManager = BACKLOG_MANAGER_REGISTRY[0]!, // default: github-issues
       sandboxProvider = SANDBOX_PROVIDER_REGISTRY[0]!, // default: docker
+      presetAgentIds = [],
     } = options;
     const fs = yield* FileSystem.FileSystem;
     const configDir = join(repoDir, ".sandcastle");
@@ -660,26 +1255,45 @@ export const scaffold = (
     }
 
     const mainFilename = yield* detectMainFilename(repoDir);
+    const selectedRuntimes = yield* resolveInstalledRuntimes(
+      agent,
+      installedRuntimes,
+    );
+    const authRequirements = collectAuthRequirements({
+      installedRuntimes: selectedRuntimes,
+      backlogManager,
+    });
+    const dockerfileTemplate =
+      renderInstalledRuntimesDockerfile(selectedRuntimes);
+    const selectedAuthMounts = dedupeAuthMounts(
+      authRequirements.flatMap((requirement) => requirement.authMounts),
+    );
 
     yield* fs
       .makeDirectory(configDir, { recursive: false })
       .pipe(Effect.mapError((e) => new Error(e.message)));
+    yield* prepareAuthMountHostDirectories(fs, repoDir, selectedAuthMounts);
 
     const templateDir = yield* getTemplateDir(templateName);
 
-    // Build .env.example from agent + backlog manager env blocks
-    const envExampleParts = [agent.envExample];
-    if (backlogManager.envExample) {
-      envExampleParts.push(backlogManager.envExample);
-    }
-    const envExampleContent = envExampleParts.join("\n") + "\n";
+    // Build .env.example from installed runtime + backlog manager env blocks
+    const envExampleContent = renderEnvExample([
+      ...selectedRuntimes.map((runtime) => ({
+        envVars: runtime.envVars,
+        content: runtime.envExample,
+      })),
+      {
+        envVars: backlogManager.envVars,
+        content: backlogManager.envExample,
+      },
+    ]);
 
     yield* Effect.all(
       [
         fs
           .writeFileString(
             join(configDir, sandboxProvider.containerfileName),
-            agent.dockerfileTemplate,
+            dockerfileTemplate,
           )
           .pipe(Effect.mapError((e) => new Error(e.message))),
         fs
@@ -688,21 +1302,39 @@ export const scaffold = (
         fs
           .writeFileString(join(configDir, ".env.example"), envExampleContent)
           .pipe(Effect.mapError((e) => new Error(e.message))),
+        fs
+          .writeFileString(join(configDir, ".env"), envExampleContent)
+          .pipe(Effect.mapError((e) => new Error(e.message))),
         copyTemplateFiles(templateDir, configDir, mainFilename),
       ],
       { concurrency: "unbounded" },
     );
 
-    // Rewrite main file with the selected agent factory and model
-    yield* rewriteMainTs(configDir, agent, model, mainFilename);
+    yield* rewriteMainFile(
+      configDir,
+      agent,
+      model,
+      mainFilename,
+      selectedAuthMounts,
+    );
 
     // Replace backlog manager template arguments in all text files (must run before label stripping)
-    yield* substituteTemplateArgs(configDir, backlogManager);
+    yield* substituteTemplateArgs(configDir, backlogManager.templateArgs);
 
     // Strip --label Sandcastle from prompt files when the user declined label creation
     if (!createLabel) {
       yield* rewritePromptFiles(configDir);
     }
 
-    return { mainFilename };
+    if (presetAgentIds.length > 0) {
+      yield* copyPresetAgentsIntoConfig(configDir, presetAgentIds);
+      yield* rewriteMainCopyToWorktreeForPresets(configDir, mainFilename);
+    }
+
+    return {
+      mainFilename,
+      ...(presetAgentIds.length > 0
+        ? { presetAgentIds: [...presetAgentIds] }
+        : {}),
+    };
   });
