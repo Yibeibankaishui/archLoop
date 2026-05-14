@@ -672,6 +672,9 @@ describe("InitService scaffold", () => {
 
     await expect(access(join(configDir, "main.mts"))).resolves.toBeUndefined();
     await expect(access(join(configDir, "prompt.md"))).resolves.toBeUndefined();
+    await expect(
+      access(join(configDir, "bootstrap-prompt.md")),
+    ).resolves.toBeUndefined();
   });
 
   it("simple-loop main.mts imports from @ai-hero/sandcastle", async () => {
@@ -685,7 +688,7 @@ describe("InitService scaffold", () => {
     expect(mainTs).toContain('"@ai-hero/sandcastle"');
   });
 
-  it("simple-loop main.mts contains sandcastle.run() with expected options", async () => {
+  it("simple-loop main.mts contains bootstrap phase and run() options", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop" });
 
@@ -699,8 +702,12 @@ describe("InitService scaffold", () => {
     // When scaffolded with default model, simple-loop uses claude-opus-4-6
     // (rewritten from template's claude-sonnet-4-6)
     expect(mainTs).toContain("promptFile");
-    expect(mainTs).toContain("npm install");
+    expect(mainTs).toContain("bootstrap-prompt.md");
+    expect(mainTs).toContain(".sandcastle/bootstrap.sh");
+    expect(mainTs).toContain("bash .sandcastle/bootstrap.sh");
     expect(mainTs).toContain("onSandboxReady");
+    expect(mainTs).not.toContain("npm install");
+    expect(mainTs).not.toContain("node_modules");
   });
 
   it("simple-loop prompt.md contains shell expressions for issues and commit history", async () => {
@@ -717,7 +724,7 @@ describe("InitService scaffold", () => {
   });
 
   describe("sequential-reviewer template", () => {
-    it("produces main.mts, implement-prompt.md, and review-prompt.md", async () => {
+    it("produces main.mts, implement-prompt.md, review-prompt.md, and bootstrap-prompt.md", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
@@ -732,6 +739,9 @@ describe("InitService scaffold", () => {
       ).resolves.toBeUndefined();
       await expect(
         access(join(configDir, "review-prompt.md")),
+      ).resolves.toBeUndefined();
+      await expect(
+        access(join(configDir, "bootstrap-prompt.md")),
       ).resolves.toBeUndefined();
     });
 
@@ -761,7 +771,7 @@ describe("InitService scaffold", () => {
       expect(mainTs).toContain("review-prompt.md");
     });
 
-    it("main.mts does not use merge-to-head (incompatible with reviewer handoff)", async () => {
+    it("main.mts keeps implementer/reviewer handoff on a shared explicit branch", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
@@ -769,7 +779,10 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).not.toContain("merge-to-head");
+      expect(mainTs).toContain("const branch =");
+      expect(mainTs).toContain("createSandbox");
+      expect(mainTs).toContain("promptArgs");
+      expect(mainTs).toContain("BRANCH: branch");
     });
 
     it("main.mts only reviews when implementer produces commits", async () => {
@@ -903,18 +916,18 @@ describe("InitService scaffold", () => {
       expect(joined).toContain("mix installed agent providers");
     });
 
-    it("non-blank template includes a note about customizing the install command", () => {
+    it("non-blank template includes a note about customizing bootstrap.sh", () => {
       const lines = getNextStepsLines("simple-loop", "main.mts");
       const joined = lines.join("\n");
-      expect(joined).toContain("npm install");
+      expect(joined).toContain(".sandcastle/bootstrap.sh");
       expect(joined).toContain("onSandboxReady");
     });
 
-    it("non-blank template mentions copyToWorktree and node_modules", () => {
+    it("non-blank template does not mention node_modules optimization defaults", () => {
       const lines = getNextStepsLines("simple-loop", "main.mts");
       const joined = lines.join("\n");
-      expect(joined).toContain("copyToWorktree");
-      expect(joined).toContain("node_modules");
+      expect(joined).not.toContain("node_modules");
+      expect(joined).not.toContain("copyToWorktree");
     });
 
     it("blank template includes a step to customize prompt.md", () => {
@@ -1165,7 +1178,7 @@ describe("InitService scaffold", () => {
   });
 
   describe("parallel-planner template", () => {
-    it("produces main.mts, plan-prompt.md, implement-prompt.md, merge-prompt.md", async () => {
+    it("produces main.mts, plan-prompt.md, implement-prompt.md, merge-prompt.md, bootstrap-prompt.md", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner" });
 
@@ -1184,9 +1197,12 @@ describe("InitService scaffold", () => {
       await expect(
         access(join(configDir, "merge-prompt.md")),
       ).resolves.toBeUndefined();
+      await expect(
+        access(join(configDir, "bootstrap-prompt.md")),
+      ).resolves.toBeUndefined();
     });
 
-    it("main.mts uses npm install hook and imports sandcastle", async () => {
+    it("main.mts uses bootstrap hook and imports sandcastle", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner" });
 
@@ -1194,8 +1210,11 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain("npm install");
+      expect(mainTs).toContain("bootstrap-prompt.md");
+      expect(mainTs).toContain("bash .sandcastle/bootstrap.sh");
       expect(mainTs).toContain("sandcastle");
+      expect(mainTs).not.toContain("npm install");
+      expect(mainTs).not.toContain("node_modules");
     });
 
     it("main.mts imports from @ai-hero/sandcastle", async () => {
@@ -1277,7 +1296,7 @@ describe("InitService scaffold", () => {
   });
 
   describe("parallel-planner-with-review template", () => {
-    it("produces main.mts, plan-prompt.md, implement-prompt.md, review-prompt.md, merge-prompt.md", async () => {
+    it("produces main.mts, plan-prompt.md, implement-prompt.md, review-prompt.md, merge-prompt.md, and bootstrap-prompt.md", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
@@ -1298,6 +1317,9 @@ describe("InitService scaffold", () => {
       ).resolves.toBeUndefined();
       await expect(
         access(join(configDir, "merge-prompt.md")),
+      ).resolves.toBeUndefined();
+      await expect(
+        access(join(configDir, "bootstrap-prompt.md")),
       ).resolves.toBeUndefined();
     });
 
@@ -2424,9 +2446,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(main).toContain(
-        'copyToWorktree: ["node_modules", ".sandcastle/agents", ".sandcastle/skills"]',
-      );
+      expect(main).not.toContain('copyToWorktree: ["node_modules"');
     });
 
     it("adds preset agent and skill paths to copyToWorktree constants", async () => {
@@ -2439,9 +2459,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(main).toContain(
-        'const copyToWorktree = ["node_modules", ".sandcastle/agents", ".sandcastle/skills"];',
-      );
+      expect(main).not.toContain('const copyToWorktree = ["node_modules"');
     });
   });
 });

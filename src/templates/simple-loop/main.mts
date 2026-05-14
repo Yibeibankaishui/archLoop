@@ -1,4 +1,5 @@
-import { run, claudeCode } from "@ai-hero/sandcastle";
+import { access } from "node:fs/promises";
+import { run, claudeCode, createSandbox } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
 // Simple loop: an agent that picks open issues one by one and closes them.
@@ -8,6 +9,42 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 const sandboxProvider = docker({
   mounts: [],
 });
+
+const BOOTSTRAP_SCRIPT_PATH = ".sandcastle/bootstrap.sh";
+const BOOTSTRAP_PROMPT_PATH = "./.sandcastle/bootstrap-prompt.md";
+const bootstrapHooks = {
+  sandbox: {
+    onSandboxReady: [{ command: "bash .sandcastle/bootstrap.sh" }],
+  },
+};
+
+const ensureBootstrapReady = async () => {
+  try {
+    await access(BOOTSTRAP_SCRIPT_PATH);
+    return;
+  } catch {
+    // Missing bootstrap script: generate it once from repository context.
+  }
+
+  await run({
+    name: "bootstrap-generator",
+    sandbox: sandboxProvider,
+    branchStrategy: { type: "merge-to-head" },
+    agent: claudeCode("claude-sonnet-4-6"),
+    promptFile: BOOTSTRAP_PROMPT_PATH,
+    maxIterations: 1,
+  });
+
+  // Validate generated script before entering the formal task loop.
+  const sandbox = await createSandbox({
+    branch: `sandcastle/bootstrap-validation/${Date.now()}`,
+    sandbox: sandboxProvider,
+    hooks: bootstrapHooks,
+  });
+  await sandbox.close();
+};
+
+await ensureBootstrapReady();
 
 await run({
   // A name for this run, shown as a prefix in log output.
@@ -32,23 +69,9 @@ await run({
 
   // Branch strategy — merge-to-head creates a temporary branch for the agent
   // to work on, then merges the result back to HEAD when the run completes.
-  // This is required when using copyToWorktree, since head mode bind-mounts
-  // the host directory directly (no worktree to copy into).
   branchStrategy: { type: "merge-to-head" },
 
-  // Copy node_modules from the host into the worktree before the sandbox
-  // starts. This avoids a full npm install from scratch on every iteration.
-  // The onSandboxReady hook still runs npm install as a safety net to handle
-  // platform-specific binaries and any packages added since the last copy.
-  copyToWorktree: ["node_modules"],
-
   // Lifecycle hooks — commands grouped by where they run (host or sandbox).
-  hooks: {
-    sandbox: {
-      // onSandboxReady runs once after the sandbox is initialised and the repo is
-      // synced in, before the agent starts. Use it to install dependencies or run
-      // any other setup steps your project needs.
-      onSandboxReady: [{ command: "npm install" }],
-    },
-  },
+  // bootstrap.sh is the repository-specific setup contract.
+  hooks: bootstrapHooks,
 });

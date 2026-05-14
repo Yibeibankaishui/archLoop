@@ -803,7 +803,7 @@ export function getNextStepsLines(
     "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
     `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
     `${step++}. Edit .sandcastle/${mainFilename} to mix installed agent providers after init; the selected default agent only seeds the scaffolded example`,
-    `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. Adjust both if you use a different package manager`,
+    `${step++}. Non-blank templates use \`.sandcastle/bootstrap.sh\` as the repository bootstrap contract and run it from \`sandbox.onSandboxReady\`. Customize that script for your stack`,
     `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
   ];
   if (hasReviewer) {

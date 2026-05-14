@@ -20,6 +20,7 @@
 //   "scripts": { "sandcastle": "npx tsx .sandcastle/main.mts" }
 
 import * as sandcastle from "@ai-hero/sandcastle";
+import { access } from "node:fs/promises";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
 // ---------------------------------------------------------------------------
@@ -30,24 +31,50 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 // Each cycle works on one issue. Raise this to process more issues per run.
 const MAX_ITERATIONS = 10;
 
-// Hooks run inside the sandbox before the agent starts each iteration.
-// npm install ensures the sandbox always has fresh dependencies.
-const hooks = {
-  sandbox: { onSandboxReady: [{ command: "npm install" }] },
-};
+const BOOTSTRAP_SCRIPT_PATH = ".sandcastle/bootstrap.sh";
+const BOOTSTRAP_PROMPT_PATH = "./.sandcastle/bootstrap-prompt.md";
 
-// Copy node_modules from the host into the worktree before each sandbox
-// starts. Avoids a full npm install from scratch; the hook above handles
-// platform-specific binaries and any packages added since the last copy.
-const copyToWorktree = ["node_modules"];
+// Hooks run inside the sandbox before the agent starts each iteration.
+// bootstrap.sh defines repository-specific setup.
+const hooks = {
+  sandbox: { onSandboxReady: [{ command: "bash .sandcastle/bootstrap.sh" }] },
+};
 
 const sandboxProvider = docker({
   mounts: [],
 });
 
+const ensureBootstrapReady = async () => {
+  try {
+    await access(BOOTSTRAP_SCRIPT_PATH);
+    return;
+  } catch {
+    // Missing bootstrap script: generate it once from repository context.
+  }
+
+  await sandcastle.run({
+    name: "bootstrap-generator",
+    sandbox: sandboxProvider,
+    branchStrategy: { type: "merge-to-head" },
+    agent: sandcastle.claudeCode("claude-sonnet-4-6"),
+    promptFile: BOOTSTRAP_PROMPT_PATH,
+    maxIterations: 1,
+  });
+
+  // Validate generated script before entering the formal task loop.
+  const sandbox = await sandcastle.createSandbox({
+    branch: `sandcastle/bootstrap-validation/${Date.now()}`,
+    sandbox: sandboxProvider,
+    hooks,
+  });
+  await sandbox.close();
+};
+
 // ---------------------------------------------------------------------------
 // Main loop
 // ---------------------------------------------------------------------------
+
+await ensureBootstrapReady();
 
 for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   console.log(`\n=== Iteration ${iteration}/${MAX_ITERATIONS} ===\n`);
@@ -61,7 +88,6 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     branch,
     sandbox: sandboxProvider,
     hooks,
-    copyToWorktree,
   });
 
   try {
