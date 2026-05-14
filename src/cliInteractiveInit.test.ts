@@ -56,6 +56,9 @@ describe("sandcastle init interactive runtime selection", () => {
         if (opts.message === "Select a template:") {
           return "blank";
         }
+        if (opts.message === "Set up Cursor authentication now?") {
+          return "env";
+        }
         throw new Error(`Unexpected select prompt: ${opts.message}`);
       },
     );
@@ -135,6 +138,7 @@ describe("sandcastle init interactive runtime selection", () => {
       if (opts.message === "Select a backlog manager:") return "github-issues";
       if (opts.message === "Select a template:") return "blank";
       if (opts.message === "Set up GitHub authentication now?") return "env";
+      if (opts.message === "Set up Codex authentication now?") return "env";
       throw new Error(`Unexpected select prompt: ${opts.message}`);
     });
     mockMultiselect.mockResolvedValue(["codex"]);
@@ -176,15 +180,23 @@ describe("sandcastle init interactive runtime selection", () => {
         ),
       }),
     );
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "status",
+        message: expect.stringContaining("Add OPENAI_KEY to .sandcastle/.env"),
+      }),
+    );
   });
 
-  it("runs gh auth login with GH_CONFIG_DIR when GitHub login path is selected", async () => {
+  it("runs gh auth login with sandbox-usable storage and isolated auth homes when login paths are selected", async () => {
     mockSelect.mockImplementation(async (opts: { message: string }) => {
       if (opts.message === "Select the default scaffold agent:") return "codex";
       if (opts.message === "Select a sandbox provider:") return "docker";
       if (opts.message === "Select a backlog manager:") return "github-issues";
       if (opts.message === "Select a template:") return "blank";
       if (opts.message === "Set up GitHub authentication now?") return "login";
+      if (opts.message === "Set up Codex authentication now?") return "login";
+      if (opts.message === "Set up Cursor authentication now?") return "login";
       throw new Error(`Unexpected select prompt: ${opts.message}`);
     });
     mockMultiselect.mockResolvedValue(["codex", "cursor"]);
@@ -209,23 +221,33 @@ describe("sandcastle init interactive runtime selection", () => {
     );
 
     expect(mockExecSync).toHaveBeenCalledWith(
-      "gh auth login",
+      "gh auth login --insecure-storage",
       expect.objectContaining({
         env: expect.objectContaining({
           GH_CONFIG_DIR: expect.stringContaining(".sandcastle/auth/gh"),
         }),
       }),
     );
-    expect(entries).toContainEqual(
+    expect(mockExecSync).toHaveBeenCalledWith(
+      "codex login",
       expect.objectContaining({
-        _tag: "text",
-        message: expect.stringContaining("Codex auth: sign in manually"),
+        env: expect.objectContaining({
+          CODEX_HOME: expect.stringContaining(".sandcastle/auth/codex"),
+        }),
+      }),
+    );
+    expect(mockExecSync).toHaveBeenCalledWith(
+      "agent login",
+      expect.objectContaining({
+        env: expect.objectContaining({
+          CURSOR_CONFIG_DIR: expect.stringContaining(".sandcastle/auth/cursor"),
+        }),
       }),
     );
     expect(entries).toContainEqual(
       expect.objectContaining({
         _tag: "text",
-        message: expect.stringContaining("Cursor auth: sign in manually"),
+        message: expect.stringContaining("Run `npm run sandcastle`"),
       }),
     );
   });
@@ -237,6 +259,7 @@ describe("sandcastle init interactive runtime selection", () => {
       if (opts.message === "Select a backlog manager:") return "github-issues";
       if (opts.message === "Select a template:") return "blank";
       if (opts.message === "Set up GitHub authentication now?") return "skip";
+      if (opts.message === "Set up Codex authentication now?") return "skip";
       throw new Error(`Unexpected select prompt: ${opts.message}`);
     });
     mockMultiselect.mockResolvedValue(["codex"]);
@@ -271,6 +294,14 @@ describe("sandcastle init interactive runtime selection", () => {
         _tag: "text",
         message: expect.stringContaining(
           "Set up GitHub auth later with GH_TOKEN in .sandcastle/.env",
+        ),
+      }),
+    );
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "text",
+        message: expect.stringContaining(
+          "Set up Codex auth later with OPENAI_KEY in .sandcastle/.env",
         ),
       }),
     );
@@ -329,7 +360,66 @@ describe("sandcastle init interactive runtime selection", () => {
       expect.objectContaining({
         _tag: "text",
         message: expect.stringContaining(
-          "Prepare Codex auth before sandbox runs: use OPENAI_KEY in .sandcastle/.env or sync credentials into .sandcastle/auth/codex.",
+          "This scripted init skipped interactive Codex auth setup.",
+        ),
+      }),
+    );
+  });
+
+  it("scripted init with cursor runtime includes explicit cursor auth next steps", async () => {
+    mockSelect.mockImplementation(async (opts: { message: string }) => {
+      throw new Error(`Unexpected select prompt: ${opts.message}`);
+    });
+    mockExecSync.mockImplementation(() => undefined);
+
+    const entries = await Effect.runPromise(
+      Effect.gen(function* () {
+        const ref = yield* Ref.make<ReadonlyArray<DisplayEntry>>([]);
+        yield* cli([
+          "node",
+          "sandcastle",
+          "init",
+          "--agent",
+          "cursor",
+          "--runtimes",
+          "cursor",
+          "--sandbox",
+          "docker",
+          "--backlog",
+          "beads",
+          "--template",
+          "blank",
+          "--preset-agents",
+          "none",
+          "--build-image",
+          "false",
+        ]).pipe(
+          Effect.provide(SilentDisplay.layer(ref)),
+          Effect.provide(NodeContext.layer),
+        );
+        return yield* Ref.get(ref);
+      }),
+    );
+
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "text",
+        message: expect.stringContaining(
+          "This scripted init skipped interactive Cursor auth setup.",
+        ),
+      }),
+    );
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "text",
+        message: expect.stringContaining("CURSOR_API_KEY"),
+      }),
+    );
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "text",
+        message: expect.stringContaining(
+          "CURSOR_CONFIG_DIR=.sandcastle/auth/cursor agent login",
         ),
       }),
     );

@@ -217,13 +217,13 @@ export const cursor = (
       ? " --force --sandbox disabled"
       : "";
     return {
-      command: `cursor-agent --print --output-format stream-json --stream-partial-output --trust --model ${shellEscape(model)}${modeFlag}${forceFlags} "$(cat)"`,
+      command: `agent --print --output-format stream-json --stream-partial-output --trust --model ${shellEscape(model)}${modeFlag}${forceFlags} "$(cat)"`,
       stdin: prompt,
     };
   },
 
   buildInteractiveArgs({ prompt }: AgentCommandOptions): string[] {
-    const args = ["cursor-agent", "--model", model];
+    const args = ["agent", "--model", model];
     if (options?.mode) args.push("--mode", options.mode);
     if (prompt) args.push(prompt);
     return args;

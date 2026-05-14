@@ -706,7 +706,7 @@ describe("cursor factory", () => {
   it("buildPrintCommand includes Cursor Agent headless stream-json flags", () => {
     const provider = cursor("auto");
     const { command } = provider.buildPrintCommand(opts("do something"));
-    expect(command).toContain("cursor-agent");
+    expect(command).toContain("agent");
     expect(command).toContain("--print");
     expect(command).toContain("--output-format stream-json");
     expect(command).toContain("--stream-partial-output");
@@ -764,14 +764,14 @@ describe("cursor factory", () => {
   it("buildInteractiveArgs includes model and prompt", () => {
     const provider = cursor("auto");
     const args = provider.buildInteractiveArgs!(opts("do something"));
-    expect(args).toEqual(["cursor-agent", "--model", "auto", "do something"]);
+    expect(args).toEqual(["agent", "--model", "auto", "do something"]);
   });
 
   it("buildInteractiveArgs includes mode when specified", () => {
     const provider = cursor("auto", { mode: "ask" });
     const args = provider.buildInteractiveArgs!(opts("question"));
     expect(args).toEqual([
-      "cursor-agent",
+      "agent",
       "--model",
       "auto",
       "--mode",

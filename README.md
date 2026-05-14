@@ -652,7 +652,7 @@ After you choose a template, init can optionally add **preset agent roles**. In 
 
 ### `sandcastle init`
 
-Scaffolds the `.sandcastle/` config directory and builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a default scaffold agent and then which agent runtimes to install in the image. You choose a sandbox provider (Docker or Podman) during init — selecting Podman writes a `Containerfile` instead of `Dockerfile` and uses `sandcastle podman build-image` for the build step. After scaffold and before image build, init also runs an auth setup step (for GitHub Issues, choose GH token, `gh auth login`, or skip).
+Scaffolds the `.sandcastle/` config directory and builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a default scaffold agent and then which agent runtimes to install in the image. You choose a sandbox provider (Docker or Podman) during init — selecting Podman writes a `Containerfile` instead of `Dockerfile` and uses `sandcastle podman build-image` for the build step. After scaffold and before image build, init also runs an auth setup step for selected tools, including GitHub Issues, Codex, and Cursor.
 
 Think of the init agent choices as two layers:
 

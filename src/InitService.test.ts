@@ -481,6 +481,7 @@ describe("InitService scaffold", () => {
     expect(mainTs).toContain('claudeCode("claude-opus-4-6")');
     expect(dockerfile).toContain("@openai/codex");
     expect(dockerfile).toContain("cursor.com/install");
+    expect(dockerfile).toContain('test -x "$HOME/.local/bin/agent"');
     expect(envExample).toContain("OPENAI_KEY=");
     expect(envExample).toContain("CURSOR_API_KEY=");
   });
@@ -501,6 +502,7 @@ describe("InitService scaffold", () => {
 
     expect(dockerfile).toContain("@openai/codex");
     expect(dockerfile).toContain("cursor.com/install");
+    expect(dockerfile).toContain('test -x "$HOME/.local/bin/agent"');
     expect(dockerfile).not.toContain("claude.ai/install.sh");
     expect(dockerfile).not.toContain("@mariozechner/pi-coding-agent");
     expect(dockerfile).not.toContain("opencode-ai");
@@ -531,6 +533,7 @@ describe("InitService scaffold", () => {
 
     expect(containerfile).toContain("@openai/codex");
     expect(containerfile).toContain("cursor.com/install");
+    expect(containerfile).toContain('test -x "$HOME/.local/bin/agent"');
     expect(containerfile).not.toContain("claude.ai/install.sh");
     expect(containerfile).not.toContain("opencode-ai");
     expect(countOccurrences(containerfile, /^FROM /gm)).toBe(1);

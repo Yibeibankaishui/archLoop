@@ -354,8 +354,8 @@ interface AuthSetupResult {
 
 const buildAuthSetupNextStepLines = (options: {
   readonly githubChoice?: "env" | "login" | "skip" | "deferred";
-  readonly hasCodex: boolean;
-  readonly hasCursor: boolean;
+  readonly codexChoice?: "env" | "login" | "skip" | "deferred";
+  readonly cursorChoice?: "env" | "login" | "skip" | "deferred";
 }): string[] => {
   const lines: string[] = [];
 
@@ -365,23 +365,39 @@ const buildAuthSetupNextStepLines = (options: {
     );
   } else if (options.githubChoice === "skip") {
     lines.push(
-      "Set up GitHub auth later with GH_TOKEN in .sandcastle/.env or `GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login`.",
+      "Set up GitHub auth later with GH_TOKEN in .sandcastle/.env or `GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login --insecure-storage`.",
     );
   } else if (options.githubChoice === "deferred") {
     lines.push(
-      "This scripted init skipped interactive GitHub auth setup. Use GH_TOKEN in .sandcastle/.env or `GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login` before running GitHub Issues templates.",
+      "This scripted init skipped interactive GitHub auth setup. Use GH_TOKEN in .sandcastle/.env or `GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login --insecure-storage` before running GitHub Issues templates.",
     );
   }
 
-  if (options.hasCodex) {
+  if (options.codexChoice === "env") {
     lines.push(
-      "Prepare Codex auth before sandbox runs: use OPENAI_KEY in .sandcastle/.env or sync credentials into .sandcastle/auth/codex.",
+      "Add OPENAI_KEY to .sandcastle/.env before running Codex in the sandbox.",
+    );
+  } else if (options.codexChoice === "skip") {
+    lines.push(
+      "Set up Codex auth later with OPENAI_KEY in .sandcastle/.env or `CODEX_HOME=.sandcastle/auth/codex codex login`.",
+    );
+  } else if (options.codexChoice === "deferred") {
+    lines.push(
+      "This scripted init skipped interactive Codex auth setup. Use OPENAI_KEY in .sandcastle/.env or `CODEX_HOME=.sandcastle/auth/codex codex login` before running Codex in the sandbox.",
     );
   }
 
-  if (options.hasCursor) {
+  if (options.cursorChoice === "env") {
     lines.push(
-      "Prepare Cursor auth before sandbox runs: use CURSOR_API_KEY in .sandcastle/.env or sync credentials into .sandcastle/auth/cursor and .sandcastle/auth/cursor-config.",
+      "Add CURSOR_API_KEY to .sandcastle/.env before running Cursor in the sandbox.",
+    );
+  } else if (options.cursorChoice === "skip") {
+    lines.push(
+      "Set up Cursor auth later with CURSOR_API_KEY in .sandcastle/.env or `CURSOR_CONFIG_DIR=.sandcastle/auth/cursor agent login`.",
+    );
+  } else if (options.cursorChoice === "deferred") {
+    lines.push(
+      "This scripted init skipped interactive Cursor auth setup. Use CURSOR_API_KEY in .sandcastle/.env or `CURSOR_CONFIG_DIR=.sandcastle/auth/cursor agent login` before running Cursor in the sandbox.",
     );
   }
 
@@ -690,6 +706,8 @@ const initCommand = Command.make(
           requirement.githubLoginSupported,
       );
       let githubAuthChoice: "env" | "login" | "skip" | "deferred" | undefined;
+      let codexAuthChoice: "env" | "login" | "skip" | "deferred" | undefined;
+      let cursorAuthChoice: "env" | "login" | "skip" | "deferred" | undefined;
 
       if (githubAuthRequirement) {
         if (isFullyScriptedInit) {
@@ -731,7 +749,7 @@ const initCommand = Command.make(
             githubAuthChoice = "login";
             yield* Effect.try({
               try: () =>
-                execSync("gh auth login", {
+                execSync("gh auth login --insecure-storage", {
                   cwd,
                   stdio: "inherit",
                   env: {
@@ -742,7 +760,7 @@ const initCommand = Command.make(
               catch: () =>
                 new InitError({
                   message:
-                    "GitHub login failed. You can retry with `GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login`.",
+                    "GitHub login failed. You can retry with `GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login --insecure-storage`.",
                 }),
             });
           } else {
@@ -756,28 +774,143 @@ const initCommand = Command.make(
       }
 
       if (hasCodexAuth) {
-        yield* d.text(
-          styleText(
-            "dim",
-            "Codex auth: sign in manually and sync credentials to .sandcastle/auth/codex before running in the sandbox.",
-          ),
-        );
+        if (isFullyScriptedInit) {
+          codexAuthChoice = "deferred";
+        } else {
+          const authChoice = yield* Effect.promise(() =>
+            clack.select({
+              message: "Set up Codex authentication now?",
+              initialValue: "env",
+              options: [
+                {
+                  value: "env",
+                  label: "Use OPENAI_KEY in .sandcastle/.env",
+                },
+                {
+                  value: "login",
+                  label: "Run codex login into .sandcastle/auth/codex",
+                },
+                {
+                  value: "skip",
+                  label: "Skip for now",
+                },
+              ],
+            }),
+          );
+          if (clack.isCancel(authChoice)) {
+            yield* Effect.fail(
+              new InitError({ message: "Codex auth setup cancelled." }),
+            );
+          }
+
+          if (authChoice === "env") {
+            codexAuthChoice = "env";
+            yield* d.status(
+              "Add OPENAI_KEY to .sandcastle/.env when you're ready. Sandcastle will not write secrets for you.",
+              "info",
+            );
+          } else if (authChoice === "login") {
+            codexAuthChoice = "login";
+            yield* Effect.try({
+              try: () =>
+                execSync("codex login", {
+                  cwd,
+                  stdio: "inherit",
+                  env: {
+                    ...process.env,
+                    CODEX_HOME: join(cwd, ".sandcastle", "auth", "codex"),
+                  },
+                }),
+              catch: () =>
+                new InitError({
+                  message:
+                    "Codex login failed. You can retry with `CODEX_HOME=.sandcastle/auth/codex codex login`.",
+                }),
+            });
+          } else {
+            codexAuthChoice = "skip";
+            yield* d.status(
+              "Skipped Codex auth setup for now. Configure OPENAI_KEY or codex login later.",
+              "info",
+            );
+          }
+        }
       }
 
       if (hasCursorAuth) {
-        yield* d.text(
-          styleText(
-            "dim",
-            "Cursor auth: sign in manually and sync credentials to .sandcastle/auth/cursor (and .sandcastle/auth/cursor-config) before running in the sandbox.",
-          ),
-        );
+        if (isFullyScriptedInit) {
+          cursorAuthChoice = "deferred";
+        } else {
+          const authChoice = yield* Effect.promise(() =>
+            clack.select({
+              message: "Set up Cursor authentication now?",
+              initialValue: "env",
+              options: [
+                {
+                  value: "env",
+                  label: "Use CURSOR_API_KEY in .sandcastle/.env",
+                },
+                {
+                  value: "login",
+                  label: "Run agent login into .sandcastle/auth/cursor",
+                },
+                {
+                  value: "skip",
+                  label: "Skip for now",
+                },
+              ],
+            }),
+          );
+          if (clack.isCancel(authChoice)) {
+            yield* Effect.fail(
+              new InitError({ message: "Cursor auth setup cancelled." }),
+            );
+          }
+
+          if (authChoice === "env") {
+            cursorAuthChoice = "env";
+            yield* d.status(
+              "Add CURSOR_API_KEY to .sandcastle/.env when you're ready. Sandcastle will not write secrets for you.",
+              "info",
+            );
+          } else if (authChoice === "login") {
+            cursorAuthChoice = "login";
+            yield* Effect.try({
+              try: () =>
+                execSync("agent login", {
+                  cwd,
+                  stdio: "inherit",
+                  env: {
+                    ...process.env,
+                    CURSOR_CONFIG_DIR: join(
+                      cwd,
+                      ".sandcastle",
+                      "auth",
+                      "cursor",
+                    ),
+                  },
+                }),
+              catch: () =>
+                new InitError({
+                  message:
+                    "Cursor login failed. You can retry with `CURSOR_CONFIG_DIR=.sandcastle/auth/cursor agent login`.",
+                }),
+            });
+          } else {
+            cursorAuthChoice = "skip";
+            yield* d.status(
+              "Skipped Cursor auth setup for now. Configure CURSOR_API_KEY or prepare Cursor auth later.",
+              "info",
+            );
+          }
+        }
       }
 
       const authSetupResult: AuthSetupResult = {
         nextStepLines: buildAuthSetupNextStepLines({
           githubChoice: githubAuthChoice,
-          hasCodex: hasCodexAuth,
-          hasCursor: hasCursorAuth,
+          codexChoice: codexAuthChoice,
+          cursorChoice: cursorAuthChoice,
         }),
       };
 

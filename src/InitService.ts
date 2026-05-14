@@ -258,7 +258,8 @@ USER \${AGENT_UID}:\${AGENT_GID}
 ENV HOME="/home/agent"
 
 # Install Cursor Agent CLI
-RUN curl https://cursor.com/install -fsS | bash
+RUN curl https://cursor.com/install -fsS | bash \\
+  && test -x "$HOME/.local/bin/agent"
 
 # Add Cursor Agent to PATH
 ENV PATH="/home/agent/.local/bin:$PATH"
@@ -393,7 +394,8 @@ OPENAI_KEY=`,
     label: "Cursor",
     dockerfileInstall: {
       user: `# Install Cursor Agent CLI
-RUN curl https://cursor.com/install -fsS | bash`,
+RUN curl https://cursor.com/install -fsS | bash \\
+  && test -x "$HOME/.local/bin/agent"`,
       pathEntries: ["/home/agent/.local/bin"],
     },
     dockerfileTemplate: CURSOR_DOCKERFILE,
