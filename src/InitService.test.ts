@@ -641,10 +641,10 @@ describe("InitService scaffold", () => {
 
     expect(mainTs).toContain(".sandcastle/auth/codex");
     expect(mainTs).toContain("/home/agent/.codex");
-    expect(mainTs).toContain(".sandcastle/auth/cursor");
-    expect(mainTs).toContain("/home/agent/.cursor");
-    expect(mainTs).toContain(".sandcastle/auth/cursor-config");
-    expect(mainTs).toContain("/home/agent/.config/cursor");
+    expect(mainTs).not.toContain(".sandcastle/auth/cursor");
+    expect(mainTs).not.toContain("/home/agent/.cursor");
+    expect(mainTs).not.toContain(".sandcastle/auth/cursor-config");
+    expect(mainTs).not.toContain("/home/agent/.config/cursor");
     expect(mainTs).not.toContain(".sandcastle/auth/gh");
 
     await expect(
@@ -652,10 +652,10 @@ describe("InitService scaffold", () => {
     ).resolves.toBeUndefined();
     await expect(
       access(join(dir, ".sandcastle", "auth", "cursor")),
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow();
     await expect(
       access(join(dir, ".sandcastle", "auth", "cursor-config")),
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow();
     await expect(
       access(join(dir, ".sandcastle", "auth", "gh")),
     ).rejects.toThrow();

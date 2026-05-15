@@ -402,16 +402,6 @@ RUN curl https://cursor.com/install -fsS | bash \\
     envVars: ["CURSOR_API_KEY"],
     envExample: `# Cursor API key
 CURSOR_API_KEY=`,
-    authMounts: [
-      {
-        hostPath: ".sandcastle/auth/cursor",
-        sandboxPath: "/home/agent/.cursor",
-      },
-      {
-        hostPath: ".sandcastle/auth/cursor-config",
-        sandboxPath: "/home/agent/.config/cursor",
-      },
-    ],
   },
   {
     name: "opencode",

@@ -355,7 +355,7 @@ interface AuthSetupResult {
 const buildAuthSetupNextStepLines = (options: {
   readonly githubChoice?: "env" | "login" | "skip" | "deferred";
   readonly codexChoice?: "env" | "login" | "skip" | "deferred";
-  readonly cursorChoice?: "env" | "login" | "skip" | "deferred";
+  readonly cursorChoice?: "env" | "skip" | "deferred";
 }): string[] => {
   const lines: string[] = [];
 
@@ -393,11 +393,11 @@ const buildAuthSetupNextStepLines = (options: {
     );
   } else if (options.cursorChoice === "skip") {
     lines.push(
-      "Set up Cursor auth later with CURSOR_API_KEY in .sandcastle/.env or `CURSOR_CONFIG_DIR=.sandcastle/auth/cursor agent login`.",
+      "Set up Cursor auth later with CURSOR_API_KEY in .sandcastle/.env.",
     );
   } else if (options.cursorChoice === "deferred") {
     lines.push(
-      "This scripted init skipped interactive Cursor auth setup. Use CURSOR_API_KEY in .sandcastle/.env or `CURSOR_CONFIG_DIR=.sandcastle/auth/cursor agent login` before running Cursor in the sandbox.",
+      "This scripted init skipped interactive Cursor auth setup. Use CURSOR_API_KEY in .sandcastle/.env before running Cursor in the sandbox.",
     );
   }
 
@@ -707,7 +707,7 @@ const initCommand = Command.make(
       );
       let githubAuthChoice: "env" | "login" | "skip" | "deferred" | undefined;
       let codexAuthChoice: "env" | "login" | "skip" | "deferred" | undefined;
-      let cursorAuthChoice: "env" | "login" | "skip" | "deferred" | undefined;
+      let cursorAuthChoice: "env" | "skip" | "deferred" | undefined;
 
       if (githubAuthRequirement) {
         if (isFullyScriptedInit) {
@@ -851,10 +851,6 @@ const initCommand = Command.make(
                   label: "Use CURSOR_API_KEY in .sandcastle/.env",
                 },
                 {
-                  value: "login",
-                  label: "Run agent login into .sandcastle/auth/cursor",
-                },
-                {
                   value: "skip",
                   label: "Skip for now",
                 },
@@ -873,33 +869,10 @@ const initCommand = Command.make(
               "Add CURSOR_API_KEY to .sandcastle/.env when you're ready. Sandcastle will not write secrets for you.",
               "info",
             );
-          } else if (authChoice === "login") {
-            cursorAuthChoice = "login";
-            yield* Effect.try({
-              try: () =>
-                execSync("agent login", {
-                  cwd,
-                  stdio: "inherit",
-                  env: {
-                    ...process.env,
-                    CURSOR_CONFIG_DIR: join(
-                      cwd,
-                      ".sandcastle",
-                      "auth",
-                      "cursor",
-                    ),
-                  },
-                }),
-              catch: () =>
-                new InitError({
-                  message:
-                    "Cursor login failed. You can retry with `CURSOR_CONFIG_DIR=.sandcastle/auth/cursor agent login`.",
-                }),
-            });
           } else {
             cursorAuthChoice = "skip";
             yield* d.status(
-              "Skipped Cursor auth setup for now. Configure CURSOR_API_KEY or prepare Cursor auth later.",
+              "Skipped Cursor auth setup for now. Configure CURSOR_API_KEY later.",
               "info",
             );
           }
