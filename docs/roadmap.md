@@ -119,13 +119,13 @@ Goal: 让 Sandcastle 不再默认假设 Node 项目，而是通过项目级 boot
 - [x] 非 blank 模板引入 `.sandcastle/bootstrap.sh`。
 - [x] init 按 Project profile 生成 bootstrap script；模板仅通过 sandbox hook 执行。
 - [x] 模板移除对 `node_modules` 或 `npm install` 的默认假设。
+- [x] 设计 `sandcastle init` 的项目类型选择，包括 scripted init 参数和交互式选择。
+- [x] 为 Node、Python、C++ 等项目类型生成对应 Dockerfile / Containerfile profile。
+- [x] 明确通用 Docker 镜像与项目类型 profile 的边界（见 README Project profiles、ADR-0015）。
 - [ ] 为常见技术栈沉淀 bootstrap 示例。
-- [ ] 设计 `sandcastle init` 的项目类型选择，包括 scripted init 参数和交互式选择。
-- [ ] 为 Node、Python、C++ 等项目类型生成对应 Dockerfile / Containerfile profile。
-- [ ] 明确通用 Docker 镜像与项目类型 profile 的边界。
 - [ ] 梳理 unsandboxed / no-sandbox 模式的安全边界与适用场景。
 
-相关文档：[bootstrap-template-contract](../.changeset/bootstrap-template-contract.md)。
+相关文档：[ADR-0015](./adr/0015-project-profiles-bootstrap-at-init.md)、[bootstrap-template-contract](../.changeset/bootstrap-template-contract.md)。
 
 ## 03 Docker 环境与容器接入
 
