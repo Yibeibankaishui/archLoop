@@ -803,6 +803,9 @@ export function getNextStepsLines(
       `${step++}. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs and can mix installed agent providers after init`,
       `${step++}. Add "sandcastle": "${runMainCommand(mainFilename)}" to your package.json scripts`,
     ];
+    lines.push(
+      `${step++}. \`.sandcastle/bootstrap.sh\` was generated from your Project profile during init (user-editable scaffold; init does not run or validate it). The blank template does not run bootstrap unless you wire \`sandbox.onSandboxReady\` yourself`,
+    );
     if (presetHintText) {
       lines.push(`${step++}. ${presetHintText}`);
     }
@@ -821,7 +824,7 @@ export function getNextStepsLines(
     "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
     `${step++}. Add "sandcastle": "${runMainCommand(mainFilename)}" to your package.json scripts`,
     `${step++}. Edit .sandcastle/${mainFilename} to mix installed agent providers after init; the selected default agent only seeds the scaffolded example`,
-    `${step++}. Non-blank templates use \`.sandcastle/bootstrap.sh\` as the repository bootstrap contract and run it from \`sandbox.onSandboxReady\`. Customize that script for your stack`,
+    `${step++}. Init generated \`.sandcastle/bootstrap.sh\` from your Project profile (user-editable; init does not run or validate it). Non-blank templates run it from \`sandbox.onSandboxReady\` after the worktree is mounted and before the agent starts — not during image build. Customize the script for your stack`,
     `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
   ];
   if (hasReviewer) {
