@@ -101,7 +101,7 @@ Goal: 让 Sandcastle 不再默认假设 Node 项目，而是通过项目级 boot
 ### Scope
 
 - `.sandcastle/bootstrap.sh` 作为 repository-specific bootstrap contract。
-- 当 bootstrap script 缺失时，由 agent 生成并验证。
+- `sandcastle init` 按 Project profile 生成 bootstrap script，模板在 sandbox 就绪时执行。
 - 模板不再默认假设 `node_modules`、`npm install` 或 Node-only workflow。
 - `sandcastle init` 根据项目类型生成更贴近目标项目的 Dockerfile / Containerfile 基础配置。
 - 常见项目类型的 sandbox 环境建议，包括 Node、Python、C++ 等技术栈。
@@ -117,7 +117,7 @@ Goal: 让 Sandcastle 不再默认假设 Node 项目，而是通过项目级 boot
 ### Tasks
 
 - [x] 非 blank 模板引入 `.sandcastle/bootstrap.sh`。
-- [x] 支持 bootstrap script 缺失时生成并验证。
+- [x] init 按 Project profile 生成 bootstrap script；模板仅通过 sandbox hook 执行。
 - [x] 模板移除对 `node_modules` 或 `npm install` 的默认假设。
 - [ ] 为常见技术栈沉淀 bootstrap 示例。
 - [ ] 设计 `sandcastle init` 的项目类型选择，包括 scripted init 参数和交互式选择。

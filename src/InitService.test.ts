@@ -55,6 +55,17 @@ const runScaffold = (repoDir: string, options?: Partial<ScaffoldOptions>) =>
 const countOccurrences = (content: string, pattern: RegExp): number =>
   content.match(pattern)?.length ?? 0;
 
+/** Non-blank templates run init-scaffolded bootstrap only (no runtime generation). */
+const expectMainUsesInitBootstrapOnly = (mainTs: string) => {
+  expect(mainTs).toContain("bash .sandcastle/bootstrap.sh");
+  expect(mainTs).toContain("onSandboxReady");
+  expect(mainTs).not.toContain("bootstrap-prompt.md");
+  expect(mainTs).not.toContain("ensureBootstrapReady");
+  expect(mainTs).not.toContain("bootstrap-generator");
+  expect(mainTs).not.toContain("npm install");
+  expect(mainTs).not.toContain("node_modules");
+};
+
 // ---------------------------------------------------------------------------
 // Agent registry
 // ---------------------------------------------------------------------------
@@ -223,6 +234,25 @@ describe("InitService scaffold", () => {
     expect(bootstrap).toContain("exit 0");
     expect(bootstrap).not.toContain("npm install");
   });
+
+  it.each([
+    "simple-loop",
+    "sequential-reviewer",
+    "parallel-planner",
+    "parallel-planner-with-review",
+  ] as const)(
+    "non-blank template %s main.mts runs init bootstrap only",
+    async (templateName) => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expectMainUsesInitBootstrapOnly(mainTs);
+    },
+  );
 
   it("generic project profile does not add language-specific Dockerfile tools", async () => {
     const dir = await makeDir();
@@ -724,7 +754,7 @@ describe("InitService scaffold", () => {
     await expect(access(join(configDir, "prompt.md"))).resolves.toBeUndefined();
     await expect(
       access(join(configDir, "bootstrap-prompt.md")),
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow();
   });
 
   it("simple-loop main.mts imports from @ai-hero/sandcastle", async () => {
@@ -738,7 +768,7 @@ describe("InitService scaffold", () => {
     expect(mainTs).toContain('"@ai-hero/sandcastle"');
   });
 
-  it("simple-loop main.mts contains bootstrap phase and run() options", async () => {
+  it("simple-loop main.mts contains bootstrap hook and run() options", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop" });
 
@@ -752,12 +782,6 @@ describe("InitService scaffold", () => {
     // When scaffolded with default model, simple-loop uses claude-opus-4-6
     // (rewritten from template's claude-sonnet-4-6)
     expect(mainTs).toContain("promptFile");
-    expect(mainTs).toContain("bootstrap-prompt.md");
-    expect(mainTs).toContain(".sandcastle/bootstrap.sh");
-    expect(mainTs).toContain("bash .sandcastle/bootstrap.sh");
-    expect(mainTs).toContain("onSandboxReady");
-    expect(mainTs).not.toContain("npm install");
-    expect(mainTs).not.toContain("node_modules");
   });
 
   it("simple-loop prompt.md contains shell expressions for issues and commit history", async () => {
@@ -774,7 +798,7 @@ describe("InitService scaffold", () => {
   });
 
   describe("sequential-reviewer template", () => {
-    it("produces main.mts, implement-prompt.md, review-prompt.md, and bootstrap-prompt.md", async () => {
+    it("produces main.mts, implement-prompt.md, and review-prompt.md", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
@@ -792,7 +816,7 @@ describe("InitService scaffold", () => {
       ).resolves.toBeUndefined();
       await expect(
         access(join(configDir, "bootstrap-prompt.md")),
-      ).resolves.toBeUndefined();
+      ).rejects.toThrow();
     });
 
     it("main.mts imports from @ai-hero/sandcastle", async () => {
@@ -1236,7 +1260,7 @@ describe("InitService scaffold", () => {
   });
 
   describe("parallel-planner template", () => {
-    it("produces main.mts, plan-prompt.md, implement-prompt.md, merge-prompt.md, bootstrap-prompt.md", async () => {
+    it("produces main.mts, plan-prompt.md, implement-prompt.md, and merge-prompt.md", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner" });
 
@@ -1257,10 +1281,10 @@ describe("InitService scaffold", () => {
       ).resolves.toBeUndefined();
       await expect(
         access(join(configDir, "bootstrap-prompt.md")),
-      ).resolves.toBeUndefined();
+      ).rejects.toThrow();
     });
 
-    it("main.mts uses bootstrap hook and imports sandcastle", async () => {
+    it("main.mts imports sandcastle namespace", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner" });
 
@@ -1268,11 +1292,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain("bootstrap-prompt.md");
-      expect(mainTs).toContain("bash .sandcastle/bootstrap.sh");
       expect(mainTs).toContain("sandcastle");
-      expect(mainTs).not.toContain("npm install");
-      expect(mainTs).not.toContain("node_modules");
     });
 
     it("main.mts imports from @ai-hero/sandcastle", async () => {
@@ -1354,7 +1374,7 @@ describe("InitService scaffold", () => {
   });
 
   describe("parallel-planner-with-review template", () => {
-    it("produces main.mts, plan-prompt.md, implement-prompt.md, review-prompt.md, merge-prompt.md, and bootstrap-prompt.md", async () => {
+    it("produces main.mts, plan-prompt.md, implement-prompt.md, review-prompt.md, and merge-prompt.md", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
@@ -1378,7 +1398,7 @@ describe("InitService scaffold", () => {
       ).resolves.toBeUndefined();
       await expect(
         access(join(configDir, "bootstrap-prompt.md")),
-      ).resolves.toBeUndefined();
+      ).rejects.toThrow();
     });
 
     it("main.mts imports from @ai-hero/sandcastle", async () => {

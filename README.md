@@ -644,7 +644,7 @@ console.log(result.output.score); // typed as number
 
 Select a template during `sandcastle init` when prompted, or re-run init in a fresh repo to try a different one.
 
-For all templates except `blank`, `.sandcastle/bootstrap.sh` is the bootstrap script convention. Templates generate it when missing, validate it before the formal task loop, and run it from `sandbox.onSandboxReady`.
+For all templates except `blank`, `.sandcastle/bootstrap.sh` is the bootstrap script convention. `sandcastle init` scaffolds this script from your Project profile; non-blank templates run it from `sandbox.onSandboxReady` and do not generate or repair it at run time.
 
 ### Preset agent roles (optional)
 
