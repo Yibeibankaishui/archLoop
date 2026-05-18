@@ -80,14 +80,12 @@ RUN apt-get update && apt-get install -y \\
 
 RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh`;
 
-const PYTHON_BOOTSTRAP_SCRIPT = `#!/usr/bin/env bash
-set -euo pipefail
-
-# Sandcastle repository bootstrap for Python projects.
-# Runs from sandbox.onSandboxReady after the worktree is mounted.
-# Prepares dependencies only; does not run tests or full verification.
-
-cd "\${SANDBOX_REPO_DIR:-.}"
+const PYTHON_BOOTSTRAP_SCRIPT =
+  bootstrapScriptPreamble(
+    "Python projects",
+    "Generated for the Python project profile. Prepares dependencies only; does not run tests or full verification",
+  ) +
+  `cd "\${SANDBOX_REPO_DIR:-.}"
 
 is_poetry_project() {
   if [[ -f poetry.lock ]]; then
@@ -161,14 +159,12 @@ RUN apt-get update && apt-get install -y \\
   ninja-build \\
   && rm -rf /var/lib/apt/lists/*`;
 
-const CPP_BOOTSTRAP_SCRIPT = `#!/usr/bin/env bash
-set -euo pipefail
-
-# Sandcastle repository bootstrap for C++ projects.
-# Runs from sandbox.onSandboxReady after the worktree is mounted.
-# Setup-only: configures CMake or recognizes Makefiles; does not build by default.
-
-root="\${SANDBOX_REPO_DIR:-.}"
+const CPP_BOOTSTRAP_SCRIPT =
+  bootstrapScriptPreamble(
+    "C++ projects",
+    "Generated for the C++ project profile. Setup-only: configures CMake or recognizes Makefiles; does not build by default",
+  ) +
+  `root="\${SANDBOX_REPO_DIR:-.}"
 
 if [[ -f "\$root/CMakeLists.txt" ]]; then
   build_dir="\$root/build"
@@ -204,6 +200,9 @@ const PROJECT_PROFILE_REGISTRY: readonly ProjectProfileEntry[] = [
 
 export const listProjectProfiles = (): readonly ProjectProfileEntry[] =>
   PROJECT_PROFILE_REGISTRY;
+
+export const formatProjectProfileNames = (): string =>
+  PROJECT_PROFILE_REGISTRY.map((profile) => profile.name).join(", ");
 
 export const getProjectProfile = (
   name: string,

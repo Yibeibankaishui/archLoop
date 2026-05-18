@@ -26,6 +26,7 @@ import {
   collectAuthRequirements,
   DEFAULT_PROJECT_PROFILE,
 } from "./InitService.js";
+import { renderBootstrapScript } from "./bootstrap.js";
 import { getProjectProfile, NODE_PROJECT_PROFILE } from "./projectProfiles.js";
 import type { ScaffoldOptions } from "./InitService.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
@@ -234,6 +235,22 @@ describe("InitService scaffold", () => {
     expect(bootstrap).toContain("exit 0");
     expect(bootstrap).not.toContain("npm install");
   });
+
+  it.each(["generic", "node", "python", "cpp"] as const)(
+    "scaffolds bootstrap.sh from renderBootstrapScript for %s profile",
+    async (profileName) => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        projectProfile: getProjectProfile(profileName)!,
+      });
+
+      const bootstrap = await readFile(
+        join(dir, ".sandcastle", "bootstrap.sh"),
+        "utf-8",
+      );
+      expect(bootstrap).toBe(renderBootstrapScript(profileName));
+    },
+  );
 
   it.each([
     "simple-loop",

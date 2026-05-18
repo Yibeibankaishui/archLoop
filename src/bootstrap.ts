@@ -1,13 +1,13 @@
-import { getProjectProfile, listProjectProfiles } from "./projectProfiles.js";
+import {
+  formatProjectProfileNames,
+  getProjectProfile,
+} from "./projectProfiles.js";
 
 export const renderBootstrapScript = (profileName: string): string => {
   const profile = getProjectProfile(profileName);
   if (!profile) {
-    const available = listProjectProfiles()
-      .map((entry) => entry.name)
-      .join(", ");
     throw new Error(
-      `Unknown project profile "${profileName}". Available: ${available}`,
+      `Unknown project profile "${profileName}". Available: ${formatProjectProfileNames()}`,
     );
   }
   return profile.bootstrapScript;

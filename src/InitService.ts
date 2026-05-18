@@ -10,11 +10,9 @@ import {
   validatePresetRegistries,
   type PresetAgentDefinition,
 } from "./presetAgents.js";
+import { renderBootstrapScript } from "./bootstrap.js";
 import {
   DEFAULT_PROJECT_PROFILE,
-  DEFAULT_PROJECT_PROFILE_NAME,
-  getProjectProfile,
-  listProjectProfiles,
   type ProjectProfileEntry,
 } from "./projectProfiles.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
@@ -22,10 +20,11 @@ import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 export {
   DEFAULT_PROJECT_PROFILE,
   DEFAULT_PROJECT_PROFILE_NAME,
+  formatProjectProfileNames,
   getProjectProfile,
   listProjectProfiles,
   type ProjectProfileEntry,
-};
+} from "./projectProfiles.js";
 
 const GITIGNORE = `.env
 auth/
@@ -1336,7 +1335,7 @@ export const scaffold = (
         fs
           .writeFileString(
             join(configDir, "bootstrap.sh"),
-            projectProfile.bootstrapScript,
+            renderBootstrapScript(projectProfile.name),
           )
           .pipe(Effect.mapError((e) => new Error(e.message))),
         copyTemplateFiles(templateDir, configDir, mainFilename),
