@@ -26,12 +26,17 @@ import {
   listAgentRuntimes,
   getAgentRuntime,
   collectAuthRequirements,
+  listProjectProfiles,
+  getProjectProfile,
+  DEFAULT_PROJECT_PROFILE,
+  DEFAULT_PROJECT_PROFILE_NAME,
 } from "./InitService.js";
 import { defaultImageName } from "./sandboxes/docker.js";
 import type {
   AgentEntry,
   AgentRuntimeEntry,
   BacklogManagerEntry,
+  ProjectProfileEntry,
   SandboxProviderEntry,
 } from "./InitService.js";
 import { ConfigDirError, InitError } from "./errors.js";
@@ -132,6 +137,13 @@ const initSandboxOption = Options.text("sandbox").pipe(
 const initBacklogOption = Options.text("backlog").pipe(
   Options.withDescription(
     "Backlog manager (github-issues or beads). Omit to choose interactively.",
+  ),
+  Options.optional,
+);
+
+const initProjectProfileOption = Options.text("project-profile").pipe(
+  Options.withDescription(
+    "Project profile for bootstrap and sandbox image scaffolding (e.g. generic). Defaults to generic.",
   ),
   Options.optional,
 );
@@ -404,6 +416,27 @@ const buildAuthSetupNextStepLines = (options: {
   return lines;
 };
 
+const isFullyScriptedInit = (options: {
+  agentFlag: OptionalTextFlag;
+  runtimesFlag: OptionalTextFlag;
+  sandboxCli: OptionalTextFlag;
+  backlogCli: OptionalTextFlag;
+  template: OptionalTextFlag;
+  presetAgentsCli: OptionalTextFlag;
+  buildImageCli: OptionalTextFlag;
+  createSandcastleLabelCli: OptionalTextFlag;
+  selectedBacklogManagerName: string;
+}): boolean =>
+  options.agentFlag._tag === "Some" &&
+  options.sandboxCli._tag === "Some" &&
+  options.backlogCli._tag === "Some" &&
+  options.template._tag === "Some" &&
+  options.presetAgentsCli._tag === "Some" &&
+  options.buildImageCli._tag === "Some" &&
+  (options.runtimesFlag._tag === "Some" || options.agentFlag._tag === "Some") &&
+  (options.selectedBacklogManagerName !== "github-issues" ||
+    options.createSandcastleLabelCli._tag === "Some");
+
 const initCommand = Command.make(
   "init",
   {
@@ -414,6 +447,7 @@ const initCommand = Command.make(
     model: initModelOption,
     sandbox: initSandboxOption,
     backlog: initBacklogOption,
+    projectProfile: initProjectProfileOption,
     presetAgents: initPresetAgentsOption,
     createSandcastleLabel: initCreateSandcastleLabelOption,
     buildImage: initBuildImageOption,
@@ -426,6 +460,7 @@ const initCommand = Command.make(
     model: modelFlag,
     sandbox: sandboxCli,
     backlog: backlogCli,
+    projectProfile: projectProfileCli,
     presetAgents: presetAgentsCli,
     createSandcastleLabel: createSandcastleLabelCli,
     buildImage: buildImageCli,
@@ -437,6 +472,20 @@ const initCommand = Command.make(
 
       // Early validation of CLI flags before interactive prompts
       const templates = listTemplates();
+      if (projectProfileCli._tag === "Some") {
+        const profile = getProjectProfile(projectProfileCli.value);
+        if (!profile) {
+          const names = listProjectProfiles()
+            .map((entry) => entry.name)
+            .join(", ");
+          yield* Effect.fail(
+            new InitError({
+              message: `Unknown project profile "${projectProfileCli.value}". Available: ${names}`,
+            }),
+          );
+        }
+      }
+
       if (template._tag === "Some") {
         const valid = templates.find((tmpl) => tmpl.name === template.value);
         if (!valid) {
@@ -589,6 +638,45 @@ const initCommand = Command.make(
         selectedTemplate = selected as string;
       }
 
+      const scriptedInit = isFullyScriptedInit({
+        agentFlag,
+        runtimesFlag,
+        sandboxCli,
+        backlogCli,
+        template,
+        presetAgentsCli,
+        buildImageCli,
+        createSandcastleLabelCli,
+        selectedBacklogManagerName: selectedBacklogManager.name,
+      });
+
+      let selectedProjectProfile: ProjectProfileEntry;
+      if (projectProfileCli._tag === "Some") {
+        selectedProjectProfile = getProjectProfile(projectProfileCli.value)!;
+      } else if (scriptedInit) {
+        selectedProjectProfile = DEFAULT_PROJECT_PROFILE;
+      } else {
+        const selected = yield* Effect.promise(() =>
+          clack.select({
+            message: "Select a project profile:",
+            initialValue: DEFAULT_PROJECT_PROFILE_NAME,
+            options: listProjectProfiles().map((profile) => ({
+              value: profile.name,
+              label: profile.label,
+              hint: profile.description,
+            })),
+          }),
+        );
+        if (clack.isCancel(selected)) {
+          yield* Effect.fail(
+            new InitError({
+              message: "Project profile selection cancelled.",
+            }),
+          );
+        }
+        selectedProjectProfile = getProjectProfile(selected as string)!;
+      }
+
       let presetAgentIds: readonly string[] | undefined;
       if (presetAgentsCli._tag === "Some") {
         presetAgentIds = yield* parsePresetAgentsCliValue(
@@ -666,6 +754,7 @@ const initCommand = Command.make(
           backlogManager: selectedBacklogManager,
           sandboxProvider: selectedSandboxProvider,
           installedRuntimes: selectedInstalledRuntimes,
+          projectProfile: selectedProjectProfile,
           ...(presetAgentIds !== undefined && presetAgentIds.length > 0
             ? { presetAgentIds }
             : {}),
@@ -689,17 +778,6 @@ const initCommand = Command.make(
       const hasCursorAuth = authRequirements.some(
         (requirement) => requirement.id === "cursor",
       );
-      const isFullyScriptedInit =
-        agentFlag._tag === "Some" &&
-        sandboxCli._tag === "Some" &&
-        backlogCli._tag === "Some" &&
-        template._tag === "Some" &&
-        presetAgentsCli._tag === "Some" &&
-        buildImageCli._tag === "Some" &&
-        (runtimesFlag._tag === "Some" || agentFlag._tag === "Some") &&
-        (selectedBacklogManager.name !== "github-issues" ||
-          createSandcastleLabelCli._tag === "Some");
-
       const githubAuthRequirement = authRequirements.find(
         (requirement) =>
           requirement.id === "github-issues" &&
@@ -710,7 +788,7 @@ const initCommand = Command.make(
       let cursorAuthChoice: "env" | "skip" | "deferred" | undefined;
 
       if (githubAuthRequirement) {
-        if (isFullyScriptedInit) {
+        if (scriptedInit) {
           githubAuthChoice = "deferred";
         } else {
           const authChoice = yield* Effect.promise(() =>
@@ -774,7 +852,7 @@ const initCommand = Command.make(
       }
 
       if (hasCodexAuth) {
-        if (isFullyScriptedInit) {
+        if (scriptedInit) {
           codexAuthChoice = "deferred";
         } else {
           const authChoice = yield* Effect.promise(() =>
@@ -838,7 +916,7 @@ const initCommand = Command.make(
       }
 
       if (hasCursorAuth) {
-        if (isFullyScriptedInit) {
+        if (scriptedInit) {
           cursorAuthChoice = "deferred";
         } else {
           const authChoice = yield* Effect.promise(() =>

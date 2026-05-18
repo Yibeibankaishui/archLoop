@@ -10,7 +10,22 @@ import {
   validatePresetRegistries,
   type PresetAgentDefinition,
 } from "./presetAgents.js";
+import {
+  DEFAULT_PROJECT_PROFILE,
+  DEFAULT_PROJECT_PROFILE_NAME,
+  getProjectProfile,
+  listProjectProfiles,
+  type ProjectProfileEntry,
+} from "./projectProfiles.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
+
+export {
+  DEFAULT_PROJECT_PROFILE,
+  DEFAULT_PROJECT_PROFILE_NAME,
+  getProjectProfile,
+  listProjectProfiles,
+  type ProjectProfileEntry,
+};
 
 const GITIGNORE = `.env
 auth/
@@ -116,6 +131,8 @@ RUN apt-get update && apt-get install -y \\
 
 {{BACKLOG_MANAGER_TOOLS}}
 
+{{PROJECT_PROFILE_TOOLS}}
+
 # Build-args for UID/GID alignment: sandcastle docker build-image
 # defaults these to the host user's UID/GID so image-built files
 # and bind-mounted files share an owner without runtime chown.
@@ -159,6 +176,8 @@ RUN apt-get update && apt-get install -y \\
 
 {{BACKLOG_MANAGER_TOOLS}}
 
+{{PROJECT_PROFILE_TOOLS}}
+
 # Build-args for UID/GID alignment: sandcastle docker build-image
 # defaults these to the host user's UID/GID so image-built files
 # and bind-mounted files share an owner without runtime chown.
@@ -199,6 +218,8 @@ RUN apt-get update && apt-get install -y \\
 
 {{BACKLOG_MANAGER_TOOLS}}
 
+{{PROJECT_PROFILE_TOOLS}}
+
 # Build-args for UID/GID alignment: sandcastle docker build-image
 # defaults these to the host user's UID/GID so image-built files
 # and bind-mounted files share an owner without runtime chown.
@@ -238,6 +259,8 @@ RUN apt-get update && apt-get install -y \\
   && rm -rf /var/lib/apt/lists/*
 
 {{BACKLOG_MANAGER_TOOLS}}
+
+{{PROJECT_PROFILE_TOOLS}}
 
 # Build-args for UID/GID alignment: sandcastle docker build-image
 # defaults these to the host user's UID/GID so image-built files
@@ -282,6 +305,8 @@ RUN apt-get update && apt-get install -y \\
   && rm -rf /var/lib/apt/lists/*
 
 {{BACKLOG_MANAGER_TOOLS}}
+
+{{PROJECT_PROFILE_TOOLS}}
 
 # Build-args for UID/GID alignment: sandcastle docker build-image
 # defaults these to the host user's UID/GID so image-built files
@@ -1184,6 +1209,7 @@ export interface ScaffoldOptions {
   createLabel?: boolean;
   backlogManager?: BacklogManagerEntry;
   sandboxProvider?: SandboxProviderEntry;
+  projectProfile?: ProjectProfileEntry;
   /** Optional preset agent role ids (see `presetAgents.ts`). */
   presetAgentIds?: readonly string[];
 }
@@ -1231,6 +1257,7 @@ export const scaffold = (
       createLabel = true,
       backlogManager = BACKLOG_MANAGER_REGISTRY[0]!, // default: github-issues
       sandboxProvider = SANDBOX_PROVIDER_REGISTRY[0]!, // default: docker
+      projectProfile = DEFAULT_PROJECT_PROFILE,
       presetAgentIds = [],
     } = options;
     const fs = yield* FileSystem.FileSystem;
@@ -1298,6 +1325,12 @@ export const scaffold = (
         fs
           .writeFileString(join(configDir, ".env"), envExampleContent)
           .pipe(Effect.mapError((e) => new Error(e.message))),
+        fs
+          .writeFileString(
+            join(configDir, "bootstrap.sh"),
+            projectProfile.bootstrapScript,
+          )
+          .pipe(Effect.mapError((e) => new Error(e.message))),
         copyTemplateFiles(templateDir, configDir, mainFilename),
       ],
       { concurrency: "unbounded" },
@@ -1311,8 +1344,11 @@ export const scaffold = (
       selectedAuthMounts,
     );
 
-    // Replace backlog manager template arguments in all text files (must run before label stripping)
-    yield* substituteTemplateArgs(configDir, backlogManager.templateArgs);
+    // Replace backlog manager and project profile template arguments in all text files (must run before label stripping)
+    yield* substituteTemplateArgs(configDir, {
+      ...backlogManager.templateArgs,
+      PROJECT_PROFILE_TOOLS: projectProfile.containerfileTools,
+    });
 
     // Strip --label Sandcastle from prompt files when the user declined label creation
     if (!createLabel) {

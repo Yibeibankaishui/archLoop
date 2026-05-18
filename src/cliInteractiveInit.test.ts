@@ -56,6 +56,10 @@ describe("sandcastle init interactive runtime selection", () => {
         if (opts.message === "Select a template:") {
           return "blank";
         }
+        if (opts.message === "Select a project profile:") {
+          expect(opts.initialValue).toBe("generic");
+          return "generic";
+        }
         if (opts.message === "Set up Cursor authentication now?") {
           return "env";
         }
@@ -77,6 +81,56 @@ describe("sandcastle init interactive runtime selection", () => {
   afterEach(() => {
     process.chdir(originalCwd);
     vi.clearAllMocks();
+  });
+
+  it("asks for project profile after template selection", async () => {
+    const selectOrder: string[] = [];
+    mockSelect.mockImplementation(
+      async (opts: { message: string; initialValue?: string }) => {
+        selectOrder.push(opts.message);
+        if (opts.message === "Select the default scaffold agent:")
+          return "cursor";
+        if (opts.message === "Select a sandbox provider:") return "docker";
+        if (opts.message === "Select a backlog manager:") return "beads";
+        if (opts.message === "Select a template:") return "simple-loop";
+        if (opts.message === "Select a project profile:") {
+          expect(opts.initialValue).toBe("generic");
+          return "generic";
+        }
+        if (opts.message === "Set up Cursor authentication now?") return "env";
+        throw new Error(`Unexpected select prompt: ${opts.message}`);
+      },
+    );
+    mockMultiselect.mockResolvedValue(["cursor"]);
+    mockConfirm.mockImplementation(async (opts: { message: string }) => {
+      if (opts.message.startsWith('Create a "Sandcastle" GitHub label?'))
+        return false;
+      if (opts.message.startsWith("Add preset agent roles")) return false;
+      if (opts.message.startsWith("Build the default Docker image now"))
+        return false;
+      throw new Error(`Unexpected confirm prompt: ${opts.message}`);
+    });
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const ref = yield* Ref.make<ReadonlyArray<DisplayEntry>>([]);
+        yield* cli(["node", "sandcastle", "init"]).pipe(
+          Effect.provide(SilentDisplay.layer(ref)),
+          Effect.provide(NodeContext.layer),
+        );
+      }),
+    );
+
+    const templateIndex = selectOrder.indexOf("Select a template:");
+    const profileIndex = selectOrder.indexOf("Select a project profile:");
+    expect(templateIndex).toBeGreaterThanOrEqual(0);
+    expect(profileIndex).toBeGreaterThan(templateIndex);
+
+    const bootstrap = await readFile(
+      join(hostDir, ".sandcastle", "bootstrap.sh"),
+      "utf-8",
+    );
+    expect(bootstrap).toContain("exit 0");
   });
 
   it("preselects the default agent runtime in the interactive runtime prompt", async () => {
@@ -142,6 +196,7 @@ describe("sandcastle init interactive runtime selection", () => {
         if (opts.message === "Select a sandbox provider:") return "docker";
         if (opts.message === "Select a backlog manager:") return "beads";
         if (opts.message === "Select a template:") return "blank";
+        if (opts.message === "Select a project profile:") return "generic";
         if (opts.message === "Set up Cursor authentication now?") {
           expect(opts.options).toEqual([
             {
@@ -183,6 +238,7 @@ describe("sandcastle init interactive runtime selection", () => {
       if (opts.message === "Select a sandbox provider:") return "docker";
       if (opts.message === "Select a backlog manager:") return "github-issues";
       if (opts.message === "Select a template:") return "blank";
+      if (opts.message === "Select a project profile:") return "generic";
       if (opts.message === "Set up GitHub authentication now?") return "env";
       if (opts.message === "Set up Codex authentication now?") return "env";
       throw new Error(`Unexpected select prompt: ${opts.message}`);
@@ -240,6 +296,7 @@ describe("sandcastle init interactive runtime selection", () => {
       if (opts.message === "Select a sandbox provider:") return "docker";
       if (opts.message === "Select a backlog manager:") return "github-issues";
       if (opts.message === "Select a template:") return "blank";
+      if (opts.message === "Select a project profile:") return "generic";
       if (opts.message === "Set up GitHub authentication now?") return "login";
       if (opts.message === "Set up Codex authentication now?") return "login";
       if (opts.message === "Set up Cursor authentication now?") return "skip";
@@ -309,6 +366,7 @@ describe("sandcastle init interactive runtime selection", () => {
       if (opts.message === "Select a sandbox provider:") return "docker";
       if (opts.message === "Select a backlog manager:") return "github-issues";
       if (opts.message === "Select a template:") return "blank";
+      if (opts.message === "Select a project profile:") return "generic";
       if (opts.message === "Set up GitHub authentication now?") return "skip";
       if (opts.message === "Set up Codex authentication now?") return "skip";
       throw new Error(`Unexpected select prompt: ${opts.message}`);

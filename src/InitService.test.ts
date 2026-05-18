@@ -24,6 +24,8 @@ import {
   listAgentRuntimes,
   getAgentRuntime,
   collectAuthRequirements,
+  DEFAULT_PROJECT_PROFILE,
+  getProjectProfile,
 } from "./InitService.js";
 import type { ScaffoldOptions } from "./InitService.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
@@ -207,6 +209,53 @@ describe("Auth requirement collection", () => {
 // ---------------------------------------------------------------------------
 
 describe("InitService scaffold", () => {
+  it("scaffolds a no-op bootstrap.sh for the generic project profile", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      projectProfile: DEFAULT_PROJECT_PROFILE,
+    });
+
+    const bootstrap = await readFile(
+      join(dir, ".sandcastle", "bootstrap.sh"),
+      "utf-8",
+    );
+    expect(bootstrap).toContain("#!/usr/bin/env bash");
+    expect(bootstrap).toContain("exit 0");
+    expect(bootstrap).not.toContain("npm install");
+  });
+
+  it("generic project profile does not add language-specific Dockerfile tools", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      projectProfile: DEFAULT_PROJECT_PROFILE,
+    });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).not.toContain("{{PROJECT_PROFILE_TOOLS}}");
+    expect(dockerfile).not.toContain("corepack enable");
+    expect(dockerfile).not.toMatch(/\buv\b/);
+    expect(dockerfile).not.toContain("cmake");
+  });
+
+  it("generic project profile does not alter .env.example beyond runtime and backlog vars", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      projectProfile: DEFAULT_PROJECT_PROFILE,
+    });
+
+    const envExample = await readFile(
+      join(dir, ".sandcastle", ".env.example"),
+      "utf-8",
+    );
+    expect(envExample).toContain("ANTHROPIC_API_KEY=");
+    expect(envExample).toContain("GH_TOKEN=");
+    expect(envExample).not.toContain("NPM_TOKEN");
+    expect(envExample).not.toContain("UV_");
+  });
+
   it("uses default runtime Dockerfile metadata for Dockerfile (with templateArgs substitution)", async () => {
     const dir = await makeDir();
     await runScaffold(dir);
@@ -219,6 +268,7 @@ describe("InitService scaffold", () => {
     expect(dockerfile).toContain("FROM node:22-bookworm");
     expect(dockerfile).toContain("GitHub CLI");
     expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
+    expect(dockerfile).not.toContain("{{PROJECT_PROFILE_TOOLS}}");
   });
 
   // --- Dynamic .env.example generation ---

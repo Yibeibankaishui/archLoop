@@ -114,6 +114,11 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("--installed-runtimes");
   });
 
+  it("init --help exposes --project-profile flag", async () => {
+    const { stdout } = await runCli("init --help", process.cwd());
+    expect(stdout).toContain("--project-profile");
+  });
+
   it("init --template nonexistent produces error listing available templates", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
@@ -258,6 +263,39 @@ describe("sandcastle CLI", () => {
     expect(envExample).toContain("OPENAI_KEY=");
     expect(envExample).toContain("CURSOR_API_KEY=");
     expect(envExample).not.toContain("ANTHROPIC_API_KEY=");
+  });
+
+  it("init --project-profile generic scaffolds bootstrap.sh", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    await runNonInteractiveInit(
+      hostDir,
+      "--agent claude-code --project-profile generic",
+    );
+
+    const bootstrap = await readFile(
+      join(hostDir, ".sandcastle", "bootstrap.sh"),
+      "utf-8",
+    );
+    expect(bootstrap).toContain("#!/usr/bin/env bash");
+    expect(bootstrap).toContain("exit 0");
+  });
+
+  it("init --project-profile rejects unknown profiles before scaffolding", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    try {
+      await runNonInteractiveInit(
+        hostDir,
+        "--agent claude-code --project-profile node",
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      expect(cliFailureOutput(err)).toContain('Unknown project profile "node"');
+      await expect(access(join(hostDir, ".sandcastle"))).rejects.toThrow();
+    }
   });
 
   it("init --runtimes rejects unknown runtimes before scaffolding", async () => {
