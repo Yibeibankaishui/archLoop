@@ -26,8 +26,9 @@ import {
   listAgentRuntimes,
   getAgentRuntime,
   collectAuthRequirements,
-  listProjectProfiles,
+  formatProjectProfileNames,
   getProjectProfile,
+  listProjectProfiles,
   DEFAULT_PROJECT_PROFILE,
   DEFAULT_PROJECT_PROFILE_NAME,
 } from "./InitService.js";
@@ -472,18 +473,16 @@ const initCommand = Command.make(
 
       // Early validation of CLI flags before interactive prompts
       const templates = listTemplates();
-      if (projectProfileCli._tag === "Some") {
-        const profile = getProjectProfile(projectProfileCli.value);
-        if (!profile) {
-          const names = listProjectProfiles()
-            .map((entry) => entry.name)
-            .join(", ");
-          yield* Effect.fail(
-            new InitError({
-              message: `Unknown project profile "${projectProfileCli.value}". Available: ${names}`,
-            }),
-          );
-        }
+      const cliProjectProfile =
+        projectProfileCli._tag === "Some"
+          ? getProjectProfile(projectProfileCli.value)
+          : undefined;
+      if (projectProfileCli._tag === "Some" && !cliProjectProfile) {
+        yield* Effect.fail(
+          new InitError({
+            message: `Unknown project profile "${projectProfileCli.value}". Available: ${formatProjectProfileNames()}`,
+          }),
+        );
       }
 
       if (template._tag === "Some") {
@@ -651,8 +650,8 @@ const initCommand = Command.make(
       });
 
       let selectedProjectProfile: ProjectProfileEntry;
-      if (projectProfileCli._tag === "Some") {
-        selectedProjectProfile = getProjectProfile(projectProfileCli.value)!;
+      if (cliProjectProfile) {
+        selectedProjectProfile = cliProjectProfile;
       } else if (scriptedInit) {
         selectedProjectProfile = DEFAULT_PROJECT_PROFILE;
       } else {
