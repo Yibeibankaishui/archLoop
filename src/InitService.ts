@@ -776,6 +776,13 @@ export const getSandboxProvider = (
 const PRESET_AGENT_NEXT_STEP =
   "Preset agent roles are in .sandcastle/agents/ with bundled skills under .sandcastle/skills/. See .sandcastle/agent-profiles.json for recommended provider/model; compose prompts from main.mts using run() as needed. Recommendations may require matching installed runtimes.";
 
+const BOOTSTRAP_SCAFFOLD_NOTE =
+  "`.sandcastle/bootstrap.sh` was generated from your Project profile during init (user-editable scaffold; init does not run or validate it)";
+
+const blankBootstrapNextStep = `${BOOTSTRAP_SCAFFOLD_NOTE}. The blank template does not run bootstrap unless you wire \`sandbox.onSandboxReady\` yourself`;
+
+const nonBlankBootstrapNextStep = `${BOOTSTRAP_SCAFFOLD_NOTE}. Non-blank templates run it from \`sandbox.onSandboxReady\` after the worktree is mounted and before the agent starts — not during image build. Customize the script for your stack`;
+
 const runMainCommand = (mainFilename: string): string =>
   `npm exec --yes --package tsx -- tsx .sandcastle/${mainFilename}`;
 
@@ -803,6 +810,7 @@ export function getNextStepsLines(
       `${step++}. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs and can mix installed agent providers after init`,
       `${step++}. Add "sandcastle": "${runMainCommand(mainFilename)}" to your package.json scripts`,
     ];
+    lines.push(`${step++}. ${blankBootstrapNextStep}`);
     if (presetHintText) {
       lines.push(`${step++}. ${presetHintText}`);
     }
@@ -821,7 +829,7 @@ export function getNextStepsLines(
     "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
     `${step++}. Add "sandcastle": "${runMainCommand(mainFilename)}" to your package.json scripts`,
     `${step++}. Edit .sandcastle/${mainFilename} to mix installed agent providers after init; the selected default agent only seeds the scaffolded example`,
-    `${step++}. Non-blank templates use \`.sandcastle/bootstrap.sh\` as the repository bootstrap contract and run it from \`sandbox.onSandboxReady\`. Customize that script for your stack`,
+    `${step++}. ${nonBlankBootstrapNextStep}`,
     `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
   ];
   if (hasReviewer) {

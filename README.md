@@ -632,7 +632,7 @@ console.log(result.output.score); // typed as number
 
 ### Templates
 
-`sandcastle init` prompts you to choose a sandbox provider (Docker or Podman), a backlog manager (GitHub Issues or Beads), and a template, which scaffolds a ready-to-use prompt and `main.mts` suited to a specific workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. Five templates are available:
+`sandcastle init` prompts you to choose a sandbox provider (Docker or Podman), a backlog manager (GitHub Issues or Beads), a workflow template, and a **Project profile** (your repo's language or build-system shape). It scaffolds a ready-to-use prompt and `main.mts` suited to the workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. Five templates are available:
 
 | Template                       | Description                                                               |
 | ------------------------------ | ------------------------------------------------------------------------- |
@@ -644,7 +644,7 @@ console.log(result.output.score); // typed as number
 
 Select a template during `sandcastle init` when prompted, or re-run init in a fresh repo to try a different one.
 
-For all templates except `blank`, `.sandcastle/bootstrap.sh` is the bootstrap script convention. `sandcastle init` scaffolds this script from your Project profile; non-blank templates run it from `sandbox.onSandboxReady` and do not generate or repair it at run time.
+For all templates except `blank`, `.sandcastle/bootstrap.sh` is the repository bootstrap contract. `sandcastle init` scaffolds this user-editable script from your Project profile; non-blank templates run it from `sandbox.onSandboxReady` after the worktree is mounted and before the agent runs. Templates do not generate or repair bootstrap at run time. See [Project profiles](#project-profiles) under `sandcastle init` for the full model.
 
 ### Preset agent roles (optional)
 
@@ -654,7 +654,7 @@ After you choose a template, init can optionally add **preset agent roles**. In 
 
 ### `sandcastle init`
 
-Scaffolds the `.sandcastle/` config directory and builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a default scaffold agent and then which agent runtimes to install in the image. You choose a sandbox provider (Docker or Podman) during init — selecting Podman writes a `Containerfile` instead of `Dockerfile` and uses `sandcastle podman build-image` for the build step. After scaffold and before image build, init also runs an auth setup step for selected tools, including GitHub Issues, Codex, and Cursor.
+Scaffolds the `.sandcastle/` config directory and builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a default scaffold agent, which agent runtimes to install in the image, sandbox provider, backlog manager, workflow template, and Project profile (after template selection). You choose Docker or Podman during init — selecting Podman writes a `Containerfile` instead of `Dockerfile` and uses `sandcastle podman build-image` for the build step. After scaffold and before image build, init also runs an auth setup step for selected tools, including GitHub Issues, Codex, and Cursor.
 
 Think of the init agent choices as two layers:
 
@@ -663,6 +663,38 @@ Think of the init agent choices as two layers:
 
 `main.mts`/`main.ts` remains the orchestration surface after init. If you install multiple runtimes, edit that file to import and call the providers you want for each `run()` or `createSandbox()` flow. For scripted init, omit `--runtimes` to install the selected `--agent` runtime, or pass a comma-separated list.
 
+#### Project profiles
+
+**Project profile** is the project type you select during init (`--project-profile` in scripted mode; interactive init asks after workflow template selection). It is independent of workflow **template**, default scaffold **agent**, installed **runtimes**, and **backlog manager**.
+
+Supported first-version profiles:
+
+| Profile   | Purpose                                                                 |
+| --------- | ----------------------------------------------------------------------- |
+| `generic` | Default. Language-agnostic scaffold with a no-op bootstrap you can edit |
+| `node`    | Lockfile-aware Node dependency setup in bootstrap                       |
+| `python`  | Python, pip, venv, and uv in the image; setup-only Python bootstrap     |
+| `cpp`     | C++ toolchain in the image; setup-only CMake or Makefile bootstrap      |
+
+`generic` is the default. Sandcastle does **not** auto-detect project type in the first version — pick the closest profile or stay on `generic`. AI-generated bootstrap and automatic detection are out of scope for v1.
+
+What Project profile affects:
+
+- **Dockerfile or Containerfile** — language-specific tool layers composed with agent runtime and backlog manager layers.
+- **`.sandcastle/bootstrap.sh`** — a deterministic, user-editable scaffold script generated at init.
+
+What Project profile does **not** affect:
+
+- Public runtime APIs (`run()`, `createSandbox()`, sandbox providers, and CLI commands other than `init`).
+- **`.env.example`** beyond agent and backlog credentials.
+- Cache mounts or `copyToWorktree` defaults.
+
+Bootstrap behavior:
+
+- Generated during init as an editable scaffold; init does **not** run or validate bootstrap.
+- Bootstrap is **not** part of image build — it is repository setup that runs at sandbox start.
+- Non-blank templates invoke bootstrap from `sandbox.onSandboxReady` after the worktree is mounted and before the agent runs.
+
 ```bash
 npx sandcastle init \
   --agent claude-code \
@@ -670,6 +702,7 @@ npx sandcastle init \
   --sandbox docker \
   --backlog github-issues \
   --template simple-loop \
+  --project-profile node \
   --preset-agents none \
   --create-sandcastle-label false \
   --build-image false
@@ -684,6 +717,7 @@ Existing single-runtime projects remain valid. `sandcastle init` does not automa
 | `--runtimes`                | No       | Selected `--agent` runtime, or interactive prompt | Comma-separated runtimes to install (`claude-code,codex`); `--installed-runtimes` is accepted as an alias |
 | `--model`                   | No       | Agent's default model                             | Model to use (e.g. `claude-sonnet-4-6`). Defaults to agent's default                                      |
 | `--template`                | No       | Interactive prompt                                | Template to scaffold (e.g. `blank`, `simple-loop`)                                                        |
+| `--project-profile`         | No       | `generic`                                         | Project type for containerfile tools and bootstrap (`generic`, `node`, `python`, `cpp`)                   |
 | `--sandbox`                 | No       | Interactive prompt                                | Sandbox provider (`docker` or `podman`)                                                                   |
 | `--backlog`                 | No       | Interactive prompt                                | Backlog manager (`github-issues` or `beads`)                                                              |
 | `--preset-agents`           | No       | Interactive prompt                                | Comma-separated preset ids (e.g. `reviewer,planner`) or `none`                                            |
@@ -695,6 +729,8 @@ Creates the following files (plus optional `agents/`, `skills/`, and `agent-prof
 ```
 .sandcastle/
 ├── Dockerfile      # Sandbox environment (customize as needed)
+├── bootstrap.sh    # Repo setup hook (from Project profile; customize as needed)
+├── main.mts        # Orchestration entry (or main.ts)
 ├── prompt.md       # Agent instructions
 ├── .env.example    # Token placeholders
 └── .gitignore      # Ignores .env, logs/
