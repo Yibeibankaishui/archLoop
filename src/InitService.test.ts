@@ -1143,8 +1143,19 @@ describe("InitService scaffold", () => {
     it("non-blank template includes a note about customizing bootstrap.sh", () => {
       const lines = getNextStepsLines("simple-loop", "main.mts");
       const joined = lines.join("\n");
+      expect(joined).toMatch(/Project profile/i);
       expect(joined).toContain(".sandcastle/bootstrap.sh");
       expect(joined).toContain("onSandboxReady");
+      expect(joined).toMatch(/worktree|mounted/i);
+      expect(joined).toMatch(/image build|during init/i);
+      expect(joined).toMatch(/does not run or validate/i);
+    });
+
+    it("blank template next steps mention scaffolded bootstrap from Project profile", () => {
+      const joined = getNextStepsLines("blank", "main.mts").join("\n");
+      expect(joined).toMatch(/Project profile/i);
+      expect(joined).toContain(".sandcastle/bootstrap.sh");
+      expect(joined).toMatch(/does not run or validate/i);
     });
 
     it("non-blank template does not mention node_modules optimization defaults", () => {
