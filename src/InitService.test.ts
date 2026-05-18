@@ -25,8 +25,8 @@ import {
   getAgentRuntime,
   collectAuthRequirements,
   DEFAULT_PROJECT_PROFILE,
-  getProjectProfile,
 } from "./InitService.js";
+import { getProjectProfile, NODE_PROJECT_PROFILE } from "./projectProfiles.js";
 import type { ScaffoldOptions } from "./InitService.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import { SKELETON_PROMPT } from "./templates.js";
@@ -270,6 +270,49 @@ describe("InitService scaffold", () => {
     expect(dockerfile).not.toContain("cmake");
   });
 
+  it("cpp project profile adds C++ toolchain to Dockerfile and bootstrap.sh", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      projectProfile: getProjectProfile("cpp")!,
+    });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).toContain("build-essential");
+    expect(dockerfile).toContain("cmake");
+    expect(dockerfile).toContain("ninja-build");
+    expect(dockerfile).not.toContain("{{PROJECT_PROFILE_TOOLS}}");
+
+    const bootstrap = await readFile(
+      join(dir, ".sandcastle", "bootstrap.sh"),
+      "utf-8",
+    );
+    expect(bootstrap).toContain("cmake -S");
+    expect(bootstrap).not.toContain("cmake --build");
+    expect(bootstrap).toContain("No supported C++ build signal found");
+  });
+
+  it("cpp project profile does not alter .env.example or copy-to-worktree defaults", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, { projectProfile: getProjectProfile("cpp")! });
+
+    const envExample = await readFile(
+      join(dir, ".sandcastle", ".env.example"),
+      "utf-8",
+    );
+    expect(envExample).toContain("ANTHROPIC_API_KEY=");
+    expect(envExample).not.toContain("CCACHE");
+    expect(envExample).not.toContain("CMAKE_");
+
+    const mainTs = await readFile(
+      join(dir, ".sandcastle", "main.mts"),
+      "utf-8",
+    );
+    expect(mainTs).not.toMatch(/copyToWorktree:[\s\S]*build\//);
+  });
+
   it("generic project profile does not alter .env.example beyond runtime and backlog vars", async () => {
     const dir = await makeDir();
     await runScaffold(dir, {
@@ -284,6 +327,105 @@ describe("InitService scaffold", () => {
     expect(envExample).toContain("GH_TOKEN=");
     expect(envExample).not.toContain("NPM_TOKEN");
     expect(envExample).not.toContain("UV_");
+  });
+
+  it("scaffolds node bootstrap.sh with lockfile-based dependency install", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      projectProfile: NODE_PROJECT_PROFILE,
+    });
+
+    const bootstrap = await readFile(
+      join(dir, ".sandcastle", "bootstrap.sh"),
+      "utf-8",
+    );
+    expect(bootstrap).toContain("pnpm-lock.yaml");
+    expect(bootstrap).toContain("pnpm install");
+    expect(bootstrap).toContain("yarn.lock");
+    expect(bootstrap).toContain("npm ci");
+    expect(bootstrap).toContain("No package.json found");
+    expect(bootstrap).not.toContain("npm test");
+    expect(bootstrap).not.toContain("npm run build");
+  });
+
+  it("node project profile reuses Node 22 base without extra containerfile tools", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      projectProfile: NODE_PROJECT_PROFILE,
+    });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).toContain("FROM node:22-bookworm");
+    expect(dockerfile).not.toContain("{{PROJECT_PROFILE_TOOLS}}");
+    expect(dockerfile).not.toContain("corepack enable");
+    expect(dockerfile).not.toMatch(/\buv\b/);
+    expect(dockerfile).not.toContain("cmake");
+  });
+
+  it("python project profile adds Python tools to Dockerfile", async () => {
+    const dir = await makeDir();
+    const pythonProfile = getProjectProfile("python")!;
+    await runScaffold(dir, { projectProfile: pythonProfile });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).not.toContain("{{PROJECT_PROFILE_TOOLS}}");
+    expect(dockerfile).toContain("python3");
+    expect(dockerfile).toContain("python3-pip");
+    expect(dockerfile).toContain("python3-venv");
+    expect(dockerfile).toContain("astral.sh/uv/install.sh");
+    expect(dockerfile.toLowerCase()).not.toContain("poetry");
+  });
+
+  it("python project profile adds Python tools to Containerfile", async () => {
+    const dir = await makeDir();
+    const pythonProfile = getProjectProfile("python")!;
+    await runScaffold(dir, {
+      projectProfile: pythonProfile,
+      sandboxProvider: getSandboxProvider("podman")!,
+    });
+
+    const containerfile = await readFile(
+      join(dir, ".sandcastle", "Containerfile"),
+      "utf-8",
+    );
+    expect(containerfile).not.toContain("{{PROJECT_PROFILE_TOOLS}}");
+    expect(containerfile).toContain("python3-venv");
+    expect(containerfile).toContain("astral.sh/uv/install.sh");
+  });
+
+  it("python project profile scaffolds a Python bootstrap.sh", async () => {
+    const dir = await makeDir();
+    const pythonProfile = getProjectProfile("python")!;
+    await runScaffold(dir, { projectProfile: pythonProfile });
+
+    const bootstrap = await readFile(
+      join(dir, ".sandcastle", "bootstrap.sh"),
+      "utf-8",
+    );
+    expect(bootstrap).toContain("uv sync");
+    expect(bootstrap).toContain("requirements.txt");
+    expect(bootstrap).toContain("Poetry");
+    expect(bootstrap).not.toContain("pytest");
+  });
+
+  it("python project profile does not alter .env.example beyond runtime and backlog vars", async () => {
+    const dir = await makeDir();
+    const pythonProfile = getProjectProfile("python")!;
+    await runScaffold(dir, { projectProfile: pythonProfile });
+
+    const envExample = await readFile(
+      join(dir, ".sandcastle", ".env.example"),
+      "utf-8",
+    );
+    expect(envExample).toContain("ANTHROPIC_API_KEY=");
+    expect(envExample).not.toContain("UV_INDEX_URL");
+    expect(envExample).not.toContain("POETRY_");
   });
 
   it("uses default runtime Dockerfile metadata for Dockerfile (with templateArgs substitution)", async () => {

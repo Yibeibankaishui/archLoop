@@ -143,7 +143,7 @@ const initBacklogOption = Options.text("backlog").pipe(
 
 const initProjectProfileOption = Options.text("project-profile").pipe(
   Options.withDescription(
-    "Project profile for bootstrap and sandbox image scaffolding (e.g. generic). Defaults to generic.",
+    "Project profile for bootstrap and sandbox image scaffolding (e.g. generic, node). Defaults to generic.",
   ),
   Options.optional,
 );

@@ -10,9 +10,34 @@ describe("renderBootstrapScript", () => {
     expect(script).not.toContain("pip install");
   });
 
+  it("renders node bootstrap with lockfile-based install commands", () => {
+    const script = renderBootstrapScript("node");
+    expect(script).toContain("pnpm-lock.yaml");
+    expect(script).toContain("npm ci");
+    expect(script).toContain("No package.json found");
+  });
+
+  it("renders a Python bootstrap script with uv, pip, and Poetry guidance", () => {
+    const script = renderBootstrapScript("python");
+    expect(script).toContain("uv sync");
+    expect(script).toContain("requirements.txt");
+    expect(script).toContain("Poetry");
+    expect(script).not.toContain("pytest");
+    expect(script).not.toContain("poetry install");
+  });
+
+  it("renders cpp bootstrap with setup-only cmake and makefile handling", () => {
+    const script = renderBootstrapScript("cpp");
+    expect(script).toContain("cmake -S");
+    expect(script).not.toContain("cmake --build");
+    expect(script).toContain("Makefile");
+    expect(script).not.toMatch(/\bmake\b[^l]/);
+    expect(script).toContain("No supported C++ build signal found");
+  });
+
   it("rejects unknown project profiles", () => {
-    expect(() => renderBootstrapScript("node")).toThrow(
-      'Unknown project profile "node"',
+    expect(() => renderBootstrapScript("rust")).toThrow(
+      'Unknown project profile "rust"',
     );
   });
 });
