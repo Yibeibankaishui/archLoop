@@ -751,6 +751,9 @@ export const getSandboxProvider = (
 const PRESET_AGENT_NEXT_STEP =
   "Preset agent roles are in .sandcastle/agents/ with bundled skills under .sandcastle/skills/. See .sandcastle/agent-profiles.json for recommended provider/model; compose prompts from main.mts using run() as needed. Recommendations may require matching installed runtimes.";
 
+const runMainCommand = (mainFilename: string): string =>
+  `npm exec --yes --package tsx -- tsx .sandcastle/${mainFilename}`;
+
 export function getNextStepsLines(
   template: string,
   mainFilename: string,
@@ -773,7 +776,7 @@ export function getNextStepsLines(
       "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
       `${step++}. Read and customize .sandcastle/prompt.md to describe what you want the agent to do`,
       `${step++}. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs and can mix installed agent providers after init`,
-      `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
+      `${step++}. Add "sandcastle": "${runMainCommand(mainFilename)}" to your package.json scripts`,
     ];
     if (presetHintText) {
       lines.push(`${step++}. ${presetHintText}`);
@@ -791,7 +794,7 @@ export function getNextStepsLines(
     "Next steps:",
     `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
     "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
-    `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
+    `${step++}. Add "sandcastle": "${runMainCommand(mainFilename)}" to your package.json scripts`,
     `${step++}. Edit .sandcastle/${mainFilename} to mix installed agent providers after init; the selected default agent only seeds the scaffolded example`,
     `${step++}. Non-blank templates use \`.sandcastle/bootstrap.sh\` as the repository bootstrap contract and run it from \`sandbox.onSandboxReady\`. Customize that script for your stack`,
     `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,

@@ -389,15 +389,15 @@ const buildAuthSetupNextStepLines = (options: {
 
   if (options.cursorChoice === "env") {
     lines.push(
-      "Add CURSOR_API_KEY to .sandcastle/.env before running Cursor in the sandbox.",
+      "Add CURSOR_API_KEY to .sandcastle/.env before the first Cursor sandbox run. Bootstrap and task runs will fail without it.",
     );
   } else if (options.cursorChoice === "skip") {
     lines.push(
-      "Set up Cursor auth later with CURSOR_API_KEY in .sandcastle/.env.",
+      "Set CURSOR_API_KEY in .sandcastle/.env before the first Cursor sandbox run. Bootstrap and task runs will fail until it is set.",
     );
   } else if (options.cursorChoice === "deferred") {
     lines.push(
-      "This scripted init skipped interactive Cursor auth setup. Use CURSOR_API_KEY in .sandcastle/.env before running Cursor in the sandbox.",
+      "This scripted init skipped interactive Cursor auth setup. Set CURSOR_API_KEY in .sandcastle/.env before the first Cursor sandbox run, or bootstrap will fail.",
     );
   }
 
@@ -866,14 +866,14 @@ const initCommand = Command.make(
           if (authChoice === "env") {
             cursorAuthChoice = "env";
             yield* d.status(
-              "Add CURSOR_API_KEY to .sandcastle/.env when you're ready. Sandcastle will not write secrets for you.",
-              "info",
+              "Set CURSOR_API_KEY in .sandcastle/.env before the first Cursor sandbox run. Sandcastle will not write secrets for you, and bootstrap will fail without it.",
+              "warn",
             );
           } else {
             cursorAuthChoice = "skip";
             yield* d.status(
-              "Skipped Cursor auth setup for now. Configure CURSOR_API_KEY later.",
-              "info",
+              "Skipped Cursor auth setup for now. Set CURSOR_API_KEY before the first Cursor sandbox run, or bootstrap will fail.",
+              "warn",
             );
           }
         }

@@ -160,6 +160,10 @@ _Avoid_: ".sandcastle folder", "sandcastle dir"
 A pluggable source of **tasks** for the **agent**, selected during **init** (e.g. GitHub Issues, Beads).
 _Avoid_: "task source", "issue tracker"
 
+**Project profile**:
+A project-type choice made during **init** that describes the host repo's language or build-system shape (e.g. Node, Python, C++), independent of the selected **template** or **backlog manager**.
+_Avoid_: "task type", "project template", "stack" (ambiguous with runtime stack)
+
 **Template argument**:
 A named `{{KEY}}` placeholder in a scaffold template (Dockerfile, prompt `.md` file) that **init** replaces with a value derived from the user's choices.
 _Avoid_: "placeholder", "variable"

@@ -295,7 +295,10 @@ describe("sandcastle init interactive runtime selection", () => {
     expect(entries).toContainEqual(
       expect.objectContaining({
         _tag: "status",
-        message: expect.stringContaining("CURSOR_API_KEY"),
+        severity: "warn",
+        message: expect.stringContaining(
+          "Set CURSOR_API_KEY before the first Cursor sandbox run",
+        ),
       }),
     );
   });
@@ -460,7 +463,7 @@ describe("sandcastle init interactive runtime selection", () => {
     expect(entries).toContainEqual(
       expect.objectContaining({
         _tag: "text",
-        message: expect.stringContaining("CURSOR_API_KEY"),
+        message: expect.stringContaining("bootstrap will fail"),
       }),
     );
     expect(entries).not.toContainEqual(

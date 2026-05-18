@@ -891,7 +891,11 @@ describe("InitService scaffold", () => {
       const joined = lines.join("\n");
       expect(joined).toContain(".env");
       expect(joined).toContain("main.mts");
+      expect(joined).toContain(
+        "npm exec --yes --package tsx -- tsx .sandcastle/main.mts",
+      );
       expect(joined).not.toContain("npx sandcastle run");
+      expect(joined).not.toContain("npx tsx");
     });
 
     it("non-blank template returns steps mentioning .env, package.json scripts, and npm run sandcastle", () => {
@@ -899,7 +903,11 @@ describe("InitService scaffold", () => {
       const joined = lines.join("\n");
       expect(joined).toContain(".env");
       expect(joined).toContain("package.json");
+      expect(joined).toContain(
+        "npm exec --yes --package tsx -- tsx .sandcastle/main.mts",
+      );
       expect(joined).toContain("npm run sandcastle");
+      expect(joined).not.toContain("npx tsx");
     });
 
     it("blank template next steps explain the main file can mix installed providers after init", () => {
