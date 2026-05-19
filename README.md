@@ -694,6 +694,7 @@ Bootstrap behavior:
 - Generated during init as an editable scaffold; init does **not** run or validate bootstrap.
 - Bootstrap is **not** part of image build — it is repository setup that runs at sandbox start.
 - Non-blank templates invoke bootstrap from `sandbox.onSandboxReady` after the worktree is mounted and before the agent runs.
+- Scaffolded `main.mts` hooks use `timeoutMs: 300_000` (5 minutes) for bootstrap so typical dependency installs are not cut off by the generic 60 s hook default. Edit `timeoutMs` in `.sandcastle/main.mts` if your setup needs longer.
 
 ```bash
 npx sandcastle init \
@@ -741,6 +742,8 @@ Errors if `.sandcastle/` already exists to prevent overwriting customizations.
 ### `sandcastle docker build-image`
 
 Rebuilds the Docker image from an existing `.sandcastle/` directory. Use this after modifying the Dockerfile. On Linux/macOS, the build automatically passes `--build-arg AGENT_UID=$(id -u)` and `AGENT_GID=$(id -g)` so the image's `agent` user matches the host UID — this prevents permission errors on image-built files without runtime chown.
+
+**WSL2 / root (UID 0):** Sandcastle cannot bake UID 0 into the image (`usermod` would conflict with root). When the host process is root, `build-image` uses `AGENT_UID=1000` and `AGENT_GID=1000` instead and prints guidance. Pass `containerUid: 1000` and `containerGid: 1000` to `docker()` in `.sandcastle/main.mts` so the runtime `--user` matches the image (see the Docker provider pre-flight check if they diverge).
 
 | Option         | Required | Default                      | Description                                                                       |
 | -------------- | -------- | ---------------------------- | --------------------------------------------------------------------------------- |

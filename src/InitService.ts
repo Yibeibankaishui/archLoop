@@ -775,12 +775,27 @@ export const getSandboxProvider = (
 const PRESET_AGENT_NEXT_STEP =
   "Preset agent roles are in .sandcastle/agents/ with bundled skills under .sandcastle/skills/. See .sandcastle/agent-profiles.json for recommended provider/model; compose prompts from main.mts using run() as needed. Recommendations may require matching installed runtimes.";
 
+/** Default sandbox bootstrap hook timeout (5 minutes) for dependency installs. */
+export const BOOTSTRAP_HOOK_TIMEOUT_MS = 300_000;
+
+/** Numeric literal in non-blank template `main.mts` files; keep in sync with `BOOTSTRAP_HOOK_TIMEOUT_MS`. */
+const BOOTSTRAP_HOOK_TIMEOUT_MS_LITERAL = "300_000";
+
+if (
+  Number(BOOTSTRAP_HOOK_TIMEOUT_MS_LITERAL.replaceAll("_", "")) !==
+  BOOTSTRAP_HOOK_TIMEOUT_MS
+) {
+  throw new Error(
+    "BOOTSTRAP_HOOK_TIMEOUT_MS_LITERAL must match BOOTSTRAP_HOOK_TIMEOUT_MS",
+  );
+}
+
 const BOOTSTRAP_SCAFFOLD_NOTE =
   "`.sandcastle/bootstrap.sh` was generated from your Project profile during init (user-editable scaffold; init does not run or validate it)";
 
 const blankBootstrapNextStep = `${BOOTSTRAP_SCAFFOLD_NOTE}. The blank template does not run bootstrap unless you wire \`sandbox.onSandboxReady\` yourself`;
 
-const nonBlankBootstrapNextStep = `${BOOTSTRAP_SCAFFOLD_NOTE}. Non-blank templates run it from \`sandbox.onSandboxReady\` after the worktree is mounted and before the agent starts — not during image build. Customize the script for your stack`;
+const nonBlankBootstrapNextStep = `${BOOTSTRAP_SCAFFOLD_NOTE}. Non-blank templates run it from \`sandbox.onSandboxReady\` with a 5-minute default hook timeout (${BOOTSTRAP_HOOK_TIMEOUT_MS_LITERAL} ms) after the worktree is mounted and before the agent starts — not during image build. Customize the script for your stack; raise \`timeoutMs\` in \`main.mts\` if installs need longer`;
 
 const runMainCommand = (mainFilename: string): string =>
   `npm exec --yes --package tsx -- tsx .sandcastle/${mainFilename}`;

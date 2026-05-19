@@ -8,6 +8,10 @@ import { join } from "node:path";
 import { styleText } from "node:util";
 
 import { Display } from "./Display.js";
+import {
+  resolveDockerUidBuildArgs,
+  rootHostDockerUidGuidance,
+} from "./dockerUidBuildArgs.js";
 import { buildImage, removeImage } from "./DockerLifecycle.js";
 import {
   buildImage as podmanBuildImage,
@@ -65,18 +69,6 @@ const imageNameOption = Options.text("image-name").pipe(
 
 const resolveImageName = (cliFlag: OptionalTextFlag, cwd: string): string =>
   cliFlag._tag === "Some" ? cliFlag.value : defaultImageName(cwd);
-
-// --- UID build-args ---
-
-/** Build-args that align the image UID/GID to the host (Linux/macOS). No-op on Windows. */
-const defaultUidBuildArgs = (): Record<string, string> => {
-  const args: Record<string, string> = {};
-  const uid = process.getuid?.();
-  const gid = process.getgid?.();
-  if (uid !== undefined) args.AGENT_UID = String(uid);
-  if (gid !== undefined) args.AGENT_GID = String(gid);
-  return args;
-};
 
 // --- Config directory check ---
 
@@ -989,11 +981,13 @@ const initCommand = Command.make(
             podmanBuildImage(imageName, containerfileDir),
           );
         } else {
+          const { buildArgs, hostIsRoot } = resolveDockerUidBuildArgs();
+          if (hostIsRoot) {
+            yield* d.status(rootHostDockerUidGuidance(), "info");
+          }
           yield* d.spinner(
             `Building ${providerLabel} image '${imageName}'...`,
-            buildImage(imageName, containerfileDir, {
-              buildArgs: defaultUidBuildArgs(),
-            }),
+            buildImage(imageName, containerfileDir, { buildArgs }),
           );
         }
         yield* d.status("Init complete! Image built successfully.", "success");
@@ -1048,11 +1042,16 @@ const buildImageCommand = Command.make(
       const dockerfilePath =
         dockerfile._tag === "Some" ? dockerfile.value : undefined;
 
+      const { buildArgs, hostIsRoot } = resolveDockerUidBuildArgs();
+      if (hostIsRoot) {
+        yield* d.status(rootHostDockerUidGuidance(), "info");
+      }
+
       yield* d.spinner(
         `Building Docker image '${imageName}'...`,
         buildImage(imageName, dockerfileDir, {
           dockerfile: dockerfilePath,
-          buildArgs: defaultUidBuildArgs(),
+          buildArgs,
         }),
       );
 
