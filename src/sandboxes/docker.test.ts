@@ -15,7 +15,15 @@ vi.mock("node:child_process", async () => {
 });
 
 import { execFile } from "node:child_process";
-import { writeFileSync, mkdtempSync, unlinkSync, rmdirSync } from "node:fs";
+import {
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+  mkdtempSync,
+  unlinkSync,
+  rmdirSync,
+} from "node:fs";
+import { access } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { docker } from "./docker.js";
@@ -108,6 +116,29 @@ describe("docker()", () => {
         mounts: [{ hostPath: "nonexistent_dir_xyz", sandboxPath: "/mnt/data" }],
       }),
     ).toThrow("Mount hostPath does not exist");
+  });
+
+  it("creates missing scaffold auth mount host directories at construction time", async () => {
+    const repoDir = mkdtempSync(join(tmpdir(), "docker-scaffold-auth-"));
+    const previousCwd = process.cwd();
+    mkdirSync(join(repoDir, ".sandcastle"), { recursive: true });
+    process.chdir(repoDir);
+
+    try {
+      const provider = docker({
+        mounts: [
+          {
+            hostPath: ".sandcastle/auth/codex",
+            sandboxPath: "/home/agent/.codex",
+          },
+        ],
+      });
+      expect(provider.tag).toBe("bind-mount");
+      await access(join(repoDir, ".sandcastle/auth/codex"));
+    } finally {
+      process.chdir(previousCwd);
+      rmSync(repoDir, { recursive: true, force: true });
+    }
   });
 
   it("resolves relative sandboxPath against sandbox repo dir", () => {

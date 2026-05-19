@@ -6,6 +6,13 @@ For user-facing changes, add a changeset to `.changeset`. Check all changesets t
 
 When changing public-facing behavior, check `README.md` to see if the documentation needs updating.
 
+## Roadmap
+
+- Maintain `docs/roadmap.md` when PRDs, issues, public APIs, CLI behavior, major features, releases, or phase status change.
+- Keep roadmap phases in `## NN name` format with valid `Status`, one-sentence `Goal`, `Scope`, and `Deliverables`.
+- Completed phases must include `Version`; blocked phases must include `Blocked by`.
+- If Feishu sync is enabled, use `sync-doc-feishu` and resolve conflicts by manual review before overwriting the cloud document.
+
 ## Agent skills
 
 ### Issue tracker

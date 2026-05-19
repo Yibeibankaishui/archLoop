@@ -5,7 +5,7 @@
  * validation, image naming, and Windows path normalization.
  */
 
-import { existsSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, statSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { isAbsolute, resolve, join, dirname } from "node:path";
 import { mkdtemp, writeFile } from "node:fs/promises";
@@ -63,6 +63,32 @@ export const resolveHostPath = (hostPath: string): string => {
   return isAbsolute(expanded) ? expanded : resolve(process.cwd(), expanded);
 };
 
+/** Matches host paths emitted by `sandcastle init` for runtime/backlog auth bind mounts. */
+const SCAFFOLD_AUTH_MOUNT_HOST_PATH_RE =
+  /(?:^|[\\/])\.sandcastle[\\/]auth[\\/][^\\/]+$/;
+
+export const isScaffoldAuthMountHostPath = (hostPath: string): boolean =>
+  SCAFFOLD_AUTH_MOUNT_HOST_PATH_RE.test(hostPath);
+
+const ensureMountHostPathExists = (
+  hostPath: string,
+  resolvedHostPath: string,
+): void => {
+  if (existsSync(resolvedHostPath)) {
+    return;
+  }
+  if (isScaffoldAuthMountHostPath(hostPath)) {
+    mkdirSync(resolvedHostPath, { recursive: true });
+    return;
+  }
+  throw new Error(
+    `Mount hostPath does not exist: ${hostPath}` +
+      (hostPath !== resolvedHostPath
+        ? ` (resolved to ${resolvedHostPath})`
+        : ""),
+  );
+};
+
 /**
  * Resolve a sandbox path: expands tilde using `sandboxHomedir`, then resolves
  * relative paths from `SANDBOX_REPO_DIR`.
@@ -99,15 +125,7 @@ export const resolveUserMounts = (
 ): Array<{ hostPath: string; sandboxPath: string; readonly?: boolean }> =>
   mounts.map((m) => {
     const resolvedHostPath = resolveHostPath(m.hostPath);
-
-    if (!existsSync(resolvedHostPath)) {
-      throw new Error(
-        `Mount hostPath does not exist: ${m.hostPath}` +
-          (m.hostPath !== resolvedHostPath
-            ? ` (resolved to ${resolvedHostPath})`
-            : ""),
-      );
-    }
+    ensureMountHostPathExists(m.hostPath, resolvedHostPath);
 
     return {
       hostPath: resolvedHostPath,

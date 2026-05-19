@@ -10,7 +10,21 @@ import {
   validatePresetRegistries,
   type PresetAgentDefinition,
 } from "./presetAgents.js";
+import { renderBootstrapScript } from "./bootstrap.js";
+import {
+  DEFAULT_PROJECT_PROFILE,
+  type ProjectProfileEntry,
+} from "./projectProfiles.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
+
+export {
+  DEFAULT_PROJECT_PROFILE,
+  DEFAULT_PROJECT_PROFILE_NAME,
+  formatProjectProfileNames,
+  getProjectProfile,
+  listProjectProfiles,
+  type ProjectProfileEntry,
+} from "./projectProfiles.js";
 
 const GITIGNORE = `.env
 auth/
@@ -116,6 +130,8 @@ RUN apt-get update && apt-get install -y \\
 
 {{BACKLOG_MANAGER_TOOLS}}
 
+{{PROJECT_PROFILE_TOOLS}}
+
 # Build-args for UID/GID alignment: sandcastle docker build-image
 # defaults these to the host user's UID/GID so image-built files
 # and bind-mounted files share an owner without runtime chown.
@@ -159,6 +175,8 @@ RUN apt-get update && apt-get install -y \\
 
 {{BACKLOG_MANAGER_TOOLS}}
 
+{{PROJECT_PROFILE_TOOLS}}
+
 # Build-args for UID/GID alignment: sandcastle docker build-image
 # defaults these to the host user's UID/GID so image-built files
 # and bind-mounted files share an owner without runtime chown.
@@ -199,6 +217,8 @@ RUN apt-get update && apt-get install -y \\
 
 {{BACKLOG_MANAGER_TOOLS}}
 
+{{PROJECT_PROFILE_TOOLS}}
+
 # Build-args for UID/GID alignment: sandcastle docker build-image
 # defaults these to the host user's UID/GID so image-built files
 # and bind-mounted files share an owner without runtime chown.
@@ -238,6 +258,8 @@ RUN apt-get update && apt-get install -y \\
   && rm -rf /var/lib/apt/lists/*
 
 {{BACKLOG_MANAGER_TOOLS}}
+
+{{PROJECT_PROFILE_TOOLS}}
 
 # Build-args for UID/GID alignment: sandcastle docker build-image
 # defaults these to the host user's UID/GID so image-built files
@@ -282,6 +304,8 @@ RUN apt-get update && apt-get install -y \\
   && rm -rf /var/lib/apt/lists/*
 
 {{BACKLOG_MANAGER_TOOLS}}
+
+{{PROJECT_PROFILE_TOOLS}}
 
 # Build-args for UID/GID alignment: sandcastle docker build-image
 # defaults these to the host user's UID/GID so image-built files
@@ -402,16 +426,6 @@ RUN curl https://cursor.com/install -fsS | bash \\
     envVars: ["CURSOR_API_KEY"],
     envExample: `# Cursor API key
 CURSOR_API_KEY=`,
-    authMounts: [
-      {
-        hostPath: ".sandcastle/auth/cursor",
-        sandboxPath: "/home/agent/.cursor",
-      },
-      {
-        hostPath: ".sandcastle/auth/cursor-config",
-        sandboxPath: "/home/agent/.config/cursor",
-      },
-    ],
   },
   {
     name: "opencode",
@@ -761,6 +775,16 @@ export const getSandboxProvider = (
 const PRESET_AGENT_NEXT_STEP =
   "Preset agent roles are in .sandcastle/agents/ with bundled skills under .sandcastle/skills/. See .sandcastle/agent-profiles.json for recommended provider/model; compose prompts from main.mts using run() as needed. Recommendations may require matching installed runtimes.";
 
+const BOOTSTRAP_SCAFFOLD_NOTE =
+  "`.sandcastle/bootstrap.sh` was generated from your Project profile during init (user-editable scaffold; init does not run or validate it)";
+
+const blankBootstrapNextStep = `${BOOTSTRAP_SCAFFOLD_NOTE}. The blank template does not run bootstrap unless you wire \`sandbox.onSandboxReady\` yourself`;
+
+const nonBlankBootstrapNextStep = `${BOOTSTRAP_SCAFFOLD_NOTE}. Non-blank templates run it from \`sandbox.onSandboxReady\` after the worktree is mounted and before the agent starts — not during image build. Customize the script for your stack`;
+
+const runMainCommand = (mainFilename: string): string =>
+  `npm exec --yes --package tsx -- tsx .sandcastle/${mainFilename}`;
+
 export function getNextStepsLines(
   template: string,
   mainFilename: string,
@@ -783,8 +807,9 @@ export function getNextStepsLines(
       "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
       `${step++}. Read and customize .sandcastle/prompt.md to describe what you want the agent to do`,
       `${step++}. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs and can mix installed agent providers after init`,
-      `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
+      `${step++}. Add "sandcastle": "${runMainCommand(mainFilename)}" to your package.json scripts`,
     ];
+    lines.push(`${step++}. ${blankBootstrapNextStep}`);
     if (presetHintText) {
       lines.push(`${step++}. ${presetHintText}`);
     }
@@ -801,9 +826,9 @@ export function getNextStepsLines(
     "Next steps:",
     `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
     "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
-    `${step++}. Add "sandcastle": "npx tsx .sandcastle/${mainFilename}" to your package.json scripts`,
+    `${step++}. Add "sandcastle": "${runMainCommand(mainFilename)}" to your package.json scripts`,
     `${step++}. Edit .sandcastle/${mainFilename} to mix installed agent providers after init; the selected default agent only seeds the scaffolded example`,
-    `${step++}. Templates use \`copyToWorktree: ["node_modules"]\` to copy your host node_modules into the sandbox for fast startup — the \`npm install\` in the onSandboxReady hook is a safety net for platform-specific binaries. Adjust both if you use a different package manager`,
+    `${step++}. ${nonBlankBootstrapNextStep}`,
     `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
   ];
   if (hasReviewer) {
@@ -1191,6 +1216,7 @@ export interface ScaffoldOptions {
   createLabel?: boolean;
   backlogManager?: BacklogManagerEntry;
   sandboxProvider?: SandboxProviderEntry;
+  projectProfile?: ProjectProfileEntry;
   /** Optional preset agent role ids (see `presetAgents.ts`). */
   presetAgentIds?: readonly string[];
 }
@@ -1238,6 +1264,7 @@ export const scaffold = (
       createLabel = true,
       backlogManager = BACKLOG_MANAGER_REGISTRY[0]!, // default: github-issues
       sandboxProvider = SANDBOX_PROVIDER_REGISTRY[0]!, // default: docker
+      projectProfile = DEFAULT_PROJECT_PROFILE,
       presetAgentIds = [],
     } = options;
     const fs = yield* FileSystem.FileSystem;
@@ -1305,6 +1332,12 @@ export const scaffold = (
         fs
           .writeFileString(join(configDir, ".env"), envExampleContent)
           .pipe(Effect.mapError((e) => new Error(e.message))),
+        fs
+          .writeFileString(
+            join(configDir, "bootstrap.sh"),
+            renderBootstrapScript(projectProfile.name),
+          )
+          .pipe(Effect.mapError((e) => new Error(e.message))),
         copyTemplateFiles(templateDir, configDir, mainFilename),
       ],
       { concurrency: "unbounded" },
@@ -1318,8 +1351,11 @@ export const scaffold = (
       selectedAuthMounts,
     );
 
-    // Replace backlog manager template arguments in all text files (must run before label stripping)
-    yield* substituteTemplateArgs(configDir, backlogManager.templateArgs);
+    // Replace backlog manager and project profile template arguments in all text files (must run before label stripping)
+    yield* substituteTemplateArgs(configDir, {
+      ...backlogManager.templateArgs,
+      PROJECT_PROFILE_TOOLS: projectProfile.containerfileTools,
+    });
 
     // Strip --label Sandcastle from prompt files when the user declined label creation
     if (!createLabel) {

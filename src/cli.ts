@@ -26,12 +26,18 @@ import {
   listAgentRuntimes,
   getAgentRuntime,
   collectAuthRequirements,
+  formatProjectProfileNames,
+  getProjectProfile,
+  listProjectProfiles,
+  DEFAULT_PROJECT_PROFILE,
+  DEFAULT_PROJECT_PROFILE_NAME,
 } from "./InitService.js";
 import { defaultImageName } from "./sandboxes/docker.js";
 import type {
   AgentEntry,
   AgentRuntimeEntry,
   BacklogManagerEntry,
+  ProjectProfileEntry,
   SandboxProviderEntry,
 } from "./InitService.js";
 import { ConfigDirError, InitError } from "./errors.js";
@@ -132,6 +138,13 @@ const initSandboxOption = Options.text("sandbox").pipe(
 const initBacklogOption = Options.text("backlog").pipe(
   Options.withDescription(
     "Backlog manager (github-issues or beads). Omit to choose interactively.",
+  ),
+  Options.optional,
+);
+
+const initProjectProfileOption = Options.text("project-profile").pipe(
+  Options.withDescription(
+    "Project profile for bootstrap and sandbox image scaffolding (e.g. generic, node). Defaults to generic.",
   ),
   Options.optional,
 );
@@ -355,7 +368,7 @@ interface AuthSetupResult {
 const buildAuthSetupNextStepLines = (options: {
   readonly githubChoice?: "env" | "login" | "skip" | "deferred";
   readonly codexChoice?: "env" | "login" | "skip" | "deferred";
-  readonly cursorChoice?: "env" | "login" | "skip" | "deferred";
+  readonly cursorChoice?: "env" | "skip" | "deferred";
 }): string[] => {
   const lines: string[] = [];
 
@@ -389,20 +402,41 @@ const buildAuthSetupNextStepLines = (options: {
 
   if (options.cursorChoice === "env") {
     lines.push(
-      "Add CURSOR_API_KEY to .sandcastle/.env before running Cursor in the sandbox.",
+      "Add CURSOR_API_KEY to .sandcastle/.env before the first Cursor sandbox run. Bootstrap and task runs will fail without it.",
     );
   } else if (options.cursorChoice === "skip") {
     lines.push(
-      "Set up Cursor auth later with CURSOR_API_KEY in .sandcastle/.env or `CURSOR_CONFIG_DIR=.sandcastle/auth/cursor agent login`.",
+      "Set CURSOR_API_KEY in .sandcastle/.env before the first Cursor sandbox run. Bootstrap and task runs will fail until it is set.",
     );
   } else if (options.cursorChoice === "deferred") {
     lines.push(
-      "This scripted init skipped interactive Cursor auth setup. Use CURSOR_API_KEY in .sandcastle/.env or `CURSOR_CONFIG_DIR=.sandcastle/auth/cursor agent login` before running Cursor in the sandbox.",
+      "This scripted init skipped interactive Cursor auth setup. Set CURSOR_API_KEY in .sandcastle/.env before the first Cursor sandbox run, or bootstrap will fail.",
     );
   }
 
   return lines;
 };
+
+const isFullyScriptedInit = (options: {
+  agentFlag: OptionalTextFlag;
+  runtimesFlag: OptionalTextFlag;
+  sandboxCli: OptionalTextFlag;
+  backlogCli: OptionalTextFlag;
+  template: OptionalTextFlag;
+  presetAgentsCli: OptionalTextFlag;
+  buildImageCli: OptionalTextFlag;
+  createSandcastleLabelCli: OptionalTextFlag;
+  selectedBacklogManagerName: string;
+}): boolean =>
+  options.agentFlag._tag === "Some" &&
+  options.sandboxCli._tag === "Some" &&
+  options.backlogCli._tag === "Some" &&
+  options.template._tag === "Some" &&
+  options.presetAgentsCli._tag === "Some" &&
+  options.buildImageCli._tag === "Some" &&
+  (options.runtimesFlag._tag === "Some" || options.agentFlag._tag === "Some") &&
+  (options.selectedBacklogManagerName !== "github-issues" ||
+    options.createSandcastleLabelCli._tag === "Some");
 
 const initCommand = Command.make(
   "init",
@@ -414,6 +448,7 @@ const initCommand = Command.make(
     model: initModelOption,
     sandbox: initSandboxOption,
     backlog: initBacklogOption,
+    projectProfile: initProjectProfileOption,
     presetAgents: initPresetAgentsOption,
     createSandcastleLabel: initCreateSandcastleLabelOption,
     buildImage: initBuildImageOption,
@@ -426,6 +461,7 @@ const initCommand = Command.make(
     model: modelFlag,
     sandbox: sandboxCli,
     backlog: backlogCli,
+    projectProfile: projectProfileCli,
     presetAgents: presetAgentsCli,
     createSandcastleLabel: createSandcastleLabelCli,
     buildImage: buildImageCli,
@@ -437,6 +473,18 @@ const initCommand = Command.make(
 
       // Early validation of CLI flags before interactive prompts
       const templates = listTemplates();
+      const cliProjectProfile =
+        projectProfileCli._tag === "Some"
+          ? getProjectProfile(projectProfileCli.value)
+          : undefined;
+      if (projectProfileCli._tag === "Some" && !cliProjectProfile) {
+        yield* Effect.fail(
+          new InitError({
+            message: `Unknown project profile "${projectProfileCli.value}". Available: ${formatProjectProfileNames()}`,
+          }),
+        );
+      }
+
       if (template._tag === "Some") {
         const valid = templates.find((tmpl) => tmpl.name === template.value);
         if (!valid) {
@@ -589,6 +637,45 @@ const initCommand = Command.make(
         selectedTemplate = selected as string;
       }
 
+      const scriptedInit = isFullyScriptedInit({
+        agentFlag,
+        runtimesFlag,
+        sandboxCli,
+        backlogCli,
+        template,
+        presetAgentsCli,
+        buildImageCli,
+        createSandcastleLabelCli,
+        selectedBacklogManagerName: selectedBacklogManager.name,
+      });
+
+      let selectedProjectProfile: ProjectProfileEntry;
+      if (cliProjectProfile) {
+        selectedProjectProfile = cliProjectProfile;
+      } else if (scriptedInit) {
+        selectedProjectProfile = DEFAULT_PROJECT_PROFILE;
+      } else {
+        const selected = yield* Effect.promise(() =>
+          clack.select({
+            message: "Select a project profile:",
+            initialValue: DEFAULT_PROJECT_PROFILE_NAME,
+            options: listProjectProfiles().map((profile) => ({
+              value: profile.name,
+              label: profile.label,
+              hint: profile.description,
+            })),
+          }),
+        );
+        if (clack.isCancel(selected)) {
+          yield* Effect.fail(
+            new InitError({
+              message: "Project profile selection cancelled.",
+            }),
+          );
+        }
+        selectedProjectProfile = getProjectProfile(selected as string)!;
+      }
+
       let presetAgentIds: readonly string[] | undefined;
       if (presetAgentsCli._tag === "Some") {
         presetAgentIds = yield* parsePresetAgentsCliValue(
@@ -666,6 +753,7 @@ const initCommand = Command.make(
           backlogManager: selectedBacklogManager,
           sandboxProvider: selectedSandboxProvider,
           installedRuntimes: selectedInstalledRuntimes,
+          projectProfile: selectedProjectProfile,
           ...(presetAgentIds !== undefined && presetAgentIds.length > 0
             ? { presetAgentIds }
             : {}),
@@ -689,17 +777,6 @@ const initCommand = Command.make(
       const hasCursorAuth = authRequirements.some(
         (requirement) => requirement.id === "cursor",
       );
-      const isFullyScriptedInit =
-        agentFlag._tag === "Some" &&
-        sandboxCli._tag === "Some" &&
-        backlogCli._tag === "Some" &&
-        template._tag === "Some" &&
-        presetAgentsCli._tag === "Some" &&
-        buildImageCli._tag === "Some" &&
-        (runtimesFlag._tag === "Some" || agentFlag._tag === "Some") &&
-        (selectedBacklogManager.name !== "github-issues" ||
-          createSandcastleLabelCli._tag === "Some");
-
       const githubAuthRequirement = authRequirements.find(
         (requirement) =>
           requirement.id === "github-issues" &&
@@ -707,10 +784,10 @@ const initCommand = Command.make(
       );
       let githubAuthChoice: "env" | "login" | "skip" | "deferred" | undefined;
       let codexAuthChoice: "env" | "login" | "skip" | "deferred" | undefined;
-      let cursorAuthChoice: "env" | "login" | "skip" | "deferred" | undefined;
+      let cursorAuthChoice: "env" | "skip" | "deferred" | undefined;
 
       if (githubAuthRequirement) {
-        if (isFullyScriptedInit) {
+        if (scriptedInit) {
           githubAuthChoice = "deferred";
         } else {
           const authChoice = yield* Effect.promise(() =>
@@ -774,7 +851,7 @@ const initCommand = Command.make(
       }
 
       if (hasCodexAuth) {
-        if (isFullyScriptedInit) {
+        if (scriptedInit) {
           codexAuthChoice = "deferred";
         } else {
           const authChoice = yield* Effect.promise(() =>
@@ -838,7 +915,7 @@ const initCommand = Command.make(
       }
 
       if (hasCursorAuth) {
-        if (isFullyScriptedInit) {
+        if (scriptedInit) {
           cursorAuthChoice = "deferred";
         } else {
           const authChoice = yield* Effect.promise(() =>
@@ -849,10 +926,6 @@ const initCommand = Command.make(
                 {
                   value: "env",
                   label: "Use CURSOR_API_KEY in .sandcastle/.env",
-                },
-                {
-                  value: "login",
-                  label: "Run agent login into .sandcastle/auth/cursor",
                 },
                 {
                   value: "skip",
@@ -870,37 +943,14 @@ const initCommand = Command.make(
           if (authChoice === "env") {
             cursorAuthChoice = "env";
             yield* d.status(
-              "Add CURSOR_API_KEY to .sandcastle/.env when you're ready. Sandcastle will not write secrets for you.",
-              "info",
+              "Set CURSOR_API_KEY in .sandcastle/.env before the first Cursor sandbox run. Sandcastle will not write secrets for you, and bootstrap will fail without it.",
+              "warn",
             );
-          } else if (authChoice === "login") {
-            cursorAuthChoice = "login";
-            yield* Effect.try({
-              try: () =>
-                execSync("agent login", {
-                  cwd,
-                  stdio: "inherit",
-                  env: {
-                    ...process.env,
-                    CURSOR_CONFIG_DIR: join(
-                      cwd,
-                      ".sandcastle",
-                      "auth",
-                      "cursor",
-                    ),
-                  },
-                }),
-              catch: () =>
-                new InitError({
-                  message:
-                    "Cursor login failed. You can retry with `CURSOR_CONFIG_DIR=.sandcastle/auth/cursor agent login`.",
-                }),
-            });
           } else {
             cursorAuthChoice = "skip";
             yield* d.status(
-              "Skipped Cursor auth setup for now. Configure CURSOR_API_KEY or prepare Cursor auth later.",
-              "info",
+              "Skipped Cursor auth setup for now. Set CURSOR_API_KEY before the first Cursor sandbox run, or bootstrap will fail.",
+              "warn",
             );
           }
         }

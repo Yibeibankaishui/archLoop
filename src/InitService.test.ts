@@ -24,7 +24,10 @@ import {
   listAgentRuntimes,
   getAgentRuntime,
   collectAuthRequirements,
+  DEFAULT_PROJECT_PROFILE,
 } from "./InitService.js";
+import { renderBootstrapScript } from "./bootstrap.js";
+import { getProjectProfile, NODE_PROJECT_PROFILE } from "./projectProfiles.js";
 import type { ScaffoldOptions } from "./InitService.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import { SKELETON_PROMPT } from "./templates.js";
@@ -52,6 +55,17 @@ const runScaffold = (repoDir: string, options?: Partial<ScaffoldOptions>) =>
 
 const countOccurrences = (content: string, pattern: RegExp): number =>
   content.match(pattern)?.length ?? 0;
+
+/** Non-blank templates run init-scaffolded bootstrap only (no runtime generation). */
+const expectMainUsesInitBootstrapOnly = (mainTs: string) => {
+  expect(mainTs).toContain("bash .sandcastle/bootstrap.sh");
+  expect(mainTs).toContain("onSandboxReady");
+  expect(mainTs).not.toContain("bootstrap-prompt.md");
+  expect(mainTs).not.toContain("ensureBootstrapReady");
+  expect(mainTs).not.toContain("bootstrap-generator");
+  expect(mainTs).not.toContain("npm install");
+  expect(mainTs).not.toContain("node_modules");
+};
 
 // ---------------------------------------------------------------------------
 // Agent registry
@@ -207,6 +221,230 @@ describe("Auth requirement collection", () => {
 // ---------------------------------------------------------------------------
 
 describe("InitService scaffold", () => {
+  it("scaffolds a no-op bootstrap.sh for the generic project profile", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      projectProfile: DEFAULT_PROJECT_PROFILE,
+    });
+
+    const bootstrap = await readFile(
+      join(dir, ".sandcastle", "bootstrap.sh"),
+      "utf-8",
+    );
+    expect(bootstrap).toContain("#!/usr/bin/env bash");
+    expect(bootstrap).toContain("exit 0");
+    expect(bootstrap).not.toContain("npm install");
+  });
+
+  it.each(["generic", "node", "python", "cpp"] as const)(
+    "scaffolds bootstrap.sh from renderBootstrapScript for %s profile",
+    async (profileName) => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        projectProfile: getProjectProfile(profileName)!,
+      });
+
+      const bootstrap = await readFile(
+        join(dir, ".sandcastle", "bootstrap.sh"),
+        "utf-8",
+      );
+      expect(bootstrap).toBe(renderBootstrapScript(profileName));
+    },
+  );
+
+  it.each([
+    "simple-loop",
+    "sequential-reviewer",
+    "parallel-planner",
+    "parallel-planner-with-review",
+  ] as const)(
+    "non-blank template %s main.mts runs init bootstrap only",
+    async (templateName) => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expectMainUsesInitBootstrapOnly(mainTs);
+    },
+  );
+
+  it("generic project profile does not add language-specific Dockerfile tools", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      projectProfile: DEFAULT_PROJECT_PROFILE,
+    });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).not.toContain("{{PROJECT_PROFILE_TOOLS}}");
+    expect(dockerfile).not.toContain("corepack enable");
+    expect(dockerfile).not.toMatch(/\buv\b/);
+    expect(dockerfile).not.toContain("cmake");
+  });
+
+  it("cpp project profile adds C++ toolchain to Dockerfile and bootstrap.sh", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      projectProfile: getProjectProfile("cpp")!,
+    });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).toContain("build-essential");
+    expect(dockerfile).toContain("cmake");
+    expect(dockerfile).toContain("ninja-build");
+    expect(dockerfile).not.toContain("{{PROJECT_PROFILE_TOOLS}}");
+
+    const bootstrap = await readFile(
+      join(dir, ".sandcastle", "bootstrap.sh"),
+      "utf-8",
+    );
+    expect(bootstrap).toContain("cmake -S");
+    expect(bootstrap).not.toContain("cmake --build");
+    expect(bootstrap).toContain("No supported C++ build signal found");
+  });
+
+  it("cpp project profile does not alter .env.example or copy-to-worktree defaults", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, { projectProfile: getProjectProfile("cpp")! });
+
+    const envExample = await readFile(
+      join(dir, ".sandcastle", ".env.example"),
+      "utf-8",
+    );
+    expect(envExample).toContain("ANTHROPIC_API_KEY=");
+    expect(envExample).not.toContain("CCACHE");
+    expect(envExample).not.toContain("CMAKE_");
+
+    const mainTs = await readFile(
+      join(dir, ".sandcastle", "main.mts"),
+      "utf-8",
+    );
+    expect(mainTs).not.toMatch(/copyToWorktree:[\s\S]*build\//);
+  });
+
+  it("generic project profile does not alter .env.example beyond runtime and backlog vars", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      projectProfile: DEFAULT_PROJECT_PROFILE,
+    });
+
+    const envExample = await readFile(
+      join(dir, ".sandcastle", ".env.example"),
+      "utf-8",
+    );
+    expect(envExample).toContain("ANTHROPIC_API_KEY=");
+    expect(envExample).toContain("GH_TOKEN=");
+    expect(envExample).not.toContain("NPM_TOKEN");
+    expect(envExample).not.toContain("UV_");
+  });
+
+  it("scaffolds node bootstrap.sh with lockfile-based dependency install", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      projectProfile: NODE_PROJECT_PROFILE,
+    });
+
+    const bootstrap = await readFile(
+      join(dir, ".sandcastle", "bootstrap.sh"),
+      "utf-8",
+    );
+    expect(bootstrap).toContain("pnpm-lock.yaml");
+    expect(bootstrap).toContain("pnpm install");
+    expect(bootstrap).toContain("yarn.lock");
+    expect(bootstrap).toContain("npm ci");
+    expect(bootstrap).toContain("No package.json found");
+    expect(bootstrap).not.toContain("npm test");
+    expect(bootstrap).not.toContain("npm run build");
+  });
+
+  it("node project profile reuses Node 22 base without extra containerfile tools", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      projectProfile: NODE_PROJECT_PROFILE,
+    });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).toContain("FROM node:22-bookworm");
+    expect(dockerfile).not.toContain("{{PROJECT_PROFILE_TOOLS}}");
+    expect(dockerfile).not.toContain("corepack enable");
+    expect(dockerfile).not.toMatch(/\buv\b/);
+    expect(dockerfile).not.toContain("cmake");
+  });
+
+  it("python project profile adds Python tools to Dockerfile", async () => {
+    const dir = await makeDir();
+    const pythonProfile = getProjectProfile("python")!;
+    await runScaffold(dir, { projectProfile: pythonProfile });
+
+    const dockerfile = await readFile(
+      join(dir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).not.toContain("{{PROJECT_PROFILE_TOOLS}}");
+    expect(dockerfile).toContain("python3");
+    expect(dockerfile).toContain("python3-pip");
+    expect(dockerfile).toContain("python3-venv");
+    expect(dockerfile).toContain("astral.sh/uv/install.sh");
+    expect(dockerfile.toLowerCase()).not.toContain("poetry");
+  });
+
+  it("python project profile adds Python tools to Containerfile", async () => {
+    const dir = await makeDir();
+    const pythonProfile = getProjectProfile("python")!;
+    await runScaffold(dir, {
+      projectProfile: pythonProfile,
+      sandboxProvider: getSandboxProvider("podman")!,
+    });
+
+    const containerfile = await readFile(
+      join(dir, ".sandcastle", "Containerfile"),
+      "utf-8",
+    );
+    expect(containerfile).not.toContain("{{PROJECT_PROFILE_TOOLS}}");
+    expect(containerfile).toContain("python3-venv");
+    expect(containerfile).toContain("astral.sh/uv/install.sh");
+  });
+
+  it("python project profile scaffolds a Python bootstrap.sh", async () => {
+    const dir = await makeDir();
+    const pythonProfile = getProjectProfile("python")!;
+    await runScaffold(dir, { projectProfile: pythonProfile });
+
+    const bootstrap = await readFile(
+      join(dir, ".sandcastle", "bootstrap.sh"),
+      "utf-8",
+    );
+    expect(bootstrap).toContain("uv sync");
+    expect(bootstrap).toContain("requirements.txt");
+    expect(bootstrap).toContain("Poetry");
+    expect(bootstrap).not.toContain("pytest");
+  });
+
+  it("python project profile does not alter .env.example beyond runtime and backlog vars", async () => {
+    const dir = await makeDir();
+    const pythonProfile = getProjectProfile("python")!;
+    await runScaffold(dir, { projectProfile: pythonProfile });
+
+    const envExample = await readFile(
+      join(dir, ".sandcastle", ".env.example"),
+      "utf-8",
+    );
+    expect(envExample).toContain("ANTHROPIC_API_KEY=");
+    expect(envExample).not.toContain("UV_INDEX_URL");
+    expect(envExample).not.toContain("POETRY_");
+  });
+
   it("uses default runtime Dockerfile metadata for Dockerfile (with templateArgs substitution)", async () => {
     const dir = await makeDir();
     await runScaffold(dir);
@@ -219,6 +457,7 @@ describe("InitService scaffold", () => {
     expect(dockerfile).toContain("FROM node:22-bookworm");
     expect(dockerfile).toContain("GitHub CLI");
     expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
+    expect(dockerfile).not.toContain("{{PROJECT_PROFILE_TOOLS}}");
   });
 
   // --- Dynamic .env.example generation ---
@@ -641,10 +880,10 @@ describe("InitService scaffold", () => {
 
     expect(mainTs).toContain(".sandcastle/auth/codex");
     expect(mainTs).toContain("/home/agent/.codex");
-    expect(mainTs).toContain(".sandcastle/auth/cursor");
-    expect(mainTs).toContain("/home/agent/.cursor");
-    expect(mainTs).toContain(".sandcastle/auth/cursor-config");
-    expect(mainTs).toContain("/home/agent/.config/cursor");
+    expect(mainTs).not.toContain(".sandcastle/auth/cursor");
+    expect(mainTs).not.toContain("/home/agent/.cursor");
+    expect(mainTs).not.toContain(".sandcastle/auth/cursor-config");
+    expect(mainTs).not.toContain("/home/agent/.config/cursor");
     expect(mainTs).not.toContain(".sandcastle/auth/gh");
 
     await expect(
@@ -652,10 +891,10 @@ describe("InitService scaffold", () => {
     ).resolves.toBeUndefined();
     await expect(
       access(join(dir, ".sandcastle", "auth", "cursor")),
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow();
     await expect(
       access(join(dir, ".sandcastle", "auth", "cursor-config")),
-    ).resolves.toBeUndefined();
+    ).rejects.toThrow();
     await expect(
       access(join(dir, ".sandcastle", "auth", "gh")),
     ).rejects.toThrow();
@@ -672,6 +911,9 @@ describe("InitService scaffold", () => {
 
     await expect(access(join(configDir, "main.mts"))).resolves.toBeUndefined();
     await expect(access(join(configDir, "prompt.md"))).resolves.toBeUndefined();
+    await expect(
+      access(join(configDir, "bootstrap-prompt.md")),
+    ).rejects.toThrow();
   });
 
   it("simple-loop main.mts imports from @ai-hero/sandcastle", async () => {
@@ -685,7 +927,7 @@ describe("InitService scaffold", () => {
     expect(mainTs).toContain('"@ai-hero/sandcastle"');
   });
 
-  it("simple-loop main.mts contains sandcastle.run() with expected options", async () => {
+  it("simple-loop main.mts contains bootstrap hook and run() options", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop" });
 
@@ -699,8 +941,6 @@ describe("InitService scaffold", () => {
     // When scaffolded with default model, simple-loop uses claude-opus-4-6
     // (rewritten from template's claude-sonnet-4-6)
     expect(mainTs).toContain("promptFile");
-    expect(mainTs).toContain("npm install");
-    expect(mainTs).toContain("onSandboxReady");
   });
 
   it("simple-loop prompt.md contains shell expressions for issues and commit history", async () => {
@@ -733,6 +973,9 @@ describe("InitService scaffold", () => {
       await expect(
         access(join(configDir, "review-prompt.md")),
       ).resolves.toBeUndefined();
+      await expect(
+        access(join(configDir, "bootstrap-prompt.md")),
+      ).rejects.toThrow();
     });
 
     it("main.mts imports from @ai-hero/sandcastle", async () => {
@@ -761,7 +1004,7 @@ describe("InitService scaffold", () => {
       expect(mainTs).toContain("review-prompt.md");
     });
 
-    it("main.mts does not use merge-to-head (incompatible with reviewer handoff)", async () => {
+    it("main.mts keeps implementer/reviewer handoff on a shared explicit branch", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
@@ -769,7 +1012,10 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).not.toContain("merge-to-head");
+      expect(mainTs).toContain("const branch =");
+      expect(mainTs).toContain("createSandbox");
+      expect(mainTs).toContain("promptArgs");
+      expect(mainTs).toContain("BRANCH: branch");
     });
 
     it("main.mts only reviews when implementer produces commits", async () => {
@@ -878,7 +1124,11 @@ describe("InitService scaffold", () => {
       const joined = lines.join("\n");
       expect(joined).toContain(".env");
       expect(joined).toContain("main.mts");
+      expect(joined).toContain(
+        "npm exec --yes --package tsx -- tsx .sandcastle/main.mts",
+      );
       expect(joined).not.toContain("npx sandcastle run");
+      expect(joined).not.toContain("npx tsx");
     });
 
     it("non-blank template returns steps mentioning .env, package.json scripts, and npm run sandcastle", () => {
@@ -886,7 +1136,11 @@ describe("InitService scaffold", () => {
       const joined = lines.join("\n");
       expect(joined).toContain(".env");
       expect(joined).toContain("package.json");
+      expect(joined).toContain(
+        "npm exec --yes --package tsx -- tsx .sandcastle/main.mts",
+      );
       expect(joined).toContain("npm run sandcastle");
+      expect(joined).not.toContain("npx tsx");
     });
 
     it("blank template next steps explain the main file can mix installed providers after init", () => {
@@ -903,18 +1157,29 @@ describe("InitService scaffold", () => {
       expect(joined).toContain("mix installed agent providers");
     });
 
-    it("non-blank template includes a note about customizing the install command", () => {
+    it("non-blank template includes a note about customizing bootstrap.sh", () => {
       const lines = getNextStepsLines("simple-loop", "main.mts");
       const joined = lines.join("\n");
-      expect(joined).toContain("npm install");
+      expect(joined).toMatch(/Project profile/i);
+      expect(joined).toContain(".sandcastle/bootstrap.sh");
       expect(joined).toContain("onSandboxReady");
+      expect(joined).toMatch(/worktree|mounted/i);
+      expect(joined).toMatch(/image build|during init/i);
+      expect(joined).toMatch(/does not run or validate/i);
     });
 
-    it("non-blank template mentions copyToWorktree and node_modules", () => {
+    it("blank template next steps mention scaffolded bootstrap from Project profile", () => {
+      const joined = getNextStepsLines("blank", "main.mts").join("\n");
+      expect(joined).toMatch(/Project profile/i);
+      expect(joined).toContain(".sandcastle/bootstrap.sh");
+      expect(joined).toMatch(/does not run or validate/i);
+    });
+
+    it("non-blank template does not mention node_modules optimization defaults", () => {
       const lines = getNextStepsLines("simple-loop", "main.mts");
       const joined = lines.join("\n");
-      expect(joined).toContain("copyToWorktree");
-      expect(joined).toContain("node_modules");
+      expect(joined).not.toContain("node_modules");
+      expect(joined).not.toContain("copyToWorktree");
     });
 
     it("blank template includes a step to customize prompt.md", () => {
@@ -1165,7 +1430,7 @@ describe("InitService scaffold", () => {
   });
 
   describe("parallel-planner template", () => {
-    it("produces main.mts, plan-prompt.md, implement-prompt.md, merge-prompt.md", async () => {
+    it("produces main.mts, plan-prompt.md, implement-prompt.md, and merge-prompt.md", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner" });
 
@@ -1184,9 +1449,12 @@ describe("InitService scaffold", () => {
       await expect(
         access(join(configDir, "merge-prompt.md")),
       ).resolves.toBeUndefined();
+      await expect(
+        access(join(configDir, "bootstrap-prompt.md")),
+      ).rejects.toThrow();
     });
 
-    it("main.mts uses npm install hook and imports sandcastle", async () => {
+    it("main.mts imports sandcastle namespace", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner" });
 
@@ -1194,7 +1462,6 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain("npm install");
       expect(mainTs).toContain("sandcastle");
     });
 
@@ -1277,7 +1544,7 @@ describe("InitService scaffold", () => {
   });
 
   describe("parallel-planner-with-review template", () => {
-    it("produces main.mts, plan-prompt.md, implement-prompt.md, review-prompt.md, merge-prompt.md", async () => {
+    it("produces main.mts, plan-prompt.md, implement-prompt.md, review-prompt.md, and merge-prompt.md", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
@@ -1299,6 +1566,9 @@ describe("InitService scaffold", () => {
       await expect(
         access(join(configDir, "merge-prompt.md")),
       ).resolves.toBeUndefined();
+      await expect(
+        access(join(configDir, "bootstrap-prompt.md")),
+      ).rejects.toThrow();
     });
 
     it("main.mts imports from @ai-hero/sandcastle", async () => {
@@ -2424,9 +2694,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(main).toContain(
-        'copyToWorktree: ["node_modules", ".sandcastle/agents", ".sandcastle/skills"]',
-      );
+      expect(main).not.toContain('copyToWorktree: ["node_modules"');
     });
 
     it("adds preset agent and skill paths to copyToWorktree constants", async () => {
@@ -2439,9 +2707,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(main).toContain(
-        'const copyToWorktree = ["node_modules", ".sandcastle/agents", ".sandcastle/skills"];',
-      );
+      expect(main).not.toContain('const copyToWorktree = ["node_modules"');
     });
   });
 });

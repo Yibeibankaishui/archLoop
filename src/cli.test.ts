@@ -114,6 +114,11 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("--installed-runtimes");
   });
 
+  it("init --help exposes --project-profile flag", async () => {
+    const { stdout } = await runCli("init --help", process.cwd());
+    expect(stdout).toContain("--project-profile");
+  });
+
   it("init --template nonexistent produces error listing available templates", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
@@ -258,6 +263,104 @@ describe("sandcastle CLI", () => {
     expect(envExample).toContain("OPENAI_KEY=");
     expect(envExample).toContain("CURSOR_API_KEY=");
     expect(envExample).not.toContain("ANTHROPIC_API_KEY=");
+  });
+
+  it("init --project-profile cpp scaffolds C++ Dockerfile tools and bootstrap.sh", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    await runNonInteractiveInit(
+      hostDir,
+      "--agent claude-code --project-profile cpp",
+    );
+
+    const dockerfile = await readFile(
+      join(hostDir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    const bootstrap = await readFile(
+      join(hostDir, ".sandcastle", "bootstrap.sh"),
+      "utf-8",
+    );
+    expect(dockerfile).toContain("cmake");
+    expect(dockerfile).toContain("build-essential");
+    expect(bootstrap).toContain("cmake -S");
+    expect(bootstrap).not.toContain("cmake --build");
+  });
+
+  it("init --project-profile generic scaffolds bootstrap.sh", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    await runNonInteractiveInit(
+      hostDir,
+      "--agent claude-code --project-profile generic",
+    );
+
+    const bootstrap = await readFile(
+      join(hostDir, ".sandcastle", "bootstrap.sh"),
+      "utf-8",
+    );
+    expect(bootstrap).toContain("#!/usr/bin/env bash");
+    expect(bootstrap).toContain("exit 0");
+  });
+
+  it("init --project-profile node scaffolds lockfile-aware bootstrap.sh", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    await runNonInteractiveInit(
+      hostDir,
+      "--agent claude-code --project-profile node",
+    );
+
+    const bootstrap = await readFile(
+      join(hostDir, ".sandcastle", "bootstrap.sh"),
+      "utf-8",
+    );
+    expect(bootstrap).toContain("pnpm-lock.yaml");
+    expect(bootstrap).toContain("npm ci");
+    expect(bootstrap).toContain("No package.json found");
+  });
+
+  it("init --project-profile python scaffolds Python bootstrap and image tools", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    await runNonInteractiveInit(
+      hostDir,
+      "--agent claude-code --project-profile python",
+    );
+
+    const bootstrap = await readFile(
+      join(hostDir, ".sandcastle", "bootstrap.sh"),
+      "utf-8",
+    );
+    expect(bootstrap).toContain("uv sync");
+    expect(bootstrap).toContain("Poetry");
+
+    const dockerfile = await readFile(
+      join(hostDir, ".sandcastle", "Dockerfile"),
+      "utf-8",
+    );
+    expect(dockerfile).toContain("python3-venv");
+    expect(dockerfile).toContain("astral.sh/uv/install.sh");
+  });
+
+  it("init --project-profile rejects unknown profiles before scaffolding", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    try {
+      await runNonInteractiveInit(
+        hostDir,
+        "--agent claude-code --project-profile rust",
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      expect(cliFailureOutput(err)).toContain('Unknown project profile "rust"');
+      await expect(access(join(hostDir, ".sandcastle"))).rejects.toThrow();
+    }
   });
 
   it("init --runtimes rejects unknown runtimes before scaffolding", async () => {
