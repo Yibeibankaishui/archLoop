@@ -635,7 +635,7 @@ console.log(result.output.score); // typed as number
 
 ### Templates
 
-`sandcastle init` prompts you to choose a sandbox provider (Docker or Podman), a backlog manager (GitHub Issues or Beads), a workflow template, and a **Project profile** (your repo's language or build-system shape). It scaffolds a ready-to-use prompt and `main.mts` suited to the workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. Five templates are available:
+`sandcastle init` prompts you to choose a sandbox provider (`docker` or `no-sandbox`), a backlog manager (GitHub Issues or Beads), a workflow template, and a **Project profile** (your repo's language or build-system shape). It scaffolds a ready-to-use prompt and `main.mts` suited to the workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. Five templates are available:
 
 | Template                       | Description                                                               |
 | ------------------------------ | ------------------------------------------------------------------------- |
@@ -657,7 +657,7 @@ After you choose a template, init can optionally add **preset agent roles**. In 
 
 ### `sandcastle init`
 
-Scaffolds the `.sandcastle/` config directory and builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a default scaffold agent, which agent runtimes to install in the image, sandbox provider, backlog manager, workflow template, and Project profile (after template selection). You choose Docker or Podman during init — selecting Podman writes a `Containerfile` instead of `Dockerfile` and uses `sandcastle podman build-image` for the build step. After scaffold and before image build, init also runs an auth setup step for selected tools, including GitHub Issues, Codex, and Cursor.
+Scaffolds the `.sandcastle/` config directory and optionally builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a default scaffold agent, which agent runtimes to install in the image, sandbox provider, backlog manager, workflow template, and Project profile (after template selection). Init now offers `docker` and `no-sandbox`: choosing `docker` follows the normal image-build flow, while choosing `no-sandbox` skips image build during init. After scaffold (and before optional image build), init also runs an auth setup step for selected tools, including GitHub Issues, Codex, and Cursor.
 
 Think of the init agent choices as two layers:
 
@@ -722,7 +722,7 @@ Existing single-runtime projects remain valid. `sandcastle init` does not automa
 | `--model`                   | No       | Agent's default model                             | Model to use (e.g. `claude-sonnet-4-6`). Defaults to agent's default                                      |
 | `--template`                | No       | Interactive prompt                                | Template to scaffold (e.g. `blank`, `simple-loop`)                                                        |
 | `--project-profile`         | No       | `generic`                                         | Project type for containerfile tools and bootstrap (`generic`, `node`, `python`, `cpp`)                   |
-| `--sandbox`                 | No       | Interactive prompt                                | Sandbox provider (`docker` or `podman`)                                                                   |
+| `--sandbox`                 | No       | Interactive prompt                                | Sandbox provider (`docker` or `no-sandbox`)                                                               |
 | `--backlog`                 | No       | Interactive prompt                                | Backlog manager (`github-issues` or `beads`)                                                              |
 | `--preset-agents`           | No       | Interactive prompt                                | Comma-separated preset ids (e.g. `reviewer,planner`) or `none`                                            |
 | `--create-sandcastle-label` | No       | Interactive prompt                                | `true`/`false` for creating the `Sandcastle` GitHub label                                                 |

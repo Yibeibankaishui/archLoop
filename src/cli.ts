@@ -24,8 +24,8 @@ import {
   getAgent,
   listBacklogManagers,
   getBacklogManager,
-  listSandboxProviders,
-  getSandboxProvider,
+  listInitSandboxProviders,
+  getInitSandboxProvider,
   getNextStepsLines,
   listAgentRuntimes,
   getAgentRuntime,
@@ -122,7 +122,7 @@ const initModelOption = Options.text("model").pipe(
 
 const initSandboxOption = Options.text("sandbox").pipe(
   Options.withDescription(
-    "Sandbox provider (docker or podman). Omit to choose interactively.",
+    "Sandbox provider (docker or no-sandbox). Omit to choose interactively.",
   ),
   Options.optional,
 );
@@ -537,10 +537,10 @@ const initCommand = Command.make(
       });
 
       // Resolve sandbox provider: CLI flag > interactive select
-      const sandboxProviders = listSandboxProviders();
+      const sandboxProviders = listInitSandboxProviders();
       let selectedSandboxProvider: SandboxProviderEntry;
       if (sandboxCli._tag === "Some") {
-        const entry = getSandboxProvider(sandboxCli.value);
+        const entry = getInitSandboxProvider(sandboxCli.value);
         if (!entry) {
           const names = sandboxProviders.map((p) => p.name).join(", ");
           yield* Effect.fail(
@@ -567,7 +567,7 @@ const initCommand = Command.make(
             }),
           );
         }
-        selectedSandboxProvider = getSandboxProvider(selected as string)!;
+        selectedSandboxProvider = getInitSandboxProvider(selected as string)!;
       }
 
       // Resolve backlog manager: CLI flag > interactive select
@@ -958,19 +958,22 @@ const initCommand = Command.make(
 
       // Prompt user before building image (unless --build-image is set)
       const providerLabel = selectedSandboxProvider.label;
-      let shouldBuild: boolean | symbol;
-      if (buildImageCli._tag === "Some") {
-        shouldBuild = yield* parseStrictBoolean(
-          "build-image",
-          buildImageCli.value,
-        );
-      } else {
-        shouldBuild = yield* Effect.promise(() =>
-          clack.confirm({
-            message: `Build the default ${providerLabel} image now?`,
-            initialValue: true,
-          }),
-        );
+      const isNoSandboxInit = selectedSandboxProvider.name === "no-sandbox";
+      let shouldBuild: boolean | symbol = false;
+      if (!isNoSandboxInit) {
+        if (buildImageCli._tag === "Some") {
+          shouldBuild = yield* parseStrictBoolean(
+            "build-image",
+            buildImageCli.value,
+          );
+        } else {
+          shouldBuild = yield* Effect.promise(() =>
+            clack.confirm({
+              message: `Build the default ${providerLabel} image now?`,
+              initialValue: true,
+            }),
+          );
+        }
       }
 
       if (shouldBuild === true) {
@@ -991,6 +994,11 @@ const initCommand = Command.make(
           );
         }
         yield* d.status("Init complete! Image built successfully.", "success");
+      } else if (isNoSandboxInit) {
+        yield* d.status(
+          "Init complete! no-sandbox selected, so image build was skipped.",
+          "success",
+        );
       } else {
         yield* d.status(
           `Init complete! Run \`sandcastle ${selectedSandboxProvider.cliNamespace} build-image\` to build the ${providerLabel} image later.`,

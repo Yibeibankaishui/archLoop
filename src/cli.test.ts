@@ -119,6 +119,13 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("--project-profile");
   });
 
+  it("init --help no longer advertises podman as a sandbox option", async () => {
+    const { stdout } = await runCli("init --help", process.cwd());
+    expect(stdout).toContain("Sandbox provider");
+    expect(stdout).toContain("no-sandbox");
+    expect(stdout).not.toContain("docker or podman");
+  });
+
   it("init --template nonexistent produces error listing available templates", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
@@ -196,6 +203,20 @@ describe("sandcastle CLI", () => {
       const output = cliFailureOutput(err);
       expect(output).toContain("nonexistent");
       expect(output).toContain("claude-code");
+    }
+  });
+
+  it("init --sandbox podman is rejected", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli("init --sandbox podman --agent claude-code", hostDir);
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain('Unknown sandbox provider "podman"');
+      expect(output).toContain("no-sandbox");
     }
   });
 

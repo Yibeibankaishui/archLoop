@@ -758,6 +758,14 @@ const SANDBOX_PROVIDER_REGISTRY: SandboxProviderEntry[] = [
     containerfileName: "Containerfile",
     cliNamespace: "podman",
   },
+  {
+    name: "no-sandbox",
+    label: "No Sandbox",
+    // Keep scaffold output stable; no-sandbox init still writes Dockerfile
+    // so users can opt into containerized runs later without re-initializing.
+    containerfileName: "Dockerfile",
+    cliNamespace: "docker",
+  },
 ];
 
 export const listSandboxProviders = (): SandboxProviderEntry[] =>
@@ -767,6 +775,19 @@ export const getSandboxProvider = (
   name: string,
 ): SandboxProviderEntry | undefined =>
   SANDBOX_PROVIDER_REGISTRY.find((p) => p.name === name);
+
+const INIT_SANDBOX_PROVIDER_REGISTRY: SandboxProviderEntry[] =
+  SANDBOX_PROVIDER_REGISTRY.filter(
+    (p) => p.name === "docker" || p.name === "no-sandbox",
+  );
+
+export const listInitSandboxProviders = (): SandboxProviderEntry[] =>
+  INIT_SANDBOX_PROVIDER_REGISTRY;
+
+export const getInitSandboxProvider = (
+  name: string,
+): SandboxProviderEntry | undefined =>
+  INIT_SANDBOX_PROVIDER_REGISTRY.find((p) => p.name === name);
 
 // ---------------------------------------------------------------------------
 // Next steps

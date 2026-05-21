@@ -20,7 +20,9 @@ import {
   listBacklogManagers,
   getBacklogManager,
   listSandboxProviders,
+  listInitSandboxProviders,
   getSandboxProvider,
+  getInitSandboxProvider,
   listAgentRuntimes,
   getAgentRuntime,
   collectAuthRequirements,
@@ -2743,6 +2745,13 @@ describe("Sandbox provider registry", () => {
     expect(providers.some((p) => p.name === "podman")).toBe(true);
   });
 
+  it("listInitSandboxProviders returns docker and no-sandbox", () => {
+    const providers = listInitSandboxProviders();
+    expect(providers.some((p) => p.name === "docker")).toBe(true);
+    expect(providers.some((p) => p.name === "no-sandbox")).toBe(true);
+    expect(providers.some((p) => p.name === "podman")).toBe(false);
+  });
+
   it("getSandboxProvider returns docker entry", () => {
     const provider = getSandboxProvider("docker");
     expect(provider).toBeDefined();
@@ -2755,6 +2764,17 @@ describe("Sandbox provider registry", () => {
     expect(provider).toBeDefined();
     expect(provider!.containerfileName).toBe("Containerfile");
     expect(provider!.cliNamespace).toBe("podman");
+  });
+
+  it("getInitSandboxProvider returns no-sandbox entry", () => {
+    const provider = getInitSandboxProvider("no-sandbox");
+    expect(provider).toBeDefined();
+    expect(provider!.containerfileName).toBe("Dockerfile");
+    expect(provider!.cliNamespace).toBe("docker");
+  });
+
+  it("getInitSandboxProvider excludes podman", () => {
+    expect(getInitSandboxProvider("podman")).toBeUndefined();
   });
 
   it("getSandboxProvider returns undefined for unknown provider", () => {
