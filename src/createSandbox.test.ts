@@ -13,6 +13,7 @@ import {
   createBindMountSandboxProvider,
   createIsolatedSandboxProvider,
 } from "./SandboxProvider.js";
+import { noSandbox } from "./sandboxes/no-sandbox.js";
 import { testIsolated } from "./sandboxes/test-isolated.js";
 import { makeLocalSandboxLayer } from "./testSandbox.js";
 
@@ -203,6 +204,31 @@ describe("createSandbox", () => {
       expect(existsSync(sandbox.worktreePath)).toBe(true);
     } finally {
       await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("creates and closes a sandbox with noSandbox()", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const sandbox = await createSandbox({
+      branch: "test-no-sandbox-branch",
+      sandbox: noSandbox(),
+      cwd: hostDir,
+    });
+
+    const worktreePath = sandbox.worktreePath;
+
+    try {
+      expect(sandbox.branch).toBe("test-no-sandbox-branch");
+      expect(worktreePath).toContain(".sandcastle/worktrees");
+      expect(existsSync(worktreePath)).toBe(true);
+    } finally {
+      const closeResult = await sandbox.close();
+      expect(closeResult.preservedWorktreePath).toBeUndefined();
+      expect(existsSync(worktreePath)).toBe(false);
       await rm(hostDir, { recursive: true, force: true });
     }
   });
@@ -1392,6 +1418,15 @@ describe("createSandbox", () => {
     const check: HasSignal = false;
     expect(check).toBe(false);
     expect(opts).toBeDefined();
+  });
+
+  it("accepts noSandbox() in CreateSandboxOptions", () => {
+    const opts: CreateSandboxOptions = {
+      branch: "feature/no-sandbox",
+      sandbox: noSandbox(),
+    };
+
+    expect(opts.sandbox.tag).toBe("none");
   });
 
   it("forks new branch from baseBranch when specified", async () => {

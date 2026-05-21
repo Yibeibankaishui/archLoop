@@ -231,7 +231,12 @@ export const createWorktree = async (
       baseBranch,
     });
     if (options.copyToWorktree && options.copyToWorktree.length > 0) {
-      yield* copyToWorktree(options.copyToWorktree, hostRepoDir, info.path, options.timeouts?.copyToWorktreeMs);
+      yield* copyToWorktree(
+        options.copyToWorktree,
+        hostRepoDir,
+        info.path,
+        options.timeouts?.copyToWorktreeMs,
+      );
     }
     // Run host.onWorktreeReady hooks after copyToWorktree, before sandbox creation
     if (options.hooks?.host?.onWorktreeReady?.length) {
@@ -528,7 +533,10 @@ export const createWorktree = async (
       }
 
       // 4. Start sandbox
-      let handle: BindMountSandboxHandle | IsolatedSandboxHandle;
+      let handle:
+        | BindMountSandboxHandle
+        | IsolatedSandboxHandle
+        | NoSandboxHandle;
       let sandboxRepoDir: string;
 
       if (sandboxProvider.tag === "isolated") {
@@ -536,6 +544,15 @@ export const createWorktree = async (
           provider: sandboxProvider,
           hostRepoDir: worktreeInfo.path,
           env: effectiveEnv,
+        });
+        handle = startResult.handle;
+        sandboxRepoDir = startResult.worktreePath;
+      } else if (sandboxProvider.tag === "none") {
+        const startResult = yield* startSandbox({
+          provider: sandboxProvider,
+          hostRepoDir,
+          env: effectiveEnv,
+          worktreeOrRepoPath: worktreeInfo.path,
         });
         handle = startResult.handle;
         sandboxRepoDir = startResult.worktreePath;

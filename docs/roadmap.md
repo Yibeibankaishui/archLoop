@@ -126,7 +126,7 @@ Goal: 让 Sandcastle 不再默认假设 Node 项目，而是通过项目级 boot
 - [ ] 实现模板侧 runtime bootstrap generation 移除（见 [#22](https://github.com/Yibeibankaishui/sandcastle/issues/22)）。
 - [ ] 实现 Node、Python、C++ Project profiles（见 [#23](https://github.com/Yibeibankaishui/sandcastle/issues/23)、[#24](https://github.com/Yibeibankaishui/sandcastle/issues/24)、[#25](https://github.com/Yibeibankaishui/sandcastle/issues/25)）。
 - [ ] 为常见技术栈沉淀 bootstrap 示例。
-- [ ] 梳理 unsandboxed / no-sandbox 模式的安全边界与适用场景。
+- [x] 梳理并落地 `noSandbox()` 在 `run()` / `createSandbox()` 中的使用边界与适用场景。
 - [ ] 修复 init 生成的 auth mount 目录缺失导致 sandbox 启动前失败的问题（见 [#19](https://github.com/Yibeibankaishui/sandcastle/issues/19)）。
 
 相关文档：[project-profiles-init-bootstrap](./prd/project-profiles-init-bootstrap.md)、[ADR-0015](./adr/0015-project-profiles-generate-bootstrap-at-init-time.md)、[bootstrap-template-contract](../.changeset/bootstrap-template-contract.md)。
@@ -162,7 +162,7 @@ Goal: 让高级用户可以清晰地复用自定义 Dockerfile、现有 image �
 ### Out of Scope
 
 - 不把已有容器接入作为默认 AFK 路径。
-- 不把 no-sandbox provider 扩展为 AFK 执行模式。
+- 不把 no-sandbox provider 作为默认 AFK 路径；仅保留显式 opt-in 的 host 执行模式。
 - 不在本阶段内提供完整 Docker Compose 编排。
 
 ## 04 文档与用户体验

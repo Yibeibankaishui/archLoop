@@ -298,7 +298,7 @@ export const resolveGitMounts = (
 /** Shared acquire result type for the worktree-mode acquireUseRelease. */
 interface AcquireResult {
   worktreeInfo: WorktreeManager.WorktreeInfo;
-  handle: BindMountSandboxHandle | IsolatedSandboxHandle;
+  handle: BindMountSandboxHandle | IsolatedSandboxHandle | NoSandboxHandle;
   sandboxLayer: Layer.Layer<Sandbox>;
   worktreePath: string;
 }
@@ -356,6 +356,127 @@ export const WorktreeDockerSandboxFactory = {
           E | SandboxError,
           Exclude<R, Sandbox>
         > => {
+          // No-sandbox providers: run directly on the host, no container or mounts.
+          if (sandboxProvider.tag === "none") {
+            let preservedPath: string | undefined;
+
+            // Head mode: use hostRepoDir directly, no worktree.
+            if (isHeadMode) {
+              return (
+                hooks?.host?.onWorktreeReady?.length
+                  ? runHostHooks(
+                      hooks.host.onWorktreeReady,
+                      hostRepoDir,
+                      signal,
+                    )
+                  : Effect.void
+              ).pipe(
+                Effect.andThen(
+                  Effect.acquireUseRelease(
+                    startSandbox({
+                      provider: sandboxProvider,
+                      hostRepoDir,
+                      env,
+                      worktreeOrRepoPath: hostRepoDir,
+                    }),
+                    ({ sandboxLayer, worktreePath, handle }) =>
+                      makeEffect({
+                        hostWorktreePath: hostRepoDir,
+                        sandboxRepoPath: worktreePath,
+                      }).pipe(Effect.provide(sandboxLayer)) as Effect.Effect<
+                        A,
+                        E | SandboxError,
+                        Exclude<R, Sandbox>
+                      >,
+                    ({ handle }) =>
+                      Effect.tryPromise({
+                        try: () => handle.close(),
+                        catch: () => undefined,
+                      }).pipe(Effect.orDie),
+                  ).pipe(
+                    Effect.map((value) => ({
+                      value,
+                      preservedWorktreePath: undefined,
+                    })),
+                  ),
+                ),
+              );
+            }
+
+            // Worktree mode (merge-to-head or explicit branch).
+            return Effect.acquireUseRelease(
+              pruneAndCreate().pipe(
+                Effect.flatMap((worktreeInfo) =>
+                  (copyPaths && copyPaths.length > 0
+                    ? display.spinner(
+                        "Copying to worktree",
+                        copyToWorktree(
+                          copyPaths,
+                          hostRepoDir,
+                          worktreeInfo.path,
+                          timeouts?.copyToWorktreeMs,
+                        ),
+                      )
+                    : Effect.succeed(undefined)
+                  ).pipe(Effect.map(() => worktreeInfo)),
+                ),
+                Effect.tap((worktreeInfo) =>
+                  hooks?.host?.onWorktreeReady?.length
+                    ? runHostHooks(
+                        hooks.host.onWorktreeReady,
+                        worktreeInfo.path,
+                        signal,
+                      )
+                    : Effect.void,
+                ),
+                Effect.flatMap((worktreeInfo) =>
+                  startSandbox({
+                    provider: sandboxProvider,
+                    hostRepoDir,
+                    env,
+                    worktreeOrRepoPath: worktreeInfo.path,
+                  }).pipe(
+                    Effect.map(({ handle, sandboxLayer, worktreePath }) => ({
+                      worktreeInfo,
+                      handle,
+                      sandboxLayer,
+                      worktreePath,
+                    })),
+                  ),
+                ),
+              ),
+              ({ worktreeInfo, sandboxLayer, worktreePath }) =>
+                makeEffect({
+                  hostWorktreePath: worktreeInfo.path,
+                  sandboxRepoPath: worktreePath,
+                }).pipe(Effect.provide(sandboxLayer)) as Effect.Effect<
+                  A,
+                  E | SandboxError,
+                  Exclude<R, Sandbox>
+                >,
+              ({ worktreeInfo, handle }, exit) =>
+                Effect.tryPromise({
+                  try: () => handle.close(),
+                  catch: () => undefined,
+                }).pipe(
+                  Effect.andThen(cleanupWorktree(worktreeInfo.path, exit)),
+                  Effect.tap((p) => {
+                    preservedPath = p;
+                  }),
+                  Effect.asVoid,
+                  Effect.orDie,
+                ),
+            ).pipe(
+              Effect.map((value) => ({
+                value,
+                preservedWorktreePath: preservedPath,
+              })),
+              Effect.mapError((e: E | SandboxError) =>
+                attachPreservedPath(preservedPath, e),
+              ),
+            );
+          }
+
           // Isolated providers: create worktree, sync via git bundle
           if (sandboxProvider.tag === "isolated") {
             let preservedPath: string | undefined;
@@ -504,7 +625,12 @@ export const WorktreeDockerSandboxFactory = {
                 (copyPaths && copyPaths.length > 0
                   ? display.spinner(
                       "Copying to worktree",
-                      copyToWorktree(copyPaths, hostRepoDir, worktreeInfo.path, timeouts?.copyToWorktreeMs),
+                      copyToWorktree(
+                        copyPaths,
+                        hostRepoDir,
+                        worktreeInfo.path,
+                        timeouts?.copyToWorktreeMs,
+                      ),
                     )
                   : Effect.succeed(undefined)
                 ).pipe(Effect.map(() => worktreeInfo)),

@@ -20,6 +20,7 @@ import { Output, StructuredOutputError } from "./Output.js";
 import type { InteractiveOptions } from "./interactive.js";
 import type { WorktreeInteractiveOptions } from "./createWorktree.js";
 import { defaultImageName } from "./sandboxes/docker.js";
+import { noSandbox } from "./sandboxes/no-sandbox.js";
 import * as sandcastle from "./SandboxProvider.js";
 import { createBindMountSandboxProvider } from "./SandboxProvider.js";
 
@@ -252,6 +253,16 @@ describe("RunOptions", () => {
       agent: claudeCode("claude-opus-4-6"),
       prompt: "test",
     };
+  });
+
+  it("accepts noSandbox() as the sandbox provider", () => {
+    const opts: RunOptions = {
+      agent: claudeCode("claude-opus-4-6"),
+      sandbox: noSandbox(),
+      prompt: "test",
+    };
+
+    expect(opts.sandbox.tag).toBe("none");
   });
 
   it("allows idleTimeoutSeconds to be specified", () => {

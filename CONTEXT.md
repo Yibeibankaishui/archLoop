@@ -217,9 +217,8 @@ _Avoid_: "log event" (the log file contains more than just agent output), "displ
 - A **bind-mount sandbox provider** supports all three **branch strategies**: **head** (default), **merge-to-head**, and **branch**
 - An **isolated sandbox provider** supports **merge-to-head** (default) and **branch** only -- **head** is not valid because it cannot write directly to the **host** filesystem
 - An **isolated sandbox provider** handles syncing code in and extracting commits out -- optionally using **bundle/patch sync**. **Isolated sandbox providers are defined in the type system but not yet implemented**
-- A **no-sandbox provider** supports all three **branch strategies** (default: **head**). It is only accepted by `interactive()`, not `run()` -- enforced at the type level. The **agent provider** does not receive `dangerouslySkipPermissions: true`
-- `interactive()` accepts all three **sandbox provider** types; `run()` accepts only **bind-mount** and **isolated**
-- `createSandbox()` does not accept a **no-sandbox provider**
+- A **no-sandbox provider** supports all three **branch strategies** (default: **head**). It is accepted by `run()`, `createSandbox()`, and `interactive()` -- the caller opts in to host execution by importing `noSandbox()`. The **agent provider** does not receive `dangerouslySkipPermissions: true`
+- `run()`, `createSandbox()`, and `interactive()` all accept any **sandbox provider** type, including **no-sandbox**
 - **Sandbox providers** are imported from subpaths (e.g. `sandcastle/sandboxes/docker`) -- the main `sandcastle` entry point does not re-export any provider
 - **Host hooks** run on the **host**; **sandbox hooks** run inside the **sandbox**. Hooks are grouped under `host` and `sandbox` in the `hooks` option
 - Lifecycle ordering: `copyToWorktree` -> `host.onWorktreeReady` (sequential) -> sandbox created -> `host.onSandboxReady` + `sandbox.onSandboxReady` (parallel)
@@ -294,7 +293,7 @@ _Avoid_: "log event" (the log file contains more than just agent output), "displ
 
 > **Dev:** "What about using `noSandbox()` with `run()` for an AFK job?"
 
-> **Domain expert:** "That's not allowed -- `run()` doesn't accept a **no-sandbox provider**. This is enforced at the type level. AFK means unsupervised, so you need a real **sandbox** for isolation."
+> **Domain expert:** "Allowed -- `run()` and `createSandbox()` both accept `noSandbox()`. There's no isolation, so only opt in when Sandcastle itself is already running inside an isolated environment, like containerized CI, a VM, or a sandbox host. The explicit `noSandbox()` import is the opt-in."
 
 ### Prompt system
 
