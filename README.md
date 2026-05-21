@@ -635,7 +635,7 @@ console.log(result.output.score); // typed as number
 
 ### Templates
 
-`sandcastle init` prompts you to choose a sandbox provider (`docker` or `no-sandbox`), a backlog manager (GitHub Issues or Beads), a workflow template, and a **Project profile** (your repo's language or build-system shape). It scaffolds a ready-to-use prompt and `main.mts` suited to the workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. Five templates are available:
+`sandcastle init` prompts you to choose a sandbox provider (`docker` or `no-sandbox`), a backlog manager (GitHub Issues or Beads), a workflow template, and a **Project profile** (your repo's language or build-system shape). It scaffolds a ready-to-use prompt and `main.mts` suited to the workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. The scaffolded entrypoint reflects the sandbox choice you made during init: `docker` generates `docker(...)`, while `no-sandbox` generates `noSandbox()`. Five templates are available:
 
 | Template                       | Description                                                               |
 | ------------------------------ | ------------------------------------------------------------------------- |
@@ -657,7 +657,7 @@ After you choose a template, init can optionally add **preset agent roles**. In 
 
 ### `sandcastle init`
 
-Scaffolds the `.sandcastle/` config directory and optionally builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a default scaffold agent, which agent runtimes to install in the image, sandbox provider, backlog manager, workflow template, and Project profile (after template selection). Init now offers `docker` and `no-sandbox`: choosing `docker` follows the normal image-build flow, while choosing `no-sandbox` skips image build during init. After scaffold (and before optional image build), init also runs an auth setup step for selected tools, including GitHub Issues, Codex, and Cursor.
+Scaffolds the `.sandcastle/` config directory and optionally builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a default scaffold agent, which agent runtimes to install in the image, sandbox provider, backlog manager, workflow template, and Project profile (after template selection). Init now offers `docker` and `no-sandbox`: choosing `docker` follows the normal image-build flow, while choosing `no-sandbox` skips image build during init and rewrites the scaffolded `main.mts` or `main.ts` to call `noSandbox()`. After scaffold (and before optional image build), init also runs an auth setup step for selected tools, including GitHub Issues, Codex, and Cursor.
 
 Think of the init agent choices as two layers:
 
@@ -665,6 +665,8 @@ Think of the init agent choices as two layers:
 - The installed runtimes (`--runtimes`) choose which agent CLIs are installed in the sandbox image, which auth directories are mounted, and which token placeholders appear in `.env.example`.
 
 `main.mts`/`main.ts` remains the orchestration surface after init. If you install multiple runtimes, edit that file to import and call the providers you want for each `run()` or `createSandbox()` flow. For scripted init, omit `--runtimes` to install the selected `--agent` runtime, or pass a comma-separated list.
+
+When you pair `--sandbox no-sandbox` with `--backlog beads`, init validates that `bd` is already available on your host `PATH`. In no-sandbox mode, prompt shell expressions run on the host instead of inside a container, so Beads must be installed locally before the generated workflow can run.
 
 #### Project profiles
 

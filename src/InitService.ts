@@ -602,6 +602,14 @@ const renderAuthMount = (mount: AuthMountEntry): string => {
 };
 
 const EMPTY_AUTH_MOUNTS_PROPERTY = "  mounts: [],";
+const DOCKER_IMPORT_LINE =
+  'import { docker } from "@ai-hero/sandcastle/sandboxes/docker";';
+const NO_SANDBOX_IMPORT_LINE =
+  'import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";';
+const DOCKER_PROVIDER_SNIPPET = `const sandboxProvider = docker({
+  mounts: [],
+});`;
+const NO_SANDBOX_PROVIDER_SNIPPET = "const sandboxProvider = noSandbox();";
 
 const renderAuthMountsProperty = (
   mounts: readonly AuthMountEntry[],
@@ -827,6 +835,7 @@ export function getNextStepsLines(
   options?: {
     presetAgentIds?: readonly string[];
     authSetupSummary?: AuthSetupSummary;
+    hostRequirementSummary?: AuthSetupSummary;
   },
 ): string[] {
   const presetHintText =
@@ -834,6 +843,7 @@ export function getNextStepsLines(
       ? PRESET_AGENT_NEXT_STEP
       : undefined;
   const authSetupLines = options?.authSetupSummary?.lines ?? [];
+  const hostRequirementLines = options?.hostRequirementSummary?.lines ?? [];
 
   if (template === "blank") {
     let step = 1;
@@ -850,6 +860,9 @@ export function getNextStepsLines(
       lines.push(`${step++}. ${presetHintText}`);
     }
     for (const line of authSetupLines) {
+      lines.push(`${step++}. ${line}`);
+    }
+    for (const line of hostRequirementLines) {
       lines.push(`${step++}. ${line}`);
     }
     lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
@@ -876,6 +889,9 @@ export function getNextStepsLines(
     lines.push(`${step++}. ${presetHintText}`);
   }
   for (const line of authSetupLines) {
+    lines.push(`${step++}. ${line}`);
+  }
+  for (const line of hostRequirementLines) {
     lines.push(`${step++}. ${line}`);
   }
   lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
@@ -1047,6 +1063,7 @@ const rewriteMainFile = (
   agent: AgentEntry,
   model: string,
   mainFilename: string,
+  sandboxProvider: SandboxProviderEntry,
   authMounts: readonly AuthMountEntry[],
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
@@ -1066,6 +1083,14 @@ const rewriteMainFile = (
     // When the target is main.ts, rewrite those references.
     if (mainFilename === "main.ts") {
       content = content.replace(/main\.mts/g, "main.ts");
+    }
+
+    if (sandboxProvider.name === "no-sandbox") {
+      content = content.replace(DOCKER_IMPORT_LINE, NO_SANDBOX_IMPORT_LINE);
+      content = content.replace(
+        DOCKER_PROVIDER_SNIPPET,
+        NO_SANDBOX_PROVIDER_SNIPPET,
+      );
     }
 
     // Replace factory function name in imports (e.g. claudeCode → pi)
@@ -1384,6 +1409,7 @@ export const scaffold = (
       agent,
       model,
       mainFilename,
+      sandboxProvider,
       selectedAuthMounts,
     );
 

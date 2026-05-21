@@ -2556,6 +2556,7 @@ describe("InitService scaffold", () => {
 
   describe("sandbox provider", () => {
     const dockerProvider = getSandboxProvider("docker")!;
+    const noSandboxProvider = getSandboxProvider("no-sandbox")!;
     const podmanProvider = getSandboxProvider("podman")!;
 
     it("selecting docker writes Dockerfile to .sandcastle/", async () => {
@@ -2600,6 +2601,26 @@ describe("InitService scaffold", () => {
       await expect(
         access(join(dir, ".sandcastle", "Containerfile")),
       ).rejects.toThrow();
+    });
+
+    it("selecting no-sandbox rewrites the scaffolded main file to use noSandbox()", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        sandboxProvider: noSandboxProvider,
+        templateName: "parallel-planner-with-review",
+      });
+
+      const main = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+
+      expect(main).toContain(
+        'import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";',
+      );
+      expect(main).toContain("const sandboxProvider = noSandbox();");
+      expect(main).not.toContain('import { docker }');
+      expect(main).not.toContain("const sandboxProvider = docker({");
     });
   });
 

@@ -1,7 +1,14 @@
 import { exec } from "node:child_process";
-import { access, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import {
+  access,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 
@@ -27,8 +34,11 @@ const commitFile = async (
 
 const cliPath = join(import.meta.dirname, "..", "dist", "main.js");
 
-const runCli = (args: string, cwd: string) =>
-  execAsync(`node ${cliPath} ${args}`, { cwd });
+const runCli = (
+  args: string,
+  cwd: string,
+  env?: NodeJS.ProcessEnv,
+) => execAsync(`"${process.execPath}" ${cliPath} ${args}`, { cwd, env });
 
 const runNonInteractiveInit = (cwd: string, args: string) =>
   runCli(
@@ -218,6 +228,53 @@ describe("sandcastle CLI", () => {
       expect(output).toContain('Unknown sandbox provider "podman"');
       expect(output).toContain("no-sandbox");
     }
+  });
+
+  it("init --sandbox no-sandbox --backlog beads requires bd on the host", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli(
+        "init --sandbox no-sandbox --backlog beads --template blank --project-profile generic --preset-agents none --build-image false --agent claude-code",
+        hostDir,
+        { ...process.env, PATH: dirname(process.execPath) },
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain("requires `bd` on the host");
+      expect(output).toContain("Install Beads locally or choose docker");
+    }
+  });
+
+  it("init --sandbox no-sandbox --backlog beads succeeds when bd exists on the host and explains the host requirement", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    const binDir = join(hostDir, "test-bin");
+    await mkdir(binDir, { recursive: true });
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      "#!/bin/sh\nif [ \"$1\" = \"ready\" ]; then\n  echo '[]'\n  exit 0\nfi\nexit 0\n",
+    );
+    await chmod(bdPath, 0o755);
+
+    const { stdout } = await runCli(
+      "init --sandbox no-sandbox --backlog beads --template blank --project-profile generic --preset-agents none --build-image false --agent claude-code",
+      hostDir,
+      { ...process.env, PATH: `${binDir}:${dirname(process.execPath)}` },
+    );
+
+    const mainTs = await readFile(
+      join(hostDir, ".sandcastle", "main.mts"),
+      "utf-8",
+    );
+
+    expect(mainTs).toContain("noSandbox()");
+    expect(stdout).toContain("`bd` available on your host PATH");
+    expect(stdout).toContain("no-sandbox + beads");
   });
 
   it("init with --agent and omitted runtimes installs the selected agent runtime", async () => {

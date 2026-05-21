@@ -357,6 +357,10 @@ interface AuthSetupResult {
   readonly nextStepLines: readonly string[];
 }
 
+interface HostRequirementResult {
+  readonly nextStepLines: readonly string[];
+}
+
 const buildAuthSetupNextStepLines = (options: {
   readonly githubChoice?: "env" | "login" | "skip" | "deferred";
   readonly codexChoice?: "env" | "login" | "skip" | "deferred";
@@ -407,6 +411,56 @@ const buildAuthSetupNextStepLines = (options: {
   }
 
   return lines;
+};
+
+const hostHasCommand = (command: string): boolean => {
+  const checkCommand =
+    process.platform === "win32" ? `where ${command}` : `command -v ${command}`;
+  try {
+    execSync(checkCommand, {
+      stdio: "ignore",
+      env: process.env,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const validateHostRequirementsForInit = (options: {
+  readonly sandboxProvider: SandboxProviderEntry;
+  readonly backlogManager: BacklogManagerEntry;
+}): Effect.Effect<void, InitError, never> => {
+  if (
+    options.sandboxProvider.name === "no-sandbox" &&
+    options.backlogManager.name === "beads" &&
+    !hostHasCommand("bd")
+  ) {
+    return Effect.fail(
+      new InitError({
+        message:
+          "Using --sandbox no-sandbox with backlog manager beads requires `bd` on the host PATH because backlog commands run on the host in this mode. Install Beads locally or choose docker.",
+      }),
+    );
+  }
+
+  return Effect.void;
+};
+
+const buildHostRequirementNextStepLines = (options: {
+  readonly sandboxProvider: SandboxProviderEntry;
+  readonly backlogManager: BacklogManagerEntry;
+}): string[] => {
+  if (
+    options.sandboxProvider.name === "no-sandbox" &&
+    options.backlogManager.name === "beads"
+  ) {
+    return [
+      "Keep `bd` available on your host PATH when using no-sandbox + beads. Prompt shell expressions run on the host in this mode, not in a container.",
+    ];
+  }
+
+  return [];
 };
 
 const isFullyScriptedInit = (options: {
@@ -628,6 +682,11 @@ const initCommand = Command.make(
         }
         selectedTemplate = selected as string;
       }
+
+      yield* validateHostRequirementsForInit({
+        sandboxProvider: selectedSandboxProvider,
+        backlogManager: selectedBacklogManager,
+      });
 
       const scriptedInit = isFullyScriptedInit({
         agentFlag,
@@ -955,6 +1014,12 @@ const initCommand = Command.make(
           cursorChoice: cursorAuthChoice,
         }),
       };
+      const hostRequirementResult: HostRequirementResult = {
+        nextStepLines: buildHostRequirementNextStepLines({
+          sandboxProvider: selectedSandboxProvider,
+          backlogManager: selectedBacklogManager,
+        }),
+      };
 
       // Prompt user before building image (unless --build-image is set)
       const providerLabel = selectedSandboxProvider.label;
@@ -1014,6 +1079,9 @@ const initCommand = Command.make(
           presetAgentIds: scaffoldResult.presetAgentIds,
           authSetupSummary: {
             lines: authSetupResult.nextStepLines,
+          },
+          hostRequirementSummary: {
+            lines: hostRequirementResult.nextStepLines,
           },
         },
       );
