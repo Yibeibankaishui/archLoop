@@ -25,6 +25,7 @@ import {
   getAgentRuntime,
   collectAuthRequirements,
   DEFAULT_PROJECT_PROFILE,
+  BOOTSTRAP_HOOK_TIMEOUT_MS,
 } from "./InitService.js";
 import { renderBootstrapScript } from "./bootstrap.js";
 import { getProjectProfile, NODE_PROJECT_PROFILE } from "./projectProfiles.js";
@@ -59,6 +60,9 @@ const countOccurrences = (content: string, pattern: RegExp): number =>
 /** Non-blank templates run init-scaffolded bootstrap only (no runtime generation). */
 const expectMainUsesInitBootstrapOnly = (mainTs: string) => {
   expect(mainTs).toContain("bash .sandcastle/bootstrap.sh");
+  expect(mainTs).toMatch(
+    /onSandboxReady:\s*\[\s*\{\s*command:\s*"bash \.sandcastle\/bootstrap\.sh",\s*timeoutMs:\s*300_000/,
+  );
   expect(mainTs).toContain("onSandboxReady");
   expect(mainTs).not.toContain("bootstrap-prompt.md");
   expect(mainTs).not.toContain("ensureBootstrapReady");
@@ -221,6 +225,20 @@ describe("Auth requirement collection", () => {
 // ---------------------------------------------------------------------------
 
 describe("InitService scaffold", () => {
+  it("BOOTSTRAP_HOOK_TIMEOUT_MS matches the numeric literal in scaffolded main.mts", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, { templateName: "simple-loop" });
+    const mainTs = await readFile(
+      join(dir, ".sandcastle", "main.mts"),
+      "utf-8",
+    );
+    const match = mainTs.match(/timeoutMs:\s*(\d[\d_]*)/);
+    expect(match).not.toBeNull();
+    expect(Number(match![1]!.replaceAll("_", ""))).toBe(
+      BOOTSTRAP_HOOK_TIMEOUT_MS,
+    );
+  });
+
   it("scaffolds a no-op bootstrap.sh for the generic project profile", async () => {
     const dir = await makeDir();
     await runScaffold(dir, {
@@ -1166,6 +1184,8 @@ describe("InitService scaffold", () => {
       expect(joined).toMatch(/worktree|mounted/i);
       expect(joined).toMatch(/image build|during init/i);
       expect(joined).toMatch(/does not run or validate/i);
+      expect(joined).toMatch(/300_000|5-minute/);
+      expect(joined).toMatch(/timeoutMs/);
     });
 
     it("blank template next steps mention scaffolded bootstrap from Project profile", () => {

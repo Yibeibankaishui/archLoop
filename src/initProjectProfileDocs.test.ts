@@ -19,6 +19,8 @@ describe("Project profile init documentation", () => {
     expect(readme).toContain("bootstrap.sh");
     expect(readme).toMatch(/Dockerfile|Containerfile/);
     expect(readme).toMatch(/onSandboxReady/);
+    expect(readme).toMatch(/timeoutMs:\s*300_000/);
+    expect(readme).toMatch(/60\s*s|60 second/i);
     expect(readme).toMatch(/worktree.*mount|mount.*worktree/i);
     expect(readme).toMatch(/not.*image build|image build.*not/i);
     expect(readme).toMatch(/not.*run.*validate|does not run or validate/i);
