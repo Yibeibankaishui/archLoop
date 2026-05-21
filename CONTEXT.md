@@ -164,6 +164,10 @@ _Avoid_: "task source", "issue tracker"
 A project-type choice made during **init** that describes the host repo's language or build-system shape (e.g. Node, Python, C++), independent of the selected **template** or **backlog manager**.
 _Avoid_: "task type", "project template", "stack" (ambiguous with runtime stack)
 
+**Generic project profile**:
+The default **project profile** that makes no language-specific assumptions about the host repo.
+_Avoid_: "auto", "unknown"
+
 **Template argument**:
 A named `{{KEY}}` placeholder in a scaffold template (Dockerfile, prompt `.md` file) that **init** replaces with a value derived from the user's choices.
 _Avoid_: "placeholder", "variable"
@@ -220,7 +224,21 @@ _Avoid_: "log event" (the log file contains more than just agent output), "displ
 - **Host hooks** run on the **host**; **sandbox hooks** run inside the **sandbox**. Hooks are grouped under `host` and `sandbox` in the `hooks` option
 - Lifecycle ordering: `copyToWorktree` -> `host.onWorktreeReady` (sequential) -> sandbox created -> `host.onSandboxReady` + `sandbox.onSandboxReady` (parallel)
 - Each **iteration** may produce one or more commits; iterations repeat until the **completion signal** fires or the max count is reached
-- **Init** creates the **config directory** on the **host**, prompting the user to select an **agent** and **backlog manager**
+- **Init** creates the **config directory** on the **host**, prompting the user to select an **agent**, **backlog manager**, and **project profile**
+- A **template** defines the scaffolded workflow shape; a **project profile** defines the repo environment and bootstrap assumptions. They compose independently.
+- The default **project profile** is generic; **init** does not infer a language-specific profile automatically.
+- The first supported **project profiles** are generic, Node, Python, and C++.
+- A **project profile** contributes project language and build-tool requirements to the generated Dockerfile or Containerfile.
+- The **generic project profile** generates a no-op bootstrap script and does not add language-specific tools to the generated Dockerfile or Containerfile.
+- An **agent runtime** contributes the agent CLI installation layer; a **backlog manager** contributes task-source tooling; a **sandbox provider** decides the containerfile name and runtime family.
+- Interactive **init** asks users to choose a **project profile**; that choice drives the generated Dockerfile or Containerfile and the generated bootstrap script.
+- **Init** generates the bootstrap script directly from the selected **project profile**; templates do not generate it at run time.
+- Scaffolded templates run the generated bootstrap script through a **sandbox hook**; they do not scaffold a bootstrap-generation prompt.
+- **Init** does not execute or validate the generated bootstrap script; it is first run by the scaffolded workflow's **sandbox hook**.
+- The generated bootstrap script is not part of image build; it runs inside the **sandbox** after the worktree is mounted and before the **agent** runs.
+- A **project profile** is an **init** scaffolding choice, not a public runtime option on `run()`, `createSandbox()`, or a **sandbox provider**.
+- The generated bootstrap script is a user-editable scaffold artifact owned by the host repo after **init**.
+- The generated bootstrap script prepares the repo for agent work; it does not run full project verification by default.
 - **Init** performs **template argument substitution** on Dockerfiles and scaffold `.md` files, replacing **template arguments** with values derived from the user's choices
 - Each **backlog manager** declares a Dockerfile snippet (installed via **template argument substitution**) and command placeholders for **prompt** templates
 - The **agent**'s Dockerfile template contains **template arguments** (e.g. `{{BACKLOG_MANAGER_TOOLS}}`) that **init** fills in based on the selected **backlog manager**

@@ -117,15 +117,19 @@ Goal: 让 Sandcastle 不再默认假设 Node 项目，而是通过项目级 boot
 ### Tasks
 
 - [x] 非 blank 模板引入 `.sandcastle/bootstrap.sh`。
-- [x] init 按 Project profile 生成 bootstrap script；模板仅通过 sandbox hook 执行。
+- [x] 完成 Project profile / bootstrap contract 设计收敛，并同步到 `CONTEXT.md`、ADR 和 roadmap（见 [project-profiles-init-bootstrap](./prd/project-profiles-init-bootstrap.md)、[ADR-0015](./adr/0015-project-profiles-generate-bootstrap-at-init-time.md)）。
 - [x] 模板移除对 `node_modules` 或 `npm install` 的默认假设。
-- [x] 设计 `sandcastle init` 的项目类型选择，包括 scripted init 参数和交互式选择。
-- [x] 为 Node、Python、C++ 等项目类型生成对应 Dockerfile / Containerfile profile。
-- [x] 明确通用 Docker 镜像与项目类型 profile 的边界（见 README Project profiles、ADR-0015）。
+- [x] 完成 `sandcastle init` 项目类型选择的产品/交互设计，包括 scripted init 参数和交互式选择（见 [#20](https://github.com/Yibeibankaishui/sandcastle/issues/20)）。
+- [x] 完成 Node、Python、C++ Project profiles 的实现拆分与 issue 准备（见 [#23](https://github.com/Yibeibankaishui/sandcastle/issues/23)、[#24](https://github.com/Yibeibankaishui/sandcastle/issues/24)、[#25](https://github.com/Yibeibankaishui/sandcastle/issues/25)）。
+- [x] 明确通用 Docker 镜像与 Project profile 的边界，并确认 bootstrap 不参与 image build、不由 init 验证（见 [ADR-0015](./adr/0015-project-profiles-generate-bootstrap-at-init-time.md)）。
+- [ ] 实现 `generic` Project profile 与 `--project-profile` 基础路径（见 [#21](https://github.com/Yibeibankaishui/sandcastle/issues/21)）。
+- [ ] 实现模板侧 runtime bootstrap generation 移除（见 [#22](https://github.com/Yibeibankaishui/sandcastle/issues/22)）。
+- [ ] 实现 Node、Python、C++ Project profiles（见 [#23](https://github.com/Yibeibankaishui/sandcastle/issues/23)、[#24](https://github.com/Yibeibankaishui/sandcastle/issues/24)、[#25](https://github.com/Yibeibankaishui/sandcastle/issues/25)）。
 - [ ] 为常见技术栈沉淀 bootstrap 示例。
 - [ ] 梳理 unsandboxed / no-sandbox 模式的安全边界与适用场景。
+- [ ] 修复 init 生成的 auth mount 目录缺失导致 sandbox 启动前失败的问题（见 [#19](https://github.com/Yibeibankaishui/sandcastle/issues/19)）。
 
-相关文档：[ADR-0015](./adr/0015-project-profiles-bootstrap-at-init.md)、[bootstrap-template-contract](../.changeset/bootstrap-template-contract.md)。
+相关文档：[project-profiles-init-bootstrap](./prd/project-profiles-init-bootstrap.md)、[ADR-0015](./adr/0015-project-profiles-generate-bootstrap-at-init-time.md)、[bootstrap-template-contract](../.changeset/bootstrap-template-contract.md)。
 
 ## 03 Docker 环境与容器接入
 
@@ -182,7 +186,7 @@ Goal: 让用户能从 README、模板、init next steps 和 roadmap 中理解 Sa
 
 ### Tasks
 
-- [ ] 审阅 README，并按当前代码更新 public API 与 CLI 示例。
+- [ ] 审阅 README，并按当前代码更新 public API 与 CLI 示例（Project profile 文档收口见 [#26](https://github.com/Yibeibankaishui/sandcastle/issues/26)）。
 - [ ] 补齐 provider/runtime/template/preset role 的概念说明。
 - [ ] 为常见工作流补充用户指南。
 - [ ] 建立 roadmap 与 PRD、ADR、changeset、issue 的链接规范。
