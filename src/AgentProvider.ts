@@ -208,9 +208,12 @@ const parseCursorStreamLine = (line: string): ParsedStreamEvent[] => {
 const agentExecIoDetail = (failure: AgentExecFailure): string =>
   `${failure.stderr}\n${failure.stdout}`;
 
+const cursorConnectionTeardownPattern =
+  /ECONNRESET|secure TLS connection was established/i;
+
 const cursorAcceptRecoverableExit = (failure: AgentExecFailure): boolean =>
   failure.resultText.trim().length > 0 &&
-  /ECONNRESET/i.test(agentExecIoDetail(failure));
+  cursorConnectionTeardownPattern.test(agentExecIoDetail(failure));
 
 /** Options for the Cursor agent provider. */
 export interface CursorOptions {
