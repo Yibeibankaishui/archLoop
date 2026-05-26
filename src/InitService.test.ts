@@ -1163,6 +1163,42 @@ describe("InitService scaffold", () => {
       expect(joined).not.toContain("npx tsx");
     });
 
+    it("missing package.json next steps create package metadata before adding scripts", () => {
+      const lines = getNextStepsLines("simple-loop", "main.mts", {
+        packageJsonStatus: "missing",
+      });
+      const joined = lines.join("\n");
+      expect(joined).toContain("npm init -y");
+      expect(joined).toContain(
+        "npm install --save-dev @ai-hero/sandcastle tsx",
+      );
+      expect(joined.indexOf("npm init -y")).toBeLessThan(
+        joined.indexOf('Add "sandcastle"'),
+      );
+    });
+
+    it("invalid package.json next steps ask the user to fix JSON before installing deps", () => {
+      const lines = getNextStepsLines("blank", "main.mts", {
+        packageJsonStatus: "invalid",
+      });
+      const joined = lines.join("\n");
+      expect(joined).toContain("Fix package.json");
+      expect(joined).toContain(
+        "npm install --save-dev @ai-hero/sandcastle tsx",
+      );
+    });
+
+    it("existing package.json next steps still mention required runtime deps", () => {
+      const lines = getNextStepsLines("blank", "main.ts", {
+        packageJsonStatus: "module",
+      });
+      const joined = lines.join("\n");
+      expect(joined).toContain(
+        "npm install --save-dev @ai-hero/sandcastle tsx",
+      );
+      expect(joined).not.toContain("npm init -y");
+    });
+
     it("blank template next steps explain the main file can mix installed providers after init", () => {
       const lines = getNextStepsLines("blank", "main.ts");
       const joined = lines.join("\n");
@@ -2441,6 +2477,7 @@ describe("InitService scaffold", () => {
       const result = await runScaffold(dir);
 
       expect(result.mainFilename).toBe("main.mts");
+      expect(result.packageJsonStatus).toBe("missing");
       const { access } = await import("node:fs/promises");
       await expect(
         access(join(dir, ".sandcastle", "main.mts")),
@@ -2456,6 +2493,7 @@ describe("InitService scaffold", () => {
       const result = await runScaffold(dir);
 
       expect(result.mainFilename).toBe("main.mts");
+      expect(result.packageJsonStatus).toBe("commonjs");
       const mainContent = await readFile(
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
@@ -2472,6 +2510,7 @@ describe("InitService scaffold", () => {
       const result = await runScaffold(dir);
 
       expect(result.mainFilename).toBe("main.mts");
+      expect(result.packageJsonStatus).toBe("commonjs");
     });
 
     it("scaffolds main.ts when package.json has type: module", async () => {
@@ -2483,6 +2522,7 @@ describe("InitService scaffold", () => {
       const result = await runScaffold(dir);
 
       expect(result.mainFilename).toBe("main.ts");
+      expect(result.packageJsonStatus).toBe("module");
       const { access } = await import("node:fs/promises");
       await expect(
         access(join(dir, ".sandcastle", "main.ts")),
@@ -2547,6 +2587,7 @@ describe("InitService scaffold", () => {
       const result = await runScaffold(dir);
 
       expect(result.mainFilename).toBe("main.mts");
+      expect(result.packageJsonStatus).toBe("invalid");
     });
   });
 
@@ -2619,7 +2660,7 @@ describe("InitService scaffold", () => {
         'import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";',
       );
       expect(main).toContain("const sandboxProvider = noSandbox();");
-      expect(main).not.toContain('import { docker }');
+      expect(main).not.toContain("import { docker }");
       expect(main).not.toContain("const sandboxProvider = docker({");
     });
   });

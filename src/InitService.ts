@@ -65,6 +65,8 @@ const TEMPLATES: TemplateMetadata[] = [
 
 export const listTemplates = (): TemplateMetadata[] => TEMPLATES;
 
+export type PackageJsonStatus = "missing" | "invalid" | "commonjs" | "module";
+
 // ---------------------------------------------------------------------------
 // Agent registry (internal — not part of public API)
 // ---------------------------------------------------------------------------
@@ -606,9 +608,8 @@ const DOCKER_IMPORT_LINE =
   'import { docker } from "@ai-hero/sandcastle/sandboxes/docker";';
 const NO_SANDBOX_IMPORT_LINE =
   'import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";';
-const DOCKER_PROVIDER_SNIPPET = `const sandboxProvider = docker({
-  mounts: [],
-});`;
+const DOCKER_PROVIDER_RE =
+  /const sandboxProvider = docker\(\{\r?\n\s*mounts:\s*\[\],\r?\n\}\);/;
 const NO_SANDBOX_PROVIDER_SNIPPET = "const sandboxProvider = noSandbox();";
 
 const renderAuthMountsProperty = (
@@ -829,6 +830,21 @@ const nonBlankBootstrapNextStep = `${BOOTSTRAP_SCAFFOLD_NOTE}. Non-blank templat
 const runMainCommand = (mainFilename: string): string =>
   `npm exec --yes --package tsx -- tsx .sandcastle/${mainFilename}`;
 
+const packageSetupStep = (
+  status: PackageJsonStatus | undefined,
+): string | undefined => {
+  if (status === "missing") {
+    return "Create package.json and install Sandcastle runtime deps: `npm init -y && npm install --save-dev @ai-hero/sandcastle tsx`";
+  }
+  if (status === "invalid") {
+    return "Fix package.json so npm can parse it, then install Sandcastle runtime deps: `npm install --save-dev @ai-hero/sandcastle tsx`";
+  }
+  if (status === "commonjs" || status === "module") {
+    return "Ensure Sandcastle runtime deps are installed in this project: `npm install --save-dev @ai-hero/sandcastle tsx`";
+  }
+  return undefined;
+};
+
 export function getNextStepsLines(
   template: string,
   mainFilename: string,
@@ -836,6 +852,7 @@ export function getNextStepsLines(
     presetAgentIds?: readonly string[];
     authSetupSummary?: AuthSetupSummary;
     hostRequirementSummary?: AuthSetupSummary;
+    packageJsonStatus?: PackageJsonStatus;
   },
 ): string[] {
   const presetHintText =
@@ -844,6 +861,7 @@ export function getNextStepsLines(
       : undefined;
   const authSetupLines = options?.authSetupSummary?.lines ?? [];
   const hostRequirementLines = options?.hostRequirementSummary?.lines ?? [];
+  const packageSetupText = packageSetupStep(options?.packageJsonStatus);
 
   if (template === "blank") {
     let step = 1;
@@ -853,8 +871,13 @@ export function getNextStepsLines(
       "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
       `${step++}. Read and customize .sandcastle/prompt.md to describe what you want the agent to do`,
       `${step++}. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs and can mix installed agent providers after init`,
-      `${step++}. Add "sandcastle": "${runMainCommand(mainFilename)}" to your package.json scripts`,
     ];
+    if (packageSetupText) {
+      lines.push(`${step++}. ${packageSetupText}`);
+    }
+    lines.push(
+      `${step++}. Add "sandcastle": "${runMainCommand(mainFilename)}" to your package.json scripts`,
+    );
     lines.push(`${step++}. ${blankBootstrapNextStep}`);
     if (presetHintText) {
       lines.push(`${step++}. ${presetHintText}`);
@@ -875,11 +898,16 @@ export function getNextStepsLines(
     "Next steps:",
     `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
     "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
+  ];
+  if (packageSetupText) {
+    lines.push(`${step++}. ${packageSetupText}`);
+  }
+  lines.push(
     `${step++}. Add "sandcastle": "${runMainCommand(mainFilename)}" to your package.json scripts`,
     `${step++}. Edit .sandcastle/${mainFilename} to mix installed agent providers after init; the selected default agent only seeds the scaffolded example`,
     `${step++}. ${nonBlankBootstrapNextStep}`,
     `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
-  ];
+  );
   if (hasReviewer) {
     lines.push(
       `${step++}. Customize .sandcastle/CODING_STANDARDS.md with your project's standards — the reviewer agent loads it during review`,
@@ -1088,7 +1116,7 @@ const rewriteMainFile = (
     if (sandboxProvider.name === "no-sandbox") {
       content = content.replace(DOCKER_IMPORT_LINE, NO_SANDBOX_IMPORT_LINE);
       content = content.replace(
-        DOCKER_PROVIDER_SNIPPET,
+        DOCKER_PROVIDER_RE,
         NO_SANDBOX_PROVIDER_SNIPPET,
       );
     }
@@ -1284,6 +1312,7 @@ export interface ScaffoldOptions {
 
 export interface ScaffoldResult {
   mainFilename: string;
+  packageJsonStatus: PackageJsonStatus;
   presetAgentIds?: readonly string[];
 }
 
@@ -1291,26 +1320,29 @@ export interface ScaffoldResult {
  * Detect whether the project's package.json has `"type": "module"`.
  * If so, we can use plain `.ts`; otherwise we use `.mts` to ensure ESM.
  */
-const detectMainFilename = (
+const detectPackageJsonStatus = (
   repoDir: string,
-): Effect.Effect<string, never, FileSystem.FileSystem> =>
+): Effect.Effect<PackageJsonStatus, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const pkgPath = join(repoDir, "package.json");
     const exists = yield* fs
       .exists(pkgPath)
       .pipe(Effect.orElseSucceed(() => false));
-    if (!exists) return "main.mts";
+    if (!exists) return "missing";
     const content = yield* fs
       .readFileString(pkgPath)
       .pipe(Effect.orElseSucceed(() => ""));
     try {
       const pkg = JSON.parse(content) as Record<string, unknown>;
-      return pkg["type"] === "module" ? "main.ts" : "main.mts";
+      return pkg["type"] === "module" ? "module" : "commonjs";
     } catch {
-      return "main.mts";
+      return "invalid";
     }
   });
+
+const mainFilenameForPackageJsonStatus = (status: PackageJsonStatus): string =>
+  status === "module" ? "main.ts" : "main.mts";
 
 export const scaffold = (
   repoDir: string,
@@ -1342,7 +1374,8 @@ export const scaffold = (
       );
     }
 
-    const mainFilename = yield* detectMainFilename(repoDir);
+    const packageJsonStatus = yield* detectPackageJsonStatus(repoDir);
+    const mainFilename = mainFilenameForPackageJsonStatus(packageJsonStatus);
     const selectedRuntimes = yield* resolveInstalledRuntimes(
       agent,
       installedRuntimes,
@@ -1431,6 +1464,7 @@ export const scaffold = (
 
     return {
       mainFilename,
+      packageJsonStatus,
       ...(presetAgentIds.length > 0
         ? { presetAgentIds: [...presetAgentIds] }
         : {}),
