@@ -4,12 +4,6 @@ import { createRequire } from "node:module";
 import { cp } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
-
-const require = createRequire(import.meta.url);
-const SANDCASTLE_PACKAGE_VERSION = (
-  require("../package.json") as { version: string }
-).version;
-const TSX_DEV_DEPENDENCY_RANGE = "^4.21.0";
 import {
   getPresetAgentDefinition,
   getPresetBundlesRoot,
@@ -23,6 +17,12 @@ import {
   type ProjectProfileEntry,
 } from "./projectProfiles.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
+
+const require = createRequire(import.meta.url);
+const SANDCASTLE_PACKAGE_VERSION = (
+  require("../package.json") as { version: string }
+).version;
+const TSX_DEV_DEPENDENCY_RANGE = "^4.21.0";
 
 export {
   DEFAULT_PROJECT_PROFILE,
@@ -838,13 +838,28 @@ export const runMainCommand = (mainFilename: string): string =>
 
 export type PackageSetupResult = "created" | "updated" | "skipped";
 
+type PackageJsonRecord = Record<string, unknown>;
+
+const stringRecord = (value: unknown): Record<string, string> =>
+  (value as Record<string, string> | undefined) ?? {};
+
+const formatPackageJson = (pkg: PackageJsonRecord): string =>
+  `${JSON.stringify(pkg, null, 2)}\n`;
+
+const writePackageJson = (
+  fs: FileSystem.FileSystem,
+  pkgPath: string,
+  pkg: PackageJsonRecord,
+): Effect.Effect<void, never, never> =>
+  fs
+    .writeFileString(pkgPath, formatPackageJson(pkg))
+    .pipe(Effect.orElseSucceed(() => undefined));
+
 const mergeSandcastlePackageJson = (
-  pkg: Record<string, unknown>,
+  pkg: PackageJsonRecord,
   mainFilename: string,
-): Record<string, unknown> => {
-  const devDependencies = {
-    ...((pkg.devDependencies as Record<string, string> | undefined) ?? {}),
-  };
+): PackageJsonRecord => {
+  const devDependencies = { ...stringRecord(pkg.devDependencies) };
   if (!devDependencies.tsx) {
     devDependencies.tsx = TSX_DEV_DEPENDENCY_RANGE;
   }
@@ -852,9 +867,7 @@ const mergeSandcastlePackageJson = (
     devDependencies["@ai-hero/sandcastle"] = `^${SANDCASTLE_PACKAGE_VERSION}`;
   }
 
-  const scripts = {
-    ...((pkg.scripts as Record<string, string> | undefined) ?? {}),
-  };
+  const scripts = { ...stringRecord(pkg.scripts) };
   scripts.sandcastle = runMainCommand(mainFilename);
 
   return {
@@ -876,10 +889,11 @@ const ensurePackageJsonForSandcastle = (
       .pipe(Effect.orElseSucceed(() => false));
 
     if (!exists) {
-      const pkg = mergeSandcastlePackageJson({ private: true }, mainFilename);
-      yield* fs
-        .writeFileString(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
-        .pipe(Effect.orElseSucceed(() => undefined));
+      yield* writePackageJson(
+        fs,
+        pkgPath,
+        mergeSandcastlePackageJson({ private: true }, mainFilename),
+      );
       return "created";
     }
 
@@ -887,11 +901,12 @@ const ensurePackageJsonForSandcastle = (
       .readFileString(pkgPath)
       .pipe(Effect.orElseSucceed(() => ""));
     try {
-      const pkg = JSON.parse(content) as Record<string, unknown>;
-      const merged = mergeSandcastlePackageJson(pkg, mainFilename);
-      yield* fs
-        .writeFileString(pkgPath, `${JSON.stringify(merged, null, 2)}\n`)
-        .pipe(Effect.orElseSucceed(() => undefined));
+      const pkg = JSON.parse(content) as PackageJsonRecord;
+      yield* writePackageJson(
+        fs,
+        pkgPath,
+        mergeSandcastlePackageJson(pkg, mainFilename),
+      );
       return "updated";
     } catch {
       return "skipped";
