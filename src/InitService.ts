@@ -1,7 +1,9 @@
 import { FileSystem } from "@effect/platform";
 import { Effect } from "effect";
 import { cp } from "node:fs/promises";
-import { dirname, isAbsolute, join } from "node:path";
+import { execSync } from "node:child_process";
+import { basename, dirname, isAbsolute, join } from "node:path";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import {
   getPresetAgentDefinition,
@@ -206,6 +208,10 @@ WORKDIR /home/agent
 ENTRYPOINT ["sleep", "infinity"]
 `;
 
+const CODEX_DOCKERFILE_INSTALL = `# Install Codex CLI (run as root before USER agent)
+RUN npm install -g @openai/codex @openai/codex-linux-x64 \\
+  && codex --version`;
+
 const CODEX_DOCKERFILE = `FROM node:22-bookworm
 
 # Install system dependencies
@@ -234,8 +240,7 @@ RUN set -eux; \\
   mkdir -p /home/agent/.config; \\
   chown -R "$AGENT_UID:$AGENT_GID" /home/agent
 
-# Install Codex CLI (run as root before USER agent)
-RUN npm install -g @openai/codex
+${CODEX_DOCKERFILE_INSTALL}
 
 USER \${AGENT_UID}:\${AGENT_GID}
 ENV HOME="/home/agent"
@@ -402,8 +407,7 @@ ANTHROPIC_API_KEY=`,
     name: "codex",
     label: "Codex",
     dockerfileInstall: {
-      root: `# Install Codex CLI (run as root before USER agent)
-RUN npm install -g @openai/codex`,
+      root: CODEX_DOCKERFILE_INSTALL,
     },
     dockerfileTemplate: CODEX_DOCKERFILE,
     envVars: ["OPENAI_KEY"],
@@ -829,6 +833,185 @@ const nonBlankBootstrapNextStep = `${BOOTSTRAP_SCAFFOLD_NOTE}. Non-blank templat
 const runMainCommand = (mainFilename: string): string =>
   `npm exec --yes --package tsx -- tsx .sandcastle/${mainFilename}`;
 
+const sandcastleNpmScript = (mainFilename: string): string =>
+  `tsx .sandcastle/${mainFilename}`;
+
+const require = createRequire(import.meta.url);
+const SANDCASTLE_PACKAGE_VERSION = (
+  require("../package.json") as { version: string }
+).version;
+
+export const SANDCASTLE_NPM_PACKAGE = "@ai-hero/sandcastle";
+export const TSX_NPM_PACKAGE = "tsx";
+const TSX_VERSION_RANGE = "^4.21.0";
+
+export type ProjectPackageSetup =
+  | "created"
+  | "updated"
+  | "unchanged"
+  | "invalid-skipped";
+
+export interface EnsureProjectPackageOptions {
+  mainFilename: string;
+  sandcastleVersion?: string;
+}
+
+export interface EnsureProjectPackageResult {
+  setup: ProjectPackageSetup;
+  needsInstall: boolean;
+}
+
+const defaultPackageName = (repoDir: string): string => {
+  const raw = basename(repoDir)
+    .replace(/[^a-z0-9-_.]/gi, "-")
+    .toLowerCase();
+  return raw.length > 0 ? raw : "sandcastle-project";
+};
+
+const sandcastleDevDependencyRange = (version: string): string => `^${version}`;
+
+const copyPackageJsonRecord = (value: unknown): Record<string, string> =>
+  typeof value === "object" && value !== null
+    ? { ...(value as Record<string, string>) }
+    : {};
+
+type ReadPackageJsonResult =
+  | { readonly tag: "missing" }
+  | { readonly tag: "invalid" }
+  | { readonly tag: "ok"; readonly pkg: Record<string, unknown> };
+
+const readPackageJson = (
+  fs: FileSystem.FileSystem,
+  pkgPath: string,
+): Effect.Effect<ReadPackageJsonResult, never, never> =>
+  Effect.gen(function* () {
+    const exists = yield* fs
+      .exists(pkgPath)
+      .pipe(Effect.orElseSucceed(() => false));
+    if (!exists) return { tag: "missing" };
+    const content = yield* fs
+      .readFileString(pkgPath)
+      .pipe(Effect.orElseSucceed(() => ""));
+    try {
+      return {
+        tag: "ok",
+        pkg: JSON.parse(content) as Record<string, unknown>,
+      };
+    } catch {
+      return { tag: "invalid" };
+    }
+  });
+
+const writePackageJson = (
+  fs: FileSystem.FileSystem,
+  pkgPath: string,
+  pkg: Record<string, unknown>,
+): Effect.Effect<void, Error, never> =>
+  fs
+    .writeFileString(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
+    .pipe(Effect.mapError((e) => new Error(e.message)));
+
+export const ensureProjectPackage = (
+  repoDir: string,
+  options: EnsureProjectPackageOptions,
+): Effect.Effect<EnsureProjectPackageResult, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const sandcastleVersion =
+      options.sandcastleVersion ?? SANDCASTLE_PACKAGE_VERSION;
+    const pkgPath = join(repoDir, "package.json");
+    const script = sandcastleNpmScript(options.mainFilename);
+    const sandcastleRange = sandcastleDevDependencyRange(sandcastleVersion);
+    const parsed = yield* readPackageJson(fs, pkgPath);
+
+    if (parsed.tag === "invalid") {
+      return { setup: "invalid-skipped", needsInstall: false };
+    }
+
+    if (parsed.tag === "missing") {
+      const pkg: Record<string, unknown> = {
+        name: defaultPackageName(repoDir),
+        private: true,
+        scripts: { sandcastle: script },
+        devDependencies: {
+          [SANDCASTLE_NPM_PACKAGE]: sandcastleRange,
+          [TSX_NPM_PACKAGE]: TSX_VERSION_RANGE,
+        },
+      };
+      yield* writePackageJson(fs, pkgPath, pkg);
+      return { setup: "created", needsInstall: true };
+    }
+
+    const pkg = parsed.pkg;
+    let changed = false;
+    const scripts = copyPackageJsonRecord(pkg.scripts);
+    if (scripts.sandcastle === undefined) {
+      scripts.sandcastle = script;
+      changed = true;
+    }
+
+    const devDependencies = copyPackageJsonRecord(pkg.devDependencies);
+    if (devDependencies[SANDCASTLE_NPM_PACKAGE] === undefined) {
+      devDependencies[SANDCASTLE_NPM_PACKAGE] = sandcastleRange;
+      changed = true;
+    }
+    if (devDependencies[TSX_NPM_PACKAGE] === undefined) {
+      devDependencies[TSX_NPM_PACKAGE] = TSX_VERSION_RANGE;
+      changed = true;
+    }
+
+    if (!changed) {
+      return { setup: "unchanged", needsInstall: false };
+    }
+
+    pkg.scripts = scripts;
+    pkg.devDependencies = devDependencies;
+    yield* writePackageJson(fs, pkgPath, pkg);
+    return { setup: "updated", needsInstall: true };
+  });
+
+export const installProjectDependencies = (
+  repoDir: string,
+): Effect.Effect<boolean, never, never> =>
+  Effect.sync(() => {
+    try {
+      execSync("npm install --ignore-scripts", {
+        cwd: repoDir,
+        stdio: "inherit",
+        env: process.env,
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+const packageScriptNextStep = (
+  packageSetup: ProjectPackageSetup | undefined,
+  mainFilename: string,
+): string => {
+  if (packageSetup === "created" || packageSetup === "updated") {
+    return `package.json was configured with ${SANDCASTLE_NPM_PACKAGE}, ${TSX_NPM_PACKAGE}, and a "sandcastle" script during init`;
+  }
+  if (packageSetup === "invalid-skipped") {
+    return `Fix package.json (invalid JSON), then run: npm init -y && npm install --save-dev ${SANDCASTLE_NPM_PACKAGE} ${TSX_NPM_PACKAGE} && add "sandcastle": "${runMainCommand(mainFilename)}" to scripts`;
+  }
+  return `Add "sandcastle": "${runMainCommand(mainFilename)}" to your package.json scripts`;
+};
+
+const DEPENDENCY_INSTALL_NEXT_STEP =
+  "Run `npm install` in the project root (init could not install dependencies automatically)";
+
+const appendOptionalNumberedStep = (
+  lines: string[],
+  step: number,
+  message: string | undefined,
+): number => {
+  if (message === undefined) return step;
+  lines.push(`${step}. ${message}`);
+  return step + 1;
+};
+
 export function getNextStepsLines(
   template: string,
   mainFilename: string,
@@ -836,6 +1019,8 @@ export function getNextStepsLines(
     presetAgentIds?: readonly string[];
     authSetupSummary?: AuthSetupSummary;
     hostRequirementSummary?: AuthSetupSummary;
+    packageSetup?: ProjectPackageSetup;
+    dependencyInstallFailed?: boolean;
   },
 ): string[] {
   const presetHintText =
@@ -844,6 +1029,12 @@ export function getNextStepsLines(
       : undefined;
   const authSetupLines = options?.authSetupSummary?.lines ?? [];
   const hostRequirementLines = options?.hostRequirementSummary?.lines ?? [];
+  const packageSetup = options?.packageSetup;
+  const dependencyInstallFailed = options?.dependencyInstallFailed === true;
+  const packageScriptStep = packageScriptNextStep(packageSetup, mainFilename);
+  const dependencyInstallStep = dependencyInstallFailed
+    ? DEPENDENCY_INSTALL_NEXT_STEP
+    : undefined;
 
   if (template === "blank") {
     let step = 1;
@@ -853,7 +1044,7 @@ export function getNextStepsLines(
       "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
       `${step++}. Read and customize .sandcastle/prompt.md to describe what you want the agent to do`,
       `${step++}. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs and can mix installed agent providers after init`,
-      `${step++}. Add "sandcastle": "${runMainCommand(mainFilename)}" to your package.json scripts`,
+      `${step++}. ${packageScriptStep}`,
     ];
     lines.push(`${step++}. ${blankBootstrapNextStep}`);
     if (presetHintText) {
@@ -865,6 +1056,7 @@ export function getNextStepsLines(
     for (const line of hostRequirementLines) {
       lines.push(`${step++}. ${line}`);
     }
+    step = appendOptionalNumberedStep(lines, step, dependencyInstallStep);
     lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
     return lines;
   }
@@ -875,7 +1067,7 @@ export function getNextStepsLines(
     "Next steps:",
     `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
     "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
-    `${step++}. Add "sandcastle": "${runMainCommand(mainFilename)}" to your package.json scripts`,
+    `${step++}. ${packageScriptStep}`,
     `${step++}. Edit .sandcastle/${mainFilename} to mix installed agent providers after init; the selected default agent only seeds the scaffolded example`,
     `${step++}. ${nonBlankBootstrapNextStep}`,
     `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
@@ -894,6 +1086,7 @@ export function getNextStepsLines(
   for (const line of hostRequirementLines) {
     lines.push(`${step++}. ${line}`);
   }
+  step = appendOptionalNumberedStep(lines, step, dependencyInstallStep);
   lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
   return lines;
 }
@@ -1280,11 +1473,17 @@ export interface ScaffoldOptions {
   projectProfile?: ProjectProfileEntry;
   /** Optional preset agent role ids (see `presetAgents.ts`). */
   presetAgentIds?: readonly string[];
+  /** Sandcastle package version for generated devDependency (defaults to this CLI's version). */
+  sandcastleVersion?: string;
+  /** Skip `npm install` after package.json changes (tests). */
+  skipDependencyInstall?: boolean;
 }
 
 export interface ScaffoldResult {
   mainFilename: string;
   presetAgentIds?: readonly string[];
+  packageSetup: ProjectPackageSetup;
+  dependencyInstallFailed?: boolean;
 }
 
 /**
@@ -1327,6 +1526,7 @@ export const scaffold = (
       sandboxProvider = SANDBOX_PROVIDER_REGISTRY[0]!, // default: docker
       projectProfile = DEFAULT_PROJECT_PROFILE,
       presetAgentIds = [],
+      skipDependencyInstall = false,
     } = options;
     const fs = yield* FileSystem.FileSystem;
     const configDir = join(repoDir, ".sandcastle");
@@ -1429,8 +1629,20 @@ export const scaffold = (
       yield* rewriteMainCopyToWorktreeForPresets(configDir, mainFilename);
     }
 
+    const packageResult = yield* ensureProjectPackage(repoDir, {
+      mainFilename,
+      sandcastleVersion: options.sandcastleVersion,
+    });
+    const shouldInstallDependencies =
+      packageResult.needsInstall && !skipDependencyInstall;
+    const dependencyInstallFailed =
+      shouldInstallDependencies &&
+      !(yield* installProjectDependencies(repoDir));
+
     return {
       mainFilename,
+      packageSetup: packageResult.setup,
+      ...(dependencyInstallFailed ? { dependencyInstallFailed } : {}),
       ...(presetAgentIds.length > 0
         ? { presetAgentIds: [...presetAgentIds] }
         : {}),

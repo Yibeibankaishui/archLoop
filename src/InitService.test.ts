@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 import { validatePresetRegistries } from "./presetAgents.js";
 import {
   scaffold,
+  ensureProjectPackage,
   getNextStepsLines,
   listAgents,
   getAgent,
@@ -51,7 +52,20 @@ const defaultOptions: ScaffoldOptions = {
 
 const runScaffold = (repoDir: string, options?: Partial<ScaffoldOptions>) =>
   Effect.runPromise(
-    scaffold(repoDir, { ...defaultOptions, ...options }).pipe(
+    scaffold(repoDir, {
+      ...defaultOptions,
+      skipDependencyInstall: true,
+      ...options,
+    }).pipe(Effect.provide(NodeFileSystem.layer)),
+  );
+
+const runEnsureProjectPackage = (
+  repoDir: string,
+  mainFilename: string,
+  sandcastleVersion = "0.5.9",
+) =>
+  Effect.runPromise(
+    ensureProjectPackage(repoDir, { mainFilename, sandcastleVersion }).pipe(
       Effect.provide(NodeFileSystem.layer),
     ),
   );
@@ -167,13 +181,17 @@ describe("Agent runtime registry", () => {
   });
 
   it("getAgentRuntime returns install metadata for codex", () => {
-    const runtime = getAgentRuntime("codex");
-    expect(runtime).toBeDefined();
-    expect(runtime!.name).toBe("codex");
-    expect(runtime!.dockerfileInstall.root).toContain("@openai/codex");
-    expect(runtime!.dockerfileTemplate).toContain("FROM");
-    expect(runtime!.dockerfileTemplate).toContain("@openai/codex");
-    expect(runtime!.envExample).toContain("OPENAI_KEY=");
+    expect(codexRuntime.name).toBe("codex");
+    expect(codexRuntime.envExample).toContain("OPENAI_KEY=");
+    expect(codexRuntime.dockerfileTemplate).toContain("FROM");
+    for (const dockerfile of [
+      codexRuntime.dockerfileInstall.root!,
+      codexRuntime.dockerfileTemplate,
+    ]) {
+      expect(dockerfile).toContain("@openai/codex");
+      expect(dockerfile).toContain("@openai/codex-linux-x64");
+      expect(dockerfile).toContain("codex --version");
+    }
   });
 
   it("getAgentRuntime returns undefined for unknown runtime", () => {
@@ -760,6 +778,8 @@ describe("InitService scaffold", () => {
     );
 
     expect(dockerfile).toContain("@openai/codex");
+    expect(dockerfile).toContain("@openai/codex-linux-x64");
+    expect(dockerfile).toContain("codex --version");
     expect(dockerfile).toContain("cursor.com/install");
     expect(dockerfile).toContain('test -x "$HOME/.local/bin/agent"');
     expect(dockerfile).not.toContain("claude.ai/install.sh");
@@ -1155,7 +1175,7 @@ describe("InitService scaffold", () => {
       const lines = getNextStepsLines("simple-loop", "main.mts");
       const joined = lines.join("\n");
       expect(joined).toContain(".env");
-      expect(joined).toContain("package.json");
+      expect(joined).toMatch(/package\.json/);
       expect(joined).toContain(
         "npm exec --yes --package tsx -- tsx .sandcastle/main.mts",
       );
@@ -1278,6 +1298,22 @@ describe("InitService scaffold", () => {
       expect(joined).toContain("recommended provider/model");
       expect(joined).toContain("matching installed runtimes");
     });
+
+    it("created package setup mentions configured package.json instead of manual add", () => {
+      const joined = getNextStepsLines("blank", "main.mts", {
+        packageSetup: "created",
+      }).join("\n");
+      expect(joined).toContain("package.json was configured");
+      expect(joined).not.toContain('Add "sandcastle"');
+    });
+
+    it("invalid package setup tells user to fix package.json", () => {
+      const joined = getNextStepsLines("simple-loop", "main.mts", {
+        packageSetup: "invalid-skipped",
+      }).join("\n");
+      expect(joined).toContain("Fix package.json");
+      expect(joined).toContain("@ai-hero/sandcastle");
+    });
   });
 
   it("scaffolds pi agent with pi Dockerfile", async () => {
@@ -1315,6 +1351,8 @@ describe("InitService scaffold", () => {
     );
     expect(dockerfile).toContain("FROM node:22-bookworm");
     expect(dockerfile).toContain("@openai/codex");
+    expect(dockerfile).toContain("@openai/codex-linux-x64");
+    expect(dockerfile).toContain("codex --version");
     expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
   });
 
@@ -2433,6 +2471,72 @@ describe("InitService scaffold", () => {
     });
   });
 
+  // --- Project package.json setup (issue #35) ---
+
+  describe("ensureProjectPackage", () => {
+    it("creates package.json with sandcastle devDependencies when none exists", async () => {
+      const dir = await makeDir();
+      const result = await runEnsureProjectPackage(dir, "main.mts");
+
+      expect(result.setup).toBe("created");
+      expect(result.needsInstall).toBe(true);
+      const pkg = JSON.parse(
+        await readFile(join(dir, "package.json"), "utf-8"),
+      ) as {
+        scripts?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+      };
+      expect(pkg.devDependencies?.["@ai-hero/sandcastle"]).toBe("^0.5.9");
+      expect(pkg.devDependencies?.tsx).toMatch(/^\^/);
+      expect(pkg.scripts?.sandcastle).toBe("tsx .sandcastle/main.mts");
+    });
+
+    it("adds missing devDependencies and script to existing package.json", async () => {
+      const dir = await makeDir();
+      await writeFile(
+        join(dir, "package.json"),
+        JSON.stringify({ name: "my-py-app", private: true }),
+      );
+      const result = await runEnsureProjectPackage(dir, "main.mts");
+
+      expect(result.setup).toBe("updated");
+      expect(result.needsInstall).toBe(true);
+      const pkg = JSON.parse(
+        await readFile(join(dir, "package.json"), "utf-8"),
+      ) as {
+        name: string;
+        scripts?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+      };
+      expect(pkg.name).toBe("my-py-app");
+      expect(pkg.devDependencies?.["@ai-hero/sandcastle"]).toBe("^0.5.9");
+      expect(pkg.devDependencies?.tsx).toMatch(/^\^/);
+      expect(pkg.scripts?.sandcastle).toBe("tsx .sandcastle/main.mts");
+    });
+
+    it("leaves invalid package.json unchanged", async () => {
+      const dir = await makeDir();
+      const invalid = "not valid json{{{";
+      await writeFile(join(dir, "package.json"), invalid);
+      const result = await runEnsureProjectPackage(dir, "main.mts");
+
+      expect(result.setup).toBe("invalid-skipped");
+      expect(result.needsInstall).toBe(false);
+      expect(await readFile(join(dir, "package.json"), "utf-8")).toBe(invalid);
+    });
+
+    it("scaffold creates package.json when none exists", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir);
+
+      const pkg = JSON.parse(
+        await readFile(join(dir, "package.json"), "utf-8"),
+      ) as { devDependencies?: Record<string, string> };
+      expect(pkg.devDependencies?.["@ai-hero/sandcastle"]).toMatch(/^\^/);
+      expect(pkg.devDependencies?.tsx).toMatch(/^\^/);
+    });
+  });
+
   // --- ESM extension detection ---
 
   describe("main file extension detection", () => {
@@ -2619,7 +2723,7 @@ describe("InitService scaffold", () => {
         'import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";',
       );
       expect(main).toContain("const sandboxProvider = noSandbox();");
-      expect(main).not.toContain('import { docker }');
+      expect(main).not.toContain("import { docker }");
       expect(main).not.toContain("const sandboxProvider = docker({");
     });
   });

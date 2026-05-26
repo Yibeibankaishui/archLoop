@@ -112,6 +112,15 @@ export interface IterationUsage {
   readonly outputTokens: number;
 }
 
+/** Inputs for a provider-owned recoverable-exit policy on non-zero agent exits. */
+export interface AgentExecFailure {
+  readonly exitCode: number;
+  readonly stderr: string;
+  readonly stdout: string;
+  /** Parsed result payload from stream events, when the provider emits one. */
+  readonly resultText: string;
+}
+
 export interface AgentProvider {
   readonly name: string;
   /** Environment variables injected by this agent provider. Merged at launch time with env resolver and sandbox provider env. */
@@ -123,6 +132,12 @@ export interface AgentProvider {
   parseStreamLine(line: string): ParsedStreamEvent[];
   /** Parse token usage from the captured session JSONL content. Only implemented by Claude Code. */
   parseSessionUsage?(content: string): IterationUsage | undefined;
+  /**
+   * When set, decides whether a non-zero process exit can be treated as success
+   * because the provider already captured a valid result from the stream.
+   * Providers without this hook fail on every non-zero exit.
+   */
+  acceptRecoverableExit?(failure: AgentExecFailure): boolean;
 }
 
 export const DEFAULT_MODEL = "claude-opus-4-6";
@@ -190,6 +205,13 @@ const parseCursorStreamLine = (line: string): ParsedStreamEvent[] => {
   return [];
 };
 
+const agentExecIoDetail = (failure: AgentExecFailure): string =>
+  `${failure.stderr}\n${failure.stdout}`;
+
+const cursorAcceptRecoverableExit = (failure: AgentExecFailure): boolean =>
+  failure.resultText.trim().length > 0 &&
+  /ECONNRESET/i.test(agentExecIoDetail(failure));
+
 /** Options for the Cursor agent provider. */
 export interface CursorOptions {
   /** Cursor execution mode. Omit for full coding mode. */
@@ -232,6 +254,8 @@ export const cursor = (
   parseStreamLine(line: string): ParsedStreamEvent[] {
     return parseCursorStreamLine(line);
   },
+
+  acceptRecoverableExit: cursorAcceptRecoverableExit,
 });
 
 // ---------------------------------------------------------------------------

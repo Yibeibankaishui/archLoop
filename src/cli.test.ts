@@ -34,11 +34,8 @@ const commitFile = async (
 
 const cliPath = join(import.meta.dirname, "..", "dist", "main.js");
 
-const runCli = (
-  args: string,
-  cwd: string,
-  env?: NodeJS.ProcessEnv,
-) => execAsync(`"${process.execPath}" ${cliPath} ${args}`, { cwd, env });
+const runCli = (args: string, cwd: string, env?: NodeJS.ProcessEnv) =>
+  execAsync(`"${process.execPath}" ${cliPath} ${args}`, { cwd, env });
 
 const runNonInteractiveInit = (cwd: string, args: string) =>
   runCli(
@@ -257,7 +254,7 @@ describe("sandcastle CLI", () => {
     const bdPath = join(binDir, "bd");
     await writeFile(
       bdPath,
-      "#!/bin/sh\nif [ \"$1\" = \"ready\" ]; then\n  echo '[]'\n  exit 0\nfi\nexit 0\n",
+      '#!/bin/sh\nif [ "$1" = "ready" ]; then\n  echo \'[]\'\n  exit 0\nfi\nexit 0\n',
     );
     await chmod(bdPath, 0o755);
 
@@ -311,7 +308,9 @@ describe("sandcastle CLI", () => {
       "utf-8",
     );
     expect(dockerfile).toContain("@openai/codex");
-    expect(dockerfile.match(/@openai\/codex/g)).toHaveLength(1);
+    expect(dockerfile).toContain("@openai/codex-linux-x64");
+    expect(dockerfile).toContain("codex --version");
+    expect(dockerfile.match(/npm install -g @openai\/codex /g)).toHaveLength(1);
     expect(dockerfile).toContain("cursor.com/install");
     expect(dockerfile).not.toContain("claude.ai/install.sh");
     expect(dockerfile).not.toContain("opencode-ai");
