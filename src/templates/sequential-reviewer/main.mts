@@ -15,9 +15,8 @@
 // gate) and the parallel-planner (concurrent execution with a planning phase).
 //
 // Usage:
-//   npm exec --yes --package tsx -- tsx .sandcastle/main.mts
-// Or add to package.json:
-//   "scripts": { "sandcastle": "npm exec --yes --package tsx -- tsx .sandcastle/main.mts" }
+//   npm run sandcastle
+// Or directly: tsx .sandcastle/main.mts
 
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";

@@ -45,10 +45,11 @@ npx sandcastle init
 cp .sandcastle/.env.example .sandcastle/.env
 ```
 
-4. Run the `.sandcastle/main.ts` (or `main.mts`) file with `tsx`
+4. Install dependencies and run the scaffolded workflow (uses project-local `tsx` from `devDependencies`):
 
 ```bash
-npm exec --yes --package tsx -- tsx .sandcastle/main.ts
+npm install
+npm run sandcastle
 ```
 
 ```typescript

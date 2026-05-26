@@ -1164,22 +1164,20 @@ describe("InitService scaffold", () => {
       const joined = lines.join("\n");
       expect(joined).toContain(".env");
       expect(joined).toContain("main.mts");
-      expect(joined).toContain(
-        "npm exec --yes --package tsx -- tsx .sandcastle/main.mts",
-      );
+      expect(joined).toContain("tsx");
+      expect(joined).not.toContain("npm exec --yes --package tsx");
       expect(joined).not.toContain("npx sandcastle run");
       expect(joined).not.toContain("npx tsx");
     });
 
-    it("non-blank template returns steps mentioning .env, package.json scripts, and npm run sandcastle", () => {
+    it("non-blank template returns steps mentioning .env, package.json, and npm run sandcastle", () => {
       const lines = getNextStepsLines("simple-loop", "main.mts");
       const joined = lines.join("\n");
       expect(joined).toContain(".env");
       expect(joined).toMatch(/package\.json/);
-      expect(joined).toContain(
-        "npm exec --yes --package tsx -- tsx .sandcastle/main.mts",
-      );
+      expect(joined).toContain("tsx");
       expect(joined).toContain("npm run sandcastle");
+      expect(joined).not.toContain("npm exec --yes --package tsx");
       expect(joined).not.toContain("npx tsx");
     });
 
@@ -2534,6 +2532,19 @@ describe("InitService scaffold", () => {
       ) as { devDependencies?: Record<string, string> };
       expect(pkg.devDependencies?.["@ai-hero/sandcastle"]).toMatch(/^\^/);
       expect(pkg.devDependencies?.tsx).toMatch(/^\^/);
+    });
+
+    it("scaffolded main.mts comments recommend npm run sandcastle, not npm exec tsx", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "simple-loop" });
+
+      const mainContent = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainContent).toContain("npm run sandcastle");
+      expect(mainContent).toContain("tsx .sandcastle/main.mts");
+      expect(mainContent).not.toContain("npm exec --yes --package tsx");
     });
   });
 

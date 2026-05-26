@@ -830,8 +830,8 @@ const blankBootstrapNextStep = `${BOOTSTRAP_SCAFFOLD_NOTE}. The blank template d
 
 const nonBlankBootstrapNextStep = `${BOOTSTRAP_SCAFFOLD_NOTE}. Non-blank templates run it from \`sandbox.onSandboxReady\` with a 5-minute default hook timeout (${BOOTSTRAP_HOOK_TIMEOUT_MS_LITERAL} ms) after the worktree is mounted and before the agent starts — not during image build. Customize the script for your stack; raise \`timeoutMs\` in \`main.mts\` if installs need longer`;
 
-const runMainCommand = (mainFilename: string): string =>
-  `npm exec --yes --package tsx -- tsx .sandcastle/${mainFilename}`;
+export const runMainCommand = (mainFilename: string): string =>
+  `tsx .sandcastle/${mainFilename}`;
 
 const sandcastleNpmScript = (mainFilename: string): string =>
   `tsx .sandcastle/${mainFilename}`;
