@@ -39,43 +39,43 @@ Sandcastle 主要用于解决以下场景中的重复工作：
 
 初始化后，仓库根目录下会生成 `.sandcastle/`。常见文件包括：
 
-| 文件 | 说明 |
-|------|------|
-| `.sandcastle/.env` | 运行时环境变量 |
-| `.sandcastle/.env.example` | 环境变量模板 |
-| `.sandcastle/main.ts` 或 `.sandcastle/main.mts` | 入口脚本 |
-| `.sandcastle/prompt.md` 或其他提示词文件 | 传给 agent 的提示词 |
-| `.sandcastle/Dockerfile` 或 `Containerfile` | sandbox 镜像模板 |
+| 文件                                            | 说明                |
+| ----------------------------------------------- | ------------------- |
+| `.sandcastle/.env`                              | 运行时环境变量      |
+| `.sandcastle/.env.example`                      | 环境变量模板        |
+| `.sandcastle/main.ts` 或 `.sandcastle/main.mts` | 入口脚本            |
+| `.sandcastle/prompt.md` 或其他提示词文件        | 传给 agent 的提示词 |
+| `.sandcastle/Dockerfile` 或 `Containerfile`     | sandbox 镜像模板    |
 
 ## 常用运行参数
 
 下表列出使用者最常调整的公开参数：
 
-| 参数名 | 默认值 | 说明 |
-|-------|-------|------|
-| `agent` | 无 | 选择具体 agent provider，例如 `claudeCode(...)`、`codex(...)` |
-| `sandbox` | 无 | 选择 sandbox provider，例如 `docker()`、`podman()`、`vercel()` |
-| `promptFile` | 无 | 指向提示词文件 |
-| `prompt` | 无 | 直接提供内联提示词，和 `promptFile` 二选一 |
-| `promptArgs` | `{}` | 替换提示词中的 `{{KEY}}` 占位符 |
-| `maxIterations` | `1` | 最大迭代次数 |
-| `branchStrategy` | provider 决定 | 控制结果落在哪个分支 |
-| `logging` | 写入 `.sandcastle/logs/` | 控制日志输出方式 |
-| `hooks` | 无 | 在 host 或 sandbox 中运行准备命令 |
-| `copyToWorktree` | 无 | 在进入 sandbox 前复制指定路径到 worktree |
-| `idleTimeoutSeconds` | `600` | 代理长时间无输出时的超时时间 |
+| 参数名               | 默认值                   | 说明                                                           |
+| -------------------- | ------------------------ | -------------------------------------------------------------- |
+| `agent`              | 无                       | 选择具体 agent provider，例如 `claudeCode(...)`、`codex(...)`  |
+| `sandbox`            | 无                       | 选择 sandbox provider，例如 `docker()`、`podman()`、`vercel()` |
+| `promptFile`         | 无                       | 指向提示词文件                                                 |
+| `prompt`             | 无                       | 直接提供内联提示词，和 `promptFile` 二选一                     |
+| `promptArgs`         | `{}`                     | 替换提示词中的 `{{KEY}}` 占位符                                |
+| `maxIterations`      | `1`                      | 最大迭代次数                                                   |
+| `branchStrategy`     | provider 决定            | 控制结果落在哪个分支                                           |
+| `logging`            | 写入 `.sandcastle/logs/` | 控制日志输出方式                                               |
+| `hooks`              | 无                       | 在 host 或 sandbox 中运行准备命令                              |
+| `copyToWorktree`     | 无                       | 在进入 sandbox 前复制指定路径到 worktree                       |
+| `idleTimeoutSeconds` | `600`                    | 代理长时间无输出时的超时时间                                   |
 
 ## 常见环境变量
 
 具体变量取决于所选 runtime 和任务来源。常见项如下：
 
-| 变量名 | 默认值 | 说明 |
-|-------|-------|------|
-| `ANTHROPIC_API_KEY` | 无 | Claude Code 或 Pi 常用凭据 |
-| `OPENAI_KEY` | 无 | Codex 常用凭据 |
-| `CURSOR_API_KEY` | 无 | Cursor 常用凭据 |
-| `OPENCODE_API_KEY` | 无 | OpenCode 常用凭据 |
-| `GH_TOKEN` | 无 | GitHub Issues 任务源常用凭据 |
+| 变量名              | 默认值 | 说明                         |
+| ------------------- | ------ | ---------------------------- |
+| `ANTHROPIC_API_KEY` | 无     | Claude Code 或 Pi 常用凭据   |
+| `OPENAI_KEY`        | 无     | Codex 常用凭据               |
+| `CURSOR_API_KEY`    | 无     | Cursor 常用凭据              |
+| `OPENCODE_API_KEY`  | 无     | OpenCode 常用凭据            |
+| `GH_TOKEN`          | 无     | GitHub Issues 任务源常用凭据 |
 
 ---
 
@@ -98,23 +98,23 @@ Sandcastle 主要用于解决以下场景中的重复工作：
 
 ## CLI 接口
 
-| 命令 | 说明 |
-|------|------|
-| `sandcastle init` | 生成 `.sandcastle/` 配置目录 |
-| `sandcastle --help` | 查看命令帮助 |
+| 命令                       | 说明                          |
+| -------------------------- | ----------------------------- |
+| `sandcastle init`          | 生成 `.sandcastle/` 配置目录  |
+| `sandcastle --help`        | 查看命令帮助                  |
 | `sandcastle docker --help` | 查看 Docker provider 相关命令 |
 | `sandcastle podman --help` | 查看 Podman provider 相关命令 |
 
 ## JavaScript / TypeScript API
 
-| 接口 | 说明 |
-|------|------|
-| `run()` | 一次性执行代理任务 |
-| `interactive()` | 启动交互式代理会话 |
-| `createSandbox()` | 创建可复用 sandbox |
-| `createWorktree()` | 创建独立 worktree 后继续运行 |
-| `docker()` / `podman()` / `vercel()` / `noSandbox()` | 创建 sandbox provider |
-| `claudeCode()` / `codex()` / `cursor()` / `opencode()` / `pi()` | 创建 agent provider |
+| 接口                                                            | 说明                         |
+| --------------------------------------------------------------- | ---------------------------- |
+| `run()`                                                         | 一次性执行代理任务           |
+| `interactive()`                                                 | 启动交互式代理会话           |
+| `createSandbox()`                                               | 创建可复用 sandbox           |
+| `createWorktree()`                                              | 创建独立 worktree 后继续运行 |
+| `docker()` / `podman()` / `vercel()` / `noSandbox()`            | 创建 sandbox provider        |
+| `claudeCode()` / `codex()` / `cursor()` / `opencode()` / `pi()` | 创建 agent provider          |
 
 ---
 
@@ -131,7 +131,8 @@ npx sandcastle init
 ## 运行生成的入口脚本
 
 ```bash
-npm exec --yes --package tsx -- tsx .sandcastle/main.mts
+npm install
+npm run sandcastle
 ```
 
 如果初始化生成的是 `main.ts`，把文件名替换为 `main.ts` 即可。
@@ -211,6 +212,6 @@ await interactive({
 
 ## 文档修改记录
 
-| 修改日期 | 修改项 |
-|---------|--------|
+| 修改日期   | 修改项                                                                 |
+| ---------- | ---------------------------------------------------------------------- |
 | 2026-05-17 | 初始创建用户指南，补充功能概述、配置参数、外部接口、使用示例与工作流程 |

@@ -1077,6 +1077,7 @@ const initCommand = Command.make(
         scaffoldResult.mainFilename,
         {
           presetAgentIds: scaffoldResult.presetAgentIds,
+          packageSetup: scaffoldResult.packageSetup,
           authSetupSummary: {
             lines: authSetupResult.nextStepLines,
           },

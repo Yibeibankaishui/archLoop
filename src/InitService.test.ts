@@ -1144,23 +1144,31 @@ describe("InitService scaffold", () => {
       const joined = lines.join("\n");
       expect(joined).toContain(".env");
       expect(joined).toContain("main.mts");
-      expect(joined).toContain(
-        "npm exec --yes --package tsx -- tsx .sandcastle/main.mts",
-      );
+      expect(joined).toContain("npm install");
+      expect(joined).toContain("tsx");
+      expect(joined).not.toContain("npm exec --yes --package tsx");
       expect(joined).not.toContain("npx sandcastle run");
       expect(joined).not.toContain("npx tsx");
     });
 
-    it("non-blank template returns steps mentioning .env, package.json scripts, and npm run sandcastle", () => {
+    it("non-blank template returns steps mentioning .env, npm install, and npm run sandcastle", () => {
       const lines = getNextStepsLines("simple-loop", "main.mts");
       const joined = lines.join("\n");
       expect(joined).toContain(".env");
-      expect(joined).toContain("package.json");
-      expect(joined).toContain(
-        "npm exec --yes --package tsx -- tsx .sandcastle/main.mts",
-      );
+      expect(joined).toContain("npm install");
+      expect(joined).toContain("tsx");
       expect(joined).toContain("npm run sandcastle");
+      expect(joined).not.toContain("npm exec --yes --package tsx");
       expect(joined).not.toContain("npx tsx");
+    });
+
+    it("warns to fix package.json manually when package setup was skipped", () => {
+      const joined = getNextStepsLines("simple-loop", "main.mts", {
+        packageSetup: "skipped",
+      }).join("\n");
+      expect(joined).toContain("package.json");
+      expect(joined).toContain("tsx");
+      expect(joined).toContain("tsx .sandcastle/main.mts");
     });
 
     it("blank template next steps explain the main file can mix installed providers after init", () => {
@@ -2433,6 +2441,73 @@ describe("InitService scaffold", () => {
     });
   });
 
+  describe("package.json setup for tsx runner", () => {
+    it("creates package.json with tsx, @ai-hero/sandcastle, and sandcastle script when missing", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir);
+
+      const pkg = JSON.parse(
+        await readFile(join(dir, "package.json"), "utf-8"),
+      ) as {
+        devDependencies: Record<string, string>;
+        scripts: Record<string, string>;
+      };
+      expect(pkg.devDependencies.tsx).toBeDefined();
+      expect(pkg.devDependencies["@ai-hero/sandcastle"]).toMatch(/^\^/);
+      expect(pkg.scripts.sandcastle).toBe("tsx .sandcastle/main.mts");
+    });
+
+    it("merges tsx and sandcastle script into an existing package.json", async () => {
+      const dir = await makeDir();
+      await writeFile(
+        join(dir, "package.json"),
+        JSON.stringify({
+          name: "existing-app",
+          scripts: { test: "vitest" },
+          devDependencies: { vitest: "^3.0.0" },
+        }),
+      );
+      await runScaffold(dir);
+
+      const pkg = JSON.parse(
+        await readFile(join(dir, "package.json"), "utf-8"),
+      ) as {
+        name: string;
+        devDependencies: Record<string, string>;
+        scripts: Record<string, string>;
+      };
+      expect(pkg.name).toBe("existing-app");
+      expect(pkg.devDependencies.vitest).toBe("^3.0.0");
+      expect(pkg.devDependencies.tsx).toBeDefined();
+      expect(pkg.devDependencies["@ai-hero/sandcastle"]).toBeDefined();
+      expect(pkg.scripts.test).toBe("vitest");
+      expect(pkg.scripts.sandcastle).toBe("tsx .sandcastle/main.mts");
+    });
+
+    it("does not modify package.json when it contains invalid JSON", async () => {
+      const dir = await makeDir();
+      const invalid = "not valid json{{{";
+      await writeFile(join(dir, "package.json"), invalid);
+      await runScaffold(dir);
+
+      const pkgContent = await readFile(join(dir, "package.json"), "utf-8");
+      expect(pkgContent).toBe(invalid);
+    });
+
+    it("scaffolded main.mts comments recommend npm run sandcastle, not npm exec tsx", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "simple-loop" });
+
+      const mainContent = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainContent).toContain("npm run sandcastle");
+      expect(mainContent).toContain("tsx .sandcastle/main.mts");
+      expect(mainContent).not.toContain("npm exec --yes --package tsx");
+    });
+  });
+
   // --- ESM extension detection ---
 
   describe("main file extension detection", () => {
@@ -2619,7 +2694,7 @@ describe("InitService scaffold", () => {
         'import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";',
       );
       expect(main).toContain("const sandboxProvider = noSandbox();");
-      expect(main).not.toContain('import { docker }');
+      expect(main).not.toContain("import { docker }");
       expect(main).not.toContain("const sandboxProvider = docker({");
     });
   });

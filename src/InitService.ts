@@ -1,8 +1,15 @@
 import { FileSystem } from "@effect/platform";
 import { Effect } from "effect";
+import { createRequire } from "node:module";
 import { cp } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
+
+const require = createRequire(import.meta.url);
+const SANDCASTLE_PACKAGE_VERSION = (
+  require("../package.json") as { version: string }
+).version;
+const TSX_DEV_DEPENDENCY_RANGE = "^4.21.0";
 import {
   getPresetAgentDefinition,
   getPresetBundlesRoot,
@@ -826,8 +833,80 @@ const blankBootstrapNextStep = `${BOOTSTRAP_SCAFFOLD_NOTE}. The blank template d
 
 const nonBlankBootstrapNextStep = `${BOOTSTRAP_SCAFFOLD_NOTE}. Non-blank templates run it from \`sandbox.onSandboxReady\` with a 5-minute default hook timeout (${BOOTSTRAP_HOOK_TIMEOUT_MS_LITERAL} ms) after the worktree is mounted and before the agent starts — not during image build. Customize the script for your stack; raise \`timeoutMs\` in \`main.mts\` if installs need longer`;
 
-const runMainCommand = (mainFilename: string): string =>
-  `npm exec --yes --package tsx -- tsx .sandcastle/${mainFilename}`;
+export const runMainCommand = (mainFilename: string): string =>
+  `tsx .sandcastle/${mainFilename}`;
+
+export type PackageSetupResult = "created" | "updated" | "skipped";
+
+const mergeSandcastlePackageJson = (
+  pkg: Record<string, unknown>,
+  mainFilename: string,
+): Record<string, unknown> => {
+  const devDependencies = {
+    ...((pkg.devDependencies as Record<string, string> | undefined) ?? {}),
+  };
+  if (!devDependencies.tsx) {
+    devDependencies.tsx = TSX_DEV_DEPENDENCY_RANGE;
+  }
+  if (!devDependencies["@ai-hero/sandcastle"]) {
+    devDependencies["@ai-hero/sandcastle"] = `^${SANDCASTLE_PACKAGE_VERSION}`;
+  }
+
+  const scripts = {
+    ...((pkg.scripts as Record<string, string> | undefined) ?? {}),
+  };
+  scripts.sandcastle = runMainCommand(mainFilename);
+
+  return {
+    ...pkg,
+    devDependencies,
+    scripts,
+  };
+};
+
+const ensurePackageJsonForSandcastle = (
+  repoDir: string,
+  mainFilename: string,
+): Effect.Effect<PackageSetupResult, never, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const pkgPath = join(repoDir, "package.json");
+    const exists = yield* fs
+      .exists(pkgPath)
+      .pipe(Effect.orElseSucceed(() => false));
+
+    if (!exists) {
+      const pkg = mergeSandcastlePackageJson({ private: true }, mainFilename);
+      yield* fs
+        .writeFileString(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`)
+        .pipe(Effect.orElseSucceed(() => undefined));
+      return "created";
+    }
+
+    const content = yield* fs
+      .readFileString(pkgPath)
+      .pipe(Effect.orElseSucceed(() => ""));
+    try {
+      const pkg = JSON.parse(content) as Record<string, unknown>;
+      const merged = mergeSandcastlePackageJson(pkg, mainFilename);
+      yield* fs
+        .writeFileString(pkgPath, `${JSON.stringify(merged, null, 2)}\n`)
+        .pipe(Effect.orElseSucceed(() => undefined));
+      return "updated";
+    } catch {
+      return "skipped";
+    }
+  });
+
+const packageSetupNextStep = (
+  mainFilename: string,
+  packageSetup: PackageSetupResult,
+): string => {
+  if (packageSetup === "skipped") {
+    return `Fix or create package.json, add \`tsx\` and \`@ai-hero/sandcastle\` to devDependencies, and add "sandcastle": "${runMainCommand(mainFilename)}" to scripts`;
+  }
+  return "Run \`npm install\` to install local devDependencies (\`tsx\`, \`@ai-hero/sandcastle\`) — setup-time only, no registry fetch when you run the agent";
+};
 
 export function getNextStepsLines(
   template: string,
@@ -836,8 +915,10 @@ export function getNextStepsLines(
     presetAgentIds?: readonly string[];
     authSetupSummary?: AuthSetupSummary;
     hostRequirementSummary?: AuthSetupSummary;
+    packageSetup?: PackageSetupResult;
   },
 ): string[] {
+  const packageSetup = options?.packageSetup ?? "updated";
   const presetHintText =
     options?.presetAgentIds && options.presetAgentIds.length > 0
       ? PRESET_AGENT_NEXT_STEP
@@ -853,7 +934,7 @@ export function getNextStepsLines(
       "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
       `${step++}. Read and customize .sandcastle/prompt.md to describe what you want the agent to do`,
       `${step++}. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs and can mix installed agent providers after init`,
-      `${step++}. Add "sandcastle": "${runMainCommand(mainFilename)}" to your package.json scripts`,
+      `${step++}. ${packageSetupNextStep(mainFilename, packageSetup)}`,
     ];
     lines.push(`${step++}. ${blankBootstrapNextStep}`);
     if (presetHintText) {
@@ -875,7 +956,7 @@ export function getNextStepsLines(
     "Next steps:",
     `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
     "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
-    `${step++}. Add "sandcastle": "${runMainCommand(mainFilename)}" to your package.json scripts`,
+    `${step++}. ${packageSetupNextStep(mainFilename, packageSetup)}`,
     `${step++}. Edit .sandcastle/${mainFilename} to mix installed agent providers after init; the selected default agent only seeds the scaffolded example`,
     `${step++}. ${nonBlankBootstrapNextStep}`,
     `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
@@ -1284,6 +1365,7 @@ export interface ScaffoldOptions {
 
 export interface ScaffoldResult {
   mainFilename: string;
+  packageSetup: PackageSetupResult;
   presetAgentIds?: readonly string[];
 }
 
@@ -1429,8 +1511,14 @@ export const scaffold = (
       yield* rewriteMainCopyToWorktreeForPresets(configDir, mainFilename);
     }
 
+    const packageSetup = yield* ensurePackageJsonForSandcastle(
+      repoDir,
+      mainFilename,
+    );
+
     return {
       mainFilename,
+      packageSetup,
       ...(presetAgentIds.length > 0
         ? { presetAgentIds: [...presetAgentIds] }
         : {}),
