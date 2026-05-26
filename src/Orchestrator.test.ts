@@ -1744,100 +1744,70 @@ describe("Orchestrator error handling", () => {
     }
   });
 
-  it("accepts cursor result on TLS handshake teardown after valid stream result", async () => {
-    const hostDir = await mkdtemp(join(tmpdir(), "orch-cursor-tls-teardown-"));
-    const cursorProvider = cursorFactory("auto");
-    const displayEntries = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
-    const displayLayer = Layer.mergeAll(
-      SilentDisplay.layer(displayEntries),
-      defaultSessionPathsLayer,
-      noopAgentStreamEmitterLayer,
-    );
+  it.each([
+    {
+      label: "TLS handshake teardown",
+      tempPrefix: "orch-cursor-tls-teardown-",
+      stderr:
+        "Error: [aborted] Client network socket disconnected before secure TLS connection was established",
+    },
+    {
+      label: "ECONNRESET teardown",
+      tempPrefix: "orch-cursor-econnreset-",
+      stderr: "T: [aborted] read ECONNRESET",
+    },
+  ] as const)(
+    "accepts cursor result on $label after valid stream result",
+    async ({ tempPrefix, stderr }) => {
+      const hostDir = await mkdtemp(join(tmpdir(), tempPrefix));
+      const cursorProvider = cursorFactory("auto");
+      const displayEntries = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+      const displayLayer = Layer.mergeAll(
+        SilentDisplay.layer(displayEntries),
+        defaultSessionPathsLayer,
+        noopAgentStreamEmitterLayer,
+      );
 
-    await initRepo(hostDir);
-    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+      await initRepo(hostDir);
+      await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-    const agentOutput = '<plan>{"issues":[]}</plan>';
-    const resultLine = JSON.stringify({ type: "result", result: agentOutput });
+      const agentOutput = '<plan>{"issues":[]}</plan>';
+      const resultLine = JSON.stringify({
+        type: "result",
+        result: agentOutput,
+      });
 
-    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) =>
-      makeMockCursorAgentLayer(dir, {
-        resultLine,
-        stdout: resultLine,
-        stderr:
-          "Error: [aborted] Client network socket disconnected before secure TLS connection was established",
-        exitCode: 1,
-      }),
-    );
+      const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) =>
+        makeMockCursorAgentLayer(dir, {
+          resultLine,
+          stdout: resultLine,
+          stderr,
+          exitCode: 1,
+        }),
+      );
 
-    const result = await Effect.runPromise(
-      orchestrate({
-        provider: cursorProvider,
-        hostRepoDir: hostDir,
-        iterations: 1,
-        prompt: "plan work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, displayLayer))),
-    );
+      const result = await Effect.runPromise(
+        orchestrate({
+          provider: cursorProvider,
+          hostRepoDir: hostDir,
+          iterations: 1,
+          prompt: "plan work",
+        }).pipe(Effect.provide(Layer.merge(factoryLayer, displayLayer))),
+      );
 
-    expect(result.stdout).toContain(agentOutput);
-    expect(result.iterations.length).toBe(1);
-    const warnEntries = await Effect.runPromise(Ref.get(displayEntries));
-    expect(
-      warnEntries.some(
-        (e: DisplayEntry) =>
-          e._tag === "status" &&
-          e.severity === "warn" &&
-          e.message.includes("cursor exited with code 1"),
-      ),
-    ).toBe(true);
-  });
-
-  it("accepts cursor result on ECONNRESET teardown after valid stream result", async () => {
-    const hostDir = await mkdtemp(join(tmpdir(), "orch-cursor-econnreset-"));
-    const cursorProvider = cursorFactory("auto");
-    const displayEntries = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
-    const displayLayer = Layer.mergeAll(
-      SilentDisplay.layer(displayEntries),
-      defaultSessionPathsLayer,
-      noopAgentStreamEmitterLayer,
-    );
-
-    await initRepo(hostDir);
-    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
-
-    const agentOutput = '<plan>{"issues":[]}</plan>';
-    const resultLine = JSON.stringify({ type: "result", result: agentOutput });
-
-    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) =>
-      makeMockCursorAgentLayer(dir, {
-        resultLine,
-        stdout: resultLine,
-        stderr: "T: [aborted] read ECONNRESET",
-        exitCode: 1,
-      }),
-    );
-
-    const result = await Effect.runPromise(
-      orchestrate({
-        provider: cursorProvider,
-        hostRepoDir: hostDir,
-        iterations: 1,
-        prompt: "plan work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, displayLayer))),
-    );
-
-    expect(result.stdout).toContain(agentOutput);
-    expect(result.iterations.length).toBe(1);
-    const warnEntries = await Effect.runPromise(Ref.get(displayEntries));
-    expect(
-      warnEntries.some(
-        (e: DisplayEntry) =>
-          e._tag === "status" &&
-          e.severity === "warn" &&
-          e.message.includes("cursor exited with code 1"),
-      ),
-    ).toBe(true);
-  });
+      expect(result.stdout).toContain(agentOutput);
+      expect(result.iterations.length).toBe(1);
+      const warnEntries = await Effect.runPromise(Ref.get(displayEntries));
+      expect(
+        warnEntries.some(
+          (e: DisplayEntry) =>
+            e._tag === "status" &&
+            e.severity === "warn" &&
+            e.message.includes("cursor exited with code 1"),
+        ),
+      ).toBe(true);
+    },
+  );
 
   it("still fails cursor non-zero exit without captured result on ECONNRESET", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "orch-cursor-no-result-"));
