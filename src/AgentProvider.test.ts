@@ -861,6 +861,55 @@ describe("cursor factory", () => {
     const provider = cursor("auto");
     expect(provider.env).toEqual({});
   });
+
+  it.each([
+    {
+      label: "ECONNRESET teardown",
+      stderr: "T: [aborted] read ECONNRESET",
+    },
+    {
+      label: "TLS handshake teardown",
+      stderr:
+        "Error: [aborted] Client network socket disconnected before secure TLS connection was established",
+    },
+  ] as const)(
+    "acceptRecoverableExit allows $label when result text exists",
+    ({ stderr }) => {
+      const provider = cursor("auto");
+      expect(
+        provider.acceptRecoverableExit?.({
+          exitCode: 1,
+          stderr,
+          stdout: "",
+          resultText: '<plan>{"issues":[]}</plan>',
+        }),
+      ).toBe(true);
+    },
+  );
+
+  it("acceptRecoverableExit rejects non-zero exit without captured result", () => {
+    const provider = cursor("auto");
+    expect(
+      provider.acceptRecoverableExit?.({
+        exitCode: 1,
+        stderr: "T: [aborted] read ECONNRESET",
+        stdout: "",
+        resultText: "",
+      }),
+    ).toBe(false);
+  });
+
+  it("acceptRecoverableExit rejects unrelated non-zero errors even with result text", () => {
+    const provider = cursor("auto");
+    expect(
+      provider.acceptRecoverableExit?.({
+        exitCode: 1,
+        stderr: "fatal: authentication failed",
+        stdout: "",
+        resultText: "partial output",
+      }),
+    ).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

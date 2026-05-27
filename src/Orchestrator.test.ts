@@ -21,6 +21,7 @@ import { substitutePromptArgs } from "./PromptArgumentSubstitution.js";
 import {
   claudeCode,
   codex as codexFactory,
+  cursor as cursorFactory,
   opencode as opencodeFactory,
   pi as piFactory,
   DEFAULT_MODEL,
@@ -197,6 +198,45 @@ const makeMockAgentLayer = (
         });
       }
       // Pass through to real filesystem sandbox
+      return Effect.flatMap(Sandbox, (real) =>
+        real.exec(command, options),
+      ).pipe(Effect.provide(fsLayer));
+    },
+    copyIn: (hostPath, sandboxPath) =>
+      Effect.flatMap(Sandbox, (real) =>
+        real.copyIn(hostPath, sandboxPath),
+      ).pipe(Effect.provide(fsLayer)),
+    copyFileOut: (sandboxPath, hostPath) =>
+      Effect.flatMap(Sandbox, (real) =>
+        real.copyFileOut(sandboxPath, hostPath),
+      ).pipe(Effect.provide(fsLayer)),
+  });
+};
+
+/** Mock Cursor `agent` invocations; other commands use the filesystem sandbox. */
+const makeMockCursorAgentLayer = (
+  sandboxDir: string,
+  outcome: {
+    readonly resultLine?: string;
+    readonly stdout?: string;
+    readonly stderr: string;
+    readonly exitCode: number;
+  },
+): Layer.Layer<Sandbox> => {
+  const fsLayer = makeLocalSandboxLayer(sandboxDir);
+
+  return Layer.succeed(Sandbox, {
+    exec: (command, options) => {
+      if (command.startsWith("agent ")) {
+        if (outcome.resultLine && options?.onLine) {
+          options.onLine(outcome.resultLine);
+        }
+        return Effect.succeed({
+          stdout: outcome.stdout ?? outcome.resultLine ?? "",
+          stderr: outcome.stderr,
+          exitCode: outcome.exitCode,
+        });
+      }
       return Effect.flatMap(Sandbox, (real) =>
         real.exec(command, options),
       ).pipe(Effect.provide(fsLayer));
@@ -1594,36 +1634,34 @@ describe("Orchestrator error handling", () => {
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
     const opencodeProvider = opencodeFactory("test-model");
-    const stdoutContent = "Setting up environment...\nLoading model...\nError: API key is invalid\nPlease check your credentials";
+    const stdoutContent =
+      "Setting up environment...\nLoading model...\nError: API key is invalid\nPlease check your credentials";
 
-    const { factoryLayer } = makeTestSandboxFactory(
-      hostDir,
-      (dir) => {
-        const fsLayer = makeLocalSandboxLayer(dir);
-        return Layer.succeed(Sandbox, {
-          exec: (command, options) => {
-            if (command.startsWith("opencode ")) {
-              return Effect.succeed({
-                stdout: stdoutContent,
-                stderr: "",
-                exitCode: 1,
-              });
-            }
-            return Effect.flatMap(Sandbox, (real) =>
-              real.exec(command, options),
-            ).pipe(Effect.provide(fsLayer));
-          },
-          copyIn: (hostPath, sandboxPath) =>
-            Effect.flatMap(Sandbox, (real) =>
-              real.copyIn(hostPath, sandboxPath),
-            ).pipe(Effect.provide(fsLayer)),
-          copyFileOut: (sandboxPath, hostPath) =>
-            Effect.flatMap(Sandbox, (real) =>
-              real.copyFileOut(sandboxPath, hostPath),
-            ).pipe(Effect.provide(fsLayer)),
-        });
-      },
-    );
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const fsLayer = makeLocalSandboxLayer(dir);
+      return Layer.succeed(Sandbox, {
+        exec: (command, options) => {
+          if (command.startsWith("opencode ")) {
+            return Effect.succeed({
+              stdout: stdoutContent,
+              stderr: "",
+              exitCode: 1,
+            });
+          }
+          return Effect.flatMap(Sandbox, (real) =>
+            real.exec(command, options),
+          ).pipe(Effect.provide(fsLayer));
+        },
+        copyIn: (hostPath, sandboxPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyIn(hostPath, sandboxPath),
+          ).pipe(Effect.provide(fsLayer)),
+        copyFileOut: (sandboxPath, hostPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyFileOut(sandboxPath, hostPath),
+          ).pipe(Effect.provide(fsLayer)),
+      });
+    });
 
     const exit = await Effect.runPromiseExit(
       orchestrate({
@@ -1657,35 +1695,32 @@ describe("Orchestrator error handling", () => {
       result: "Rate limit exceeded, please retry later",
     });
 
-    const { factoryLayer } = makeTestSandboxFactory(
-      hostDir,
-      (dir) => {
-        const fsLayer = makeLocalSandboxLayer(dir);
-        return Layer.succeed(Sandbox, {
-          exec: (command, options) => {
-            if (command.startsWith("claude ") && options?.onLine) {
-              options.onLine(errorLine);
-              return Effect.succeed({
-                stdout: errorLine,
-                stderr: "",
-                exitCode: 1,
-              });
-            }
-            return Effect.flatMap(Sandbox, (real) =>
-              real.exec(command, options),
-            ).pipe(Effect.provide(fsLayer));
-          },
-          copyIn: (hostPath, sandboxPath) =>
-            Effect.flatMap(Sandbox, (real) =>
-              real.copyIn(hostPath, sandboxPath),
-            ).pipe(Effect.provide(fsLayer)),
-          copyFileOut: (sandboxPath, hostPath) =>
-            Effect.flatMap(Sandbox, (real) =>
-              real.copyFileOut(sandboxPath, hostPath),
-            ).pipe(Effect.provide(fsLayer)),
-        });
-      },
-    );
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const fsLayer = makeLocalSandboxLayer(dir);
+      return Layer.succeed(Sandbox, {
+        exec: (command, options) => {
+          if (command.startsWith("claude ") && options?.onLine) {
+            options.onLine(errorLine);
+            return Effect.succeed({
+              stdout: errorLine,
+              stderr: "",
+              exitCode: 1,
+            });
+          }
+          return Effect.flatMap(Sandbox, (real) =>
+            real.exec(command, options),
+          ).pipe(Effect.provide(fsLayer));
+        },
+        copyIn: (hostPath, sandboxPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyIn(hostPath, sandboxPath),
+          ).pipe(Effect.provide(fsLayer)),
+        copyFileOut: (sandboxPath, hostPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyFileOut(sandboxPath, hostPath),
+          ).pipe(Effect.provide(fsLayer)),
+      });
+    });
 
     const exit = await Effect.runPromiseExit(
       orchestrate({
@@ -1702,7 +1737,140 @@ describe("Orchestrator error handling", () => {
       expect(err).toBeInstanceOf(AgentError);
       if (err instanceof AgentError) {
         expect(err.message).toContain("claude-code exited with code 1:");
-        expect(err.message).toContain("Rate limit exceeded, please retry later");
+        expect(err.message).toContain(
+          "Rate limit exceeded, please retry later",
+        );
+      }
+    }
+  });
+
+  it.each([
+    {
+      label: "TLS handshake teardown",
+      tempPrefix: "orch-cursor-tls-teardown-",
+      stderr:
+        "Error: [aborted] Client network socket disconnected before secure TLS connection was established",
+    },
+    {
+      label: "ECONNRESET teardown",
+      tempPrefix: "orch-cursor-econnreset-",
+      stderr: "T: [aborted] read ECONNRESET",
+    },
+  ] as const)(
+    "accepts cursor result on $label after valid stream result",
+    async ({ tempPrefix, stderr }) => {
+      const hostDir = await mkdtemp(join(tmpdir(), tempPrefix));
+      const cursorProvider = cursorFactory("auto");
+      const displayEntries = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+      const displayLayer = Layer.mergeAll(
+        SilentDisplay.layer(displayEntries),
+        defaultSessionPathsLayer,
+        noopAgentStreamEmitterLayer,
+      );
+
+      await initRepo(hostDir);
+      await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+      const agentOutput = '<plan>{"issues":[]}</plan>';
+      const resultLine = JSON.stringify({
+        type: "result",
+        result: agentOutput,
+      });
+
+      const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) =>
+        makeMockCursorAgentLayer(dir, {
+          resultLine,
+          stdout: resultLine,
+          stderr,
+          exitCode: 1,
+        }),
+      );
+
+      const result = await Effect.runPromise(
+        orchestrate({
+          provider: cursorProvider,
+          hostRepoDir: hostDir,
+          iterations: 1,
+          prompt: "plan work",
+        }).pipe(Effect.provide(Layer.merge(factoryLayer, displayLayer))),
+      );
+
+      expect(result.stdout).toContain(agentOutput);
+      expect(result.iterations.length).toBe(1);
+      const warnEntries = await Effect.runPromise(Ref.get(displayEntries));
+      expect(
+        warnEntries.some(
+          (e: DisplayEntry) =>
+            e._tag === "status" &&
+            e.severity === "warn" &&
+            e.message.includes("cursor exited with code 1"),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it("still fails cursor non-zero exit without captured result on ECONNRESET", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-cursor-no-result-"));
+    const cursorProvider = cursorFactory("auto");
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) =>
+      makeMockCursorAgentLayer(dir, {
+        stderr: "T: [aborted] read ECONNRESET",
+        exitCode: 1,
+      }),
+    );
+
+    const exit = await Effect.runPromiseExit(
+      orchestrate({
+        provider: cursorProvider,
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: "plan work",
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(exit._tag).toBe("Failure");
+  });
+
+  it("still fails cursor non-zero exit for unrelated errors with captured result", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-cursor-unrelated-"));
+    const cursorProvider = cursorFactory("auto");
+    const resultLine = JSON.stringify({
+      type: "result",
+      result: '<plan>{"issues":[]}</plan>',
+    });
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) =>
+      makeMockCursorAgentLayer(dir, {
+        resultLine,
+        stdout: resultLine,
+        stderr: "fatal: authentication failed",
+        exitCode: 1,
+      }),
+    );
+
+    const exit = await Effect.runPromiseExit(
+      orchestrate({
+        provider: cursorProvider,
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: "plan work",
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      const err = Cause.squash(exit.cause);
+      expect(err).toBeInstanceOf(AgentError);
+      if (err instanceof AgentError) {
+        expect(err.message).toContain("cursor exited with code 1:");
+        expect(err.message).toContain("authentication failed");
       }
     }
   });
@@ -1715,34 +1883,31 @@ describe("Orchestrator error handling", () => {
 
     const opencodeProvider = opencodeFactory("test-model");
 
-    const { factoryLayer } = makeTestSandboxFactory(
-      hostDir,
-      (dir) => {
-        const fsLayer = makeLocalSandboxLayer(dir);
-        return Layer.succeed(Sandbox, {
-          exec: (command, options) => {
-            if (command.startsWith("opencode ")) {
-              return Effect.succeed({
-                stdout: "some stdout output",
-                stderr: "fatal error from stderr",
-                exitCode: 1,
-              });
-            }
-            return Effect.flatMap(Sandbox, (real) =>
-              real.exec(command, options),
-            ).pipe(Effect.provide(fsLayer));
-          },
-          copyIn: (hostPath, sandboxPath) =>
-            Effect.flatMap(Sandbox, (real) =>
-              real.copyIn(hostPath, sandboxPath),
-            ).pipe(Effect.provide(fsLayer)),
-          copyFileOut: (sandboxPath, hostPath) =>
-            Effect.flatMap(Sandbox, (real) =>
-              real.copyFileOut(sandboxPath, hostPath),
-            ).pipe(Effect.provide(fsLayer)),
-        });
-      },
-    );
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const fsLayer = makeLocalSandboxLayer(dir);
+      return Layer.succeed(Sandbox, {
+        exec: (command, options) => {
+          if (command.startsWith("opencode ")) {
+            return Effect.succeed({
+              stdout: "some stdout output",
+              stderr: "fatal error from stderr",
+              exitCode: 1,
+            });
+          }
+          return Effect.flatMap(Sandbox, (real) =>
+            real.exec(command, options),
+          ).pipe(Effect.provide(fsLayer));
+        },
+        copyIn: (hostPath, sandboxPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyIn(hostPath, sandboxPath),
+          ).pipe(Effect.provide(fsLayer)),
+        copyFileOut: (sandboxPath, hostPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyFileOut(sandboxPath, hostPath),
+          ).pipe(Effect.provide(fsLayer)),
+      });
+    });
 
     const exit = await Effect.runPromiseExit(
       orchestrate({

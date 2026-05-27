@@ -55,6 +55,7 @@ export { claudeCode, codex, cursor, opencode, pi } from "./AgentProvider.js";
 export type {
   AgentProvider,
   AgentCommandOptions,
+  AgentExecFailure,
   PrintCommand,
   ClaudeCodeOptions,
   CodexOptions,

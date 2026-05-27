@@ -111,7 +111,8 @@ npx sandcastle docker build-image
 ### 步骤 5：运行编排
 
 ```bash
-npm exec --yes --package tsx -- tsx .sandcastle/main.mts
+npm install
+npm run sandcastle
 # 若生成的是 main.ts，将文件名改为 main.ts
 ```
 

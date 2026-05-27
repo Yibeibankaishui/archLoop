@@ -11,7 +11,11 @@ import type { SandboxError } from "./errors.js";
 import type { SandboxService } from "./SandboxFactory.js";
 import { SandboxFactory, SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import { withSandboxLifecycle, type SandboxHooks } from "./SandboxLifecycle.js";
-import type { AgentProvider, IterationUsage } from "./AgentProvider.js";
+import type {
+  AgentExecFailure,
+  AgentProvider,
+  IterationUsage,
+} from "./AgentProvider.js";
 import { TextDeltaBuffer } from "./TextDeltaBuffer.js";
 import {
   hostSessionStore,
@@ -23,6 +27,25 @@ import { SessionPaths } from "./SessionPaths.js";
 export type { ParsedStreamEvent, IterationUsage } from "./AgentProvider.js";
 
 const IDLE_WARNING_INTERVAL_MS = 60_000;
+
+const toAgentExecFailure = (
+  exitCode: number,
+  stderr: string,
+  stdout: string,
+  resultText: string,
+): AgentExecFailure => ({ exitCode, stderr, stdout, resultText });
+
+/** Prefer stderr, then stream result, then the tail of raw stdout. */
+const formatNonZeroExitDetail = (
+  stderr: string,
+  stdout: string,
+  resultText: string,
+): string => {
+  if (stderr.trim()) return stderr;
+  if (resultText.trim()) return resultText;
+  const lines = stdout.split("\n").filter((line) => line.trim());
+  return lines.slice(-20).join("\n");
+};
 
 const invokeAgent = (
   sandbox: SandboxService,
@@ -36,7 +59,11 @@ const invokeAgent = (
   idleWarningIntervalMs: number = IDLE_WARNING_INTERVAL_MS,
   resumeSession?: string,
   signal?: AbortSignal,
-): Effect.Effect<{ result: string; sessionId?: string }, SandboxError> =>
+): Effect.Effect<
+  { result: string; sessionId?: string },
+  SandboxError,
+  Display
+> =>
   Effect.gen(function* () {
     let resultText = "";
     let sessionId: string | undefined;
@@ -120,18 +147,27 @@ const invokeAgent = (
       });
 
       if (execResult.exitCode !== 0) {
-        // Prefer stderr; fall back to resultText (from parsed stream events),
-        // then to the tail of raw stdout (last 20 non-empty lines).
-        let errorDetail = execResult.stderr;
-        if (!errorDetail.trim()) {
-          errorDetail = resultText;
+        const failure = toAgentExecFailure(
+          execResult.exitCode,
+          execResult.stderr,
+          execResult.stdout,
+          resultText,
+        );
+        const errorDetail = formatNonZeroExitDetail(
+          failure.stderr,
+          failure.stdout,
+          failure.resultText,
+        );
+
+        if (provider.acceptRecoverableExit?.(failure)) {
+          const display = yield* Display;
+          yield* display.status(
+            `${provider.name} exited with code ${execResult.exitCode} but captured a result (${errorDetail.trim() || "connection teardown"}) — continuing`,
+            "warn",
+          );
+          return { result: resultText, sessionId };
         }
-        if (!errorDetail.trim()) {
-          const lines = execResult.stdout
-            .split("\n")
-            .filter((l) => l.trim());
-          errorDetail = lines.slice(-20).join("\n");
-        }
+
         return yield* Effect.fail(
           new AgentError({
             message: `${provider.name} exited with code ${execResult.exitCode}:\n${errorDetail}`,

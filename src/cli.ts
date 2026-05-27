@@ -805,6 +805,7 @@ const initCommand = Command.make(
           sandboxProvider: selectedSandboxProvider,
           installedRuntimes: selectedInstalledRuntimes,
           projectProfile: selectedProjectProfile,
+          sandcastleVersion: VERSION,
           ...(presetAgentIds !== undefined && presetAgentIds.length > 0
             ? { presetAgentIds }
             : {}),
@@ -817,6 +818,13 @@ const initCommand = Command.make(
           ),
         ),
       );
+
+      if (scaffoldResult.dependencyInstallFailed) {
+        yield* d.status(
+          "package.json was updated but `npm install` failed. Run `npm install` in the project root before `npm run sandcastle`.",
+          "warn",
+        );
+      }
 
       const authRequirements = collectAuthRequirements({
         installedRuntimes: selectedInstalledRuntimes,
@@ -1077,6 +1085,8 @@ const initCommand = Command.make(
         scaffoldResult.mainFilename,
         {
           presetAgentIds: scaffoldResult.presetAgentIds,
+          packageSetup: scaffoldResult.packageSetup,
+          dependencyInstallFailed: scaffoldResult.dependencyInstallFailed,
           authSetupSummary: {
             lines: authSetupResult.nextStepLines,
           },
