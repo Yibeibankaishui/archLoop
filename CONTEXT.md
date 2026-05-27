@@ -116,6 +116,10 @@ _Avoid_: "dynamic prompt", "string prompt"
 A **prompt** sourced from a file via the `promptFile` option. May contain `{{KEY}}` placeholders and `` !`command` `` **shell expressions**, which are resolved via **prompt argument substitution** and **prompt expansion** before being passed to the **agent**.
 _Avoid_: "prompt file" (refers to the option, not the concept), "template prompt"
 
+**Prompt assembly**:
+The **init** step that creates a scaffolded **prompt template** by combining **preset agent** role text with **skills**, **capability pack** context, verification guidance, and selected **capability add-ons**.
+_Avoid_: "prompt expansion" (already means evaluating **shell expressions**), "runtime prompt injection"
+
 **Prompt argument**:
 A runtime **template argument** passed via `promptArgs` in `run()` that substitutes a `{{KEY}}` placeholder in a **prompt**.
 _Avoid_: "prompt variable" (ambiguous with env vars), "template variable", "parameter"
@@ -164,9 +168,25 @@ _Avoid_: "task source", "issue tracker"
 A project-type choice made during **init** that describes the host repo's language or build-system shape (e.g. Node, Python, C++), independent of the selected **template** or **backlog manager**.
 _Avoid_: "task type", "project template", "stack" (ambiguous with runtime stack)
 
+**Capability pack**:
+An **init** choice that specializes Sandcastle for a class of development work by composing a **template**, **project profile**, **preset agents**, **skills**, context files, verification entrypoints, and optional **capability add-ons**.
+_Avoid_: "project profile" (too narrow), "template" (workflow shape only), "agent pack" (too agent-specific)
+
+**Capability add-on**:
+An optional extension to a **capability pack** that adds specialized context or tooling for a narrower workflow, often depending on a particular **sandbox provider** or **host** state.
+_Avoid_: "plugin" (overloaded), "preset" (ambiguous with **preset agent**)
+
 **Generic project profile**:
 The default **project profile** that makes no language-specific assumptions about the host repo.
 _Avoid_: "auto", "unknown"
+
+**Verification entrypoint**:
+A user-editable executable scaffolded in the **config directory** that checks whether the host repo satisfies a **capability pack**'s development loop after the **agent** changes code.
+_Avoid_: "bootstrap" (setup before work), "test script" (too narrow)
+
+**Capability manifest**:
+The metadata file in the **config directory** that records which **capability pack**, **capability add-ons**, and **verification entrypoint** were scaffolded during **init**.
+_Avoid_: "runtime config" (the scaffolded workflow can run without re-reading it), "lockfile" (not a dependency resolution artifact)
 
 **Template argument**:
 A named `{{KEY}}` placeholder in a scaffold template (Dockerfile, prompt `.md` file) that **init** replaces with a value derived from the user's choices.
@@ -224,7 +244,14 @@ _Avoid_: "log event" (the log file contains more than just agent output), "displ
 - Lifecycle ordering: `copyToWorktree` -> `host.onWorktreeReady` (sequential) -> sandbox created -> `host.onSandboxReady` + `sandbox.onSandboxReady` (parallel)
 - Each **iteration** may produce one or more commits; iterations repeat until the **completion signal** fires or the max count is reached
 - **Init** creates the **config directory** on the **host**, prompting the user to select an **agent**, **backlog manager**, and **project profile**
+- **Init** may also prompt the user to select a **capability pack**. Sandcastle does not silently infer a **capability pack** from repository files in the first version.
 - A **template** defines the scaffolded workflow shape; a **project profile** defines the repo environment and bootstrap assumptions. They compose independently.
+- A **capability pack** composes existing init concepts for specialized development work; it may choose defaults for **template**, **project profile**, **preset agents**, **skills**, context files, verification entrypoints, and **capability add-ons**.
+- **Capability pack** defaults are overridden by explicit **init** choices such as `--template`, `--project-profile`, or `--preset-agents`.
+- A **capability add-on** may scaffold context and **prompt templates** without installing external tools or completing host authentication.
+- The WeChat Mini Program **capability pack** core loop supports sandboxed and **no-sandbox provider** init paths; its MCP-oriented **capability add-ons** require the **no-sandbox provider** in the first version.
+- A **capability pack** owns scaffold artifacts in the **config directory** by default; it does not modify host repo application files such as `package.json` in the first version.
+- **Init** writes a **capability manifest** when a **capability pack** is selected. The manifest records scaffold metadata; generated workflows do not need to read it to run in the first version.
 - The default **project profile** is generic; **init** does not infer a language-specific profile automatically.
 - The first supported **project profiles** are generic, Node, Python, and C++.
 - A **project profile** contributes project language and build-tool requirements to the generated Dockerfile or Containerfile.
@@ -235,6 +262,7 @@ _Avoid_: "log event" (the log file contains more than just agent output), "displ
 - Scaffolded templates run the generated bootstrap script through a **sandbox hook**; they do not scaffold a bootstrap-generation prompt.
 - **Init** does not execute or validate the generated bootstrap script; it is first run by the scaffolded workflow's **sandbox hook**.
 - The generated bootstrap script is not part of image build; it runs inside the **sandbox** after the worktree is mounted and before the **agent** runs.
+- A **verification entrypoint** is separate from the generated bootstrap script: bootstrap prepares the repo before agent work, while verification checks the result after agent changes.
 - A **project profile** is an **init** scaffolding choice, not a public runtime option on `run()`, `createSandbox()`, or a **sandbox provider**.
 - The generated bootstrap script is a user-editable scaffold artifact owned by the host repo after **init**.
 - The generated bootstrap script prepares the repo for agent work; it does not run full project verification by default.
@@ -246,6 +274,7 @@ _Avoid_: "log event" (the log file contains more than just agent output), "displ
 - At launch, Sandcastle resolves env vars from **config directory** `.env` and `process.env`, then passes the full env map into the **sandbox**
 - **Inline prompts** bypass **prompt argument substitution** and **prompt expansion** entirely -- they are passed to the **agent** as-is. `promptArgs` cannot be combined with an **inline prompt**; doing so raises an error
 - **Prompt argument substitution** and **prompt expansion** only apply to **prompt templates** (prompts sourced via `promptFile`)
+- **Prompt assembly** happens during **init** and writes scaffolded **prompt templates** into the **config directory**; it is not a runtime option on `run()` in the first version.
 - **Prompt argument substitution** runs once after prompt resolution, replacing `{{KEY}}` placeholders with values from **prompt arguments** -- this happens on the **host**, before the **sandbox** exists
 - **Prompt expansion** runs before each **iteration**, evaluating all **shell expressions** inside the **sandbox**
 - **Prompt argument substitution** runs before **prompt expansion**, so **prompt arguments** can inject values into **shell expressions**

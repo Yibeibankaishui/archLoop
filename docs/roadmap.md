@@ -7,15 +7,17 @@
 flowchart LR
     P00["00 基线能力<br/>Done<br/>核心编排 / Sandbox / Init"] --> P01["01 多 Agent Provider 与 Runtime<br/>Active<br/>Cursor / Codex / Claude Code / Pure API"]
     P01 --> P02["02 多技术栈项目支持<br/>Active<br/>Bootstrap Contract / 项目类型 / No-Sandbox 边界"]
-    P02 --> P03["03 Docker 环境与容器接入<br/>Planned<br/>Custom Dockerfile / Existing Container"]
-    P03 --> P04["04 文档与用户体验<br/>Planned<br/>README / Init Next Steps / 用户指南"]
-    P04 --> P05["05 GUI<br/>Planned<br/>运行观察 / 配置管理 / Review 状态"]
+    P02 --> P03["03 Capability Packs 与专业化开发闭环<br/>Planned<br/>能力包 / 小程序 / 验证闭环"]
+    P03 --> P04["04 Docker 环境与容器接入<br/>Planned<br/>Custom Dockerfile / Existing Container"]
+    P04 --> P05["05 文档与用户体验<br/>Planned<br/>README / Init Next Steps / 用户指南"]
+    P05 --> P06["06 GUI<br/>Planned<br/>运行观察 / 配置管理 / Review 状态"]
 
     P01 -. "能力沉淀" .-> P04
-    P02 -. "使用边界" .-> P04
-    P01 -. "运行数据" .-> P05
-    P03 -. "环境模型" .-> P04
-    P03 -. "运行模型" .-> P05
+    P02 -. "使用边界" .-> P05
+    P03 -. "能力模型" .-> P05
+    P01 -. "运行数据" .-> P06
+    P04 -. "环境模型" .-> P05
+    P04 -. "运行模型" .-> P06
 
     classDef done fill:#d1fae5,stroke:#059669,color:#064e3b,stroke-width:2px;
     classDef active fill:#fef3c7,stroke:#f59e0b,color:#78350f,stroke-width:2px;
@@ -25,8 +27,8 @@ flowchart LR
 
     class P00 done;
     class P01,P02 active;
-    class P03,P04 planned;
-    class P05 future;
+    class P03,P04,P05 planned;
+    class P06 future;
 ```
 
 ## 00 基线能力
@@ -137,7 +139,56 @@ Goal: 让 Sandcastle 不再默认假设 Node 项目，而是通过项目级 boot
 
 相关文档：[project-profiles-init-bootstrap](./prd/project-profiles-init-bootstrap.md)、[ADR-0015](./adr/0015-project-profiles-generate-bootstrap-at-init-time.md)、[bootstrap-template-contract](../.changeset/bootstrap-template-contract.md)。
 
-## 03 Docker 环境与容器接入
+## 03 Capability Packs 与专业化开发闭环
+
+Status: Planned
+
+Target: [capability-packs](./prd/capability-packs.md)
+
+Goal: 让 `sandcastle init` 可以显式选择专业化能力包，生成包含工具上下文、agent 规则和验证入口的开发闭环。
+
+### Scope
+
+- Capability pack 作为显式 init-time 选择，组合 template、Project profile、preset agents、skills、context files、verification entrypoint 和 capability add-ons。
+- Capability pack 默认值与显式 init flags 的优先级规则。
+- Init-time prompt assembly，把 preset role、skill、capability context、verification guidance 和选中的 add-on guidance 生成到可编辑 prompt template。
+- `.sandcastle/capability.json` capability manifest。
+- `.sandcastle/verify.sh` verification entrypoint。
+- `generic` 与 `miniprogram` 两个第一版 capability packs。
+- WeChat Mini Program core loop：`.sandcastle/verify.sh`、`npm run wx:check`、`miniprogram-ci`、`debug/wx-check.log`。
+- no-sandbox-only Mini Program capability add-ons：`runtime-debug`（WeChat DevTools MCP）与 `cloudbase`（CloudBase MCP）。
+
+### Deliverables
+
+- `sandcastle init --capability miniprogram` 可以生成专业化的小程序 agent 环境。
+- 小程序能力包在 Docker / no-sandbox 下都有稳定的 CLI 主验证闭环。
+- no-sandbox 下可选择 MCP add-ons，生成对应上下文和 prompt guidance，但不自动安装、登录或绑定环境。
+- 生成的 prompt templates 能确定性携带小程序 skill、context、verification guidance 和 add-on guidance。
+- Capability pack registry、add-on compatibility、manifest 和 scaffold 输出有测试覆盖。
+- README / 用户文档能说明 Project profile、template、preset agent、skill、capability pack、capability add-on 的区别。
+
+### Tasks
+
+- [x] 记录 capability pack 领域术语与设计取舍到 `CONTEXT.md` 和 [ADR-0016](./adr/0016-capability-packs-compose-specialized-init-scaffolds.md)。
+- [x] 创建 capability packs PRD：[capability-packs](./prd/capability-packs.md)，并发布为 [#39](https://github.com/Yibeibankaishui/sandcastle/issues/39)。
+- [ ] 实现 capability pack registry 与 `generic` / `miniprogram` 定义。
+- [ ] 扩展 `sandcastle init`，支持 `--capability` 与交互式 capability pack 选择。
+- [ ] 实现 capability defaults 与显式 init flags 的覆盖规则。
+- [ ] 实现 Mini Program core scaffold，包括 capability manifest、verification entrypoint、context files 和 prompt assembly。
+- [ ] 实现 no-sandbox-only `runtime-debug` / `cloudbase` capability add-ons。
+- [ ] 扩充 Mini Program preset agent 和 bundled skill，使其遵守 CLI 验证闭环。
+- [ ] 为 capability registry、add-on compatibility、manifest、prompt assembly 和 init scaffold 增加测试。
+- [ ] 更新 README / 用户指南，并按需补充 changeset。
+
+### Out of Scope
+
+- 第一版不实现 web 或 game capability packs。
+- 第一版不自动推断 capability pack。
+- 第一版不新增 `run({ agentProfile })` public runtime API。
+- 第一版不修改 host repo application files，例如 `package.json`。
+- 第一版不自动安装 `wechat-devtools-mcp`、不登录 CloudBase、不绑定云环境。
+
+## 04 Docker 环境与容器接入
 
 Status: Planned
 
@@ -171,7 +222,7 @@ Goal: 让高级用户可以清晰地复用自定义 Dockerfile、现有 image �
 - 不把 no-sandbox provider 作为默认 AFK 路径；仅保留显式 opt-in 的 host 执行模式。
 - 不在本阶段内提供完整 Docker Compose 编排。
 
-## 04 文档与用户体验
+## 05 文档与用户体验
 
 Status: Planned
 
@@ -182,22 +233,25 @@ Goal: 让用户能从 README、模板、init next steps 和 roadmap 中理解 Sa
 - README 与当前代码、CLI 行为、public API 的对齐。
 - Init 生成后的 next steps、模板内注释和用户提示。
 - Provider、runtime、template、preset role、sandbox、bootstrap contract 等核心概念的用户向解释。
+- Capability pack、capability add-on、verification entrypoint 和 prompt assembly 的用户向解释。
 - Local roadmap 与飞书云文档的同步维护约定。
 
 ### Deliverables
 
 - README 不再停留在 baseline 状态，能反映 fork 后已经落地的主要能力。
 - 用户可以根据文档选择 agent provider、runtime、sandbox provider、template 和 backlog manager。
+- 用户可以理解何时选择 Project profile、template、preset agent 或 capability pack。
 - Roadmap 阶段与 PRD、ADR、changeset 或 issue 建立轻量链接，避免把长设计细节塞进 roadmap。
 
 ### Tasks
 
 - [ ] 审阅 README，并按当前代码更新 public API 与 CLI 示例（Project profile 文档收口见 [#26](https://github.com/Yibeibankaishui/sandcastle/issues/26)）。
 - [ ] 补齐 provider/runtime/template/preset role 的概念说明。
+- [ ] 补齐 capability pack 和小程序开发闭环说明（见 [capability-packs](./prd/capability-packs.md)、[ADR-0016](./adr/0016-capability-packs-compose-specialized-init-scaffolds.md)）。
 - [ ] 为常见工作流补充用户指南。
 - [ ] 建立 roadmap 与 PRD、ADR、changeset、issue 的链接规范。
 
-## 05 GUI
+## 06 GUI
 
 Status: Planned
 
