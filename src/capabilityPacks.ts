@@ -52,6 +52,7 @@ export interface CapabilitySetupAction {
 }
 
 export const DEFAULT_CAPABILITY_PACK_ID = "generic";
+export const MINIPROGRAM_CAPABILITY_PACK_ID = "miniprogram";
 
 const GENERIC_CAPABILITY_PACK: CapabilityPackDefinition = {
   id: "generic",
@@ -61,7 +62,7 @@ const GENERIC_CAPABILITY_PACK: CapabilityPackDefinition = {
 };
 
 const MINIPROGRAM_CAPABILITY_PACK: CapabilityPackDefinition = {
-  id: "miniprogram",
+  id: MINIPROGRAM_CAPABILITY_PACK_ID,
   description:
     "WeChat Mini Program development with verification entrypoint and native variant",
   defaultTemplate: "parallel-planner-with-review",
@@ -163,6 +164,50 @@ function validateSelectedCapabilityAddons(
       );
     }
   }
+}
+
+export interface CapabilityTemplateValidation {
+  readonly allowed: true;
+  /** Set when `blank` is allowed but requires manual verification wiring. */
+  readonly blankTemplateWarning?: string;
+}
+
+function buildBlankTemplateCapabilityWarning(
+  verification: CapabilityVerificationMetadata,
+): string {
+  return (
+    "The blank template does not wire the capability verification entrypoint automatically. " +
+    `Run \`${verification.entrypoint}\` from your workflow and read \`${verification.diagnosticLog}\` after Mini Program changes.`
+  );
+}
+
+/** Validates explicit template selection against a capability pack's compatible template list. */
+export function validateCapabilityTemplateSelection(
+  capabilityId: string,
+  templateName: string,
+): CapabilityTemplateValidation {
+  const pack = getCapabilityPackDefinition(capabilityId);
+  if (pack?.compatibleTemplates === undefined) {
+    return { allowed: true };
+  }
+
+  if (!pack.compatibleTemplates.includes(templateName)) {
+    const supported = pack.compatibleTemplates.join(", ");
+    throw new Error(
+      `Template "${templateName}" is not compatible with capability pack "${capabilityId}". Supported templates: ${supported}`,
+    );
+  }
+
+  if (templateName === "blank" && pack.verification !== undefined) {
+    return {
+      allowed: true,
+      blankTemplateWarning: buildBlankTemplateCapabilityWarning(
+        pack.verification,
+      ),
+    };
+  }
+
+  return { allowed: true };
 }
 
 export function resolveCapabilityInitOptions(
