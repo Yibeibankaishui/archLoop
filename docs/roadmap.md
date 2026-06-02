@@ -7,7 +7,7 @@
 flowchart LR
     P00["00 基线能力<br/>Done<br/>核心编排 / Sandbox / Init"] --> P01["01 多 Agent Provider 与 Runtime<br/>Active<br/>Cursor / Codex / Claude Code / Pure API"]
     P01 --> P02["02 多技术栈项目支持<br/>Active<br/>Bootstrap Contract / 项目类型 / No-Sandbox 边界"]
-    P02 --> P03["03 Capability Packs 与专业化开发闭环<br/>Planned<br/>能力包 / 小程序 / 验证闭环"]
+    P02 --> P03["03 Capability Packs 与专业化开发闭环<br/>Done<br/>能力包 / 小程序 / 验证闭环"]
     P03 --> P04["04 Docker 环境与容器接入<br/>Planned<br/>Custom Dockerfile / Existing Container"]
     P04 --> P05["05 文档与用户体验<br/>Planned<br/>README / Init Next Steps / 用户指南"]
     P05 --> P06["06 GUI<br/>Planned<br/>运行观察 / 配置管理 / Review 状态"]
@@ -27,7 +27,8 @@ flowchart LR
 
     class P00 done;
     class P01,P02 active;
-    class P03,P04,P05 planned;
+    class P03 done;
+    class P04,P05 planned;
     class P06 future;
 ```
 
@@ -141,7 +142,9 @@ Goal: 让 Sandcastle 不再默认假设 Node 项目，而是通过项目级 boot
 
 ## 03 Capability Packs 与专业化开发闭环
 
-Status: Planned
+Status: Done
+
+Version: `00ca43bf0663370567a3d32666b77eca0b94e340`
 
 Target: [capability-packs](./prd/capability-packs.md)
 
@@ -179,17 +182,17 @@ Goal: 让 `sandcastle init` 可以显式选择专业化能力包，生成包含�
 
 - [x] 记录 capability pack 领域术语与设计取舍到 `CONTEXT.md` 和 [ADR-0016](./adr/0016-capability-packs-compose-specialized-init-scaffolds.md)。
 - [x] 创建 capability packs PRD：[capability-packs](./prd/capability-packs.md)，并发布为 [#39](https://github.com/Yibeibankaishui/sandcastle/issues/39)。
-- [ ] 实现 capability pack registry 与 `generic` / `miniprogram` 定义。
-- [ ] 实现小程序 native capability variant 与 `.sandcastle/wx-check-native.mjs` fallback verifier，包括检测到 `miniprogram-ci` 配置时自动执行 `preview`。
-- [ ] 实现小程序 init-time `miniprogram-ci` 检测、可选项目安装和缺失时 next-step guidance。
-- [ ] 扩展 `sandcastle init`，支持 `--capability` 与交互式 capability pack 选择。
-- [ ] 实现 capability defaults 与显式 init flags 的覆盖规则。
-- [ ] 实现 Mini Program core scaffold，包括 capability manifest、verification entrypoint、context files 和 prompt assembly。
-- [ ] 生成 `.sandcastle/context/miniprogram-setup.md`，并在 assembled Mini Program prompts 中引用。
-- [x] 实现 no-sandbox-only `runtime-debug` capability add-on。
-- [ ] 扩充 Mini Program preset agent 和 bundled skill，使其遵守 CLI 验证闭环。
-- [ ] 为 capability registry、add-on compatibility、manifest、prompt assembly 和 init scaffold 增加测试。
-- [ ] 更新 README / 用户指南，并按需补充 changeset。
+- [x] 实现 capability pack registry 与 `generic` / `miniprogram` 定义（[#40](https://github.com/Yibeibankaishui/sandcastle/issues/40)）。
+- [x] 实现小程序 native capability variant 与 `.sandcastle/wx-check-native.mjs` fallback verifier，包括检测到 `miniprogram-ci` 配置时自动执行 `preview`（[#44](https://github.com/Yibeibankaishui/sandcastle/issues/44)、[#46](https://github.com/Yibeibankaishui/sandcastle/issues/46)）。
+- [x] 实现小程序 init-time `miniprogram-ci` 检测、可选项目安装和缺失时 next-step guidance（[#45](https://github.com/Yibeibankaishui/sandcastle/issues/45)）。
+- [x] 扩展 `sandcastle init`，支持 `--capability` 与交互式 capability pack 选择（[#40](https://github.com/Yibeibankaishui/sandcastle/issues/40)）。
+- [x] 实现 capability defaults 与显式 init flags 的覆盖规则（[#40](https://github.com/Yibeibankaishui/sandcastle/issues/40)）。
+- [x] 实现 Mini Program core scaffold，包括 capability manifest、verification entrypoint、context files 和 prompt assembly（[#42](https://github.com/Yibeibankaishui/sandcastle/issues/42)、[#41](https://github.com/Yibeibankaishui/sandcastle/issues/41)）。
+- [x] 生成 `.sandcastle/context/miniprogram-setup.md`，并在 assembled Mini Program prompts 中引用（[#42](https://github.com/Yibeibankaishui/sandcastle/issues/42)）。
+- [x] 实现 no-sandbox-only `runtime-debug` capability add-on（[#47](https://github.com/Yibeibankaishui/sandcastle/issues/47)）。
+- [x] 扩充 Mini Program preset agent 和 bundled skill，使其遵守 CLI 验证闭环（[#41](https://github.com/Yibeibankaishui/sandcastle/issues/41)、[#43](https://github.com/Yibeibankaishui/sandcastle/issues/43)）。
+- [x] 为 capability registry、add-on compatibility、manifest、prompt assembly 和 init scaffold 增加测试（[#40](https://github.com/Yibeibankaishui/sandcastle/issues/40)–[#47](https://github.com/Yibeibankaishui/sandcastle/issues/47)）。
+- [x] 更新 README / 用户指南，并按需补充 changeset（[#48](https://github.com/Yibeibankaishui/sandcastle/issues/48)）。
 
 ### Out of Scope
 
@@ -260,7 +263,7 @@ Goal: 让用户能从 README、模板、init next steps 和 roadmap 中理解 Sa
 
 - [ ] 审阅 README，并按当前代码更新 public API 与 CLI 示例（Project profile 文档收口见 [#26](https://github.com/Yibeibankaishui/sandcastle/issues/26)）。
 - [ ] 补齐 provider/runtime/template/preset role 的概念说明。
-- [ ] 补齐 capability pack 和小程序开发闭环说明（见 [capability-packs](./prd/capability-packs.md)、[ADR-0016](./adr/0016-capability-packs-compose-specialized-init-scaffolds.md)）。
+- [x] 补齐 capability pack 和小程序开发闭环说明（见 [capability-packs](./prd/capability-packs.md)、[ADR-0016](./adr/0016-capability-packs-compose-specialized-init-scaffolds.md)、[#48](https://github.com/Yibeibankaishui/sandcastle/issues/48)）。
 - [ ] 为常见工作流补充用户指南。
 - [ ] 建立 roadmap 与 PRD、ADR、changeset、issue 的链接规范。
 
