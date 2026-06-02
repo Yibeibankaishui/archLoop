@@ -1088,6 +1088,19 @@ function getTemplatesDir(): string {
   return join(dirname(thisFile), "templates");
 }
 
+function resolveCapabilityBlankTemplateWarning(
+  capabilityInit: ResolvedCapabilityInit | undefined,
+  templateName: string,
+): string | undefined {
+  if (capabilityInit === undefined) {
+    return undefined;
+  }
+  return validateCapabilityTemplateSelection(
+    capabilityInit.capabilityId,
+    templateName,
+  ).blankTemplateWarning;
+}
+
 const getTemplateDir = (
   templateName: string,
 ): Effect.Effect<string, Error, never> =>
@@ -1551,15 +1564,8 @@ export const scaffold = (
     } = options;
     const fs = yield* FileSystem.FileSystem;
     const configDir = join(repoDir, ".sandcastle");
-    let capabilityBlankTemplateWarning: string | undefined;
-
-    if (capabilityInit) {
-      const templateValidation = validateCapabilityTemplateSelection(
-        capabilityInit.capabilityId,
-        templateName,
-      );
-      capabilityBlankTemplateWarning = templateValidation.blankTemplateWarning;
-    }
+    const capabilityBlankTemplateWarning =
+      resolveCapabilityBlankTemplateWarning(capabilityInit, templateName);
 
     const exists = yield* fs
       .exists(configDir)

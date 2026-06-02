@@ -1,7 +1,10 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { CapabilityVerificationMetadata } from "./capabilityPacks.js";
+import {
+  MINIPROGRAM_CAPABILITY_PACK_ID,
+  type CapabilityVerificationMetadata,
+} from "./capabilityPacks.js";
 
 /** Marker appended once to assembled capability prompts for idempotency. */
 export const MINIPROGRAM_VERIFICATION_PROMPT_MARKER =
@@ -72,5 +75,8 @@ export function shouldAssembleMiniprogramPrompts(
   capabilityId: string,
   verification: CapabilityVerificationMetadata | undefined,
 ): boolean {
-  return capabilityId === "miniprogram" && verification !== undefined;
+  return (
+    capabilityId === MINIPROGRAM_CAPABILITY_PACK_ID &&
+    verification !== undefined
+  );
 }
