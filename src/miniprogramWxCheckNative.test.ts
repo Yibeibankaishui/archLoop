@@ -91,7 +91,7 @@ const writeMinimalNativeProject = async (
   await writeFile(
     join(repoDir, "project.config.json"),
     JSON.stringify({
-      appid: "wxabcdef1234567890",
+      appid: EFFECTIVE_APPID,
       miniprogramRoot: mpRoot === "." ? "./" : `${mpRoot.replace(/\/$/, "")}/`,
       ...options?.projectConfig,
     }),
@@ -115,6 +115,30 @@ const lastDiagnostic = (events: WxCheckLogEvent[]) =>
 
 const platformStatus = (events: WxCheckLogEvent[]) =>
   events.find((e) => e.platform_validation_status)?.platform_validation_status;
+
+const setupPlatformValidationRepo = async (
+  repoDir: string,
+  options?: {
+    projectConfig?: Record<string, unknown>;
+    appJson?: Record<string, unknown>;
+    uploadKeyAppid?: string;
+    withUploadKey?: boolean;
+    withMockCi?: boolean;
+  },
+) => {
+  await installNativeVerifier(repoDir);
+  await writeMinimalNativeProject(repoDir, {
+    projectConfig: options?.projectConfig,
+    appJson: options?.appJson,
+  });
+  if (options?.withUploadKey !== false) {
+    await writeUploadKey(repoDir, options?.uploadKeyAppid ?? EFFECTIVE_APPID);
+  }
+  if (options?.withMockCi !== false) {
+    await writeMockMiniprogramCi(repoDir);
+  }
+  return join(repoDir, ".sandcastle", "mock-ci-state.json");
+};
 
 const writeHostPackageJson = async (repoDir: string) => {
   await writeFile(
@@ -490,9 +514,10 @@ describe("wx-check-native.mjs static fallback verifier", () => {
 describe("wx-check-native.mjs miniprogram-ci platform validation", () => {
   it("warns appid_missing and keeps not_configured when AppID is absent", async () => {
     const repoDir = await makeRepo();
-    await installNativeVerifier(repoDir);
-    await writeMinimalNativeProject(repoDir, {
+    await setupPlatformValidationRepo(repoDir, {
       projectConfig: { appid: undefined },
+      withUploadKey: false,
+      withMockCi: false,
     });
 
     const { exitCode } = await runNativeCheck(repoDir);
@@ -505,9 +530,10 @@ describe("wx-check-native.mjs miniprogram-ci platform validation", () => {
 
   it("treats placeholder AppID as missing with not_configured", async () => {
     const repoDir = await makeRepo();
-    await installNativeVerifier(repoDir);
-    await writeMinimalNativeProject(repoDir, {
+    await setupPlatformValidationRepo(repoDir, {
       projectConfig: { appid: "touristappid" },
+      withUploadKey: false,
+      withMockCi: false,
     });
 
     const { exitCode } = await runNativeCheck(repoDir);
@@ -520,13 +546,9 @@ describe("wx-check-native.mjs miniprogram-ci platform validation", () => {
 
   it("prefers WX_APPID over project.config.json appid", async () => {
     const repoDir = await makeRepo();
-    await installNativeVerifier(repoDir);
-    await writeMinimalNativeProject(repoDir, {
+    const mockState = await setupPlatformValidationRepo(repoDir, {
       projectConfig: { appid: OTHER_APPID },
     });
-    await writeUploadKey(repoDir, EFFECTIVE_APPID);
-    await writeMockMiniprogramCi(repoDir);
-    const mockState = join(repoDir, ".sandcastle", "mock-ci-state.json");
 
     const { exitCode } = await runNativeCheck(repoDir, {
       WX_APPID: EFFECTIVE_APPID,
@@ -540,14 +562,11 @@ describe("wx-check-native.mjs miniprogram-ci platform validation", () => {
 
   it("prefers WX_UPLOAD_KEY_PATH over repository-local key", async () => {
     const repoDir = await makeRepo();
-    await installNativeVerifier(repoDir);
-    await writeMinimalNativeProject(repoDir);
+    const mockState = await setupPlatformValidationRepo(repoDir);
     const externalKey = join(repoDir, "keys", "upload.key");
     await mkdir(join(repoDir, "keys"), { recursive: true });
     await writeFile(externalKey, "external-key");
     await writeUploadKey(repoDir, EFFECTIVE_APPID, "repo-local-key");
-    await writeMockMiniprogramCi(repoDir);
-    const mockState = join(repoDir, ".sandcastle", "mock-ci-state.json");
 
     const { exitCode } = await runNativeCheck(repoDir, {
       WX_UPLOAD_KEY_PATH: externalKey,
@@ -561,9 +580,10 @@ describe("wx-check-native.mjs miniprogram-ci platform validation", () => {
 
   it("warns upload_key_appid_mismatch for other local keys", async () => {
     const repoDir = await makeRepo();
-    await installNativeVerifier(repoDir);
-    await writeMinimalNativeProject(repoDir);
-    await writeUploadKey(repoDir, OTHER_APPID);
+    await setupPlatformValidationRepo(repoDir, {
+      uploadKeyAppid: OTHER_APPID,
+      withMockCi: false,
+    });
 
     const { exitCode } = await runNativeCheck(repoDir);
     expect(exitCode).toBe(0);
@@ -577,9 +597,7 @@ describe("wx-check-native.mjs miniprogram-ci platform validation", () => {
 
   it("reports configured_missing_tool when miniprogram-ci is unavailable", async () => {
     const repoDir = await makeRepo();
-    await installNativeVerifier(repoDir);
-    await writeMinimalNativeProject(repoDir);
-    await writeUploadKey(repoDir, EFFECTIVE_APPID);
+    await setupPlatformValidationRepo(repoDir, { withMockCi: false });
 
     const { exitCode } = await runNativeCheck(repoDir);
     expect(exitCode).toBe(1);
@@ -590,11 +608,7 @@ describe("wx-check-native.mjs miniprogram-ci platform validation", () => {
 
   it("runs preview and records passed with QR artifact", async () => {
     const repoDir = await makeRepo();
-    await installNativeVerifier(repoDir);
-    await writeMinimalNativeProject(repoDir);
-    await writeUploadKey(repoDir, EFFECTIVE_APPID);
-    await writeMockMiniprogramCi(repoDir);
-    const mockState = join(repoDir, ".sandcastle", "mock-ci-state.json");
+    const mockState = await setupPlatformValidationRepo(repoDir);
 
     const { exitCode } = await runNativeCheck(repoDir, {
       WX_MOCK_CI_STATE: mockState,
@@ -631,11 +645,7 @@ describe("wx-check-native.mjs miniprogram-ci platform validation", () => {
 
   it("reports configured_invalid when preview fails", async () => {
     const repoDir = await makeRepo();
-    await installNativeVerifier(repoDir);
-    await writeMinimalNativeProject(repoDir);
-    await writeUploadKey(repoDir, EFFECTIVE_APPID);
-    await writeMockMiniprogramCi(repoDir);
-    const mockState = join(repoDir, ".sandcastle", "mock-ci-state.json");
+    const mockState = await setupPlatformValidationRepo(repoDir);
 
     const { exitCode } = await runNativeCheck(repoDir, {
       WX_MOCK_CI_MODE: "preview_fail",
@@ -649,11 +659,7 @@ describe("wx-check-native.mjs miniprogram-ci platform validation", () => {
 
   it("reports preview_artifact_write_failed when preview omits QR file", async () => {
     const repoDir = await makeRepo();
-    await installNativeVerifier(repoDir);
-    await writeMinimalNativeProject(repoDir);
-    await writeUploadKey(repoDir, EFFECTIVE_APPID);
-    await writeMockMiniprogramCi(repoDir);
-    const mockState = join(repoDir, ".sandcastle", "mock-ci-state.json");
+    const mockState = await setupPlatformValidationRepo(repoDir);
 
     const { exitCode } = await runNativeCheck(repoDir, {
       WX_MOCK_CI_MODE: "no_preview_artifact",
@@ -668,11 +674,7 @@ describe("wx-check-native.mjs miniprogram-ci platform validation", () => {
 
   it("forces packNpm when WX_PACK_NPM=1", async () => {
     const repoDir = await makeRepo();
-    await installNativeVerifier(repoDir);
-    await writeMinimalNativeProject(repoDir);
-    await writeUploadKey(repoDir, EFFECTIVE_APPID);
-    await writeMockMiniprogramCi(repoDir);
-    const mockState = join(repoDir, ".sandcastle", "mock-ci-state.json");
+    const mockState = await setupPlatformValidationRepo(repoDir);
 
     const { exitCode } = await runNativeCheck(repoDir, {
       WX_PACK_NPM: "1",
@@ -686,16 +688,12 @@ describe("wx-check-native.mjs miniprogram-ci platform validation", () => {
 
   it("skips packNpm when WX_PACK_NPM=0", async () => {
     const repoDir = await makeRepo();
-    await installNativeVerifier(repoDir);
-    await writeMinimalNativeProject(repoDir);
+    const mockState = await setupPlatformValidationRepo(repoDir);
     await writeHostPackageJson(repoDir);
     await writeFile(
       join(repoDir, "pages", "index", "index.json"),
       JSON.stringify({ usingComponents: { ui: "weui/button" } }),
     );
-    await writeUploadKey(repoDir, EFFECTIVE_APPID);
-    await writeMockMiniprogramCi(repoDir);
-    const mockState = join(repoDir, ".sandcastle", "mock-ci-state.json");
 
     const { exitCode } = await runNativeCheck(repoDir, {
       WX_PACK_NPM: "0",
@@ -709,15 +707,11 @@ describe("wx-check-native.mjs miniprogram-ci platform validation", () => {
 
   it("runs packNpm for miniprogramRoot package.json when WX_PACK_NPM is unset", async () => {
     const repoDir = await makeRepo();
-    await installNativeVerifier(repoDir);
-    await writeMinimalNativeProject(repoDir);
+    const mockState = await setupPlatformValidationRepo(repoDir);
     await writeFile(
       join(repoDir, "package.json"),
       JSON.stringify({ name: "mp-inner", dependencies: {} }),
     );
-    await writeUploadKey(repoDir, EFFECTIVE_APPID);
-    await writeMockMiniprogramCi(repoDir);
-    const mockState = join(repoDir, ".sandcastle", "mock-ci-state.json");
 
     const { exitCode } = await runNativeCheck(repoDir, {
       WX_MOCK_CI_STATE: mockState,
@@ -730,11 +724,7 @@ describe("wx-check-native.mjs miniprogram-ci platform validation", () => {
 
   it("reports pack_npm_failed when packNpm fails", async () => {
     const repoDir = await makeRepo();
-    await installNativeVerifier(repoDir);
-    await writeMinimalNativeProject(repoDir);
-    await writeUploadKey(repoDir, EFFECTIVE_APPID);
-    await writeMockMiniprogramCi(repoDir);
-    const mockState = join(repoDir, ".sandcastle", "mock-ci-state.json");
+    const mockState = await setupPlatformValidationRepo(repoDir);
 
     const { exitCode } = await runNativeCheck(repoDir, {
       WX_PACK_NPM: "1",

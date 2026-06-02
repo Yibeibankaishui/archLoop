@@ -63,6 +63,19 @@ const warn = (diagnostic, message, extra = {}) => {
   });
 };
 
+const errorMessage = (error, fallback) =>
+  error instanceof Error ? error.message : fallback;
+
+const exitPlatformValidationFailed = (fields) => {
+  writeEvent({
+    type: "platform_validation",
+    severity: "error",
+    platform_validation_status: "configured_invalid",
+    ...fields,
+  });
+  process.exit(1);
+};
+
 const readJson = (filePath, invalidDiagnostic) => {
   try {
     return JSON.parse(readFileSync(filePath, "utf8"));
@@ -480,12 +493,23 @@ const hasBarePackageComponentRefs = (miniprogramRoot) => {
   return false;
 };
 
-const shouldRunPackNpm = (miniprogramRoot) => {
-  const packNpmEnv = process.env.WX_PACK_NPM?.trim();
-  if (packNpmEnv === "1") {
+const readWxPackNpmOverride = () => {
+  const value = process.env.WX_PACK_NPM?.trim();
+  if (value === "1") {
     return true;
   }
-  if (packNpmEnv === "0") {
+  if (value === "0") {
+    return false;
+  }
+  return undefined;
+};
+
+const shouldRunPackNpm = (miniprogramRoot) => {
+  const packNpmOverride = readWxPackNpmOverride();
+  if (packNpmOverride === true) {
+    return true;
+  }
+  if (packNpmOverride === false) {
     return false;
   }
   if (existsSync(join(miniprogramRoot, "package.json"))) {
@@ -555,7 +579,12 @@ const runPlatformValidation = async ({
   warnUploadKeyAppidMismatch(appid.effectiveAppid);
 
   const uploadKey = resolveUploadKeyPath(appid.effectiveAppid);
-  if (!uploadKey.configured || !existsSync(uploadKey.path)) {
+  const hasUsableUploadKey =
+    uploadKey.configured &&
+    uploadKey.path != null &&
+    existsSync(uploadKey.path);
+
+  if (!hasUsableUploadKey) {
     if (uploadKey.path && !existsSync(uploadKey.path)) {
       warn(
         "upload_key_missing",
@@ -605,17 +634,11 @@ const runPlatformValidation = async ({
         appid: appid.effectiveAppid,
       });
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "miniprogram-ci packNpm failed.";
-      writeEvent({
-        type: "platform_validation",
-        severity: "error",
-        message,
+      exitPlatformValidationFailed({
+        message: errorMessage(error, "miniprogram-ci packNpm failed."),
         diagnostic: "pack_npm_failed",
-        platform_validation_status: "configured_invalid",
         appid: appid.effectiveAppid,
       });
-      process.exit(1);
     }
   }
 
@@ -626,19 +649,13 @@ const runPlatformValidation = async ({
       qrcodeOutputDest: previewArtifactPath,
     });
   } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "miniprogram-ci preview failed.";
-    writeEvent({
-      type: "platform_validation",
-      severity: "error",
-      message,
+    exitPlatformValidationFailed({
+      message: errorMessage(error, "miniprogram-ci preview failed."),
       diagnostic: "preview_failed",
-      platform_validation_status: "configured_invalid",
       appid: appid.effectiveAppid,
       privateKeyPath: uploadKey.path,
       projectPath,
     });
-    process.exit(1);
   }
 
   if (!existsSync(previewArtifactPath)) {
@@ -794,7 +811,8 @@ const runNativeCheck = async () => {
 };
 
 runNativeCheck().catch((error) => {
-  const message =
-    error instanceof Error ? error.message : "Native Mini Program check failed.";
-  fail("native_check_internal_error", message);
+  fail(
+    "native_check_internal_error",
+    errorMessage(error, "Native Mini Program check failed."),
+  );
 });
