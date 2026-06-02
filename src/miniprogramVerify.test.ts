@@ -108,7 +108,17 @@ describe("miniprogram verify.sh wrapper", () => {
       join(repoDir, "project.config.json"),
       JSON.stringify({ appid: "wxabcdef1234567890", miniprogramRoot: "./" }),
     );
-    await mkdir(join(repoDir, "pages"), { recursive: true });
+    await writeFile(
+      join(repoDir, "app.json"),
+      JSON.stringify({
+        pages: ["pages/index/index"],
+        window: { navigationBarTitleText: "Test" },
+      }),
+    );
+    const pageDir = join(repoDir, "pages", "index");
+    await mkdir(pageDir, { recursive: true });
+    await writeFile(join(pageDir, "index.json"), "{}");
+    await writeFile(join(pageDir, "index.wxml"), "<view></view>");
 
     const { exitCode } = await runVerify(repoDir);
     expect(exitCode).toBe(0);
