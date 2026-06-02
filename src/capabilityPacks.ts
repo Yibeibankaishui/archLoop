@@ -54,6 +54,23 @@ export interface CapabilitySetupAction {
 
 export const DEFAULT_CAPABILITY_PACK_ID = "generic";
 export const MINIPROGRAM_CAPABILITY_PACK_ID = "miniprogram";
+export const RUNTIME_DEBUG_ADDON_ID = "runtime-debug";
+
+export function hasRuntimeDebugAddon(addonIds: readonly string[]): boolean {
+  return addonIds.includes(RUNTIME_DEBUG_ADDON_ID);
+}
+
+export function hasMiniprogramRuntimeDebugAddon(
+  capabilityInit: ResolvedCapabilityInit | undefined,
+): boolean {
+  if (capabilityInit === undefined) {
+    return false;
+  }
+  return (
+    capabilityInit.capabilityId === MINIPROGRAM_CAPABILITY_PACK_ID &&
+    hasRuntimeDebugAddon(capabilityInit.addonIds)
+  );
+}
 
 const GENERIC_CAPABILITY_PACK: CapabilityPackDefinition = {
   id: "generic",
@@ -83,7 +100,7 @@ const MINIPROGRAM_CAPABILITY_PACK: CapabilityPackDefinition = {
   },
   addons: [
     {
-      id: "runtime-debug",
+      id: RUNTIME_DEBUG_ADDON_ID,
       description:
         "WeChat Developer Tools MCP runtime debugging (no-sandbox only)",
       compatibleSandboxProviders: ["no-sandbox"],

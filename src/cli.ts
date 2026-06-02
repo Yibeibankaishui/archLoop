@@ -48,9 +48,12 @@ import { ConfigDirError, InitError } from "./errors.js";
 import {
   getCapabilityPackDefinition,
   listCapabilityPacksForInit,
+  MINIPROGRAM_CAPABILITY_PACK_ID,
   resolveCapabilityInitOptions,
   validateCapabilityTemplateSelection,
+  type ResolvedCapabilityInit,
 } from "./capabilityPacks.js";
+import { detectMiniprogramInitSnapshot } from "./miniprogramScaffold.js";
 import {
   getPresetAgentDefinition,
   listPresetAgentsForInit,
@@ -180,6 +183,15 @@ const initCreateSandcastleLabelOption = Options.text(
 const initBuildImageOption = Options.text("build-image").pipe(
   Options.withDescription(
     "true or false to build the sandbox image after scaffold (skips prompt when set). Omit to be prompted.",
+  ),
+  Options.optional,
+);
+
+const initInstallMiniprogramCiOption = Options.text(
+  "install-miniprogram-ci",
+).pipe(
+  Options.withDescription(
+    "true or false to install project-local miniprogram-ci during Mini Program init (skips prompt when set). Omit to be prompted when miniprogram-ci is missing.",
   ),
   Options.optional,
 );
@@ -525,6 +537,53 @@ const resolveSelectedCapabilityId = (
     return picked === "generic" ? undefined : picked;
   });
 
+const resolveMiniprogramCiInstallApproval = (options: {
+  readonly cwd: string;
+  readonly capabilityInit: ResolvedCapabilityInit;
+  readonly installMiniprogramCiCli: OptionalTextFlag;
+  readonly scriptedInit: boolean;
+}): Effect.Effect<boolean | undefined, InitError, never> =>
+  Effect.gen(function* () {
+    if (
+      options.capabilityInit.capabilityId !== MINIPROGRAM_CAPABILITY_PACK_ID ||
+      !options.capabilityInit.writeCapabilityManifest
+    ) {
+      return undefined;
+    }
+
+    const miniprogramSnapshot = detectMiniprogramInitSnapshot(options.cwd);
+    if (miniprogramSnapshot.miniprogramCi.status === "available") {
+      return undefined;
+    }
+
+    if (options.installMiniprogramCiCli._tag === "Some") {
+      return yield* parseStrictBoolean(
+        "install-miniprogram-ci",
+        options.installMiniprogramCiCli.value,
+      );
+    }
+
+    if (options.scriptedInit) {
+      return undefined;
+    }
+
+    const approved = yield* Effect.promise(() =>
+      clack.confirm({
+        message:
+          "Install project-local miniprogram-ci as a dev dependency? (Recommended for platform preview validation; global CLI and npx do not satisfy Sandcastle's managed loop.)",
+        initialValue: false,
+      }),
+    );
+    if (clack.isCancel(approved)) {
+      yield* Effect.fail(
+        new InitError({
+          message: "miniprogram-ci installation choice cancelled.",
+        }),
+      );
+    }
+    return approved === true;
+  });
+
 const isFullyScriptedInit = (options: {
   agentFlag: OptionalTextFlag;
   runtimesFlag: OptionalTextFlag;
@@ -562,6 +621,7 @@ const initCommand = Command.make(
     capabilityAddons: initCapabilityAddonsOption,
     createSandcastleLabel: initCreateSandcastleLabelOption,
     buildImage: initBuildImageOption,
+    installMiniprogramCi: initInstallMiniprogramCiOption,
   },
   ({
     imageName: imageNameFlag,
@@ -577,6 +637,7 @@ const initCommand = Command.make(
     capabilityAddons: capabilityAddonsCli,
     createSandcastleLabel: createSandcastleLabelCli,
     buildImage: buildImageCli,
+    installMiniprogramCi: installMiniprogramCiCli,
   }) =>
     Effect.gen(function* () {
       const d = yield* Display;
@@ -935,6 +996,14 @@ const initCommand = Command.make(
         }
       }
 
+      const miniprogramCiInstallApproved =
+        yield* resolveMiniprogramCiInstallApproval({
+          cwd,
+          capabilityInit,
+          installMiniprogramCiCli,
+          scriptedInit,
+        });
+
       const scaffoldResult = yield* d.spinner(
         "Scaffolding .sandcastle/ config directory...",
         scaffold(cwd, {
@@ -951,6 +1020,9 @@ const initCommand = Command.make(
             ? { presetAgentIds }
             : {}),
           capabilityInit,
+          ...(miniprogramCiInstallApproved !== undefined
+            ? { miniprogramCiInstallApproved }
+            : {}),
         }).pipe(
           Effect.mapError(
             (e) =>

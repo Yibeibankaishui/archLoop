@@ -12,14 +12,17 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   buildCapabilityManifest,
+  RUNTIME_DEBUG_ADDON_ID,
   resolveCapabilityInitOptions,
   validateCapabilityRegistries,
   type CapabilitySetupAction,
 } from "./capabilityPacks.js";
 import {
   MINIPROGRAM_VERIFICATION_PROMPT_MARKER,
+  MINIPROGRAM_RUNTIME_DEBUG_PROMPT_MARKER,
   listTemplatePromptFiles,
 } from "./capabilityPromptAssembly.js";
+import { setMiniprogramCiInstallRunnerForTests } from "./miniprogramScaffold.js";
 import { validatePresetRegistries } from "./presetAgents.js";
 import {
   scaffold,
@@ -3013,6 +3016,68 @@ describe("capability pack scaffold", () => {
     ).toEqual(manifest);
   });
 
+  it("records no_package_json when user approves miniprogram-ci install without package.json", async () => {
+    const dir = await makeDir();
+    const capabilityInit = resolveCapabilityInitOptions({
+      capabilityId: "miniprogram",
+    });
+    await runScaffold(dir, {
+      templateName: capabilityInit.templateName,
+      projectProfile: getProjectProfile(capabilityInit.projectProfileName)!,
+      capabilityInit,
+      miniprogramCiInstallApproved: true,
+    });
+
+    const manifest = JSON.parse(
+      await readFile(join(dir, ".sandcastle", "capability.json"), "utf-8"),
+    ) as { setupActions: CapabilitySetupAction[] };
+    expect(manifest.setupActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "miniprogram-ci-install",
+          status: "skipped",
+          reason: "no_package_json",
+        }),
+      ]),
+    );
+  });
+
+  it("records install_command_failed when user-approved miniprogram-ci install fails", async () => {
+    const dir = await makeDir();
+    await writeFile(
+      join(dir, "package.json"),
+      JSON.stringify({ name: "wx-app" }),
+    );
+    const capabilityInit = resolveCapabilityInitOptions({
+      capabilityId: "miniprogram",
+    });
+    setMiniprogramCiInstallRunnerForTests(() => ({
+      ok: false,
+      stderrSummary: "install failed",
+    }));
+
+    await runScaffold(dir, {
+      templateName: capabilityInit.templateName,
+      projectProfile: getProjectProfile(capabilityInit.projectProfileName)!,
+      capabilityInit,
+      miniprogramCiInstallApproved: true,
+    });
+
+    setMiniprogramCiInstallRunnerForTests(undefined);
+    const manifest = JSON.parse(
+      await readFile(join(dir, ".sandcastle", "capability.json"), "utf-8"),
+    ) as { setupActions: CapabilitySetupAction[] };
+    const installAction = manifest.setupActions.find(
+      (action) => action.id === "miniprogram-ci-install",
+    );
+    expect(installAction).toMatchObject({
+      status: "failed",
+      reason: "install_command_failed",
+      command: "npm install -D miniprogram-ci",
+    });
+    expect(installAction?.summary?.length).toBeLessThanOrEqual(240);
+  });
+
   it("miniprogram init writes core scaffold files and setup checklist", async () => {
     const dir = await makeDir();
     await writeFile(
@@ -3033,6 +3098,9 @@ describe("capability pack scaffold", () => {
     expect(verifySh).toMatch(/^#!\/usr\/bin\/env bash/);
     expect(verifySh).toContain("wx:check");
     expect(verifySh).toContain("wx-check-native.mjs");
+    expect(verifySh).toContain("project_wx_check");
+    expect(verifySh).toContain("project_wx_check_summary");
+    expect(verifySh).not.toContain("tee -a");
     expect(verifySh).not.toContain("capability.json");
 
     const nativeVerifier = await readFile(
@@ -3167,5 +3235,125 @@ describe("miniprogram capability prompt assembly", () => {
       ),
     );
     expect(new Set(sections).size).toBe(1);
+  });
+});
+
+describe("miniprogram runtime-debug add-on", () => {
+  const runtimeDebugCapabilityInit = resolveCapabilityInitOptions({
+    capabilityId: "miniprogram",
+    addonIds: [RUNTIME_DEBUG_ADDON_ID],
+    sandboxProviderName: "no-sandbox",
+  });
+
+  it("does not generate runtime-debug context without the add-on", async () => {
+    const dir = await makeDir();
+    const capabilityInit = resolveCapabilityInitOptions({
+      capabilityId: "miniprogram",
+      sandboxProviderName: "no-sandbox",
+    });
+    await runScaffold(dir, {
+      templateName: capabilityInit.templateName,
+      projectProfile: getProjectProfile(capabilityInit.projectProfileName)!,
+      capabilityInit,
+    });
+
+    await expect(
+      access(
+        join(dir, ".sandcastle", "context", "miniprogram-runtime-debug.md"),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("generates runtime-debug context and prompt references when selected", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      templateName: runtimeDebugCapabilityInit.templateName,
+      projectProfile: getProjectProfile(
+        runtimeDebugCapabilityInit.projectProfileName,
+      )!,
+      capabilityInit: runtimeDebugCapabilityInit,
+    });
+
+    const runtimeDebugContext = await readFile(
+      join(dir, ".sandcastle", "context", "miniprogram-runtime-debug.md"),
+      "utf-8",
+    );
+    expect(runtimeDebugContext).toContain("WaterTian");
+    expect(runtimeDebugContext).toContain("wechat-devtools-mcp");
+    expect(runtimeDebugContext).toContain("FliPPeDround");
+    expect(runtimeDebugContext).toMatch(/experimental fallback/i);
+    expect(runtimeDebugContext).toContain("wait IDE port timeout");
+    expect(runtimeDebugContext).toContain("CLI_TIMEOUT");
+    expect(runtimeDebugContext).toContain("service port");
+    expect(runtimeDebugContext).toContain("Login state");
+    expect(runtimeDebugContext).toContain("project path");
+    expect(runtimeDebugContext).toContain("automator");
+    expect(runtimeDebugContext).toMatch(/does not replace.*verify\.sh/is);
+    expect(runtimeDebugContext).toMatch(/not a completion standard/i);
+    expect(runtimeDebugContext).toMatch(/not.*start WeChat Developer Tools/i);
+
+    for (const promptFile of listTemplatePromptFiles(
+      runtimeDebugCapabilityInit.templateName,
+    )) {
+      const prompt = await readFile(
+        join(dir, ".sandcastle", promptFile),
+        "utf-8",
+      );
+      expect(prompt, promptFile).toContain(
+        MINIPROGRAM_RUNTIME_DEBUG_PROMPT_MARKER,
+      );
+      expect(prompt, promptFile).toContain(
+        ".sandcastle/context/miniprogram-runtime-debug.md",
+      );
+      expect(prompt, promptFile).toMatch(/not.*start WeChat Developer Tools/i);
+      expect(prompt, promptFile).toMatch(/only when/i);
+    }
+  });
+
+  it("does not change verify.sh when runtime-debug add-on is selected", async () => {
+    const dirWithoutAddon = await makeDir();
+    const withoutAddon = resolveCapabilityInitOptions({
+      capabilityId: "miniprogram",
+    });
+    await runScaffold(dirWithoutAddon, {
+      templateName: withoutAddon.templateName,
+      projectProfile: getProjectProfile(withoutAddon.projectProfileName)!,
+      capabilityInit: withoutAddon,
+    });
+
+    const dirWithAddon = await makeDir();
+    await runScaffold(dirWithAddon, {
+      templateName: runtimeDebugCapabilityInit.templateName,
+      projectProfile: getProjectProfile(
+        runtimeDebugCapabilityInit.projectProfileName,
+      )!,
+      capabilityInit: runtimeDebugCapabilityInit,
+    });
+
+    const verifyWithout = await readFile(
+      join(dirWithoutAddon, ".sandcastle", "verify.sh"),
+      "utf-8",
+    );
+    const verifyWith = await readFile(
+      join(dirWithAddon, ".sandcastle", "verify.sh"),
+      "utf-8",
+    );
+    expect(verifyWith).toBe(verifyWithout);
+  });
+
+  it("records runtime-debug in capability manifest when selected", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      templateName: runtimeDebugCapabilityInit.templateName,
+      projectProfile: getProjectProfile(
+        runtimeDebugCapabilityInit.projectProfileName,
+      )!,
+      capabilityInit: runtimeDebugCapabilityInit,
+    });
+
+    const manifest = JSON.parse(
+      await readFile(join(dir, ".sandcastle", "capability.json"), "utf-8"),
+    ) as { addons: string[] };
+    expect(manifest.addons).toEqual([RUNTIME_DEBUG_ADDON_ID]);
   });
 });

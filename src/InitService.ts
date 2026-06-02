@@ -14,13 +14,17 @@ import {
   validateCapabilityTemplateSelection,
 } from "./capabilityPacks.js";
 import {
+  appendMiniprogramRuntimeDebugToPrompt,
   appendMiniprogramVerificationToPrompt,
   listTemplatePromptFiles,
   shouldAssembleMiniprogramPrompts,
+  shouldAssembleMiniprogramRuntimeDebugPrompts,
 } from "./capabilityPromptAssembly.js";
 import {
   scaffoldMiniprogramCapabilityCore,
+  scaffoldMiniprogramRuntimeDebugAddon,
   shouldScaffoldMiniprogramCore,
+  shouldScaffoldMiniprogramRuntimeDebug,
 } from "./miniprogramScaffold.js";
 import {
   getPresetAgentDefinition,
@@ -1432,9 +1436,12 @@ const isTextFile = (filename: string): boolean => {
 const assembleMiniprogramCapabilityPrompts = (
   configDir: string,
   templateName: string,
+  capabilityInit?: ResolvedCapabilityInit,
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
+    const includeRuntimeDebug =
+      shouldAssembleMiniprogramRuntimeDebugPrompts(capabilityInit);
     for (const promptFile of listTemplatePromptFiles(templateName)) {
       const filePath = join(configDir, promptFile);
       const exists = yield* fs
@@ -1448,7 +1455,10 @@ const assembleMiniprogramCapabilityPrompts = (
       const content = yield* fs
         .readFileString(filePath)
         .pipe(Effect.mapError((e) => new Error(e.message)));
-      const updated = appendMiniprogramVerificationToPrompt(content);
+      let updated = appendMiniprogramVerificationToPrompt(content);
+      if (includeRuntimeDebug) {
+        updated = appendMiniprogramRuntimeDebugToPrompt(updated);
+      }
       if (updated !== content) {
         yield* fs
           .writeFileString(filePath, updated)
@@ -1513,6 +1523,8 @@ export interface ScaffoldOptions {
   sandcastleVersion?: string;
   /** Skip `npm install` after package.json changes (tests). */
   skipDependencyInstall?: boolean;
+  /** When set, controls user-approved project-local miniprogram-ci installation during Mini Program init. */
+  miniprogramCiInstallApproved?: boolean;
 }
 
 export interface ScaffoldResult {
@@ -1566,6 +1578,7 @@ export const scaffold = (
       presetAgentIds = [],
       capabilityInit,
       skipDependencyInstall = false,
+      miniprogramCiInstallApproved,
     } = options;
     const fs = yield* FileSystem.FileSystem;
     const configDir = join(repoDir, ".sandcastle");
@@ -1677,7 +1690,11 @@ export const scaffold = (
         capabilityInit.verification,
       )
     ) {
-      yield* assembleMiniprogramCapabilityPrompts(configDir, templateName);
+      yield* assembleMiniprogramCapabilityPrompts(
+        configDir,
+        templateName,
+        capabilityInit,
+      );
     }
 
     let miniprogramSetupActions: readonly CapabilitySetupAction[] = [];
@@ -1685,8 +1702,13 @@ export const scaffold = (
       const scaffolded = yield* scaffoldMiniprogramCapabilityCore(
         configDir,
         repoDir,
+        { miniprogramCiInstallApproved },
       );
       miniprogramSetupActions = scaffolded.setupActions;
+    }
+
+    if (shouldScaffoldMiniprogramRuntimeDebug(capabilityInit)) {
+      yield* scaffoldMiniprogramRuntimeDebugAddon(configDir);
     }
 
     if (capabilityInit?.writeCapabilityManifest) {

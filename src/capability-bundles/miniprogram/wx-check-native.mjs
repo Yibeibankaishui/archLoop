@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const diagnosticLog = "debug/wx-check.log";
 const logFile = join(repoRoot, diagnosticLog);
+const logDir = dirname(logFile);
 
 const writeEvent = (event) => {
   mkdirSync(logDir, { recursive: true });

@@ -4,6 +4,7 @@ import {
   getCapabilityPackDefinition,
   listCapabilityPacksForInit,
   resolveCapabilityInitOptions,
+  RUNTIME_DEBUG_ADDON_ID,
   validateCapabilityRegistries,
   validateCapabilityTemplateSelection,
   type CapabilityInitInputs,
@@ -52,12 +53,12 @@ describe("capability pack registry", () => {
       entrypoint: ".sandcastle/verify.sh",
       diagnosticLog: "debug/wx-check.log",
     });
-    expect(pack.addons.map((a) => a.id)).toContain("runtime-debug");
+    expect(pack.addons.map((a) => a.id)).toContain(RUNTIME_DEBUG_ADDON_ID);
   });
 
   it("miniprogram runtime-debug add-on requires no-sandbox", () => {
     const pack = getCapabilityPackDefinition("miniprogram")!;
-    const addon = pack.addons.find((a) => a.id === "runtime-debug");
+    const addon = pack.addons.find((a) => a.id === RUNTIME_DEBUG_ADDON_ID);
     expect(addon).toBeDefined();
     expect(addon!.compatibleSandboxProviders).toEqual(["no-sandbox"]);
     expect(addon!.requiresHostState).toBe(true);
@@ -123,7 +124,7 @@ describe("resolveCapabilityInitOptions", () => {
     expect(() =>
       resolveCapabilityInitOptions({
         capabilityId: "generic",
-        addonIds: ["runtime-debug"],
+        addonIds: [RUNTIME_DEBUG_ADDON_ID],
       }),
     ).toThrow(/Unknown capability add-on/);
   });
@@ -132,7 +133,7 @@ describe("resolveCapabilityInitOptions", () => {
     expect(() =>
       resolveCapabilityInitOptions({
         capabilityId: "miniprogram",
-        addonIds: ["runtime-debug"],
+        addonIds: [RUNTIME_DEBUG_ADDON_ID],
         sandboxProviderName: "docker",
       }),
     ).toThrow(/not compatible with sandbox provider "docker"/);
@@ -141,10 +142,18 @@ describe("resolveCapabilityInitOptions", () => {
   it("accepts runtime-debug add-on with no-sandbox", () => {
     const resolved = resolveCapabilityInitOptions({
       capabilityId: "miniprogram",
-      addonIds: ["runtime-debug"],
+      addonIds: [RUNTIME_DEBUG_ADDON_ID],
       sandboxProviderName: "no-sandbox",
     });
-    expect(resolved.addonIds).toEqual(["runtime-debug"]);
+    expect(resolved.addonIds).toEqual([RUNTIME_DEBUG_ADDON_ID]);
+  });
+
+  it("miniprogram init defaults omit runtime-debug add-on", () => {
+    const resolved = resolveCapabilityInitOptions({
+      capabilityId: "miniprogram",
+      sandboxProviderName: "no-sandbox",
+    });
+    expect(resolved.addonIds).toEqual([]);
   });
 });
 

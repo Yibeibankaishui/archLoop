@@ -186,7 +186,7 @@ Goal: 让 `sandcastle init` 可以显式选择专业化能力包，生成包含�
 - [ ] 实现 capability defaults 与显式 init flags 的覆盖规则。
 - [ ] 实现 Mini Program core scaffold，包括 capability manifest、verification entrypoint、context files 和 prompt assembly。
 - [ ] 生成 `.sandcastle/context/miniprogram-setup.md`，并在 assembled Mini Program prompts 中引用。
-- [ ] 实现 no-sandbox-only `runtime-debug` capability add-on。
+- [x] 实现 no-sandbox-only `runtime-debug` capability add-on。
 - [ ] 扩充 Mini Program preset agent 和 bundled skill，使其遵守 CLI 验证闭环。
 - [ ] 为 capability registry、add-on compatibility、manifest、prompt assembly 和 init scaffold 增加测试。
 - [ ] 更新 README / 用户指南，并按需补充 changeset。

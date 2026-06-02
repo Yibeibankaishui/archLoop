@@ -1,5 +1,6 @@
 import { FileSystem } from "@effect/platform";
 import { Effect } from "effect";
+import { execSync } from "node:child_process";
 import { chmod } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { existsSync, readFileSync } from "node:fs";
@@ -7,6 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   MINIPROGRAM_CAPABILITY_PACK_ID,
+  hasMiniprogramRuntimeDebugAddon,
   type CapabilitySetupAction,
   type ResolvedCapabilityInit,
 } from "./capabilityPacks.js";
@@ -27,6 +29,16 @@ const MINIPROGRAM_BUNDLE_FILES = [
   "auth/wx-upload/.gitignore",
 ] as const;
 
+const MINIPROGRAM_RUNTIME_DEBUG_BUNDLE_FILES = [
+  "context/miniprogram-runtime-debug.md",
+] as const;
+
+const MINIPROGRAM_CAPABILITY_BUNDLE_FILES = [
+  ...MINIPROGRAM_BUNDLE_FILES,
+  ...MINIPROGRAM_RUNTIME_DEBUG_BUNDLE_FILES,
+  "prompt-runtime-debug.md",
+] as const;
+
 export function getMiniprogramCapabilityBundlesRoot(): string {
   const thisFile = fileURLToPath(import.meta.url);
   return join(dirname(thisFile), "capability-bundles", "miniprogram");
@@ -34,7 +46,7 @@ export function getMiniprogramCapabilityBundlesRoot(): string {
 
 export function validateMiniprogramCapabilityBundle(): void {
   const root = getMiniprogramCapabilityBundlesRoot();
-  for (const relativePath of MINIPROGRAM_BUNDLE_FILES) {
+  for (const relativePath of MINIPROGRAM_CAPABILITY_BUNDLE_FILES) {
     const path = join(root, relativePath);
     if (!existsSync(path)) {
       throw new Error(`Missing Mini Program capability bundle file: ${path}`);
@@ -58,12 +70,21 @@ export type UploadKeyDetectionStatus =
   | "repo_local"
   | "missing";
 
+const MINIPROGRAM_CI_API_MEMBERS = ["Project", "preview", "packNpm"] as const;
+
+const MINIPROGRAM_CI_MANUAL_INSTALL_HINT =
+  "npm install -D miniprogram-ci (or pnpm/yarn equivalent)";
+
+export type MiniprogramInstallPackageManager = "npm" | "pnpm" | "yarn";
+
 export interface MiniprogramInitSnapshot {
   readonly miniprogramCi: {
     readonly status: MiniprogramCiStatus;
     readonly version?: string;
     readonly source?: "project_local";
   };
+  /** True when a global `miniprogram-ci` binary is on PATH (does not satisfy managed verification). */
+  readonly globalCliAvailable: boolean;
   readonly appid: {
     readonly status: AppIdDetectionStatus;
     readonly effectiveAppid?: string;
@@ -92,11 +113,27 @@ function availableMiniprogramCi(
   return { status: "available", version, source: "project_local" };
 }
 
+function probeMiniprogramCiNodeApi(repoDir: string): boolean {
+  try {
+    const requireFromRepo = createRequire(join(repoDir, "package.json"));
+    const mod = requireFromRepo("miniprogram-ci") as Record<string, unknown>;
+    return MINIPROGRAM_CI_API_MEMBERS.every(
+      (member) => typeof mod[member] === "function",
+    );
+  } catch {
+    return false;
+  }
+}
+
 function readMiniprogramCiPackage(
+  repoDir: string,
   packageJsonPath: string,
 ): MiniprogramInitSnapshot["miniprogramCi"] {
   const pkg = readJsonFile<{ version?: string }>(packageJsonPath);
   if (!pkg?.version) {
+    return { status: "detected_but_unusable" };
+  }
+  if (!probeMiniprogramCiNodeApi(repoDir)) {
     return { status: "detected_but_unusable" };
   }
   return availableMiniprogramCi(pkg.version);
@@ -108,7 +145,7 @@ function detectMiniprogramCi(
   try {
     const requireFromRepo = createRequire(join(repoDir, "package.json"));
     const pkgPath = requireFromRepo.resolve("miniprogram-ci/package.json");
-    return readMiniprogramCiPackage(pkgPath);
+    return readMiniprogramCiPackage(repoDir, pkgPath);
   } catch {
     const nodeModulesPkg = join(
       repoDir,
@@ -119,8 +156,118 @@ function detectMiniprogramCi(
     if (!existsSync(nodeModulesPkg)) {
       return { status: "missing" };
     }
-    return readMiniprogramCiPackage(nodeModulesPkg);
+    return readMiniprogramCiPackage(repoDir, nodeModulesPkg);
   }
+}
+
+/** Whether a global `miniprogram-ci` CLI is on PATH (not used for managed verification). */
+export function detectGlobalMiniprogramCiCli(): boolean {
+  try {
+    execSync("command -v miniprogram-ci", {
+      stdio: "ignore",
+      env: process.env,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function resolveMiniprogramInstallPackageManager(
+  repoDir: string,
+): MiniprogramInstallPackageManager {
+  const pkgPath = join(repoDir, "package.json");
+  if (existsSync(pkgPath)) {
+    const pkg = readJsonFile<{ packageManager?: string }>(pkgPath);
+    const raw = pkg?.packageManager?.trim();
+    if (raw) {
+      const name = raw.split("@")[0]?.trim().toLowerCase();
+      if (name === "pnpm" || name === "yarn" || name === "npm") {
+        return name;
+      }
+    }
+  }
+  if (existsSync(join(repoDir, "pnpm-lock.yaml"))) {
+    return "pnpm";
+  }
+  if (existsSync(join(repoDir, "yarn.lock"))) {
+    return "yarn";
+  }
+  return "npm";
+}
+
+export function buildMiniprogramCiInstallCommand(
+  packageManager: MiniprogramInstallPackageManager,
+): string {
+  switch (packageManager) {
+    case "pnpm":
+      return "pnpm add -D miniprogram-ci";
+    case "yarn":
+      return "yarn add -D miniprogram-ci";
+    default:
+      return "npm install -D miniprogram-ci";
+  }
+}
+
+function summarizeInstallFailure(output: string): string {
+  const trimmed = output.trim();
+  if (!trimmed) {
+    return "miniprogram-ci install command failed.";
+  }
+  const lines = trimmed
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return lines.slice(-3).join(" ").slice(0, 240);
+}
+
+export type MiniprogramCiInstallRunner = (
+  command: string,
+  repoDir: string,
+) => { readonly ok: boolean; readonly stderrSummary?: string };
+
+let miniprogramCiInstallRunnerOverride: MiniprogramCiInstallRunner | undefined;
+
+/** Test hook to avoid mocking `execSync` in ESM. */
+export function setMiniprogramCiInstallRunnerForTests(
+  runner: MiniprogramCiInstallRunner | undefined,
+): void {
+  miniprogramCiInstallRunnerOverride = runner;
+}
+
+const defaultMiniprogramCiInstallRunner: MiniprogramCiInstallRunner = (
+  command,
+  repoDir,
+) => {
+  try {
+    execSync(command, {
+      cwd: repoDir,
+      stdio: "pipe",
+      encoding: "utf8",
+      env: process.env,
+    });
+    return { ok: true };
+  } catch (error) {
+    const err = error as {
+      stderr?: string;
+      stdout?: string;
+      message?: string;
+    };
+    const combined = [err.stderr, err.stdout, err.message]
+      .filter((part): part is string => Boolean(part?.trim()))
+      .join("\n");
+    return { ok: false, stderrSummary: summarizeInstallFailure(combined) };
+  }
+};
+
+export function runMiniprogramCiInstall(
+  repoDir: string,
+  packageManager: MiniprogramInstallPackageManager,
+  command = buildMiniprogramCiInstallCommand(packageManager),
+): { readonly ok: boolean; readonly stderrSummary?: string } {
+  const runner =
+    miniprogramCiInstallRunnerOverride ?? defaultMiniprogramCiInstallRunner;
+  return runner(command, repoDir);
 }
 
 function readProjectConfigAppid(repoDir: string): string | undefined {
@@ -219,6 +366,7 @@ export function detectMiniprogramInitSnapshot(
   const appid = detectAppid(repoDir);
   return {
     miniprogramCi: detectMiniprogramCi(repoDir),
+    globalCliAvailable: detectGlobalMiniprogramCiCli(),
     appid,
     uploadKey: detectUploadKey(repoDir, appid.effectiveAppid),
     wxCheckScriptPresent: detectWxCheckScript(repoDir),
@@ -226,44 +374,93 @@ export function detectMiniprogramInitSnapshot(
   };
 }
 
-function skippedMiniprogramCiInstallAction(
-  reason: string,
-  summary: string,
-): CapabilitySetupAction {
-  return {
-    id: "miniprogram-ci-install",
-    status: "skipped",
-    reason,
-    summary,
-  };
+export interface MiniprogramCiInstallSetupInput {
+  readonly repoDir: string;
+  readonly snapshot: MiniprogramInitSnapshot;
+  /** When true, run project-local install; when false, record user_declined. Omit for non-interactive decline. */
+  readonly userApprovedInstall?: boolean;
 }
 
-export function buildMiniprogramSetupActions(
+function miniprogramCiInstallAction(
+  fields: Omit<CapabilitySetupAction, "id">,
+): CapabilitySetupAction {
+  return { id: "miniprogram-ci-install", ...fields };
+}
+
+function formatUserDeclinedInstallSummary(
   snapshot: MiniprogramInitSnapshot,
-): CapabilitySetupAction[] {
-  const { miniprogramCi } = snapshot;
-  if (miniprogramCi.status === "available") {
-    return [
-      skippedMiniprogramCiInstallAction(
-        "already_available",
-        `Project-local miniprogram-ci ${miniprogramCi.version ?? ""} detected`.trim(),
-      ),
-    ];
-  }
+): string {
+  const { miniprogramCi, globalCliAvailable } = snapshot;
   if (miniprogramCi.status === "detected_but_unusable") {
-    return [
-      skippedMiniprogramCiInstallAction(
-        "detected_but_unusable",
-        "miniprogram-ci is present but failed the lightweight availability probe; reinstall or fix the package.",
-      ),
-    ];
+    return `miniprogram-ci is present but unusable; reinstall with ${MINIPROGRAM_CI_MANUAL_INSTALL_HINT}.`;
   }
-  return [
-    skippedMiniprogramCiInstallAction(
-      "user_declined",
-      "miniprogram-ci not installed during init. Run npm install -D miniprogram-ci (or pnpm/yarn equivalent) when you want platform preview validation.",
-    ),
-  ];
+  if (globalCliAvailable) {
+    return "miniprogram-ci not installed during init. A global CLI was detected but Sandcastle requires a project-local package for managed verification.";
+  }
+  return `miniprogram-ci not installed during init. Run ${MINIPROGRAM_CI_MANUAL_INSTALL_HINT} when you want platform preview validation.`;
+}
+
+/** Runs init-time miniprogram-ci install setup and returns manifest setup action metadata. */
+export function executeMiniprogramCiInstallSetup(
+  input: MiniprogramCiInstallSetupInput,
+): CapabilitySetupAction {
+  const { repoDir, snapshot, userApprovedInstall } = input;
+  const { miniprogramCi } = snapshot;
+
+  if (miniprogramCi.status === "available") {
+    return miniprogramCiInstallAction({
+      status: "skipped",
+      reason: "already_available",
+      summary:
+        `Project-local miniprogram-ci ${miniprogramCi.version ?? ""} detected`.trim(),
+    });
+  }
+
+  if (!userApprovedInstall) {
+    return miniprogramCiInstallAction({
+      status: "skipped",
+      reason: "user_declined",
+      summary: formatUserDeclinedInstallSummary(snapshot),
+    });
+  }
+
+  const packageJsonPath = join(repoDir, "package.json");
+  if (!existsSync(packageJsonPath)) {
+    return miniprogramCiInstallAction({
+      status: "skipped",
+      reason: "no_package_json",
+      summary:
+        "No package.json in the host repo; initialize a Node package before installing project-local miniprogram-ci.",
+    });
+  }
+
+  const packageManager = resolveMiniprogramInstallPackageManager(repoDir);
+  const command = buildMiniprogramCiInstallCommand(packageManager);
+  const installResult = runMiniprogramCiInstall(
+    repoDir,
+    packageManager,
+    command,
+  );
+
+  if (installResult.ok) {
+    return miniprogramCiInstallAction({
+      status: "succeeded",
+      reason: "installed",
+      packageManager,
+      command,
+      summary: `Installed project-local miniprogram-ci with ${packageManager}.`,
+    });
+  }
+
+  return miniprogramCiInstallAction({
+    status: "failed",
+    reason: "install_command_failed",
+    packageManager,
+    command,
+    summary:
+      installResult.stderrSummary ??
+      "miniprogram-ci install command failed; run the command manually in the project root.",
+  });
 }
 
 function formatAppidSection(snapshot: MiniprogramInitSnapshot): string {
@@ -281,12 +478,15 @@ function formatAppidSection(snapshot: MiniprogramInitSnapshot): string {
 }
 
 function formatMiniprogramCiSection(snapshot: MiniprogramInitSnapshot): string {
-  const { miniprogramCi } = snapshot;
+  const { miniprogramCi, globalCliAvailable } = snapshot;
   if (miniprogramCi.status === "available") {
     return `- **miniprogram-ci:** project-local package available (${miniprogramCi.version ?? "version unknown"}).`;
   }
   if (miniprogramCi.status === "detected_but_unusable") {
-    return "- **miniprogram-ci:** detected but unusable — reinstall or fix the project-local package.";
+    return "- **miniprogram-ci:** detected but unusable — reinstall or fix the project-local package (expected Node API: Project, preview, packNpm).";
+  }
+  if (globalCliAvailable) {
+    return "- **miniprogram-ci:** not installed in the project. A global CLI was detected; install project-local `miniprogram-ci` for Sandcastle-managed platform validation (global CLI and `npx` are manual fallbacks only).";
   }
   return "- **miniprogram-ci:** not installed. Recommended for platform preview validation (AppID + upload key + IP allowlist).";
 }
@@ -371,10 +571,16 @@ const copyBundleFile = (
       .pipe(Effect.mapError((e) => new Error(e.message)));
   });
 
+export interface MiniprogramScaffoldSetupOptions {
+  /** When set, controls user-approved project-local miniprogram-ci installation during init. */
+  readonly miniprogramCiInstallApproved?: boolean;
+}
+
 /** Writes Mini Program core capability scaffold into `.sandcastle/`. */
 export const scaffoldMiniprogramCapabilityCore = (
   configDir: string,
   repoDir: string,
+  setupOptions: MiniprogramScaffoldSetupOptions = {},
 ): Effect.Effect<
   { setupActions: readonly CapabilitySetupAction[] },
   Error,
@@ -384,8 +590,16 @@ export const scaffoldMiniprogramCapabilityCore = (
     validateMiniprogramCapabilityBundle();
     const fs = yield* FileSystem.FileSystem;
     const bundlesRoot = getMiniprogramCapabilityBundlesRoot();
-    const snapshot = detectMiniprogramInitSnapshot(repoDir);
-    const setupActions = buildMiniprogramSetupActions(snapshot);
+    const initialSnapshot = detectMiniprogramInitSnapshot(repoDir);
+    const setupAction = executeMiniprogramCiInstallSetup({
+      repoDir,
+      snapshot: initialSnapshot,
+      userApprovedInstall: setupOptions.miniprogramCiInstallApproved,
+    });
+    const checklistSnapshot =
+      setupAction.reason === "installed"
+        ? detectMiniprogramInitSnapshot(repoDir)
+        : initialSnapshot;
 
     for (const relativePath of MINIPROGRAM_BUNDLE_FILES) {
       yield* copyBundleFile(fs, bundlesRoot, configDir, relativePath);
@@ -394,7 +608,7 @@ export const scaffoldMiniprogramCapabilityCore = (
     yield* fs
       .writeFileString(
         join(configDir, "context", "miniprogram-setup.md"),
-        renderMiniprogramSetupChecklist(snapshot),
+        renderMiniprogramSetupChecklist(checklistSnapshot),
       )
       .pipe(Effect.mapError((e) => new Error(e.message)));
 
@@ -403,7 +617,7 @@ export const scaffoldMiniprogramCapabilityCore = (
       catch: (e) => new Error(String(e)),
     });
 
-    return { setupActions };
+    return { setupActions: [setupAction] };
   });
 
 export function shouldScaffoldMiniprogramCore(
@@ -414,3 +628,25 @@ export function shouldScaffoldMiniprogramCore(
     capabilityInit.writeCapabilityManifest
   );
 }
+
+export function shouldScaffoldMiniprogramRuntimeDebug(
+  capabilityInit: ResolvedCapabilityInit | undefined,
+): boolean {
+  return (
+    shouldScaffoldMiniprogramCore(capabilityInit) &&
+    hasMiniprogramRuntimeDebugAddon(capabilityInit)
+  );
+}
+
+/** Writes runtime-debug add-on context into `.sandcastle/context/`. */
+export const scaffoldMiniprogramRuntimeDebugAddon = (
+  configDir: string,
+): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    validateMiniprogramCapabilityBundle();
+    const fs = yield* FileSystem.FileSystem;
+    const bundlesRoot = getMiniprogramCapabilityBundlesRoot();
+    for (const relativePath of MINIPROGRAM_RUNTIME_DEBUG_BUNDLE_FILES) {
+      yield* copyBundleFile(fs, bundlesRoot, configDir, relativePath);
+    }
+  });
