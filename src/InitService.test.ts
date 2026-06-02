@@ -15,6 +15,10 @@ import {
   resolveCapabilityInitOptions,
   validateCapabilityRegistries,
 } from "./capabilityPacks.js";
+import {
+  MINIPROGRAM_VERIFICATION_PROMPT_MARKER,
+  listTemplatePromptFiles,
+} from "./capabilityPromptAssembly.js";
 import { validatePresetRegistries } from "./presetAgents.js";
 import {
   scaffold,
@@ -2992,5 +2996,111 @@ describe("capability pack scaffold", () => {
       diagnosticLog: "debug/wx-check.log",
     });
     expect(buildCapabilityManifest(capabilityInit)).toEqual(manifest);
+  });
+
+  it("rejects incompatible miniprogram template before scaffolding files", async () => {
+    const dir = await makeDir();
+    const capabilityInit = resolveCapabilityInitOptions({
+      capabilityId: "miniprogram",
+    });
+
+    await expect(
+      runScaffold(dir, {
+        templateName: "custom-loop",
+        capabilityInit,
+      }),
+    ).rejects.toThrow(
+      /not compatible with capability pack "miniprogram".*Supported templates/,
+    );
+  });
+
+  it("allows miniprogram blank template and returns manual wiring warning", async () => {
+    const dir = await makeDir();
+    const capabilityInit = resolveCapabilityInitOptions({
+      capabilityId: "miniprogram",
+      explicitTemplate: "blank",
+    });
+    const result = await runScaffold(dir, {
+      templateName: "blank",
+      projectProfile: getProjectProfile("node")!,
+      capabilityInit,
+    });
+
+    expect(result.capabilityBlankTemplateWarning).toMatch(/verify\.sh/);
+    const prompt = await readFile(
+      join(dir, ".sandcastle", "prompt.md"),
+      "utf-8",
+    );
+    expect(prompt).toContain(MINIPROGRAM_VERIFICATION_PROMPT_MARKER);
+    expect(prompt).toContain("debug/wx-check.log");
+  });
+});
+
+describe("miniprogram capability prompt assembly", () => {
+  const supportedTemplates = [
+    "parallel-planner",
+    "parallel-planner-with-review",
+    "sequential-reviewer",
+    "simple-loop",
+  ] as const;
+
+  for (const templateName of supportedTemplates) {
+    it(`appends shared verification contract to ${templateName} orchestration prompts`, async () => {
+      const dir = await makeDir();
+      const capabilityInit = resolveCapabilityInitOptions({
+        capabilityId: "miniprogram",
+        explicitTemplate: templateName,
+      });
+      await runScaffold(dir, {
+        templateName,
+        projectProfile: getProjectProfile("node")!,
+        presetAgentIds: capabilityInit.presetAgentIds,
+        capabilityInit,
+      });
+
+      for (const promptFile of listTemplatePromptFiles(templateName)) {
+        const content = await readFile(
+          join(dir, ".sandcastle", promptFile),
+          "utf-8",
+        );
+        expect(content, promptFile).toContain(
+          MINIPROGRAM_VERIFICATION_PROMPT_MARKER,
+        );
+        expect(content, promptFile).toContain(".sandcastle/verify.sh");
+        expect(content, promptFile).toContain("debug/wx-check.log");
+        expect(content, promptFile).toContain("not_configured");
+        expect(content, promptFile).toMatch(/`local`/);
+        expect(content, promptFile).toMatch(/`platform`/);
+        expect(content, promptFile).toMatch(/`artifacts`/);
+      }
+    });
+  }
+
+  it("uses the same verification section across planner, implementer, reviewer, and merger prompts", async () => {
+    const dir = await makeDir();
+    const capabilityInit = resolveCapabilityInitOptions({
+      capabilityId: "miniprogram",
+    });
+    await runScaffold(dir, {
+      templateName: "parallel-planner-with-review",
+      projectProfile: getProjectProfile("node")!,
+      capabilityInit,
+    });
+
+    const sections = await Promise.all(
+      listTemplatePromptFiles("parallel-planner-with-review").map(
+        async (promptFile) => {
+          const content = await readFile(
+            join(dir, ".sandcastle", promptFile),
+            "utf-8",
+          );
+          const markerIndex = content.indexOf(
+            MINIPROGRAM_VERIFICATION_PROMPT_MARKER,
+          );
+          return content.slice(markerIndex);
+        },
+      ),
+    );
+    expect(new Set(sections).size).toBe(1);
   });
 });

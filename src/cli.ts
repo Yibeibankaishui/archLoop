@@ -49,6 +49,7 @@ import {
   getCapabilityPackDefinition,
   listCapabilityPacksForInit,
   resolveCapabilityInitOptions,
+  validateCapabilityTemplateSelection,
 } from "./capabilityPacks.js";
 import {
   getPresetAgentDefinition,
@@ -799,11 +800,19 @@ const initCommand = Command.make(
       } else if (scriptedInit) {
         selectedTemplate = capabilityInit.templateName;
       } else {
+        const compatibleTemplateNames = getCapabilityPackDefinition(
+          capabilityInit.capabilityId,
+        )?.compatibleTemplates;
+        const selectableTemplates = compatibleTemplateNames
+          ? templates.filter((tmpl) =>
+              compatibleTemplateNames.includes(tmpl.name),
+            )
+          : templates;
         const selected = yield* Effect.promise(() =>
           clack.select({
             message: "Select a template:",
             initialValue: capabilityInit.templateName,
-            options: templates.map((tmpl) => ({
+            options: selectableTemplates.map((tmpl) => ({
               value: tmpl.name,
               label: tmpl.name,
               hint: tmpl.description,
@@ -817,6 +826,18 @@ const initCommand = Command.make(
         }
         selectedTemplate = selected as string;
       }
+
+      yield* Effect.try({
+        try: () =>
+          validateCapabilityTemplateSelection(
+            capabilityInit.capabilityId,
+            selectedTemplate,
+          ),
+        catch: (e) =>
+          new InitError({
+            message: e instanceof Error ? e.message : String(e),
+          }),
+      });
 
       let selectedProjectProfile: ProjectProfileEntry;
       if (cliProjectProfile) {
@@ -945,6 +966,10 @@ const initCommand = Command.make(
           "package.json was updated but `npm install` failed. Run `npm install` in the project root before `npm run sandcastle`.",
           "warn",
         );
+      }
+
+      if (scaffoldResult.capabilityBlankTemplateWarning) {
+        yield* d.status(scaffoldResult.capabilityBlankTemplateWarning, "warn");
       }
 
       const authRequirements = collectAuthRequirements({
@@ -1208,6 +1233,12 @@ const initCommand = Command.make(
           presetAgentIds: scaffoldResult.presetAgentIds,
           packageSetup: scaffoldResult.packageSetup,
           dependencyInstallFailed: scaffoldResult.dependencyInstallFailed,
+          ...(scaffoldResult.capabilityBlankTemplateWarning
+            ? {
+                capabilityBlankTemplateWarning:
+                  scaffoldResult.capabilityBlankTemplateWarning,
+              }
+            : {}),
           authSetupSummary: {
             lines: authSetupResult.nextStepLines,
           },

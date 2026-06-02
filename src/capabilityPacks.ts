@@ -165,6 +165,41 @@ function validateSelectedCapabilityAddons(
   }
 }
 
+export interface CapabilityTemplateValidation {
+  readonly allowed: true;
+  /** Set when `blank` is allowed but requires manual verification wiring. */
+  readonly blankTemplateWarning?: string;
+}
+
+const BLANK_TEMPLATE_CAPABILITY_WARNING =
+  "The blank template does not wire the capability verification entrypoint automatically. Run `.sandcastle/verify.sh` from your workflow and read `debug/wx-check.log` after Mini Program changes.";
+
+/** Validates explicit template selection against a capability pack's compatible template list. */
+export function validateCapabilityTemplateSelection(
+  capabilityId: string,
+  templateName: string,
+): CapabilityTemplateValidation {
+  const pack = getCapabilityPackDefinition(capabilityId);
+  if (pack?.compatibleTemplates === undefined) {
+    return { allowed: true };
+  }
+
+  if (pack.compatibleTemplates.includes(templateName)) {
+    if (templateName === "blank") {
+      return {
+        allowed: true,
+        blankTemplateWarning: BLANK_TEMPLATE_CAPABILITY_WARNING,
+      };
+    }
+    return { allowed: true };
+  }
+
+  const supported = pack.compatibleTemplates.join(", ");
+  throw new Error(
+    `Template "${templateName}" is not compatible with capability pack "${capabilityId}". Supported templates: ${supported}`,
+  );
+}
+
 export function resolveCapabilityInitOptions(
   inputs: CapabilityInitInputs,
 ): ResolvedCapabilityInit {

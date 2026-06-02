@@ -10,7 +10,13 @@ import {
   validateCapabilityRegistries,
   type CapabilityManifest,
   type ResolvedCapabilityInit,
+  validateCapabilityTemplateSelection,
 } from "./capabilityPacks.js";
+import {
+  appendMiniprogramVerificationToPrompt,
+  listTemplatePromptFiles,
+  shouldAssembleMiniprogramPrompts,
+} from "./capabilityPromptAssembly.js";
 import {
   getPresetAgentDefinition,
   getPresetBundlesRoot,
@@ -998,6 +1004,7 @@ export function getNextStepsLines(
     hostRequirementSummary?: AuthSetupSummary;
     packageSetup?: ProjectPackageSetup;
     dependencyInstallFailed?: boolean;
+    capabilityBlankTemplateWarning?: string;
   },
 ): string[] {
   const presetHintText =
@@ -1012,6 +1019,7 @@ export function getNextStepsLines(
   const dependencyInstallStep = dependencyInstallFailed
     ? DEPENDENCY_INSTALL_NEXT_STEP
     : undefined;
+  const capabilityBlankWarning = options?.capabilityBlankTemplateWarning;
 
   if (template === "blank") {
     let step = 1;
@@ -1024,6 +1032,9 @@ export function getNextStepsLines(
       `${step++}. ${packageScriptStep}`,
     ];
     lines.push(`${step++}. ${blankBootstrapNextStep}`);
+    if (capabilityBlankWarning) {
+      lines.push(`${step++}. ${capabilityBlankWarning}`);
+    }
     if (presetHintText) {
       lines.push(`${step++}. ${presetHintText}`);
     }
@@ -1400,6 +1411,34 @@ const isTextFile = (filename: string): boolean => {
  * Replace `{{KEY}}` template arguments in all text files in the scaffolded
  * config directory.
  */
+const assembleMiniprogramCapabilityPrompts = (
+  configDir: string,
+  templateName: string,
+): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    for (const promptFile of listTemplatePromptFiles(templateName)) {
+      const filePath = join(configDir, promptFile);
+      const exists = yield* fs
+        .exists(filePath)
+        .pipe(Effect.orElseSucceed(() => false));
+      if (!exists) {
+        throw new Error(
+          `Expected template prompt "${promptFile}" for "${templateName}" was not scaffolded.`,
+        );
+      }
+      const content = yield* fs
+        .readFileString(filePath)
+        .pipe(Effect.mapError((e) => new Error(e.message)));
+      const updated = appendMiniprogramVerificationToPrompt(content);
+      if (updated !== content) {
+        yield* fs
+          .writeFileString(filePath, updated)
+          .pipe(Effect.mapError((e) => new Error(e.message)));
+      }
+    }
+  });
+
 const substituteTemplateArgs = (
   configDir: string,
   templateArgs: Record<string, string>,
@@ -1463,6 +1502,7 @@ export interface ScaffoldResult {
   presetAgentIds?: readonly string[];
   packageSetup: ProjectPackageSetup;
   dependencyInstallFailed?: boolean;
+  capabilityBlankTemplateWarning?: string;
 }
 
 /**
@@ -1511,6 +1551,15 @@ export const scaffold = (
     } = options;
     const fs = yield* FileSystem.FileSystem;
     const configDir = join(repoDir, ".sandcastle");
+    let capabilityBlankTemplateWarning: string | undefined;
+
+    if (capabilityInit) {
+      const templateValidation = validateCapabilityTemplateSelection(
+        capabilityInit.capabilityId,
+        templateName,
+      );
+      capabilityBlankTemplateWarning = templateValidation.blankTemplateWarning;
+    }
 
     const exists = yield* fs
       .exists(configDir)
@@ -1610,6 +1659,16 @@ export const scaffold = (
       yield* rewriteMainCopyToWorktreeForPresets(configDir, mainFilename);
     }
 
+    if (
+      capabilityInit &&
+      shouldAssembleMiniprogramPrompts(
+        capabilityInit.capabilityId,
+        capabilityInit.verification,
+      )
+    ) {
+      yield* assembleMiniprogramCapabilityPrompts(configDir, templateName);
+    }
+
     if (capabilityInit?.writeCapabilityManifest) {
       const manifest: CapabilityManifest =
         buildCapabilityManifest(capabilityInit);
@@ -1635,6 +1694,9 @@ export const scaffold = (
       mainFilename,
       packageSetup: packageResult.setup,
       ...(dependencyInstallFailed ? { dependencyInstallFailed } : {}),
+      ...(capabilityBlankTemplateWarning
+        ? { capabilityBlankTemplateWarning }
+        : {}),
       ...(presetAgentIds.length > 0
         ? { presetAgentIds: [...presetAgentIds] }
         : {}),

@@ -5,8 +5,14 @@ import {
   listCapabilityPacksForInit,
   resolveCapabilityInitOptions,
   validateCapabilityRegistries,
+  validateCapabilityTemplateSelection,
   type CapabilityInitInputs,
 } from "./capabilityPacks.js";
+import {
+  MINIPROGRAM_VERIFICATION_PROMPT_MARKER,
+  getMiniprogramVerificationPromptSection,
+  listTemplatePromptFiles,
+} from "./capabilityPromptAssembly.js";
 
 describe("capability pack registry", () => {
   it("validateCapabilityRegistries passes", () => {
@@ -35,6 +41,13 @@ describe("capability pack registry", () => {
     expect(pack.defaultProjectProfile).toBe("node");
     expect(pack.defaultPresetAgentIds).toEqual(["miniprogram"]);
     expect(pack.defaultVariant).toBe("native");
+    expect(pack.compatibleTemplates).toEqual([
+      "parallel-planner",
+      "parallel-planner-with-review",
+      "sequential-reviewer",
+      "simple-loop",
+      "blank",
+    ]);
     expect(pack.verification).toEqual({
       entrypoint: ".sandcastle/verify.sh",
       diagnosticLog: "debug/wx-check.log",
@@ -132,5 +145,63 @@ describe("resolveCapabilityInitOptions", () => {
       sandboxProviderName: "no-sandbox",
     });
     expect(resolved.addonIds).toEqual(["runtime-debug"]);
+  });
+});
+
+describe("validateCapabilityTemplateSelection", () => {
+  it("allows all first-version miniprogram templates", () => {
+    for (const template of [
+      "parallel-planner",
+      "parallel-planner-with-review",
+      "sequential-reviewer",
+      "simple-loop",
+    ]) {
+      expect(
+        validateCapabilityTemplateSelection("miniprogram", template),
+      ).toEqual({ allowed: true });
+    }
+  });
+
+  it("allows blank miniprogram template with manual wiring warning", () => {
+    const result = validateCapabilityTemplateSelection("miniprogram", "blank");
+    expect(result.allowed).toBe(true);
+    expect(result.blankTemplateWarning).toMatch(/verify\.sh/);
+  });
+
+  it("rejects incompatible non-blank miniprogram templates with supported list", () => {
+    expect(() =>
+      validateCapabilityTemplateSelection("miniprogram", "custom-loop"),
+    ).toThrow(
+      'Template "custom-loop" is not compatible with capability pack "miniprogram". Supported templates: parallel-planner, parallel-planner-with-review, sequential-reviewer, simple-loop, blank',
+    );
+  });
+
+  it("does not validate templates for generic capability", () => {
+    expect(
+      validateCapabilityTemplateSelection("generic", "custom-loop"),
+    ).toEqual({ allowed: true });
+  });
+});
+
+describe("miniprogram prompt assembly bundle", () => {
+  it("includes verification entrypoint and final summary contract", () => {
+    const section = getMiniprogramVerificationPromptSection();
+    expect(section).toContain(MINIPROGRAM_VERIFICATION_PROMPT_MARKER);
+    expect(section).toContain(".sandcastle/verify.sh");
+    expect(section).toContain("debug/wx-check.log");
+    expect(section).toContain("local");
+    expect(section).toContain("platform");
+    expect(section).toContain("artifacts");
+    expect(section).toContain("not_configured");
+  });
+
+  it("maps supported templates to orchestration prompt files", () => {
+    expect(listTemplatePromptFiles("parallel-planner-with-review")).toEqual([
+      "plan-prompt.md",
+      "implement-prompt.md",
+      "review-prompt.md",
+      "merge-prompt.md",
+    ]);
+    expect(listTemplatePromptFiles("simple-loop")).toEqual(["prompt.md"]);
   });
 });
