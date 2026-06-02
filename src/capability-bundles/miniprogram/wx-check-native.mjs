@@ -11,6 +11,7 @@ import {
   readdirSync,
   statSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,6 +19,12 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const diagnosticLog = "debug/wx-check.log";
 const logFile = join(repoRoot, diagnosticLog);
 const logDir = dirname(logFile);
+const previewArtifact = "debug/wx-preview.jpg";
+const previewArtifactPath = join(repoRoot, previewArtifact);
+
+const PLACEHOLDER_APPIDS = new Set(["touristappid", "wx0000000000000000"]);
+const MINIPROGRAM_CI_API_MEMBERS = ["Project", "preview", "packNpm"];
+const WX_UPLOAD_DIR = join(repoRoot, ".sandcastle", "auth", "wx-upload");
 
 const UNSUPPORTED_BUILD_ROOTS = [
   "dist",
@@ -54,6 +61,19 @@ const warn = (diagnostic, message, extra = {}) => {
     diagnostic,
     ...extra,
   });
+};
+
+const errorMessage = (error, fallback) =>
+  error instanceof Error ? error.message : fallback;
+
+const exitPlatformValidationFailed = (fields) => {
+  writeEvent({
+    type: "platform_validation",
+    severity: "error",
+    platform_validation_status: "configured_invalid",
+    ...fields,
+  });
+  process.exit(1);
 };
 
 const readJson = (filePath, invalidDiagnostic) => {
@@ -184,11 +204,20 @@ const isUnsupportedBuildRoot = (miniprogramRoot, projectConfigDir) => {
   );
 };
 
+const isBarePackageComponentRef = (value) =>
+  typeof value === "string" &&
+  value.length > 0 &&
+  !value.startsWith(".") &&
+  !value.startsWith("/") &&
+  !value.includes("://") &&
+  !value.startsWith("plugin:");
+
 const isLocalComponentPath = (value) =>
   typeof value === "string" &&
   value.length > 0 &&
   !value.includes("://") &&
-  !value.startsWith("plugin:");
+  !value.startsWith("plugin:") &&
+  !isBarePackageComponentRef(value);
 
 const resolveUnderRoot = (root, refPath, relativeBase) => {
   if (refPath.startsWith("/")) {
@@ -358,6 +387,303 @@ const verifyPages = (pages, appJsonPath, miniprogramRoot) => {
   }
 };
 
+const isPlaceholderAppid = (appid) =>
+  appid != null && PLACEHOLDER_APPIDS.has(String(appid).toLowerCase());
+
+const resolveEffectiveAppid = (projectConfig) => {
+  const wxAppid = process.env.WX_APPID?.trim();
+  const projectConfigAppid = projectConfig.appid?.trim();
+  const effectiveAppid = wxAppid || projectConfigAppid;
+  if (!effectiveAppid || isPlaceholderAppid(effectiveAppid)) {
+    return { configured: false, effectiveAppid };
+  }
+  return { configured: true, effectiveAppid, wxAppid, projectConfigAppid };
+};
+
+const listLocalUploadKeyAppids = () => {
+  if (!existsSync(WX_UPLOAD_DIR)) {
+    return [];
+  }
+  const appids = [];
+  for (const entry of readdirSync(WX_UPLOAD_DIR, { withFileTypes: true })) {
+    if (!entry.isFile()) {
+      continue;
+    }
+    const match = /^private\.(.+)\.key$/.exec(entry.name);
+    if (match) {
+      appids.push(match[1]);
+    }
+  }
+  return appids;
+};
+
+const resolveUploadKeyPath = (effectiveAppid) => {
+  const wxUploadKeyPath = process.env.WX_UPLOAD_KEY_PATH?.trim();
+  if (wxUploadKeyPath) {
+    return {
+      configured: true,
+      source: "wx_upload_key_path",
+      path: resolve(repoRoot, wxUploadKeyPath),
+    };
+  }
+  if (!effectiveAppid) {
+    return { configured: false };
+  }
+  const repoKey = join(WX_UPLOAD_DIR, `private.${effectiveAppid}.key`);
+  if (existsSync(repoKey)) {
+    return { configured: true, source: "repo_local", path: repoKey };
+  }
+  return { configured: false };
+};
+
+const warnUploadKeyAppidMismatch = (effectiveAppid) => {
+  const mismatched = listLocalUploadKeyAppids().filter(
+    (appid) => appid !== effectiveAppid,
+  );
+  if (mismatched.length === 0) {
+    return;
+  }
+  warn(
+    "upload_key_appid_mismatch",
+    `Ignoring repository-local upload keys for other AppIDs: ${mismatched.join(", ")}`,
+    { mismatchedAppids: mismatched, effectiveAppid },
+  );
+};
+
+const collectBarePackageComponentRefs = (json) => {
+  const refs = [];
+  const using = json?.usingComponents;
+  if (!using || typeof using !== "object") {
+    return refs;
+  }
+  for (const ref of Object.values(using)) {
+    if (isBarePackageComponentRef(ref)) {
+      refs.push(ref);
+    }
+  }
+  return refs;
+};
+
+const hasBarePackageComponentRefs = (miniprogramRoot) => {
+  const appJsonPath = join(miniprogramRoot, "app.json");
+  if (!existsSync(appJsonPath)) {
+    return false;
+  }
+  const appJson = readJson(appJsonPath, "app_json_invalid");
+  if (collectBarePackageComponentRefs(appJson).length > 0) {
+    return true;
+  }
+  const pagesDir = join(miniprogramRoot, "pages");
+  if (!existsSync(pagesDir)) {
+    return false;
+  }
+  for (const pageEntry of readdirSync(pagesDir, { withFileTypes: true })) {
+    if (!pageEntry.isDirectory()) {
+      continue;
+    }
+    const pageJsonPath = join(pagesDir, pageEntry.name, `${pageEntry.name}.json`);
+    if (!existsSync(pageJsonPath)) {
+      continue;
+    }
+    const pageJson = readJson(pageJsonPath, "page_json_invalid");
+    if (collectBarePackageComponentRefs(pageJson).length > 0) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const readWxPackNpmOverride = () => {
+  const value = process.env.WX_PACK_NPM?.trim();
+  if (value === "1") {
+    return true;
+  }
+  if (value === "0") {
+    return false;
+  }
+  return undefined;
+};
+
+const shouldRunPackNpm = (miniprogramRoot) => {
+  const packNpmOverride = readWxPackNpmOverride();
+  if (packNpmOverride === true) {
+    return true;
+  }
+  if (packNpmOverride === false) {
+    return false;
+  }
+  if (existsSync(join(miniprogramRoot, "package.json"))) {
+    return true;
+  }
+  const rootPackageJson = join(repoRoot, "package.json");
+  const miniprogramNpmDir = join(miniprogramRoot, "miniprogram_npm");
+  if (
+    existsSync(rootPackageJson) &&
+    !existsSync(miniprogramNpmDir) &&
+    hasBarePackageComponentRefs(miniprogramRoot)
+  ) {
+    return true;
+  }
+  return false;
+};
+
+const loadMiniprogramCi = () => {
+  const packageJsonPath = join(repoRoot, "package.json");
+  if (!existsSync(packageJsonPath)) {
+    return null;
+  }
+  try {
+    const requireFromRepo = createRequire(packageJsonPath);
+    const mod = requireFromRepo("miniprogram-ci");
+    const hasApi = MINIPROGRAM_CI_API_MEMBERS.every(
+      (member) => typeof mod[member] === "function",
+    );
+    return hasApi ? mod : null;
+  } catch {
+    return null;
+  }
+};
+
+const finishNotConfigured = (message, extra = {}) => {
+  writeEvent({
+    type: "platform_validation",
+    severity: "info",
+    message,
+    diagnostic: "platform_validation_not_configured",
+    platform_validation_status: "not_configured",
+    ...extra,
+  });
+  process.exit(0);
+};
+
+const runPlatformValidation = async ({
+  projectConfigPath,
+  projectConfig,
+  miniprogramRoot,
+}) => {
+  const appid = resolveEffectiveAppid(projectConfig);
+  if (!appid.configured) {
+    warn(
+      "appid_missing",
+      "AppID is missing or placeholder; platform validation was not run.",
+      {
+        effectiveAppid: appid.effectiveAppid,
+      },
+    );
+    finishNotConfigured(
+      "Platform validation not configured because AppID is missing or placeholder.",
+      { appid: appid.effectiveAppid },
+    );
+  }
+
+  warnUploadKeyAppidMismatch(appid.effectiveAppid);
+
+  const uploadKey = resolveUploadKeyPath(appid.effectiveAppid);
+  const hasUsableUploadKey =
+    uploadKey.configured &&
+    uploadKey.path != null &&
+    existsSync(uploadKey.path);
+
+  if (!hasUsableUploadKey) {
+    if (uploadKey.path && !existsSync(uploadKey.path)) {
+      warn(
+        "upload_key_missing",
+        `Configured upload key path does not exist: ${uploadKey.path}`,
+        { file: uploadKey.path },
+      );
+    }
+    finishNotConfigured(
+      "Platform validation not configured because no upload key is available.",
+      { appid: appid.effectiveAppid },
+    );
+  }
+
+  const ci = loadMiniprogramCi();
+  if (!ci) {
+    writeEvent({
+      type: "platform_validation",
+      severity: "error",
+      message:
+        "AppID and upload key are configured but project-local miniprogram-ci Node API is unavailable.",
+      diagnostic: "miniprogram_ci_missing",
+      platform_validation_status: "configured_missing_tool",
+      appid: appid.effectiveAppid,
+      privateKeyPath: uploadKey.path,
+    });
+    process.exit(1);
+  }
+
+  const projectPath = dirname(projectConfigPath);
+  const project = new ci.Project({
+    appid: appid.effectiveAppid,
+    type: "miniProgram",
+    projectPath,
+    privateKeyPath: uploadKey.path,
+  });
+
+  if (shouldRunPackNpm(miniprogramRoot)) {
+    try {
+      await ci.packNpm(project, {
+        ignores: ["node_modules/**/*"],
+      });
+      writeEvent({
+        type: "platform_validation",
+        severity: "info",
+        message: "miniprogram-ci packNpm completed.",
+        diagnostic: "pack_npm_succeeded",
+        appid: appid.effectiveAppid,
+      });
+    } catch (error) {
+      exitPlatformValidationFailed({
+        message: errorMessage(error, "miniprogram-ci packNpm failed."),
+        diagnostic: "pack_npm_failed",
+        appid: appid.effectiveAppid,
+      });
+    }
+  }
+
+  try {
+    await ci.preview({
+      project,
+      qrcodeFormat: "image",
+      qrcodeOutputDest: previewArtifactPath,
+    });
+  } catch (error) {
+    exitPlatformValidationFailed({
+      message: errorMessage(error, "miniprogram-ci preview failed."),
+      diagnostic: "preview_failed",
+      appid: appid.effectiveAppid,
+      privateKeyPath: uploadKey.path,
+      projectPath,
+    });
+  }
+
+  if (!existsSync(previewArtifactPath)) {
+    fail(
+      "preview_artifact_write_failed",
+      `Preview succeeded but QR artifact was not written: ${previewArtifact}`,
+      {
+        platform_validation_status: "configured_invalid",
+        appid: appid.effectiveAppid,
+        artifact: previewArtifact,
+      },
+    );
+  }
+
+  writeEvent({
+    type: "platform_validation",
+    severity: "info",
+    message: "miniprogram-ci preview platform validation passed.",
+    diagnostic: "platform_validation_passed",
+    platform_validation_status: "passed",
+    appid: appid.effectiveAppid,
+    privateKeyPath: uploadKey.path,
+    projectPath,
+    artifact: previewArtifact,
+  });
+  process.exit(0);
+};
+
 const verifyTabBar = (tabBar, pages, appJsonPath, miniprogramRoot) => {
   if (!tabBar?.list || !Array.isArray(tabBar.list)) {
     return;
@@ -389,7 +715,7 @@ const verifyTabBar = (tabBar, pages, appJsonPath, miniprogramRoot) => {
   }
 };
 
-const runNativeCheck = () => {
+const runNativeCheck = async () => {
   const projectConfigPath = resolveProjectConfigPath();
 
   if (!insideRepo(projectConfigPath)) {
@@ -475,10 +801,18 @@ const runNativeCheck = () => {
     diagnostic: "native_check_passed",
     file: projectConfigPath,
     miniprogramRoot,
-    platform_validation_status: "not_configured",
   });
 
-  process.exit(0);
+  await runPlatformValidation({
+    projectConfigPath,
+    projectConfig,
+    miniprogramRoot,
+  });
 };
 
-runNativeCheck();
+runNativeCheck().catch((error) => {
+  fail(
+    "native_check_internal_error",
+    errorMessage(error, "Native Mini Program check failed."),
+  );
+});
