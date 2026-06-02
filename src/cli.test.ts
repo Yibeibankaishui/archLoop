@@ -126,6 +126,11 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("--project-profile");
   });
 
+  it("init --help exposes --capability flag", async () => {
+    const { stdout } = await runCli("init --help", process.cwd());
+    expect(stdout).toContain("--capability");
+  });
+
   it("init --help no longer advertises podman as a sandbox option", async () => {
     const { stdout } = await runCli("init --help", process.cwd());
     expect(stdout).toContain("Sandbox provider");

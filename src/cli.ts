@@ -46,6 +46,11 @@ import type {
 } from "./InitService.js";
 import { ConfigDirError, InitError } from "./errors.js";
 import {
+  getCapabilityPackDefinition,
+  listCapabilityPacksForInit,
+  resolveCapabilityInitOptions,
+} from "./capabilityPacks.js";
+import {
   getPresetAgentDefinition,
   listPresetAgentsForInit,
 } from "./presetAgents.js";
@@ -148,6 +153,20 @@ const initPresetAgentsOption = Options.text("preset-agents").pipe(
   Options.optional,
 );
 
+const initCapabilityOption = Options.text("capability").pipe(
+  Options.withDescription(
+    "Capability pack (generic, miniprogram). Omit for implicit generic without writing capability.json.",
+  ),
+  Options.optional,
+);
+
+const initCapabilityAddonsOption = Options.text("capability-addons").pipe(
+  Options.withDescription(
+    "Comma-separated capability add-on ids for the selected pack. Omit for none.",
+  ),
+  Options.optional,
+);
+
 const initCreateSandcastleLabelOption = Options.text(
   "create-sandcastle-label",
 ).pipe(
@@ -182,17 +201,30 @@ const parseStrictBoolean = (
   );
 };
 
+const parseCommaSeparatedList = (raw: string): string[] =>
+  raw
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+
+const parseCapabilityAddonsCliValue = (
+  raw: string,
+): Effect.Effect<readonly string[], InitError, never> => {
+  const trimmed = raw.trim();
+  if (trimmed === "" || trimmed.toLowerCase() === "none") {
+    return Effect.succeed([]);
+  }
+  return Effect.succeed(parseCommaSeparatedList(trimmed));
+};
+
 const parsePresetAgentsCliValue = (
   raw: string,
 ): Effect.Effect<readonly string[] | undefined, InitError, never> => {
-  const t = raw.trim();
-  if (t === "" || t.toLowerCase() === "none") {
+  const trimmed = raw.trim();
+  if (trimmed === "" || trimmed.toLowerCase() === "none") {
     return Effect.succeed(undefined);
   }
-  const ids = t
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+  const ids = parseCommaSeparatedList(trimmed);
   for (const id of ids) {
     if (!getPresetAgentDefinition(id)) {
       return Effect.fail(
@@ -463,6 +495,35 @@ const buildHostRequirementNextStepLines = (options: {
   return [];
 };
 
+const resolveSelectedCapabilityId = (
+  capabilityCli: OptionalTextFlag,
+  scriptedInit: boolean,
+): Effect.Effect<string | undefined, InitError, never> =>
+  Effect.gen(function* () {
+    if (capabilityCli._tag === "Some") {
+      return capabilityCli.value;
+    }
+    if (scriptedInit) {
+      return undefined;
+    }
+
+    const selected = yield* Effect.promise(() =>
+      clack.select({
+        message: "Select a capability pack:",
+        initialValue: "generic",
+        options: listCapabilityPacksForInit(),
+      }),
+    );
+    if (clack.isCancel(selected)) {
+      yield* Effect.fail(
+        new InitError({ message: "Capability pack selection cancelled." }),
+      );
+    }
+
+    const picked = selected as string;
+    return picked === "generic" ? undefined : picked;
+  });
+
 const isFullyScriptedInit = (options: {
   agentFlag: OptionalTextFlag;
   runtimesFlag: OptionalTextFlag;
@@ -496,6 +557,8 @@ const initCommand = Command.make(
     backlog: initBacklogOption,
     projectProfile: initProjectProfileOption,
     presetAgents: initPresetAgentsOption,
+    capability: initCapabilityOption,
+    capabilityAddons: initCapabilityAddonsOption,
     createSandcastleLabel: initCreateSandcastleLabelOption,
     buildImage: initBuildImageOption,
   },
@@ -509,6 +572,8 @@ const initCommand = Command.make(
     backlog: backlogCli,
     projectProfile: projectProfileCli,
     presetAgents: presetAgentsCli,
+    capability: capabilityCli,
+    capabilityAddons: capabilityAddonsCli,
     createSandcastleLabel: createSandcastleLabelCli,
     buildImage: buildImageCli,
   }) =>
@@ -541,6 +606,19 @@ const initCommand = Command.make(
             }),
           );
         }
+      }
+
+      if (
+        capabilityCli._tag === "Some" &&
+        !getCapabilityPackDefinition(capabilityCli.value)
+      ) {
+        yield* Effect.fail(
+          new InitError({
+            message: `Unknown capability pack "${capabilityCli.value}". Available: ${listCapabilityPacksForInit()
+              .map((p) => p.value)
+              .join(", ")}`,
+          }),
+        );
       }
 
       // Resolve agent: CLI flag > interactive select
@@ -659,28 +737,11 @@ const initCommand = Command.make(
         selectedBacklogManager = getBacklogManager(selected as string)!;
       }
 
-      // Resolve template: CLI flag > interactive select (already validated above)
-      let selectedTemplate: string;
-      if (template._tag === "Some") {
-        selectedTemplate = template.value;
-      } else {
-        const selected = yield* Effect.promise(() =>
-          clack.select({
-            message: "Select a template:",
-            initialValue: "blank",
-            options: templates.map((tmpl) => ({
-              value: tmpl.name,
-              label: tmpl.name,
-              hint: tmpl.description,
-            })),
-          }),
+      let capabilityAddonIds: readonly string[] = [];
+      if (capabilityAddonsCli._tag === "Some") {
+        capabilityAddonIds = yield* parseCapabilityAddonsCliValue(
+          capabilityAddonsCli.value,
         );
-        if (clack.isCancel(selected)) {
-          yield* Effect.fail(
-            new InitError({ message: "Template selection cancelled." }),
-          );
-        }
-        selectedTemplate = selected as string;
       }
 
       yield* validateHostRequirementsForInit({
@@ -700,16 +761,75 @@ const initCommand = Command.make(
         selectedBacklogManagerName: selectedBacklogManager.name,
       });
 
+      const selectedCapabilityId = yield* resolveSelectedCapabilityId(
+        capabilityCli,
+        scriptedInit,
+      );
+
+      let explicitPresetAgentIds: readonly string[] | undefined;
+      if (presetAgentsCli._tag === "Some") {
+        explicitPresetAgentIds = yield* parsePresetAgentsCliValue(
+          presetAgentsCli.value,
+        );
+      }
+
+      const capabilityInit = yield* Effect.try({
+        try: () =>
+          resolveCapabilityInitOptions({
+            capabilityId: selectedCapabilityId,
+            explicitTemplate:
+              template._tag === "Some" ? template.value : undefined,
+            explicitProjectProfile:
+              projectProfileCli._tag === "Some"
+                ? projectProfileCli.value
+                : undefined,
+            explicitPresetAgentIds,
+            addonIds: capabilityAddonIds,
+            sandboxProviderName: selectedSandboxProvider.name,
+          }),
+        catch: (e) =>
+          new InitError({
+            message: e instanceof Error ? e.message : String(e),
+          }),
+      });
+
+      let selectedTemplate: string;
+      if (template._tag === "Some") {
+        selectedTemplate = template.value;
+      } else if (scriptedInit) {
+        selectedTemplate = capabilityInit.templateName;
+      } else {
+        const selected = yield* Effect.promise(() =>
+          clack.select({
+            message: "Select a template:",
+            initialValue: capabilityInit.templateName,
+            options: templates.map((tmpl) => ({
+              value: tmpl.name,
+              label: tmpl.name,
+              hint: tmpl.description,
+            })),
+          }),
+        );
+        if (clack.isCancel(selected)) {
+          yield* Effect.fail(
+            new InitError({ message: "Template selection cancelled." }),
+          );
+        }
+        selectedTemplate = selected as string;
+      }
+
       let selectedProjectProfile: ProjectProfileEntry;
       if (cliProjectProfile) {
         selectedProjectProfile = cliProjectProfile;
       } else if (scriptedInit) {
-        selectedProjectProfile = DEFAULT_PROJECT_PROFILE;
+        selectedProjectProfile =
+          getProjectProfile(capabilityInit.projectProfileName) ??
+          DEFAULT_PROJECT_PROFILE;
       } else {
         const selected = yield* Effect.promise(() =>
           clack.select({
             message: "Select a project profile:",
-            initialValue: DEFAULT_PROJECT_PROFILE_NAME,
+            initialValue: capabilityInit.projectProfileName,
             options: listProjectProfiles().map((profile) => ({
               value: profile.name,
               label: profile.label,
@@ -729,9 +849,9 @@ const initCommand = Command.make(
 
       let presetAgentIds: readonly string[] | undefined;
       if (presetAgentsCli._tag === "Some") {
-        presetAgentIds = yield* parsePresetAgentsCliValue(
-          presetAgentsCli.value,
-        );
+        presetAgentIds = explicitPresetAgentIds;
+      } else if (scriptedInit && capabilityInit.presetAgentIds.length > 0) {
+        presetAgentIds = capabilityInit.presetAgentIds;
       } else {
         const addPresets = yield* Effect.promise(() =>
           clack.confirm({
@@ -809,6 +929,7 @@ const initCommand = Command.make(
           ...(presetAgentIds !== undefined && presetAgentIds.length > 0
             ? { presetAgentIds }
             : {}),
+          capabilityInit,
         }).pipe(
           Effect.mapError(
             (e) =>

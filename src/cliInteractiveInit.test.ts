@@ -53,6 +53,9 @@ describe("sandcastle init interactive runtime selection", () => {
         if (opts.message === "Select a backlog manager:") {
           return "beads";
         }
+        if (opts.message === "Select a capability pack:") {
+          return "generic";
+        }
         if (opts.message === "Select a template:") {
           return "blank";
         }
@@ -92,6 +95,7 @@ describe("sandcastle init interactive runtime selection", () => {
           return "cursor";
         if (opts.message === "Select a sandbox provider:") return "docker";
         if (opts.message === "Select a backlog manager:") return "beads";
+        if (opts.message === "Select a capability pack:") return "generic";
         if (opts.message === "Select a template:") return "simple-loop";
         if (opts.message === "Select a project profile:") {
           expect(opts.initialValue).toBe("generic");
@@ -195,6 +199,7 @@ describe("sandcastle init interactive runtime selection", () => {
           return "cursor";
         if (opts.message === "Select a sandbox provider:") return "docker";
         if (opts.message === "Select a backlog manager:") return "beads";
+        if (opts.message === "Select a capability pack:") return "generic";
         if (opts.message === "Select a template:") return "blank";
         if (opts.message === "Select a project profile:") return "generic";
         if (opts.message === "Set up Cursor authentication now?") {
@@ -237,6 +242,7 @@ describe("sandcastle init interactive runtime selection", () => {
       if (opts.message === "Select the default scaffold agent:") return "codex";
       if (opts.message === "Select a sandbox provider:") return "docker";
       if (opts.message === "Select a backlog manager:") return "github-issues";
+      if (opts.message === "Select a capability pack:") return "generic";
       if (opts.message === "Select a template:") return "blank";
       if (opts.message === "Select a project profile:") return "generic";
       if (opts.message === "Set up GitHub authentication now?") return "env";
@@ -295,6 +301,7 @@ describe("sandcastle init interactive runtime selection", () => {
       if (opts.message === "Select the default scaffold agent:") return "codex";
       if (opts.message === "Select a sandbox provider:") return "docker";
       if (opts.message === "Select a backlog manager:") return "github-issues";
+      if (opts.message === "Select a capability pack:") return "generic";
       if (opts.message === "Select a template:") return "blank";
       if (opts.message === "Select a project profile:") return "generic";
       if (opts.message === "Set up GitHub authentication now?") return "login";
@@ -365,6 +372,7 @@ describe("sandcastle init interactive runtime selection", () => {
       if (opts.message === "Select the default scaffold agent:") return "codex";
       if (opts.message === "Select a sandbox provider:") return "docker";
       if (opts.message === "Select a backlog manager:") return "github-issues";
+      if (opts.message === "Select a capability pack:") return "generic";
       if (opts.message === "Select a template:") return "blank";
       if (opts.message === "Select a project profile:") return "generic";
       if (opts.message === "Set up GitHub authentication now?") return "skip";
