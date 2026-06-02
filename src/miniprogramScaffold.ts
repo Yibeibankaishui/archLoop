@@ -13,6 +13,13 @@ import {
 
 const PLACEHOLDER_APPIDS = new Set(["touristappid", "wx0000000000000000"]);
 
+const VERIFICATION_ARTIFACT_GITIGNORE_PATTERNS = [
+  "debug/wx-check.log",
+  "debug/wx-preview.jpg",
+  "debug/wx-check-",
+  "debug/wx-preview-",
+] as const;
+
 const MINIPROGRAM_BUNDLE_FILES = [
   "verify.sh",
   "wx-check-native.mjs",
@@ -79,21 +86,29 @@ function readJsonFile<T>(path: string): T | undefined {
   }
 }
 
+function availableMiniprogramCi(
+  version: string,
+): MiniprogramInitSnapshot["miniprogramCi"] {
+  return { status: "available", version, source: "project_local" };
+}
+
+function readMiniprogramCiPackage(
+  packageJsonPath: string,
+): MiniprogramInitSnapshot["miniprogramCi"] {
+  const pkg = readJsonFile<{ version?: string }>(packageJsonPath);
+  if (!pkg?.version) {
+    return { status: "detected_but_unusable" };
+  }
+  return availableMiniprogramCi(pkg.version);
+}
+
 function detectMiniprogramCi(
   repoDir: string,
 ): MiniprogramInitSnapshot["miniprogramCi"] {
   try {
     const requireFromRepo = createRequire(join(repoDir, "package.json"));
     const pkgPath = requireFromRepo.resolve("miniprogram-ci/package.json");
-    const pkg = readJsonFile<{ version?: string }>(pkgPath);
-    if (!pkg?.version) {
-      return { status: "detected_but_unusable" };
-    }
-    return {
-      status: "available",
-      version: pkg.version,
-      source: "project_local",
-    };
+    return readMiniprogramCiPackage(pkgPath);
   } catch {
     const nodeModulesPkg = join(
       repoDir,
@@ -101,18 +116,10 @@ function detectMiniprogramCi(
       "miniprogram-ci",
       "package.json",
     );
-    if (existsSync(nodeModulesPkg)) {
-      const pkg = readJsonFile<{ version?: string }>(nodeModulesPkg);
-      if (pkg?.version) {
-        return {
-          status: "available",
-          version: pkg.version,
-          source: "project_local",
-        };
-      }
-      return { status: "detected_but_unusable" };
+    if (!existsSync(nodeModulesPkg)) {
+      return { status: "missing" };
     }
-    return { status: "missing" };
+    return readMiniprogramCiPackage(nodeModulesPkg);
   }
 }
 
@@ -200,13 +207,9 @@ function detectVerificationArtifactsIgnored(
     return false;
   }
   const content = readFileSync(gitignorePath, "utf8");
-  const patterns = [
-    "debug/wx-check.log",
-    "debug/wx-preview.jpg",
-    "debug/wx-check-",
-    "debug/wx-preview-",
-  ];
-  return patterns.every((pattern) => content.includes(pattern));
+  return VERIFICATION_ARTIFACT_GITIGNORE_PATTERNS.every((pattern) =>
+    content.includes(pattern),
+  );
 }
 
 /** Init-time detection used for setup checklist and capability manifest setup actions. */
@@ -223,40 +226,43 @@ export function detectMiniprogramInitSnapshot(
   };
 }
 
+function skippedMiniprogramCiInstallAction(
+  reason: string,
+  summary: string,
+): CapabilitySetupAction {
+  return {
+    id: "miniprogram-ci-install",
+    status: "skipped",
+    reason,
+    summary,
+  };
+}
+
 export function buildMiniprogramSetupActions(
   snapshot: MiniprogramInitSnapshot,
 ): CapabilitySetupAction[] {
   const { miniprogramCi } = snapshot;
   if (miniprogramCi.status === "available") {
     return [
-      {
-        id: "miniprogram-ci-install",
-        status: "skipped",
-        reason: "already_available",
-        summary:
-          `Project-local miniprogram-ci ${miniprogramCi.version ?? ""} detected`.trim(),
-      },
+      skippedMiniprogramCiInstallAction(
+        "already_available",
+        `Project-local miniprogram-ci ${miniprogramCi.version ?? ""} detected`.trim(),
+      ),
     ];
   }
   if (miniprogramCi.status === "detected_but_unusable") {
     return [
-      {
-        id: "miniprogram-ci-install",
-        status: "skipped",
-        reason: "detected_but_unusable",
-        summary:
-          "miniprogram-ci is present but failed the lightweight availability probe; reinstall or fix the package.",
-      },
+      skippedMiniprogramCiInstallAction(
+        "detected_but_unusable",
+        "miniprogram-ci is present but failed the lightweight availability probe; reinstall or fix the package.",
+      ),
     ];
   }
   return [
-    {
-      id: "miniprogram-ci-install",
-      status: "skipped",
-      reason: "user_declined",
-      summary:
-        "miniprogram-ci not installed during init. Run npm install -D miniprogram-ci (or pnpm/yarn equivalent) when you want platform preview validation.",
-    },
+    skippedMiniprogramCiInstallAction(
+      "user_declined",
+      "miniprogram-ci not installed during init. Run npm install -D miniprogram-ci (or pnpm/yarn equivalent) when you want platform preview validation.",
+    ),
   ];
 }
 
@@ -285,6 +291,18 @@ function formatMiniprogramCiSection(snapshot: MiniprogramInitSnapshot): string {
   return "- **miniprogram-ci:** not installed. Recommended for platform preview validation (AppID + upload key + IP allowlist).";
 }
 
+function formatVerificationArtifactsIgnoreLine(
+  ignored: MiniprogramInitSnapshot["verificationArtifactsIgnored"],
+): string {
+  if (ignored === "not_git_repo") {
+    return "Git metadata not found — add `debug/wx-check.log` and `debug/wx-preview.jpg` to `.gitignore` manually.";
+  }
+  if (ignored) {
+    return "Host `.gitignore` appears to ignore Mini Program verification artifacts.";
+  }
+  return "Add `debug/wx-check.log`, `debug/wx-preview.jpg`, and related `debug/wx-*` patterns to the host `.gitignore`.";
+}
+
 function formatUploadKeySection(snapshot: MiniprogramInitSnapshot): string {
   const { uploadKey, appid } = snapshot;
   if (uploadKey.status === "wx_upload_key_path") {
@@ -301,13 +319,6 @@ function formatUploadKeySection(snapshot: MiniprogramInitSnapshot): string {
 export function renderMiniprogramSetupChecklist(
   snapshot: MiniprogramInitSnapshot,
 ): string {
-  const artifactIgnore =
-    snapshot.verificationArtifactsIgnored === "not_git_repo"
-      ? "Git metadata not found — add `debug/wx-check.log` and `debug/wx-preview.jpg` to `.gitignore` manually."
-      : snapshot.verificationArtifactsIgnored
-        ? "Host `.gitignore` appears to ignore Mini Program verification artifacts."
-        : "Add `debug/wx-check.log`, `debug/wx-preview.jpg`, and related `debug/wx-*` patterns to the host `.gitignore`.";
-
   const wxCheck = snapshot.wxCheckScriptPresent
     ? "- **wx:check:** `npm run wx:check` is defined; `.sandcastle/verify.sh` will run it first."
     : "- **wx:check:** no project script; `.sandcastle/verify.sh` falls back to `.sandcastle/wx-check-native.mjs`.";
@@ -322,7 +333,7 @@ ${formatMiniprogramCiSection(snapshot)}
 ${formatAppidSection(snapshot)}
 ${formatUploadKeySection(snapshot)}
 ${wxCheck}
-- **Verification artifacts:** ${artifactIgnore}
+- **Verification artifacts:** ${formatVerificationArtifactsIgnoreLine(snapshot.verificationArtifactsIgnored)}
 
 ## Next steps
 
