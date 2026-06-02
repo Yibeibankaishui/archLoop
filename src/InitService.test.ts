@@ -10,6 +10,11 @@ import {
 } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  buildCapabilityManifest,
+  resolveCapabilityInitOptions,
+  validateCapabilityRegistries,
+} from "./capabilityPacks.js";
 import { validatePresetRegistries } from "./presetAgents.js";
 import {
   scaffold,
@@ -2915,5 +2920,77 @@ describe("Sandbox provider registry", () => {
 
   it("getSandboxProvider returns undefined for unknown provider", () => {
     expect(getSandboxProvider("nonexistent")).toBeUndefined();
+  });
+});
+
+describe("capability pack scaffold", () => {
+  it("validateCapabilityRegistries passes", () => {
+    expect(() => validateCapabilityRegistries()).not.toThrow();
+  });
+
+  it("implicit generic init does not write capability.json", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, { templateName: "blank" });
+
+    await expect(
+      access(join(dir, ".sandcastle", "capability.json")),
+    ).rejects.toThrow();
+  });
+
+  it("explicit generic capability writes capability.json without changing blank scaffold", async () => {
+    const dir = await makeDir();
+    const capabilityInit = resolveCapabilityInitOptions({
+      capabilityId: "generic",
+    });
+    await runScaffold(dir, {
+      templateName: "blank",
+      capabilityInit,
+    });
+
+    const manifest = JSON.parse(
+      await readFile(join(dir, ".sandcastle", "capability.json"), "utf-8"),
+    ) as {
+      version: number;
+      capability: string;
+      addons: string[];
+      setupActions: unknown[];
+    };
+    expect(manifest).toEqual({
+      version: 1,
+      capability: "generic",
+      addons: [],
+      setupActions: [],
+    });
+    expect(
+      await readFile(join(dir, ".sandcastle", "bootstrap.sh"), "utf-8"),
+    ).toContain("no-op");
+  });
+
+  it("explicit miniprogram capability writes manifest metadata", async () => {
+    const dir = await makeDir();
+    const capabilityInit = resolveCapabilityInitOptions({
+      capabilityId: "miniprogram",
+    });
+    await runScaffold(dir, {
+      templateName: capabilityInit.templateName,
+      projectProfile: getProjectProfile(capabilityInit.projectProfileName)!,
+      presetAgentIds: capabilityInit.presetAgentIds,
+      capabilityInit,
+    });
+
+    const manifest = JSON.parse(
+      await readFile(join(dir, ".sandcastle", "capability.json"), "utf-8"),
+    ) as {
+      capability: string;
+      variant: string;
+      verification: { entrypoint: string; diagnosticLog: string };
+    };
+    expect(manifest.capability).toBe("miniprogram");
+    expect(manifest.variant).toBe("native");
+    expect(manifest.verification).toEqual({
+      entrypoint: ".sandcastle/verify.sh",
+      diagnosticLog: "debug/wx-check.log",
+    });
+    expect(buildCapabilityManifest(capabilityInit)).toEqual(manifest);
   });
 });

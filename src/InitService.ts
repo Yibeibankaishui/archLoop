@@ -6,6 +6,12 @@ import { basename, dirname, isAbsolute, join } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import {
+  buildCapabilityManifest,
+  validateCapabilityRegistries,
+  type CapabilityManifest,
+  type ResolvedCapabilityInit,
+} from "./capabilityPacks.js";
+import {
   getPresetAgentDefinition,
   getPresetBundlesRoot,
   PRESET_AGENT_DEFINITIONS,
@@ -34,38 +40,10 @@ logs/
 worktrees/
 `;
 
-export interface TemplateMetadata {
-  name: string;
-  description: string;
-}
+import { SCAFFOLD_TEMPLATES } from "./initTemplates.js";
 
-const TEMPLATES: TemplateMetadata[] = [
-  {
-    name: "blank",
-    description: "Bare scaffold — write your own prompt and orchestration",
-  },
-  {
-    name: "simple-loop",
-    description: "Picks issues one by one and closes them",
-  },
-  {
-    name: "sequential-reviewer",
-    description:
-      "Implements issues one by one, with a code review step after each",
-  },
-  {
-    name: "parallel-planner",
-    description:
-      "Plans parallelizable issues, executes on separate branches, merges",
-  },
-  {
-    name: "parallel-planner-with-review",
-    description:
-      "Plans parallelizable issues, executes with per-branch review, merges",
-  },
-];
-
-export const listTemplates = (): TemplateMetadata[] => TEMPLATES;
+export type { TemplateMetadata } from "./initTemplates.js";
+export { listTemplates } from "./initTemplates.js";
 
 // ---------------------------------------------------------------------------
 // Agent registry (internal — not part of public API)
@@ -1104,9 +1082,9 @@ const getTemplateDir = (
   templateName: string,
 ): Effect.Effect<string, Error, never> =>
   Effect.gen(function* () {
-    const template = TEMPLATES.find((t) => t.name === templateName);
+    const template = SCAFFOLD_TEMPLATES.find((t) => t.name === templateName);
     if (!template) {
-      const names = TEMPLATES.map((t) => t.name).join(", ");
+      const names = SCAFFOLD_TEMPLATES.map((t) => t.name).join(", ");
       yield* Effect.fail(
         new Error(`Unknown template: "${templateName}". Available: ${names}`),
       );
@@ -1473,6 +1451,8 @@ export interface ScaffoldOptions {
   projectProfile?: ProjectProfileEntry;
   /** Optional preset agent role ids (see `presetAgents.ts`). */
   presetAgentIds?: readonly string[];
+  /** Resolved capability pack selection from `resolveCapabilityInitOptions`. */
+  capabilityInit?: ResolvedCapabilityInit;
   /** Sandcastle package version for generated devDependency (defaults to this CLI's version). */
   sandcastleVersion?: string;
   /** Skip `npm install` after package.json changes (tests). */
@@ -1516,6 +1496,7 @@ export const scaffold = (
   options: ScaffoldOptions,
 ): Effect.Effect<ScaffoldResult, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
+    validateCapabilityRegistries();
     const {
       agent,
       model,
@@ -1526,6 +1507,7 @@ export const scaffold = (
       sandboxProvider = SANDBOX_PROVIDER_REGISTRY[0]!, // default: docker
       projectProfile = DEFAULT_PROJECT_PROFILE,
       presetAgentIds = [],
+      capabilityInit,
       skipDependencyInstall = false,
     } = options;
     const fs = yield* FileSystem.FileSystem;
@@ -1627,6 +1609,17 @@ export const scaffold = (
     if (presetAgentIds.length > 0) {
       yield* copyPresetAgentsIntoConfig(configDir, presetAgentIds);
       yield* rewriteMainCopyToWorktreeForPresets(configDir, mainFilename);
+    }
+
+    if (capabilityInit?.writeCapabilityManifest) {
+      const manifest: CapabilityManifest =
+        buildCapabilityManifest(capabilityInit);
+      yield* fs
+        .writeFileString(
+          join(configDir, "capability.json"),
+          `${JSON.stringify(manifest, null, 2)}\n`,
+        )
+        .pipe(Effect.mapError((e) => new Error(e.message)));
     }
 
     const packageResult = yield* ensureProjectPackage(repoDir, {
