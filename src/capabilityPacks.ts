@@ -132,7 +132,38 @@ export interface ResolvedCapabilityInit {
   readonly writeCapabilityManifest: boolean;
 }
 
-const defaultTemplateWhenUnspecified = "blank";
+const DEFAULT_TEMPLATE_WHEN_UNSPECIFIED = "blank";
+
+function coalesceInitValue<T>(
+  explicit: T | undefined,
+  packDefault: T | undefined,
+  fallback: T,
+): T {
+  return explicit !== undefined ? explicit : (packDefault ?? fallback);
+}
+
+function validateSelectedCapabilityAddons(
+  pack: CapabilityPackDefinition,
+  addonIds: readonly string[],
+  sandboxProviderName?: string,
+): void {
+  for (const addonId of addonIds) {
+    const addon = pack.addons.find((candidate) => candidate.id === addonId);
+    if (!addon) {
+      throw new Error(
+        `Unknown capability add-on "${addonId}" for capability pack "${pack.id}".`,
+      );
+    }
+    if (
+      sandboxProviderName &&
+      !addon.compatibleSandboxProviders.includes(sandboxProviderName)
+    ) {
+      throw new Error(
+        `Capability add-on "${addonId}" is not compatible with sandbox provider "${sandboxProviderName}". Supported: ${addon.compatibleSandboxProviders.join(", ")}.`,
+      );
+    }
+  }
+}
 
 export function resolveCapabilityInitOptions(
   inputs: CapabilityInitInputs,
@@ -145,43 +176,27 @@ export function resolveCapabilityInitOptions(
   }
 
   const addonIds = inputs.addonIds ?? [];
-  for (const addonId of addonIds) {
-    const addon = pack.addons.find((a) => a.id === addonId);
-    if (!addon) {
-      throw new Error(
-        `Unknown capability add-on "${addonId}" for capability pack "${pack.id}".`,
-      );
-    }
-    if (
-      inputs.sandboxProviderName &&
-      !addon.compatibleSandboxProviders.includes(inputs.sandboxProviderName)
-    ) {
-      throw new Error(
-        `Capability add-on "${addonId}" is not compatible with sandbox provider "${inputs.sandboxProviderName}". Supported: ${addon.compatibleSandboxProviders.join(", ")}.`,
-      );
-    }
-  }
-
-  const templateName =
-    inputs.explicitTemplate !== undefined
-      ? inputs.explicitTemplate
-      : (pack.defaultTemplate ?? defaultTemplateWhenUnspecified);
-  const projectProfileName =
-    inputs.explicitProjectProfile !== undefined
-      ? inputs.explicitProjectProfile
-      : (pack.defaultProjectProfile ?? DEFAULT_PROJECT_PROFILE_NAME);
-  const presetAgentIds =
-    inputs.explicitPresetAgentIds !== undefined
-      ? inputs.explicitPresetAgentIds
-      : (pack.defaultPresetAgentIds ?? []);
+  validateSelectedCapabilityAddons(pack, addonIds, inputs.sandboxProviderName);
 
   return {
     capabilityId: pack.id,
     variant: pack.defaultVariant,
     addonIds,
-    templateName,
-    projectProfileName,
-    presetAgentIds,
+    templateName: coalesceInitValue(
+      inputs.explicitTemplate,
+      pack.defaultTemplate,
+      DEFAULT_TEMPLATE_WHEN_UNSPECIFIED,
+    ),
+    projectProfileName: coalesceInitValue(
+      inputs.explicitProjectProfile,
+      pack.defaultProjectProfile,
+      DEFAULT_PROJECT_PROFILE_NAME,
+    ),
+    presetAgentIds: coalesceInitValue(
+      inputs.explicitPresetAgentIds,
+      pack.defaultPresetAgentIds,
+      [],
+    ),
     verification: pack.verification,
     writeCapabilityManifest: explicitCapability !== undefined,
   };
@@ -202,12 +217,77 @@ export function buildCapabilityManifest(
   };
 }
 
-/**
- * Validates capability pack registry shape and cross-registry references.
- */
+function validateCapabilityPackReferences(
+  pack: CapabilityPackDefinition,
+  templateNames: Set<string>,
+): void {
+  if (
+    pack.defaultTemplate !== undefined &&
+    !templateNames.has(pack.defaultTemplate)
+  ) {
+    throw new Error(
+      `Capability pack "${pack.id}" references unknown default template "${pack.defaultTemplate}"`,
+    );
+  }
+
+  if (
+    pack.defaultProjectProfile !== undefined &&
+    !getProjectProfile(pack.defaultProjectProfile)
+  ) {
+    throw new Error(
+      `Capability pack "${pack.id}" references unknown default project profile "${pack.defaultProjectProfile}"`,
+    );
+  }
+
+  if (pack.defaultPresetAgentIds !== undefined) {
+    for (const presetId of pack.defaultPresetAgentIds) {
+      if (!getPresetAgentDefinition(presetId)) {
+        throw new Error(
+          `Capability pack "${pack.id}" references unknown preset agent "${presetId}"`,
+        );
+      }
+    }
+  }
+
+  if (pack.compatibleTemplates !== undefined) {
+    for (const templateName of pack.compatibleTemplates) {
+      if (!templateNames.has(templateName)) {
+        throw new Error(
+          `Capability pack "${pack.id}" lists unknown compatible template "${templateName}"`,
+        );
+      }
+    }
+  }
+}
+
+function validateCapabilityPackAddons(pack: CapabilityPackDefinition): void {
+  const addonIds = new Set<string>();
+  for (const addon of pack.addons) {
+    if (!ID_PATTERN.test(addon.id)) {
+      throw new Error(
+        `Invalid capability add-on id "${addon.id}" on pack "${pack.id}"`,
+      );
+    }
+    if (addonIds.has(addon.id)) {
+      throw new Error(
+        `Duplicate capability add-on id "${addon.id}" on pack "${pack.id}"`,
+      );
+    }
+    addonIds.add(addon.id);
+    if (addon.compatibleSandboxProviders.length === 0) {
+      throw new Error(
+        `Capability add-on "${addon.id}" on pack "${pack.id}" must declare compatible sandbox providers`,
+      );
+    }
+  }
+}
+
+/** Validates capability pack registry shape and cross-registry references. */
 export function validateCapabilityRegistries(): void {
   const packIds = new Set<string>();
-  const templateNames = new Set(listTemplates().map((t) => t.name));
+  const templateNames = new Set(
+    listTemplates().map((template) => template.name),
+  );
 
   for (const pack of CAPABILITY_PACK_DEFINITIONS) {
     if (!ID_PATTERN.test(pack.id)) {
@@ -218,61 +298,7 @@ export function validateCapabilityRegistries(): void {
     }
     packIds.add(pack.id);
 
-    if (
-      pack.defaultTemplate !== undefined &&
-      !templateNames.has(pack.defaultTemplate)
-    ) {
-      throw new Error(
-        `Capability pack "${pack.id}" references unknown default template "${pack.defaultTemplate}"`,
-      );
-    }
-
-    if (pack.defaultProjectProfile !== undefined) {
-      if (!getProjectProfile(pack.defaultProjectProfile)) {
-        throw new Error(
-          `Capability pack "${pack.id}" references unknown default project profile "${pack.defaultProjectProfile}"`,
-        );
-      }
-    }
-
-    if (pack.defaultPresetAgentIds !== undefined) {
-      for (const presetId of pack.defaultPresetAgentIds) {
-        if (!getPresetAgentDefinition(presetId)) {
-          throw new Error(
-            `Capability pack "${pack.id}" references unknown preset agent "${presetId}"`,
-          );
-        }
-      }
-    }
-
-    if (pack.compatibleTemplates !== undefined) {
-      for (const templateName of pack.compatibleTemplates) {
-        if (!templateNames.has(templateName)) {
-          throw new Error(
-            `Capability pack "${pack.id}" lists unknown compatible template "${templateName}"`,
-          );
-        }
-      }
-    }
-
-    const addonIds = new Set<string>();
-    for (const addon of pack.addons) {
-      if (!ID_PATTERN.test(addon.id)) {
-        throw new Error(
-          `Invalid capability add-on id "${addon.id}" on pack "${pack.id}"`,
-        );
-      }
-      if (addonIds.has(addon.id)) {
-        throw new Error(
-          `Duplicate capability add-on id "${addon.id}" on pack "${pack.id}"`,
-        );
-      }
-      addonIds.add(addon.id);
-      if (addon.compatibleSandboxProviders.length === 0) {
-        throw new Error(
-          `Capability add-on "${addon.id}" on pack "${pack.id}" must declare compatible sandbox providers`,
-        );
-      }
-    }
+    validateCapabilityPackReferences(pack, templateNames);
+    validateCapabilityPackAddons(pack);
   }
 }

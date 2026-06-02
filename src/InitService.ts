@@ -24,6 +24,7 @@ import {
   type ProjectProfileEntry,
 } from "./projectProfiles.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
+import { SCAFFOLD_TEMPLATES } from "./initTemplates.js";
 
 export {
   DEFAULT_PROJECT_PROFILE,
@@ -39,8 +40,6 @@ auth/
 logs/
 worktrees/
 `;
-
-import { SCAFFOLD_TEMPLATES } from "./initTemplates.js";
 
 export type { TemplateMetadata } from "./initTemplates.js";
 export { listTemplates } from "./initTemplates.js";

@@ -201,32 +201,30 @@ const parseStrictBoolean = (
   );
 };
 
+const parseCommaSeparatedList = (raw: string): string[] =>
+  raw
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+
 const parseCapabilityAddonsCliValue = (
   raw: string,
 ): Effect.Effect<readonly string[], InitError, never> => {
-  const t = raw.trim();
-  if (t === "" || t.toLowerCase() === "none") {
+  const trimmed = raw.trim();
+  if (trimmed === "" || trimmed.toLowerCase() === "none") {
     return Effect.succeed([]);
   }
-  return Effect.succeed(
-    t
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0),
-  );
+  return Effect.succeed(parseCommaSeparatedList(trimmed));
 };
 
 const parsePresetAgentsCliValue = (
   raw: string,
 ): Effect.Effect<readonly string[] | undefined, InitError, never> => {
-  const t = raw.trim();
-  if (t === "" || t.toLowerCase() === "none") {
+  const trimmed = raw.trim();
+  if (trimmed === "" || trimmed.toLowerCase() === "none") {
     return Effect.succeed(undefined);
   }
-  const ids = t
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+  const ids = parseCommaSeparatedList(trimmed);
   for (const id of ids) {
     if (!getPresetAgentDefinition(id)) {
       return Effect.fail(
@@ -497,6 +495,35 @@ const buildHostRequirementNextStepLines = (options: {
   return [];
 };
 
+const resolveSelectedCapabilityId = (
+  capabilityCli: OptionalTextFlag,
+  scriptedInit: boolean,
+): Effect.Effect<string | undefined, InitError, never> =>
+  Effect.gen(function* () {
+    if (capabilityCli._tag === "Some") {
+      return capabilityCli.value;
+    }
+    if (scriptedInit) {
+      return undefined;
+    }
+
+    const selected = yield* Effect.promise(() =>
+      clack.select({
+        message: "Select a capability pack:",
+        initialValue: "generic",
+        options: listCapabilityPacksForInit(),
+      }),
+    );
+    if (clack.isCancel(selected)) {
+      yield* Effect.fail(
+        new InitError({ message: "Capability pack selection cancelled." }),
+      );
+    }
+
+    const picked = selected as string;
+    return picked === "generic" ? undefined : picked;
+  });
+
 const isFullyScriptedInit = (options: {
   agentFlag: OptionalTextFlag;
   runtimesFlag: OptionalTextFlag;
@@ -710,11 +737,6 @@ const initCommand = Command.make(
         selectedBacklogManager = getBacklogManager(selected as string)!;
       }
 
-      let selectedCapabilityId: string | undefined;
-      if (capabilityCli._tag === "Some") {
-        selectedCapabilityId = capabilityCli.value;
-      }
-
       let capabilityAddonIds: readonly string[] = [];
       if (capabilityAddonsCli._tag === "Some") {
         capabilityAddonIds = yield* parseCapabilityAddonsCliValue(
@@ -739,28 +761,10 @@ const initCommand = Command.make(
         selectedBacklogManagerName: selectedBacklogManager.name,
       });
 
-      if (
-        selectedCapabilityId === undefined &&
-        capabilityCli._tag === "None" &&
-        !scriptedInit
-      ) {
-        const selected = yield* Effect.promise(() =>
-          clack.select({
-            message: "Select a capability pack:",
-            initialValue: "generic",
-            options: listCapabilityPacksForInit(),
-          }),
-        );
-        if (clack.isCancel(selected)) {
-          yield* Effect.fail(
-            new InitError({ message: "Capability pack selection cancelled." }),
-          );
-        }
-        const picked = selected as string;
-        if (picked !== "generic") {
-          selectedCapabilityId = picked;
-        }
-      }
+      const selectedCapabilityId = yield* resolveSelectedCapabilityId(
+        capabilityCli,
+        scriptedInit,
+      );
 
       let explicitPresetAgentIds: readonly string[] | undefined;
       if (presetAgentsCli._tag === "Some") {
