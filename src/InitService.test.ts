@@ -14,6 +14,7 @@ import {
   buildCapabilityManifest,
   resolveCapabilityInitOptions,
   validateCapabilityRegistries,
+  type CapabilitySetupAction,
 } from "./capabilityPacks.js";
 import {
   MINIPROGRAM_VERIFICATION_PROMPT_MARKER,
@@ -2988,6 +2989,7 @@ describe("capability pack scaffold", () => {
       capability: string;
       variant: string;
       verification: { entrypoint: string; diagnosticLog: string };
+      setupActions: CapabilitySetupAction[];
     };
     expect(manifest.capability).toBe("miniprogram");
     expect(manifest.variant).toBe("native");
@@ -2995,7 +2997,70 @@ describe("capability pack scaffold", () => {
       entrypoint: ".sandcastle/verify.sh",
       diagnosticLog: "debug/wx-check.log",
     });
-    expect(buildCapabilityManifest(capabilityInit)).toEqual(manifest);
+    expect(manifest.setupActions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "miniprogram-ci-install",
+          status: "skipped",
+        }),
+      ]),
+    );
+    expect(
+      buildCapabilityManifest(
+        capabilityInit,
+        manifest.setupActions as CapabilitySetupAction[],
+      ),
+    ).toEqual(manifest);
+  });
+
+  it("miniprogram init writes core scaffold files and setup checklist", async () => {
+    const dir = await makeDir();
+    await writeFile(
+      join(dir, "project.config.json"),
+      JSON.stringify({ appid: "wxabcdef1234567890", miniprogramRoot: "./" }),
+    );
+    const capabilityInit = resolveCapabilityInitOptions({
+      capabilityId: "miniprogram",
+    });
+    await runScaffold(dir, {
+      templateName: capabilityInit.templateName,
+      projectProfile: getProjectProfile(capabilityInit.projectProfileName)!,
+      capabilityInit,
+    });
+
+    const configDir = join(dir, ".sandcastle");
+    const verifySh = await readFile(join(configDir, "verify.sh"), "utf-8");
+    expect(verifySh).toMatch(/^#!\/usr\/bin\/env bash/);
+    expect(verifySh).toContain("wx:check");
+    expect(verifySh).toContain("wx-check-native.mjs");
+    expect(verifySh).not.toContain("capability.json");
+
+    const nativeVerifier = await readFile(
+      join(configDir, "wx-check-native.mjs"),
+      "utf-8",
+    );
+    expect(nativeVerifier).toContain("debug/wx-check.log");
+
+    const context = await readFile(
+      join(configDir, "context", "miniprogram.md"),
+      "utf-8",
+    );
+    expect(context).toContain("verify.sh");
+
+    const setup = await readFile(
+      join(configDir, "context", "miniprogram-setup.md"),
+      "utf-8",
+    );
+    expect(setup).toContain("Init-time snapshot");
+    expect(setup).toContain("wxabcdef1234567890");
+    expect(setup).toContain("private.*.key");
+    expect(setup).toContain("WX_UPLOAD_KEY_PATH");
+
+    const uploadIgnore = await readFile(
+      join(configDir, "auth", "wx-upload", ".gitignore"),
+      "utf-8",
+    );
+    expect(uploadIgnore).toContain("private.*.key");
   });
 
   it("rejects incompatible miniprogram template before scaffolding files", async () => {

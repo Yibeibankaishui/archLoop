@@ -1,5 +1,6 @@
 import { listTemplates } from "./initTemplates.js";
 import { getPresetAgentDefinition } from "./presetAgents.js";
+import { validateMiniprogramCapabilityBundle } from "./miniprogramScaffold.js";
 import {
   DEFAULT_PROJECT_PROFILE_NAME,
   getProjectProfile,
@@ -249,6 +250,7 @@ export function resolveCapabilityInitOptions(
 
 export function buildCapabilityManifest(
   resolved: ResolvedCapabilityInit,
+  setupActions: readonly CapabilitySetupAction[] = [],
 ): CapabilityManifest {
   return {
     version: 1,
@@ -258,7 +260,7 @@ export function buildCapabilityManifest(
     ...(resolved.verification !== undefined
       ? { verification: resolved.verification }
       : {}),
-    setupActions: [],
+    setupActions: [...setupActions],
   };
 }
 
@@ -346,4 +348,6 @@ export function validateCapabilityRegistries(): void {
     validateCapabilityPackReferences(pack, templateNames);
     validateCapabilityPackAddons(pack);
   }
+
+  validateMiniprogramCapabilityBundle();
 }

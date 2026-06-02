@@ -9,6 +9,7 @@ import {
   buildCapabilityManifest,
   validateCapabilityRegistries,
   type CapabilityManifest,
+  type CapabilitySetupAction,
   type ResolvedCapabilityInit,
   validateCapabilityTemplateSelection,
 } from "./capabilityPacks.js";
@@ -17,6 +18,10 @@ import {
   listTemplatePromptFiles,
   shouldAssembleMiniprogramPrompts,
 } from "./capabilityPromptAssembly.js";
+import {
+  scaffoldMiniprogramCapabilityCore,
+  shouldScaffoldMiniprogramCore,
+} from "./miniprogramScaffold.js";
 import {
   getPresetAgentDefinition,
   getPresetBundlesRoot,
@@ -1675,9 +1680,20 @@ export const scaffold = (
       yield* assembleMiniprogramCapabilityPrompts(configDir, templateName);
     }
 
+    let miniprogramSetupActions: readonly CapabilitySetupAction[] = [];
+    if (shouldScaffoldMiniprogramCore(capabilityInit)) {
+      const scaffolded = yield* scaffoldMiniprogramCapabilityCore(
+        configDir,
+        repoDir,
+      );
+      miniprogramSetupActions = scaffolded.setupActions;
+    }
+
     if (capabilityInit?.writeCapabilityManifest) {
-      const manifest: CapabilityManifest =
-        buildCapabilityManifest(capabilityInit);
+      const manifest: CapabilityManifest = buildCapabilityManifest(
+        capabilityInit,
+        miniprogramSetupActions,
+      );
       yield* fs
         .writeFileString(
           join(configDir, "capability.json"),
