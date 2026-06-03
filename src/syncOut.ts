@@ -29,6 +29,59 @@ import type { IsolatedSandboxHandle } from "./SandboxProvider.js";
 import { buildRecoveryMessage, type FailedStep } from "./RecoveryMessage.js";
 import { SyncError } from "./errors.js";
 
+/** Tracks the sandbox HEAD last used for incremental format-patch sync-out. */
+export const syncBasePath = (hostRepoDir: string): string =>
+  join(hostRepoDir, ".sandcastle", "sync-base");
+
+export const writeSyncBase = (
+  hostRepoDir: string,
+  rev: string,
+): Effect.Effect<void, SyncError> =>
+  Effect.tryPromise({
+    try: async () => {
+      const path = syncBasePath(hostRepoDir);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, `${rev}\n`);
+    },
+    catch: (e) =>
+      new SyncError({
+        message: `Failed to write sync base: ${e instanceof Error ? e.message : String(e)}`,
+      }),
+  });
+
+const readSyncBase = (
+  hostRepoDir: string,
+): Effect.Effect<string | undefined, SyncError> =>
+  Effect.tryPromise({
+    try: async () => {
+      const path = syncBasePath(hostRepoDir);
+      if (!existsSync(path)) {
+        return undefined;
+      }
+      const content = await readFile(path, "utf-8");
+      const trimmed = content.trim();
+      return trimmed.length > 0 ? trimmed : undefined;
+    },
+    catch: (e) =>
+      new SyncError({
+        message: `Failed to read sync base: ${e instanceof Error ? e.message : String(e)}`,
+      }),
+  });
+
+const revExistsInSandbox = (
+  handle: IsolatedSandboxHandle,
+  worktreePath: string,
+  rev: string,
+): Effect.Effect<boolean, SyncError> =>
+  Effect.gen(function* () {
+    const result = yield* execSandbox(
+      handle,
+      `git cat-file -e "${rev}^{commit}"`,
+      { cwd: worktreePath },
+    );
+    return result.exitCode === 0;
+  });
+
 /**
  * Execute a command on the host side, returning stdout.
  * Fails with SyncError on non-zero exit.
@@ -176,7 +229,23 @@ export const syncOut = (
       cwd: worktreePath,
     })).stdout.trim();
 
-    const hasCommits = hostHead !== sandboxHead;
+    let patchBase = hostHead;
+    const hostHeadInSandbox = yield* revExistsInSandbox(
+      handle,
+      worktreePath,
+      hostHead,
+    );
+    if (!hostHeadInSandbox) {
+      const syncBase = yield* readSyncBase(hostRepoDir);
+      if (
+        syncBase !== undefined &&
+        (yield* revExistsInSandbox(handle, worktreePath, syncBase))
+      ) {
+        patchBase = syncBase;
+      }
+    }
+
+    const hasCommits = patchBase !== sandboxHead;
 
     // Check for uncommitted changes
     const diffResult = yield* execSandbox(handle, "git diff HEAD", {
@@ -223,7 +292,7 @@ export const syncOut = (
       try {
         yield* execOk(
           handle,
-          `git format-patch "${hostHead}..HEAD" -o "${sandboxPatchDir}"`,
+          `git format-patch "${patchBase}..HEAD" -o "${sandboxPatchDir}"`,
           { cwd: worktreePath },
         );
 
@@ -349,6 +418,9 @@ export const syncOut = (
       });
       console.error(`\n${msg}`);
     } else {
+      if (hasCommits) {
+        yield* writeSyncBase(hostRepoDir, sandboxHead);
+      }
       yield* Effect.tryPromise({
         try: async () => {
           await rm(patchDir, { recursive: true, force: true });
@@ -356,13 +428,10 @@ export const syncOut = (
           try {
             const remaining = await readdir(patchesRoot);
             if (remaining.length === 0) {
-              await rm(join(hostRepoDir, ".sandcastle"), {
-                recursive: true,
-                force: true,
-              });
+              await rm(patchesRoot, { recursive: true, force: true });
             }
           } catch {
-            // ignore
+            // patches root may already be absent
           }
         },
         catch: () =>

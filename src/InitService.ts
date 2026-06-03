@@ -34,6 +34,7 @@ import {
   type PresetAgentDefinition,
 } from "./presetAgents.js";
 import { renderBootstrapScript } from "./bootstrap.js";
+import { injectDockerRootRuntimeUid } from "./dockerUidBuildArgs.js";
 import {
   DEFAULT_PROJECT_PROFILE,
   type ProjectProfileEntry,
@@ -1314,6 +1315,10 @@ const rewriteMainFile = (
       EMPTY_AUTH_MOUNTS_PROPERTY,
       renderAuthMountsProperty(authMounts),
     );
+
+    if (sandboxProvider.name === "docker") {
+      content = injectDockerRootRuntimeUid(content);
+    }
 
     yield* fs
       .writeFileString(mainTsPath, content)

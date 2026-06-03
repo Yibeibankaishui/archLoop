@@ -9,9 +9,12 @@ import { styleText } from "node:util";
 
 import { Display } from "./Display.js";
 import {
+  buildDockerRootHostNextStepLines,
   resolveDockerUidBuildArgs,
-  rootHostDockerUidGuidance,
+  ROOT_HOST_DOCKER_UID_GUIDANCE,
 } from "./dockerUidBuildArgs.js";
+import { inspectGitRemotes } from "./inspectGitRemotes.js";
+import { githubIssuesGitRemoteNextStepLines } from "./initGitRemoteGuidance.js";
 import { buildImage, removeImage } from "./DockerLifecycle.js";
 import {
   buildImage as podmanBuildImage,
@@ -50,6 +53,7 @@ import {
   listCapabilityAddonPromptOptions,
   listCapabilityPacksForInit,
   MINIPROGRAM_CAPABILITY_PACK_ID,
+  DEFAULT_CAPABILITY_PACK_ID,
   resolveCapabilityInitOptions,
   validateCapabilityTemplateSelection,
   type CapabilityPackDefinition,
@@ -498,27 +502,58 @@ const buildHostRequirementNextStepLines = (options: {
   readonly sandboxProvider: SandboxProviderEntry;
   readonly backlogManager: BacklogManagerEntry;
   readonly projectProfile: ProjectProfileEntry;
+  readonly gitRemoteNextSteps?: readonly string[];
 }): string[] => {
-  if (options.sandboxProvider.name !== "no-sandbox") {
-    return [];
+  const lines: string[] = [
+    ...buildDockerRootHostNextStepLines(options.sandboxProvider.name),
+  ];
+
+  if (options.sandboxProvider.name === "no-sandbox") {
+    if (options.backlogManager.name === "beads") {
+      lines.push(
+        "Keep `bd` available on your host PATH when using no-sandbox + beads. Prompt shell expressions run on the host in this mode, not in a container.",
+      );
+    }
+
+    if (options.projectProfile.name === "python") {
+      lines.push(
+        "Python bootstrap runs on the host in no-sandbox mode. Install `python3-venv` and/or `uv` locally (the Docker image installs these for container runs), or choose the docker sandbox provider.",
+      );
+    }
   }
 
-  const lines: string[] = [];
-
-  if (options.backlogManager.name === "beads") {
-    lines.push(
-      "Keep `bd` available on your host PATH when using no-sandbox + beads. Prompt shell expressions run on the host in this mode, not in a container.",
-    );
-  }
-
-  if (options.projectProfile.name === "python") {
-    lines.push(
-      "Python bootstrap runs on the host in no-sandbox mode. Install `python3-venv` and/or `uv` locally (the Docker image installs these for container runs), or choose the docker sandbox provider.",
-    );
+  if (options.gitRemoteNextSteps && options.gitRemoteNextSteps.length > 0) {
+    lines.push(...options.gitRemoteNextSteps);
   }
 
   return lines;
 };
+
+const githubIssuesGitRemoteNextStepLinesForCwd = (
+  backlogManagerName: string,
+): Effect.Effect<readonly string[], InitError> => {
+  if (backlogManagerName !== "github-issues") {
+    return Effect.succeed([]);
+  }
+  return Effect.tryPromise({
+    try: () => inspectGitRemotes(process.cwd()),
+    catch: (error) =>
+      new InitError({
+        message: error instanceof Error ? error.message : String(error),
+      }),
+  }).pipe(Effect.map(githubIssuesGitRemoteNextStepLines));
+};
+
+const statusDockerRootBuildGuidanceIfNeeded = (
+  hostIsRoot: boolean,
+): Effect.Effect<void, never, Display> =>
+  Effect.gen(function* () {
+    if (!hostIsRoot) {
+      return;
+    }
+    const d = yield* Display;
+    yield* d.status(ROOT_HOST_DOCKER_UID_GUIDANCE, "info");
+  });
 
 const promptForCapabilityAddons = (
   pack: CapabilityPackDefinition,
@@ -596,7 +631,7 @@ const resolveSelectedCapabilityId = (
     }
 
     const picked = selected as string;
-    return picked === "generic" ? undefined : picked;
+    return picked === DEFAULT_CAPABILITY_PACK_ID ? undefined : picked;
   });
 
 const resolveMiniprogramCiInstallApproval = (options: {
@@ -1302,11 +1337,18 @@ const initCommand = Command.make(
           cursorChoice: cursorAuthChoice,
         }),
       };
+
+      const gitRemoteNextSteps =
+        yield* githubIssuesGitRemoteNextStepLinesForCwd(
+          selectedBacklogManager.name,
+        );
+
       const hostRequirementResult: HostRequirementResult = {
         nextStepLines: buildHostRequirementNextStepLines({
           sandboxProvider: selectedSandboxProvider,
           backlogManager: selectedBacklogManager,
           projectProfile: selectedProjectProfile,
+          gitRemoteNextSteps,
         }),
       };
 
@@ -1339,9 +1381,7 @@ const initCommand = Command.make(
           );
         } else {
           const { buildArgs, hostIsRoot } = resolveDockerUidBuildArgs();
-          if (hostIsRoot) {
-            yield* d.status(rootHostDockerUidGuidance(), "info");
-          }
+          yield* statusDockerRootBuildGuidanceIfNeeded(hostIsRoot);
           yield* d.spinner(
             `Building ${providerLabel} image '${imageName}'...`,
             buildImage(imageName, containerfileDir, { buildArgs }),
@@ -1416,9 +1456,7 @@ const buildImageCommand = Command.make(
         dockerfile._tag === "Some" ? dockerfile.value : undefined;
 
       const { buildArgs, hostIsRoot } = resolveDockerUidBuildArgs();
-      if (hostIsRoot) {
-        yield* d.status(rootHostDockerUidGuidance(), "info");
-      }
+      yield* statusDockerRootBuildGuidanceIfNeeded(hostIsRoot);
 
       yield* d.spinner(
         `Building Docker image '${imageName}'...`,

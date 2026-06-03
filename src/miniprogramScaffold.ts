@@ -8,7 +8,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   MINIPROGRAM_CAPABILITY_PACK_ID,
-  hasMiniprogramRuntimeDebugAddon,
+  hasRuntimeDebugAddon,
   type CapabilitySetupAction,
   type ResolvedCapabilityInit,
 } from "./capabilityPacks.js";
@@ -648,10 +648,13 @@ export function shouldScaffoldMiniprogramCore(
 export function shouldScaffoldMiniprogramRuntimeDebug(
   capabilityInit: ResolvedCapabilityInit | undefined,
 ): boolean {
-  return (
-    shouldScaffoldMiniprogramCore(capabilityInit) &&
-    hasMiniprogramRuntimeDebugAddon(capabilityInit)
-  );
+  if (
+    capabilityInit === undefined ||
+    !shouldScaffoldMiniprogramCore(capabilityInit)
+  ) {
+    return false;
+  }
+  return hasRuntimeDebugAddon(capabilityInit.addonIds);
 }
 
 /** Writes runtime-debug add-on context into `.sandcastle/context/`. */

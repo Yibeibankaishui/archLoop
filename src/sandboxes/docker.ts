@@ -15,6 +15,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { Effect } from "effect";
+import { dockerUidMismatchRootHint } from "../dockerUidBuildArgs.js";
 import { startContainer, removeContainer } from "../DockerLifecycle.js";
 import { dockerCommand } from "../dockerCommand.js";
 import {
@@ -379,12 +380,16 @@ const checkImageUid = (
           return;
         }
         if (imageUid !== expectedUid) {
+          const mismatchMessage =
+            `UID mismatch: image '${imageName}' was built with UID ${imageUid}, ` +
+            `but the expected UID is ${expectedUid}. ` +
+            `Rebuild the image with 'sandcastle docker build-image', ` +
+            `or pass containerUid: ${imageUid} to docker() to match the image.`;
           reject(
             new Error(
-              `UID mismatch: image '${imageName}' was built with UID ${imageUid}, ` +
-                `but the expected UID is ${expectedUid}. ` +
-                `Rebuild the image with 'sandcastle docker build-image', ` +
-                `or pass containerUid: ${imageUid} to docker() to match the image.`,
+              expectedUid === 0
+                ? mismatchMessage + dockerUidMismatchRootHint(imageUid)
+                : mismatchMessage,
             ),
           );
         } else {

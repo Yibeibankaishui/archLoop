@@ -117,7 +117,7 @@ export function hasMiniprogramRuntimeDebugAddon(
 }
 
 const GENERIC_CAPABILITY_PACK: CapabilityPackDefinition = {
-  id: "generic",
+  id: DEFAULT_CAPABILITY_PACK_ID,
   description:
     "Language-agnostic init with no domain-specific assumptions (current default behavior)",
   addons: [],

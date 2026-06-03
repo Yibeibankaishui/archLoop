@@ -144,7 +144,7 @@ Goal: 让 Sandcastle 不再默认假设 Node 项目，而是通过项目级 boot
 
 Status: Done
 
-Version: `00ca43bf0663370567a3d32666b77eca0b94e340`
+Version: `f9e432fd88279e25169555bbb3d7d1e846304e0c`
 
 Target: [capability-packs](./prd/capability-packs.md)
 

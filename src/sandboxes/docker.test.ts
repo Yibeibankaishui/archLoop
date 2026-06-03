@@ -202,6 +202,36 @@ describe("docker()", () => {
     await handle.close();
   });
 
+  it("UID mismatch error mentions WSL2/root containerUid when host UID is 0", async () => {
+    const originalGetuid = process.getuid;
+    process.getuid = () => 0;
+    mockExecFile.mockImplementation((_command, args, ...rest: any[]) => {
+      const callback = rest[rest.length - 1];
+      if (Array.isArray(args) && args[0] === "image" && args[1] === "inspect") {
+        callback(null, "1000:1000\n", "");
+      } else {
+        callback(null, "", "");
+      }
+      return undefined as any;
+    });
+
+    try {
+      const provider = docker();
+      await expect(
+        provider.create({
+          worktreePath: "/tmp/worktree",
+          hostRepoPath: "/tmp/repo",
+          mounts: [
+            { hostPath: "/tmp/worktree", sandboxPath: "/home/agent/workspace" },
+          ],
+          env: {},
+        }),
+      ).rejects.toThrow(/containerUid:\s*1000/);
+    } finally {
+      process.getuid = originalGetuid;
+    }
+  });
+
   it("throws on UID mismatch between image and host", async () => {
     mockExecFile.mockImplementation((_command, args, ...rest: any[]) => {
       const callback = rest[rest.length - 1];

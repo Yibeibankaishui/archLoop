@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   MINIPROGRAM_CAPABILITY_PACK_ID,
-  hasMiniprogramRuntimeDebugAddon,
+  hasRuntimeDebugAddon,
   type CapabilityVerificationMetadata,
   type ResolvedCapabilityInit,
 } from "./capabilityPacks.js";
@@ -131,10 +131,13 @@ export function shouldAssembleMiniprogramRuntimeDebugPrompts(
   if (capabilityInit === undefined) {
     return false;
   }
-  return (
-    shouldAssembleMiniprogramPrompts(
+  if (
+    !shouldAssembleMiniprogramPrompts(
       capabilityInit.capabilityId,
       capabilityInit.verification,
-    ) && hasMiniprogramRuntimeDebugAddon(capabilityInit)
-  );
+    )
+  ) {
+    return false;
+  }
+  return hasRuntimeDebugAddon(capabilityInit.addonIds);
 }

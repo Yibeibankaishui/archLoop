@@ -732,6 +732,27 @@ describe("InitService scaffold", () => {
     expect(mainTs).toContain('claudeCode("claude-opus-4-6")');
   });
 
+  it("scaffolds docker containerUid/containerGid when host runs as root (WSL2 root)", async () => {
+    const originalGetuid = process.getuid;
+    const originalGetgid = process.getgid;
+    process.getuid = () => 0;
+    process.getgid = () => 0;
+    try {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("containerUid: 1000");
+      expect(mainTs).toContain("containerGid: 1000");
+    } finally {
+      process.getuid = originalGetuid;
+      process.getgid = originalGetgid;
+    }
+  });
+
   it("uses the selected agent in main.mts while installing the selected runtime", async () => {
     const dir = await makeDir();
     await runScaffold(dir, {
