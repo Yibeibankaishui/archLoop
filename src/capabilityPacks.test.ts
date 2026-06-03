@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_CAPABILITY_PACK_ID,
   getCapabilityPackDefinition,
+  listCapabilityAddonPromptOptions,
   listCapabilityPacksForInit,
   resolveCapabilityInitOptions,
   RUNTIME_DEBUG_ADDON_ID,
@@ -62,6 +63,36 @@ describe("capability pack registry", () => {
     expect(addon).toBeDefined();
     expect(addon!.compatibleSandboxProviders).toEqual(["no-sandbox"]);
     expect(addon!.requiresHostState).toBe(true);
+  });
+});
+
+describe("listCapabilityAddonPromptOptions", () => {
+  const pack = getCapabilityPackDefinition("miniprogram")!;
+
+  it("offers runtime-debug unchecked with no-sandbox", () => {
+    const options = listCapabilityAddonPromptOptions(pack, "no-sandbox");
+    expect(options).toEqual([
+      {
+        value: RUNTIME_DEBUG_ADDON_ID,
+        label: RUNTIME_DEBUG_ADDON_ID,
+        hint: expect.stringContaining("no-sandbox"),
+      },
+    ]);
+    expect(options[0]?.disabled).toBeUndefined();
+  });
+
+  it("disables runtime-debug with docker and explains incompatible sandbox", () => {
+    const options = listCapabilityAddonPromptOptions(pack, "docker");
+    expect(options).toEqual([
+      {
+        value: RUNTIME_DEBUG_ADDON_ID,
+        label: RUNTIME_DEBUG_ADDON_ID,
+        disabled: true,
+        hint: expect.stringMatching(
+          /Unavailable with "docker" sandbox.*no-sandbox.*host-local/i,
+        ),
+      },
+    ]);
   });
 });
 

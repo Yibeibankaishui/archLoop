@@ -720,9 +720,9 @@ Capability-pack prompts require agents to end work with a structured summary:
 
 Do not claim full platform validation passed when `platform` is `not_configured`.
 
-**Runtime-debug add-on (`--capability-addons runtime-debug`)**
+**Runtime-debug add-on (`runtime-debug`)**
 
-Optional **no-sandbox only** add-on for WeChat Developer Tools / MCP runtime debugging (simulator, console, screenshots). Init scaffolds context and prompt guidance but does **not** install MCP servers, configure DevTools, or start login flows. Runtime debugging supplements — it does not replace — `.sandcastle/verify.sh` unless the task explicitly requires runtime evidence.
+Optional **no-sandbox only** add-on for WeChat Developer Tools / MCP runtime debugging (simulator, console, screenshots). Interactive init offers it after you choose the `miniprogram` capability and sandbox provider; scripted init uses `--capability-addons runtime-debug`. With Docker sandbox, the add-on appears disabled with an explanation. Init scaffolds context and prompt guidance but does **not** install MCP servers, configure DevTools, or start login flows. Runtime debugging supplements — it does not replace — `.sandcastle/verify.sh` unless the task explicitly requires runtime evidence.
 
 **Out of scope (first version)**
 
@@ -734,7 +734,7 @@ Optional **no-sandbox only** add-on for WeChat Developer Tools / MCP runtime deb
 
 ### `sandcastle init`
 
-Scaffolds the `.sandcastle/` config directory and optionally builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a capability pack (first), default scaffold agent, installed runtimes, sandbox provider, backlog manager, workflow template, and Project profile. Init now offers `docker` and `no-sandbox`: choosing `docker` follows the normal image-build flow, while choosing `no-sandbox` skips image build during init and rewrites the scaffolded `main.mts` or `main.ts` to call `noSandbox()`. After scaffold (and before optional image build), init also runs an auth setup step for selected tools, including GitHub Issues, Codex, and Cursor. When you select the `miniprogram` capability pack, init may also offer project-local `miniprogram-ci` installation and writes Mini Program verification scaffold files.
+Scaffolds the `.sandcastle/` config directory and optionally builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a capability pack (first), default scaffold agent, installed runtimes, sandbox provider, backlog manager, optional capability add-ons (when the pack exposes them), workflow template, and Project profile. Init now offers `docker` and `no-sandbox`: choosing `docker` follows the normal image-build flow, while choosing `no-sandbox` skips image build during init and rewrites the scaffolded `main.mts` or `main.ts` to call `noSandbox()`. After scaffold (and before optional image build), init also runs an auth setup step for selected tools, including GitHub Issues, Codex, and Cursor. When you select the `miniprogram` capability pack, init may also offer project-local `miniprogram-ci` installation and writes Mini Program verification scaffold files.
 
 Think of the init agent choices as two layers:
 
@@ -744,6 +744,8 @@ Think of the init agent choices as two layers:
 `main.mts`/`main.ts` remains the orchestration surface after init. If you install multiple runtimes, edit that file to import and call the providers you want for each `run()` or `createSandbox()` flow. For scripted init, omit `--runtimes` to install the selected `--agent` runtime, or pass a comma-separated list.
 
 When you pair `--sandbox no-sandbox` with `--backlog beads`, init validates that `bd` is already available on your host `PATH`. In no-sandbox mode, prompt shell expressions run on the host instead of inside a container, so Beads must be installed locally before the generated workflow can run.
+
+With `--sandbox no-sandbox` and `--project-profile python`, bootstrap runs on the host rather than in the Python profile image. Install `python3-venv` and/or `uv` on the host (Debian/Ubuntu: `apt install python3-venv`) so `.sandcastle/bootstrap.sh` can create a working virtualenv, or use the `docker` sandbox provider so the generated image supplies those tools.
 
 #### Project profiles
 

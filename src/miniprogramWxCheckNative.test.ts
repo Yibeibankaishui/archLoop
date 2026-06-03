@@ -121,6 +121,7 @@ const setupPlatformValidationRepo = async (
   options?: {
     projectConfig?: Record<string, unknown>;
     appJson?: Record<string, unknown>;
+    miniprogramSubdir?: string;
     uploadKeyAppid?: string;
     withUploadKey?: boolean;
     withMockCi?: boolean;
@@ -130,6 +131,7 @@ const setupPlatformValidationRepo = async (
   await writeMinimalNativeProject(repoDir, {
     projectConfig: options?.projectConfig,
     appJson: options?.appJson,
+    miniprogramSubdir: options?.miniprogramSubdir,
   });
   if (options?.withUploadKey !== false) {
     await writeUploadKey(repoDir, options?.uploadKeyAppid ?? EFFECTIVE_APPID);
@@ -703,6 +705,32 @@ describe("wx-check-native.mjs miniprogram-ci platform validation", () => {
 
     const state = await readMockCiState(repoDir);
     expect(state.packNpmCalled).toBeUndefined();
+  });
+
+  it("runs packNpm for bare package refs on non-dirname page layouts when WX_PACK_NPM is unset", async () => {
+    const repoDir = await makeRepo();
+    const mockState = await setupPlatformValidationRepo(repoDir, {
+      miniprogramSubdir: "miniprogram",
+      appJson: {
+        pages: ["pages/home/index"],
+        window: { navigationBarTitleText: "Test" },
+      },
+    });
+    const homePageDir = join(repoDir, "miniprogram", "pages", "home");
+    await mkdir(homePageDir, { recursive: true });
+    await writeFile(
+      join(homePageDir, "index.json"),
+      JSON.stringify({ usingComponents: { ui: "weui/button" } }),
+    );
+    await writeFile(join(homePageDir, "index.wxml"), "<view></view>");
+
+    const { exitCode } = await runNativeCheck(repoDir, {
+      WX_MOCK_CI_STATE: mockState,
+    });
+    expect(exitCode).toBe(0);
+
+    const state = await readMockCiState(repoDir);
+    expect(state.packNpmCalled).toBe(true);
   });
 
   it("runs packNpm for miniprogramRoot package.json when WX_PACK_NPM is unset", async () => {

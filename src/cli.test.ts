@@ -279,6 +279,25 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("no-sandbox + beads");
   });
 
+  it("init --sandbox no-sandbox --project-profile python explains host Python prerequisites", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+
+    const { stdout } = await runCli(
+      "init --sandbox no-sandbox --backlog github-issues --template blank --project-profile python --preset-agents none --build-image false --create-sandcastle-label false --agent claude-code",
+      hostDir,
+    );
+
+    const bootstrap = await readFile(
+      join(hostDir, ".sandcastle", "bootstrap.sh"),
+      "utf-8",
+    );
+
+    expect(bootstrap).toContain("removing incomplete .venv");
+    expect(stdout).toContain("python3-venv");
+    expect(stdout).toContain("no-sandbox");
+  });
+
   it("init with --agent and omitted runtimes installs the selected agent runtime", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);

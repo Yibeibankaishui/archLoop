@@ -47,10 +47,12 @@ import type {
 import { ConfigDirError, InitError } from "./errors.js";
 import {
   getCapabilityPackDefinition,
+  listCapabilityAddonPromptOptions,
   listCapabilityPacksForInit,
   MINIPROGRAM_CAPABILITY_PACK_ID,
   resolveCapabilityInitOptions,
   validateCapabilityTemplateSelection,
+  type CapabilityPackDefinition,
   type ResolvedCapabilityInit,
 } from "./capabilityPacks.js";
 import { detectMiniprogramInitSnapshot } from "./miniprogramScaffold.js";
@@ -495,18 +497,78 @@ const validateHostRequirementsForInit = (options: {
 const buildHostRequirementNextStepLines = (options: {
   readonly sandboxProvider: SandboxProviderEntry;
   readonly backlogManager: BacklogManagerEntry;
+  readonly projectProfile: ProjectProfileEntry;
 }): string[] => {
-  if (
-    options.sandboxProvider.name === "no-sandbox" &&
-    options.backlogManager.name === "beads"
-  ) {
-    return [
-      "Keep `bd` available on your host PATH when using no-sandbox + beads. Prompt shell expressions run on the host in this mode, not in a container.",
-    ];
+  if (options.sandboxProvider.name !== "no-sandbox") {
+    return [];
   }
 
-  return [];
+  const lines: string[] = [];
+
+  if (options.backlogManager.name === "beads") {
+    lines.push(
+      "Keep `bd` available on your host PATH when using no-sandbox + beads. Prompt shell expressions run on the host in this mode, not in a container.",
+    );
+  }
+
+  if (options.projectProfile.name === "python") {
+    lines.push(
+      "Python bootstrap runs on the host in no-sandbox mode. Install `python3-venv` and/or `uv` locally (the Docker image installs these for container runs), or choose the docker sandbox provider.",
+    );
+  }
+
+  return lines;
 };
+
+const promptForCapabilityAddons = (
+  pack: CapabilityPackDefinition,
+  sandboxProviderName: string,
+): Effect.Effect<readonly string[], InitError, never> =>
+  Effect.gen(function* () {
+    const selected = yield* Effect.promise(() =>
+      clack.multiselect({
+        message: "Select capability add-ons (optional):",
+        options: [
+          ...listCapabilityAddonPromptOptions(pack, sandboxProviderName),
+        ],
+        required: false,
+      }),
+    );
+    if (clack.isCancel(selected)) {
+      yield* Effect.fail(
+        new InitError({ message: "Capability add-on selection cancelled." }),
+      );
+    }
+    if (!Array.isArray(selected) || selected.length === 0) {
+      return [];
+    }
+    return selected;
+  });
+
+const resolveCapabilityAddonIds = (options: {
+  readonly selectedCapabilityId: string | undefined;
+  readonly sandboxProviderName: string;
+  readonly capabilityAddonsCli: OptionalTextFlag;
+  readonly scriptedInit: boolean;
+}): Effect.Effect<readonly string[], InitError, never> =>
+  Effect.gen(function* () {
+    if (options.capabilityAddonsCli._tag === "Some") {
+      return yield* parseCapabilityAddonsCliValue(
+        options.capabilityAddonsCli.value,
+      );
+    }
+
+    if (options.scriptedInit || options.selectedCapabilityId === undefined) {
+      return [];
+    }
+
+    const pack = getCapabilityPackDefinition(options.selectedCapabilityId);
+    if (pack === undefined || pack.addons.length === 0) {
+      return [];
+    }
+
+    return yield* promptForCapabilityAddons(pack, options.sandboxProviderName);
+  });
 
 const resolveSelectedCapabilityId = (
   capabilityCli: OptionalTextFlag,
@@ -799,13 +861,6 @@ const initCommand = Command.make(
         selectedBacklogManager = getBacklogManager(selected as string)!;
       }
 
-      let capabilityAddonIds: readonly string[] = [];
-      if (capabilityAddonsCli._tag === "Some") {
-        capabilityAddonIds = yield* parseCapabilityAddonsCliValue(
-          capabilityAddonsCli.value,
-        );
-      }
-
       yield* validateHostRequirementsForInit({
         sandboxProvider: selectedSandboxProvider,
         backlogManager: selectedBacklogManager,
@@ -827,6 +882,13 @@ const initCommand = Command.make(
         capabilityCli,
         scriptedInit,
       );
+
+      const capabilityAddonIds = yield* resolveCapabilityAddonIds({
+        selectedCapabilityId,
+        sandboxProviderName: selectedSandboxProvider.name,
+        capabilityAddonsCli,
+        scriptedInit,
+      });
 
       let explicitPresetAgentIds: readonly string[] | undefined;
       if (presetAgentsCli._tag === "Some") {
@@ -1244,6 +1306,7 @@ const initCommand = Command.make(
         nextStepLines: buildHostRequirementNextStepLines({
           sandboxProvider: selectedSandboxProvider,
           backlogManager: selectedBacklogManager,
+          projectProfile: selectedProjectProfile,
         }),
       };
 

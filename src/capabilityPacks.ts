@@ -60,6 +60,50 @@ export function hasRuntimeDebugAddon(addonIds: readonly string[]): boolean {
   return addonIds.includes(RUNTIME_DEBUG_ADDON_ID);
 }
 
+export interface CapabilityAddonPromptOption {
+  readonly value: string;
+  readonly label: string;
+  readonly hint?: string;
+  readonly disabled?: boolean;
+}
+
+function buildCapabilityAddonPromptOption(
+  addon: CapabilityAddonDefinition,
+  sandboxProviderName: string,
+): CapabilityAddonPromptOption {
+  const sandboxCompatible =
+    addon.compatibleSandboxProviders.includes(sandboxProviderName);
+  if (sandboxCompatible) {
+    return {
+      value: addon.id,
+      label: addon.id,
+      hint: addon.description,
+    };
+  }
+
+  const supportedSandboxes = addon.compatibleSandboxProviders.join(" or ");
+  const hostStateNote = addon.requiresHostState
+    ? " Requires host-local tools and login state."
+    : "";
+  const incompatibilityNote = `Unavailable with "${sandboxProviderName}" sandbox (requires ${supportedSandboxes}).`;
+  return {
+    value: addon.id,
+    label: addon.id,
+    disabled: true,
+    hint: `${incompatibilityNote}${hostStateNote} ${addon.description}`,
+  };
+}
+
+/** Builds interactive init multiselect options for a pack's add-ons. */
+export function listCapabilityAddonPromptOptions(
+  pack: CapabilityPackDefinition,
+  sandboxProviderName: string,
+): readonly CapabilityAddonPromptOption[] {
+  return pack.addons.map((addon) =>
+    buildCapabilityAddonPromptOption(addon, sandboxProviderName),
+  );
+}
+
 export function hasMiniprogramRuntimeDebugAddon(
   capabilityInit: ResolvedCapabilityInit | undefined,
 ): boolean {

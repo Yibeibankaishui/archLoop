@@ -450,18 +450,57 @@ const warnUploadKeyAppidMismatch = (effectiveAppid) => {
   );
 };
 
-const collectBarePackageComponentRefs = (json) => {
-  const refs = [];
-  const using = json?.usingComponents;
-  if (!using || typeof using !== "object") {
-    return refs;
+const isNonEmptyString = (value) =>
+  typeof value === "string" && value.trim().length > 0;
+
+const trimTrailingSlash = (path) => path.replace(/\/$/, "");
+
+const joinSubPackagePagePath = (root, pagePath) => {
+  if (!root) {
+    return pagePath;
   }
-  for (const ref of Object.values(using)) {
-    if (isBarePackageComponentRef(ref)) {
-      refs.push(ref);
+  return `${trimTrailingSlash(root)}/${pagePath}`;
+};
+
+const collectDeclaredPagePaths = (appJson) => {
+  const paths = [];
+  if (Array.isArray(appJson.pages)) {
+    for (const pagePath of appJson.pages) {
+      if (isNonEmptyString(pagePath)) {
+        paths.push(pagePath);
+      }
     }
   }
-  return refs;
+  if (Array.isArray(appJson.subPackages)) {
+    for (const subPackage of appJson.subPackages) {
+      if (!subPackage || typeof subPackage !== "object") {
+        continue;
+      }
+      const root =
+        typeof subPackage.root === "string" ? subPackage.root.trim() : "";
+      if (!Array.isArray(subPackage.pages)) {
+        continue;
+      }
+      for (const pagePath of subPackage.pages) {
+        if (!isNonEmptyString(pagePath)) {
+          continue;
+        }
+        paths.push(joinSubPackagePagePath(root, pagePath));
+      }
+    }
+  }
+  return paths;
+};
+
+const pageJsonPathFor = (miniprogramRoot, pagePath) =>
+  `${resolveFromMiniprogramRoot(miniprogramRoot, pagePath)}.json`;
+
+const jsonHasBarePackageComponentRefs = (json) => {
+  const using = json?.usingComponents;
+  if (!using || typeof using !== "object") {
+    return false;
+  }
+  return Object.values(using).some(isBarePackageComponentRef);
 };
 
 const hasBarePackageComponentRefs = (miniprogramRoot) => {
@@ -470,23 +509,16 @@ const hasBarePackageComponentRefs = (miniprogramRoot) => {
     return false;
   }
   const appJson = readJson(appJsonPath, "app_json_invalid");
-  if (collectBarePackageComponentRefs(appJson).length > 0) {
+  if (jsonHasBarePackageComponentRefs(appJson)) {
     return true;
   }
-  const pagesDir = join(miniprogramRoot, "pages");
-  if (!existsSync(pagesDir)) {
-    return false;
-  }
-  for (const pageEntry of readdirSync(pagesDir, { withFileTypes: true })) {
-    if (!pageEntry.isDirectory()) {
-      continue;
-    }
-    const pageJsonPath = join(pagesDir, pageEntry.name, `${pageEntry.name}.json`);
+  for (const pagePath of collectDeclaredPagePaths(appJson)) {
+    const pageJsonPath = pageJsonPathFor(miniprogramRoot, pagePath);
     if (!existsSync(pageJsonPath)) {
       continue;
     }
     const pageJson = readJson(pageJsonPath, "page_json_invalid");
-    if (collectBarePackageComponentRefs(pageJson).length > 0) {
+    if (jsonHasBarePackageComponentRefs(pageJson)) {
       return true;
     }
   }

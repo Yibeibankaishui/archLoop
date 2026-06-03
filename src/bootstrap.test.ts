@@ -19,6 +19,7 @@ describe("renderBootstrapScript", () => {
 
   it("renders a Python bootstrap script with uv, pip, and Poetry guidance", () => {
     const script = renderBootstrapScript("python");
+    expect(script).toContain("ensure_venv");
     expect(script).toContain("uv sync");
     expect(script).toContain("requirements.txt");
     expect(script).toContain("Poetry");

@@ -75,10 +75,16 @@ describe("Project profile registry", () => {
       );
     });
 
-    it("bootstrap handles uv, pip, and Poetry guidance", () => {
+    it("bootstrap handles uv, pip, Poetry guidance, and hardened venv creation", () => {
       const script = python().bootstrapScript;
       expect(script).toContain("#!/usr/bin/env bash");
       expect(script).toContain("ensure_venv");
+      expect(script).toContain('local activate=".venv/bin/activate"');
+      expect(script).toContain("removing incomplete .venv");
+      expect(script).toContain("failed to create venv");
+      expect(script).toContain("python3-venv");
+      expect(script).toContain("no-sandbox");
+      expect(script).not.toContain("[[ ! -d .venv ]]");
       expect(script).toContain("poetry.lock");
       expect(script).toMatch(/tool\\.poetry/);
       expect(script).toContain("uv sync");
