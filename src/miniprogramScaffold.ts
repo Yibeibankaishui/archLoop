@@ -160,8 +160,16 @@ function detectMiniprogramCi(
   }
 }
 
-/** Whether a global `miniprogram-ci` CLI is on PATH (not used for managed verification). */
-export function detectGlobalMiniprogramCiCli(): boolean {
+let detectGlobalMiniprogramCiCliOverride: (() => boolean) | undefined;
+
+/** Test hook to avoid depending on host-global `miniprogram-ci` on PATH. */
+export function setDetectGlobalMiniprogramCiCliForTests(
+  detector: (() => boolean) | undefined,
+): void {
+  detectGlobalMiniprogramCiCliOverride = detector;
+}
+
+function detectGlobalMiniprogramCiCliOnPath(): boolean {
   try {
     execSync("command -v miniprogram-ci", {
       stdio: "ignore",
@@ -171,6 +179,14 @@ export function detectGlobalMiniprogramCiCli(): boolean {
   } catch {
     return false;
   }
+}
+
+/** Whether a global `miniprogram-ci` CLI is on PATH (not used for managed verification). */
+export function detectGlobalMiniprogramCiCli(): boolean {
+  return (
+    detectGlobalMiniprogramCiCliOverride?.() ??
+    detectGlobalMiniprogramCiCliOnPath()
+  );
 }
 
 export function resolveMiniprogramInstallPackageManager(

@@ -9,6 +9,7 @@ import {
   renderMiniprogramSetupChecklist,
   resolveMiniprogramInstallPackageManager,
   runMiniprogramCiInstall,
+  setDetectGlobalMiniprogramCiCliForTests,
   setMiniprogramCiInstallRunnerForTests,
   shouldScaffoldMiniprogramRuntimeDebug,
   validateMiniprogramCapabilityBundle,
@@ -20,6 +21,7 @@ import {
 
 afterEach(() => {
   setMiniprogramCiInstallRunnerForTests(undefined);
+  setDetectGlobalMiniprogramCiCliForTests(undefined);
 });
 
 const makeRepo = () => mkdtemp(join(tmpdir(), "miniprogram-scaffold-"));
@@ -59,7 +61,22 @@ describe("detectMiniprogramInitSnapshot", () => {
     expect(snapshot.appid.status).toBe("missing");
     expect(snapshot.uploadKey.status).toBe("missing");
     expect(snapshot.wxCheckScriptPresent).toBe(false);
-    expect(snapshot.globalCliAvailable).toBe(false);
+  });
+
+  it("sets globalCliAvailable when mocked global CLI is on PATH", async () => {
+    const repoDir = await makeRepo();
+    setDetectGlobalMiniprogramCiCliForTests(() => true);
+    expect(detectMiniprogramInitSnapshot(repoDir).globalCliAvailable).toBe(
+      true,
+    );
+  });
+
+  it("clears globalCliAvailable when mocked global CLI is absent", async () => {
+    const repoDir = await makeRepo();
+    setDetectGlobalMiniprogramCiCliForTests(() => false);
+    expect(detectMiniprogramInitSnapshot(repoDir).globalCliAvailable).toBe(
+      false,
+    );
   });
 
   it("reads appid from project.config.json and detects wx:check script", async () => {
@@ -170,6 +187,16 @@ describe("renderMiniprogramSetupChecklist", () => {
     expect(checklist).toContain("private.*.key");
     expect(checklist).toContain("IP allowlist");
   });
+
+  it("warns that global CLI does not satisfy managed verification when detected", async () => {
+    const repoDir = await makeRepo();
+    setDetectGlobalMiniprogramCiCliForTests(() => true);
+    const checklist = renderMiniprogramSetupChecklist(
+      detectMiniprogramInitSnapshot(repoDir),
+    );
+    expect(checklist).toContain("global CLI was detected");
+    expect(checklist).toContain("project-local");
+  });
 });
 
 describe("executeMiniprogramCiInstallSetup", () => {
@@ -185,6 +212,15 @@ describe("executeMiniprogramCiInstallSetup", () => {
       status: "skipped",
       reason: "user_declined",
     });
+  });
+
+  it("records global CLI guidance when user declines install on a host with global CLI", async () => {
+    const repoDir = await makeRepo();
+    setDetectGlobalMiniprogramCiCliForTests(() => true);
+    const snapshot = detectMiniprogramInitSnapshot(repoDir);
+    const action = executeMiniprogramCiInstallSetup({ repoDir, snapshot });
+    expect(action.summary).toContain("global CLI was detected");
+    expect(action.summary).toContain("project-local");
   });
 
   it("records already_available when project-local miniprogram-ci resolves", async () => {

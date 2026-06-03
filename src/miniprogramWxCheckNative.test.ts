@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import {
   copyFile,
   mkdir,
@@ -28,6 +29,21 @@ type WxCheckLogEvent = {
 
 const EFFECTIVE_APPID = "wxabcdef1234567890";
 const OTHER_APPID = "wxotherapp123456789";
+
+/** Canonicalize paths so macOS /var and /private/var aliases compare equal. */
+function canonicalPath(path: string): string {
+  try {
+    return realpathSync.native(path);
+  } catch {
+    return path;
+  }
+}
+
+function expectPathEqual(actual: unknown, expected: string): void {
+  expect(actual, "expected a file path").toBeTypeOf("string");
+  const resolvedActual = actual as string;
+  expect(canonicalPath(resolvedActual)).toBe(canonicalPath(expected));
+}
 
 const parseWxCheckLog = (content: string): WxCheckLogEvent[] =>
   content
@@ -577,7 +593,7 @@ describe("wx-check-native.mjs miniprogram-ci platform validation", () => {
     expect(exitCode).toBe(0);
 
     const state = await readMockCiState(repoDir);
-    expect(state.project?.privateKeyPath).toBe(externalKey);
+    expectPathEqual(state.project?.privateKeyPath, externalKey);
   });
 
   it("warns upload_key_appid_mismatch for other local keys", async () => {
@@ -630,19 +646,23 @@ describe("wx-check-native.mjs miniprogram-ci platform validation", () => {
     expect(state.project).toMatchObject({
       appid: EFFECTIVE_APPID,
       type: "miniProgram",
-      projectPath: repoDir,
-      privateKeyPath: join(
+    });
+    expectPathEqual(state.project?.projectPath, repoDir);
+    expectPathEqual(
+      state.project?.privateKeyPath,
+      join(
         repoDir,
         ".sandcastle",
         "auth",
         "wx-upload",
         `private.${EFFECTIVE_APPID}.key`,
       ),
-    });
-    expect(state.preview).toMatchObject({
-      qrcodeFormat: "image",
-      qrcodeOutputDest: join(repoDir, "debug", "wx-preview.jpg"),
-    });
+    );
+    expect(state.preview).toMatchObject({ qrcodeFormat: "image" });
+    expectPathEqual(
+      state.preview?.qrcodeOutputDest,
+      join(repoDir, "debug", "wx-preview.jpg"),
+    );
   });
 
   it("reports configured_invalid when preview fails", async () => {
