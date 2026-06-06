@@ -1878,6 +1878,61 @@ describe("InitService scaffold", () => {
       expect(prompt).not.toContain("git diff main");
       expect(prompt).not.toContain("git log main");
     });
+
+    it("implement-prompt.md documents merge-phase issue closure lifecycle", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "implement-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("merge phase");
+      expect(prompt).toMatch(/do not close the issue/i);
+      expect(prompt).toContain("awaiting the merge phase");
+      expect(prompt).not.toMatch(/left open for human review/i);
+    });
+
+    it("plan-prompt.md guides planner to skip fresh implementation for branches with unmerged commits", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "plan-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toMatch(/unmerged commits|commits ahead/i);
+      expect(prompt).toMatch(/sandcastle\/issue-\{id\}/);
+    });
+
+    it("main.mts applies an empty-run circuit breaker with actionable recovery steps", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("EMPTY_RUN_CIRCUIT_BREAKER_THRESHOLD");
+      expect(mainTs).toContain("consecutiveEmptyImplementRuns");
+      expect(mainTs).toMatch(
+        /consecutive implement runs produced no new commits/i,
+      );
+      expect(mainTs).toContain("no work on branch; nothing to merge");
+      expect(mainTs).toMatch(/Merge branch|merge the branch/i);
+    });
+
+    it("scaffolds README.md documenting implement, review, merge, and close lifecycle", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
+
+      const readme = await readFile(
+        join(dir, ".sandcastle", "README.md"),
+        "utf-8",
+      );
+      expect(readme).toMatch(/implement.*review.*merge.*close/is);
+      expect(readme).toMatch(/merge phase/i);
+    });
   });
 
   // --- Backlog manager ---

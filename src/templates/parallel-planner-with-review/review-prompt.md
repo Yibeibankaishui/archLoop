@@ -2,6 +2,8 @@
 
 Review the code changes on branch `{{BRANCH}}` and improve code clarity, consistency, and maintainability while preserving exact functionality.
 
+Do **not** close the issue — only the merge phase closes issues after branches are merged into the base branch.
+
 # CONTEXT
 
 ## Branch diff

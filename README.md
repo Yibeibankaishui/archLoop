@@ -646,7 +646,7 @@ console.log(result.output.score); // typed as number
 | `parallel-planner`             | Plans parallelizable issues, executes on separate branches, then merges   |
 | `parallel-planner-with-review` | Plans parallelizable issues, executes with per-branch review, then merges |
 
-`parallel-planner-with-review` runs review and merge when an issue branch already has commits ahead of your current branch, even if the latest implementer run made no new commits (for example after a prior review failure). Re-run `sandcastle init` in an existing project to pick up template updates.
+`parallel-planner-with-review` runs review and merge when an issue branch already has commits ahead of your current branch, even if the latest implementer run made no new commits (for example after a prior review failure). Prompts document the implement → review → merge → close lifecycle (only the merge phase closes issues), and the template stops repeated empty implement loops with actionable recovery steps. Re-run `sandcastle init` in an existing project to pick up template updates.
 
 Select a template during `sandcastle init` when prompted, or re-run init in a fresh repo to try a different one.
 

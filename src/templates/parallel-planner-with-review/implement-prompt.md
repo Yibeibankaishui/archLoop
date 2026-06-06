@@ -49,11 +49,19 @@ Make a git commit. The commit message must:
 
 Keep it concise.
 
+# WORKFLOW LIFECYCLE
+
+This template runs **implement → review → merge → close** for each issue.
+
+- **You are the implementer.** Commit your work and run tests, but **do not close the issue**.
+- The issue stays **open** until the **merge phase** closes it after branches are merged into the base branch.
+- If you cannot finish, leave a comment on the issue describing what was done and what remains. Do **not** say the issue is waiting for "human review" unless this project explicitly defines a human gate — say it is **awaiting the merge phase** instead.
+
 # THE ISSUE
 
 If the task is not complete, leave a comment on the issue with what was done.
 
-Do not close the issue - this will be done later.
+Do not close the issue — only the merge phase closes issues after branches are merged.
 
 Once complete, output <promise>COMPLETE</promise>.
 
