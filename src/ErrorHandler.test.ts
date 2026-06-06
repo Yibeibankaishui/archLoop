@@ -72,6 +72,21 @@ describe("formatErrorMessage", () => {
     expect(msg).toContain("file not found");
   });
 
+  it("PromptError with GitHub auth guidance passes through remediation hints", () => {
+    const msg = formatErrorMessage(
+      new PromptError({
+        message:
+          "GitHub authentication failed while expanding prompt shell expression `gh issue list`.\n" +
+          "Fix one of:\n" +
+          "- Set a non-empty `GH_TOKEN` in `.sandcastle/.env`\n" +
+          "- Run `GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login --insecure-storage`",
+      }),
+    );
+    expect(msg).toContain("GitHub authentication failed");
+    expect(msg).toContain("GH_TOKEN");
+    expect(msg).toContain("GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login");
+  });
+
   it("AgentError includes message", () => {
     const msg = formatErrorMessage(
       new AgentError({ message: "claude not installed" }),

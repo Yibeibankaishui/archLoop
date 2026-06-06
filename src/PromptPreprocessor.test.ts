@@ -39,6 +39,37 @@ describe("PromptPreprocessor", () => {
     );
   };
 
+  const runFailingGhCommand = async (
+    sandboxDir: string,
+    ghCommand: string,
+    ghStderr: string,
+  ) => {
+    const spySandboxLayer = Layer.succeed(Sandbox, {
+      exec: (command) =>
+        command === ghCommand
+          ? Effect.succeed({ stdout: "", stderr: ghStderr, exitCode: 1 })
+          : Effect.succeed({ stdout: "", stderr: "", exitCode: 0 }),
+      copyIn: () => Effect.succeed(undefined as never),
+      copyFileOut: () => Effect.succeed(undefined as never),
+    });
+    const spyLayer = Layer.merge(
+      spySandboxLayer,
+      SilentDisplay.layer(Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([])),
+    );
+    const marked = await Effect.runPromise(
+      substitutePromptArgs(`Issues: !\`${ghCommand}\``, {}).pipe(
+        Effect.provide(spyLayer),
+      ),
+    );
+    return Effect.runPromise(
+      Sandbox.pipe(
+        Effect.flatMap((s) => preprocessPrompt(marked, s, sandboxDir)),
+        Effect.flip,
+        Effect.provide(spyLayer),
+      ),
+    );
+  };
+
   it("passes through prompts with no !`command` expressions unchanged", async () => {
     const { sandboxDir, layer } = await setup();
     const prompt = "This is a plain prompt with no commands.\n\nJust text.";
@@ -76,6 +107,42 @@ describe("PromptPreprocessor", () => {
     expect(result._tag).toBe("PromptError");
     expect(result.message).toContain("exit 1");
     expect(result.message).toContain("exited with code 1");
+  });
+
+  it("surfaces actionable GitHub auth guidance when gh commands fail with 401", async () => {
+    const { sandboxDir } = await setup();
+    const ghCommand =
+      "gh issue list -l Sandcastle --state open --json number,title";
+    const ghStderr =
+      "HTTP 401: Bad credentials (https://api.github.com/graphql)\n" +
+      "gh: To re-authenticate, run: gh auth login -h github.com";
+
+    const result = await runFailingGhCommand(sandboxDir, ghCommand, ghStderr);
+
+    expect(result).toBeInstanceOf(PromptError);
+    expect(result.message).toContain("GitHub authentication failed");
+    expect(result.message).toContain(".sandcastle/auth/gh");
+    expect(result.message).toContain("GH_TOKEN");
+    expect(result.message).toContain(
+      "GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login --insecure-storage",
+    );
+    expect(result.message).toContain("host `gh auth status`");
+    expect(result.message).not.toContain("FiberFailure");
+  });
+
+  it("surfaces actionable GitHub auth guidance when gh reports an invalid stored token", async () => {
+    const { sandboxDir } = await setup();
+    const ghCommand = "gh issue list --state open";
+    const ghStderr = "The token in hosts.yml is invalid.";
+
+    const result = await runFailingGhCommand(sandboxDir, ghCommand, ghStderr);
+
+    expect(result).toBeInstanceOf(PromptError);
+    expect(result.message).toContain("GitHub authentication failed");
+    expect(result.message).toContain("GH_TOKEN");
+    expect(result.message).toContain(
+      "GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login --insecure-storage",
+    );
   });
 
   it("runs commands with the provided cwd", async () => {
