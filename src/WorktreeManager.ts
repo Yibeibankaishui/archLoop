@@ -2,7 +2,12 @@ import { Effect, Option } from "effect";
 import { FileSystem } from "@effect/platform";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
-import { WorktreeError, WorktreeTimeoutError, withTimeout } from "./errors.js";
+import {
+  emptyRepoWorktreeError,
+  WorktreeError,
+  WorktreeTimeoutError,
+  withTimeout,
+} from "./errors.js";
 
 const WORKTREE_TIMEOUT_MS = 30_000;
 
@@ -52,6 +57,20 @@ const execGit = (
     });
   });
 
+const isEmptyRepoGitError = (message: string): boolean =>
+  message.includes("Needed a single revision");
+
+/** Fails when the repo has no commits yet; otherwise succeeds. */
+const assertRepoHasCommits = (
+  repoDir: string,
+): Effect.Effect<void, WorktreeError> =>
+  execGit(["rev-parse", "--verify", "HEAD"], repoDir).pipe(
+    Effect.asVoid,
+    Effect.mapError((error) =>
+      isEmptyRepoGitError(error.message) ? emptyRepoWorktreeError() : error,
+    ),
+  );
+
 /**
  * Generates a temporary branch name.
  * When name is provided: `sandcastle/<sanitized-name>/<YYYYMMDD-HHMMSS>`.
@@ -69,7 +88,10 @@ export const generateTempBranchName = (name?: string): string => {
 export const getCurrentBranch = (
   repoDir: string,
 ): Effect.Effect<string, WorktreeError> =>
-  execGit(["rev-parse", "--abbrev-ref", "HEAD"], repoDir).pipe(
+  assertRepoHasCommits(repoDir).pipe(
+    Effect.flatMap(() =>
+      execGit(["rev-parse", "--abbrev-ref", "HEAD"], repoDir),
+    ),
     Effect.map((output) => output.trim()),
   );
 
@@ -139,6 +161,8 @@ export const create = (
   FileSystem.FileSystem
 > =>
   Effect.gen(function* () {
+    yield* assertRepoHasCommits(repoDir);
+
     const fs = yield* FileSystem.FileSystem;
     const worktreesDir = join(repoDir, ".sandcastle", "worktrees");
     yield* fs

@@ -13,6 +13,7 @@ import {
   InitError,
   PromptError,
   SyncError,
+  EMPTY_REPO_ERROR_MESSAGE,
   WorktreeError,
 } from "./errors.js";
 import { formatErrorMessage, withFriendlyErrors } from "./ErrorHandler.js";
@@ -62,6 +63,14 @@ describe("formatErrorMessage", () => {
       new WorktreeError({ message: "already exists" }),
     );
     expect(msg).toContain("already exists");
+  });
+
+  it("WorktreeError for empty Git repo passes through the actionable message", () => {
+    const msg = formatErrorMessage(
+      new WorktreeError({ message: EMPTY_REPO_ERROR_MESSAGE }),
+    );
+    expect(msg).toBe(EMPTY_REPO_ERROR_MESSAGE);
+    expect(msg).not.toContain("Git worktree operation failed");
   });
 
   it("PromptError includes message", () => {

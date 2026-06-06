@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { Display } from "./Display.js";
-import type { SandboxError } from "./errors.js";
+import { isPreformattedWorktreeMessage, type SandboxError } from "./errors.js";
 
 /**
  * Formats a tagged SandboxError into a user-friendly message with
@@ -21,7 +21,9 @@ export const formatErrorMessage = (error: SandboxError): string => {
     case "SyncError":
       return `Git sync failed: ${error.message}`;
     case "WorktreeError":
-      return `Git worktree operation failed: ${error.message}`;
+      return isPreformattedWorktreeMessage(error.message)
+        ? error.message
+        : `Git worktree operation failed: ${error.message}`;
     case "PromptError":
       return `Failed to resolve prompt: ${error.message}`;
     case "AgentError":

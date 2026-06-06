@@ -1663,7 +1663,48 @@ describe("InitService scaffold", () => {
       );
       expect(mainTs).toContain("implement-prompt.md");
       expect(mainTs).toContain("review-prompt.md");
-      expect(mainTs).toContain("implement.commits.length > 0");
+      expect(mainTs).toContain("shouldReview");
+    });
+
+    it("main.mts runs reviewer when branch has unmerged commits even with zero current-run commits", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("countBranchCommitsAhead");
+      expect(mainTs).toContain("branchHasUnmergedWork");
+      expect(mainTs).toMatch(
+        /shouldReview\s*=\s*commitsThisRun\s*>\s*0\s*\|\|\s*branchHasUnmergedWork/,
+      );
+    });
+
+    it("main.mts includes branches with existing unmerged commits in merge phase", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("branchHasUnmergedWork");
+      expect(mainTs).toMatch(
+        /entry\.outcome\.value\.commits\.length\s*>\s*0\s*\|\|\s*entry\.outcome\.value\.branchHasUnmergedWork/,
+      );
+    });
+
+    it("main.mts distinguishes no work from pending unmerged commits in console output", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("no new commits this run; branch has");
+      expect(mainTs).toContain("No branches with unmerged work");
     });
 
     it("main.mts captures reviewer result and merges commits from both runs", async () => {
