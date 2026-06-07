@@ -101,6 +101,38 @@ describe("syncOut", () => {
     }
   });
 
+  it("syncs incremental commits when host HEAD SHA differs from sandbox after prior sync-out", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+
+    const provider = testIsolated();
+    const handle = await provider.create({ env: {} });
+    try {
+      await Effect.runPromise(syncIn(hostDir, handle));
+
+      const wp = handle.worktreePath;
+      await handle.exec('echo "first" > first.txt', { cwd: wp });
+      await handle.exec("git add first.txt", { cwd: wp });
+      await handle.exec('git commit -m "first sandbox commit"', { cwd: wp });
+      await Effect.runPromise(syncOut(hostDir, handle));
+
+      await handle.exec('echo "second" > second.txt', { cwd: wp });
+      await handle.exec("git add second.txt", { cwd: wp });
+      await handle.exec('git commit -m "second sandbox commit"', { cwd: wp });
+      await Effect.runPromise(syncOut(hostDir, handle));
+
+      const log = await getLog(hostDir);
+      expect(log).toHaveLength(3);
+      expect(log[0]).toContain("second sandbox commit");
+      expect(log[1]).toContain("first sandbox commit");
+      expect(existsSync(join(hostDir, "first.txt"))).toBe(true);
+      expect(existsSync(join(hostDir, "second.txt"))).toBe(true);
+    } finally {
+      await handle.close();
+    }
+  });
+
   it("is a no-op when sandbox has no new commits", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);

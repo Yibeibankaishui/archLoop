@@ -98,12 +98,25 @@ is_poetry_project() {
 }
 
 ensure_venv() {
-  if [[ ! -d .venv ]]; then
-    echo "Sandcastle bootstrap: creating .venv"
-    python3 -m venv .venv
+  local activate=".venv/bin/activate"
+
+  if [[ -d .venv && ! -f "$activate" ]]; then
+    echo "Sandcastle bootstrap: removing incomplete .venv"
+    rm -rf .venv
   fi
+
+  if [[ ! -f "$activate" ]]; then
+    echo "Sandcastle bootstrap: creating .venv"
+    if ! python3 -m venv .venv; then
+      rm -rf .venv
+      echo "Sandcastle bootstrap: failed to create venv."
+      echo "Install python3-venv and/or uv on the host (no-sandbox runs bootstrap on the host), or use a Docker sandbox provider."
+      exit 1
+    fi
+  fi
+
   # shellcheck source=/dev/null
-  source .venv/bin/activate
+  source "$activate"
 }
 
 if is_poetry_project; then

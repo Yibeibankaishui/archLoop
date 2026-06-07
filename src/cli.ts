@@ -9,9 +9,12 @@ import { styleText } from "node:util";
 
 import { Display } from "./Display.js";
 import {
+  buildDockerRootHostNextStepLines,
   resolveDockerUidBuildArgs,
-  rootHostDockerUidGuidance,
+  ROOT_HOST_DOCKER_UID_GUIDANCE,
 } from "./dockerUidBuildArgs.js";
+import { inspectGitRemotes } from "./inspectGitRemotes.js";
+import { githubIssuesGitRemoteNextStepLines } from "./initGitRemoteGuidance.js";
 import { buildImage, removeImage } from "./DockerLifecycle.js";
 import {
   buildImage as podmanBuildImage,
@@ -45,6 +48,18 @@ import type {
   SandboxProviderEntry,
 } from "./InitService.js";
 import { ConfigDirError, InitError } from "./errors.js";
+import {
+  getCapabilityPackDefinition,
+  listCapabilityAddonPromptOptions,
+  listCapabilityPacksForInit,
+  MINIPROGRAM_CAPABILITY_PACK_ID,
+  DEFAULT_CAPABILITY_PACK_ID,
+  resolveCapabilityInitOptions,
+  validateCapabilityTemplateSelection,
+  type CapabilityPackDefinition,
+  type ResolvedCapabilityInit,
+} from "./capabilityPacks.js";
+import { detectMiniprogramInitSnapshot } from "./miniprogramScaffold.js";
 import {
   getPresetAgentDefinition,
   listPresetAgentsForInit,
@@ -148,6 +163,20 @@ const initPresetAgentsOption = Options.text("preset-agents").pipe(
   Options.optional,
 );
 
+const initCapabilityOption = Options.text("capability").pipe(
+  Options.withDescription(
+    "Capability pack (generic, miniprogram). Omit for implicit generic without writing capability.json.",
+  ),
+  Options.optional,
+);
+
+const initCapabilityAddonsOption = Options.text("capability-addons").pipe(
+  Options.withDescription(
+    "Comma-separated capability add-on ids for the selected pack. Omit for none.",
+  ),
+  Options.optional,
+);
+
 const initCreateSandcastleLabelOption = Options.text(
   "create-sandcastle-label",
 ).pipe(
@@ -160,6 +189,15 @@ const initCreateSandcastleLabelOption = Options.text(
 const initBuildImageOption = Options.text("build-image").pipe(
   Options.withDescription(
     "true or false to build the sandbox image after scaffold (skips prompt when set). Omit to be prompted.",
+  ),
+  Options.optional,
+);
+
+const initInstallMiniprogramCiOption = Options.text(
+  "install-miniprogram-ci",
+).pipe(
+  Options.withDescription(
+    "true or false to install project-local miniprogram-ci during Mini Program init (skips prompt when set). Omit to be prompted when miniprogram-ci is missing.",
   ),
   Options.optional,
 );
@@ -182,17 +220,30 @@ const parseStrictBoolean = (
   );
 };
 
+const parseCommaSeparatedList = (raw: string): string[] =>
+  raw
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+
+const parseCapabilityAddonsCliValue = (
+  raw: string,
+): Effect.Effect<readonly string[], InitError, never> => {
+  const trimmed = raw.trim();
+  if (trimmed === "" || trimmed.toLowerCase() === "none") {
+    return Effect.succeed([]);
+  }
+  return Effect.succeed(parseCommaSeparatedList(trimmed));
+};
+
 const parsePresetAgentsCliValue = (
   raw: string,
 ): Effect.Effect<readonly string[] | undefined, InitError, never> => {
-  const t = raw.trim();
-  if (t === "" || t.toLowerCase() === "none") {
+  const trimmed = raw.trim();
+  if (trimmed === "" || trimmed.toLowerCase() === "none") {
     return Effect.succeed(undefined);
   }
-  const ids = t
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
+  const ids = parseCommaSeparatedList(trimmed);
   for (const id of ids) {
     if (!getPresetAgentDefinition(id)) {
       return Effect.fail(
@@ -450,18 +501,185 @@ const validateHostRequirementsForInit = (options: {
 const buildHostRequirementNextStepLines = (options: {
   readonly sandboxProvider: SandboxProviderEntry;
   readonly backlogManager: BacklogManagerEntry;
+  readonly projectProfile: ProjectProfileEntry;
+  readonly gitRemoteNextSteps?: readonly string[];
 }): string[] => {
-  if (
-    options.sandboxProvider.name === "no-sandbox" &&
-    options.backlogManager.name === "beads"
-  ) {
-    return [
-      "Keep `bd` available on your host PATH when using no-sandbox + beads. Prompt shell expressions run on the host in this mode, not in a container.",
-    ];
+  const lines: string[] = [
+    ...buildDockerRootHostNextStepLines(options.sandboxProvider.name),
+  ];
+
+  if (options.sandboxProvider.name === "no-sandbox") {
+    if (options.backlogManager.name === "beads") {
+      lines.push(
+        "Keep `bd` available on your host PATH when using no-sandbox + beads. Prompt shell expressions run on the host in this mode, not in a container.",
+      );
+    }
+
+    if (options.projectProfile.name === "python") {
+      lines.push(
+        "Python bootstrap runs on the host in no-sandbox mode. Install `python3-venv` and/or `uv` locally (the Docker image installs these for container runs), or choose the docker sandbox provider.",
+      );
+    }
   }
 
-  return [];
+  if (options.gitRemoteNextSteps && options.gitRemoteNextSteps.length > 0) {
+    lines.push(...options.gitRemoteNextSteps);
+  }
+
+  return lines;
 };
+
+const githubIssuesGitRemoteNextStepLinesForCwd = (
+  backlogManagerName: string,
+): Effect.Effect<readonly string[], InitError> => {
+  if (backlogManagerName !== "github-issues") {
+    return Effect.succeed([]);
+  }
+  return Effect.tryPromise({
+    try: () => inspectGitRemotes(process.cwd()),
+    catch: (error) =>
+      new InitError({
+        message: error instanceof Error ? error.message : String(error),
+      }),
+  }).pipe(Effect.map(githubIssuesGitRemoteNextStepLines));
+};
+
+const statusDockerRootBuildGuidanceIfNeeded = (
+  hostIsRoot: boolean,
+): Effect.Effect<void, never, Display> =>
+  Effect.gen(function* () {
+    if (!hostIsRoot) {
+      return;
+    }
+    const d = yield* Display;
+    yield* d.status(ROOT_HOST_DOCKER_UID_GUIDANCE, "info");
+  });
+
+const promptForCapabilityAddons = (
+  pack: CapabilityPackDefinition,
+  sandboxProviderName: string,
+): Effect.Effect<readonly string[], InitError, never> =>
+  Effect.gen(function* () {
+    const selected = yield* Effect.promise(() =>
+      clack.multiselect({
+        message: "Select capability add-ons (optional):",
+        options: [
+          ...listCapabilityAddonPromptOptions(pack, sandboxProviderName),
+        ],
+        required: false,
+      }),
+    );
+    if (clack.isCancel(selected)) {
+      yield* Effect.fail(
+        new InitError({ message: "Capability add-on selection cancelled." }),
+      );
+    }
+    if (!Array.isArray(selected) || selected.length === 0) {
+      return [];
+    }
+    return selected;
+  });
+
+const resolveCapabilityAddonIds = (options: {
+  readonly selectedCapabilityId: string | undefined;
+  readonly sandboxProviderName: string;
+  readonly capabilityAddonsCli: OptionalTextFlag;
+  readonly scriptedInit: boolean;
+}): Effect.Effect<readonly string[], InitError, never> =>
+  Effect.gen(function* () {
+    if (options.capabilityAddonsCli._tag === "Some") {
+      return yield* parseCapabilityAddonsCliValue(
+        options.capabilityAddonsCli.value,
+      );
+    }
+
+    if (options.scriptedInit || options.selectedCapabilityId === undefined) {
+      return [];
+    }
+
+    const pack = getCapabilityPackDefinition(options.selectedCapabilityId);
+    if (pack === undefined || pack.addons.length === 0) {
+      return [];
+    }
+
+    return yield* promptForCapabilityAddons(pack, options.sandboxProviderName);
+  });
+
+const resolveSelectedCapabilityId = (
+  capabilityCli: OptionalTextFlag,
+  scriptedInit: boolean,
+): Effect.Effect<string | undefined, InitError, never> =>
+  Effect.gen(function* () {
+    if (capabilityCli._tag === "Some") {
+      return capabilityCli.value;
+    }
+    if (scriptedInit) {
+      return undefined;
+    }
+
+    const selected = yield* Effect.promise(() =>
+      clack.select({
+        message: "Select a capability pack:",
+        initialValue: "generic",
+        options: listCapabilityPacksForInit(),
+      }),
+    );
+    if (clack.isCancel(selected)) {
+      yield* Effect.fail(
+        new InitError({ message: "Capability pack selection cancelled." }),
+      );
+    }
+
+    const picked = selected as string;
+    return picked === DEFAULT_CAPABILITY_PACK_ID ? undefined : picked;
+  });
+
+const resolveMiniprogramCiInstallApproval = (options: {
+  readonly cwd: string;
+  readonly capabilityInit: ResolvedCapabilityInit;
+  readonly installMiniprogramCiCli: OptionalTextFlag;
+  readonly scriptedInit: boolean;
+}): Effect.Effect<boolean | undefined, InitError, never> =>
+  Effect.gen(function* () {
+    if (
+      options.capabilityInit.capabilityId !== MINIPROGRAM_CAPABILITY_PACK_ID ||
+      !options.capabilityInit.writeCapabilityManifest
+    ) {
+      return undefined;
+    }
+
+    const miniprogramSnapshot = detectMiniprogramInitSnapshot(options.cwd);
+    if (miniprogramSnapshot.miniprogramCi.status === "available") {
+      return undefined;
+    }
+
+    if (options.installMiniprogramCiCli._tag === "Some") {
+      return yield* parseStrictBoolean(
+        "install-miniprogram-ci",
+        options.installMiniprogramCiCli.value,
+      );
+    }
+
+    if (options.scriptedInit) {
+      return undefined;
+    }
+
+    const approved = yield* Effect.promise(() =>
+      clack.confirm({
+        message:
+          "Install project-local miniprogram-ci as a dev dependency? (Recommended for platform preview validation; global CLI and npx do not satisfy Sandcastle's managed loop.)",
+        initialValue: false,
+      }),
+    );
+    if (clack.isCancel(approved)) {
+      yield* Effect.fail(
+        new InitError({
+          message: "miniprogram-ci installation choice cancelled.",
+        }),
+      );
+    }
+    return approved === true;
+  });
 
 const isFullyScriptedInit = (options: {
   agentFlag: OptionalTextFlag;
@@ -496,8 +714,11 @@ const initCommand = Command.make(
     backlog: initBacklogOption,
     projectProfile: initProjectProfileOption,
     presetAgents: initPresetAgentsOption,
+    capability: initCapabilityOption,
+    capabilityAddons: initCapabilityAddonsOption,
     createSandcastleLabel: initCreateSandcastleLabelOption,
     buildImage: initBuildImageOption,
+    installMiniprogramCi: initInstallMiniprogramCiOption,
   },
   ({
     imageName: imageNameFlag,
@@ -509,8 +730,11 @@ const initCommand = Command.make(
     backlog: backlogCli,
     projectProfile: projectProfileCli,
     presetAgents: presetAgentsCli,
+    capability: capabilityCli,
+    capabilityAddons: capabilityAddonsCli,
     createSandcastleLabel: createSandcastleLabelCli,
     buildImage: buildImageCli,
+    installMiniprogramCi: installMiniprogramCiCli,
   }) =>
     Effect.gen(function* () {
       const d = yield* Display;
@@ -541,6 +765,19 @@ const initCommand = Command.make(
             }),
           );
         }
+      }
+
+      if (
+        capabilityCli._tag === "Some" &&
+        !getCapabilityPackDefinition(capabilityCli.value)
+      ) {
+        yield* Effect.fail(
+          new InitError({
+            message: `Unknown capability pack "${capabilityCli.value}". Available: ${listCapabilityPacksForInit()
+              .map((p) => p.value)
+              .join(", ")}`,
+          }),
+        );
       }
 
       // Resolve agent: CLI flag > interactive select
@@ -659,30 +896,6 @@ const initCommand = Command.make(
         selectedBacklogManager = getBacklogManager(selected as string)!;
       }
 
-      // Resolve template: CLI flag > interactive select (already validated above)
-      let selectedTemplate: string;
-      if (template._tag === "Some") {
-        selectedTemplate = template.value;
-      } else {
-        const selected = yield* Effect.promise(() =>
-          clack.select({
-            message: "Select a template:",
-            initialValue: "blank",
-            options: templates.map((tmpl) => ({
-              value: tmpl.name,
-              label: tmpl.name,
-              hint: tmpl.description,
-            })),
-          }),
-        );
-        if (clack.isCancel(selected)) {
-          yield* Effect.fail(
-            new InitError({ message: "Template selection cancelled." }),
-          );
-        }
-        selectedTemplate = selected as string;
-      }
-
       yield* validateHostRequirementsForInit({
         sandboxProvider: selectedSandboxProvider,
         backlogManager: selectedBacklogManager,
@@ -700,16 +913,102 @@ const initCommand = Command.make(
         selectedBacklogManagerName: selectedBacklogManager.name,
       });
 
+      const selectedCapabilityId = yield* resolveSelectedCapabilityId(
+        capabilityCli,
+        scriptedInit,
+      );
+
+      const capabilityAddonIds = yield* resolveCapabilityAddonIds({
+        selectedCapabilityId,
+        sandboxProviderName: selectedSandboxProvider.name,
+        capabilityAddonsCli,
+        scriptedInit,
+      });
+
+      let explicitPresetAgentIds: readonly string[] | undefined;
+      if (presetAgentsCli._tag === "Some") {
+        explicitPresetAgentIds = yield* parsePresetAgentsCliValue(
+          presetAgentsCli.value,
+        );
+      }
+
+      const capabilityInit = yield* Effect.try({
+        try: () =>
+          resolveCapabilityInitOptions({
+            capabilityId: selectedCapabilityId,
+            explicitTemplate:
+              template._tag === "Some" ? template.value : undefined,
+            explicitProjectProfile:
+              projectProfileCli._tag === "Some"
+                ? projectProfileCli.value
+                : undefined,
+            explicitPresetAgentIds,
+            addonIds: capabilityAddonIds,
+            sandboxProviderName: selectedSandboxProvider.name,
+          }),
+        catch: (e) =>
+          new InitError({
+            message: e instanceof Error ? e.message : String(e),
+          }),
+      });
+
+      let selectedTemplate: string;
+      if (template._tag === "Some") {
+        selectedTemplate = template.value;
+      } else if (scriptedInit) {
+        selectedTemplate = capabilityInit.templateName;
+      } else {
+        const compatibleTemplateNames = getCapabilityPackDefinition(
+          capabilityInit.capabilityId,
+        )?.compatibleTemplates;
+        const selectableTemplates = compatibleTemplateNames
+          ? templates.filter((tmpl) =>
+              compatibleTemplateNames.includes(tmpl.name),
+            )
+          : templates;
+        const selected = yield* Effect.promise(() =>
+          clack.select({
+            message: "Select a template:",
+            initialValue: capabilityInit.templateName,
+            options: selectableTemplates.map((tmpl) => ({
+              value: tmpl.name,
+              label: tmpl.name,
+              hint: tmpl.description,
+            })),
+          }),
+        );
+        if (clack.isCancel(selected)) {
+          yield* Effect.fail(
+            new InitError({ message: "Template selection cancelled." }),
+          );
+        }
+        selectedTemplate = selected as string;
+      }
+
+      yield* Effect.try({
+        try: () =>
+          validateCapabilityTemplateSelection(
+            capabilityInit.capabilityId,
+            selectedTemplate,
+          ),
+        catch: (e) =>
+          new InitError({
+            message: e instanceof Error ? e.message : String(e),
+          }),
+      });
+
       let selectedProjectProfile: ProjectProfileEntry;
       if (cliProjectProfile) {
         selectedProjectProfile = cliProjectProfile;
       } else if (scriptedInit) {
-        selectedProjectProfile = DEFAULT_PROJECT_PROFILE;
+        selectedProjectProfile =
+          getProjectProfile(capabilityInit.projectProfileName) ??
+          DEFAULT_PROJECT_PROFILE;
       } else {
         const selected = yield* Effect.promise(() =>
           clack.select({
             message: "Select a project profile:",
-            initialValue: DEFAULT_PROJECT_PROFILE_NAME,
+            initialValue: capabilityInit.projectProfileName,
             options: listProjectProfiles().map((profile) => ({
               value: profile.name,
               label: profile.label,
@@ -729,9 +1028,9 @@ const initCommand = Command.make(
 
       let presetAgentIds: readonly string[] | undefined;
       if (presetAgentsCli._tag === "Some") {
-        presetAgentIds = yield* parsePresetAgentsCliValue(
-          presetAgentsCli.value,
-        );
+        presetAgentIds = explicitPresetAgentIds;
+      } else if (scriptedInit && capabilityInit.presetAgentIds.length > 0) {
+        presetAgentIds = capabilityInit.presetAgentIds;
       } else {
         const addPresets = yield* Effect.promise(() =>
           clack.confirm({
@@ -794,6 +1093,14 @@ const initCommand = Command.make(
         }
       }
 
+      const miniprogramCiInstallApproved =
+        yield* resolveMiniprogramCiInstallApproval({
+          cwd,
+          capabilityInit,
+          installMiniprogramCiCli,
+          scriptedInit,
+        });
+
       const scaffoldResult = yield* d.spinner(
         "Scaffolding .sandcastle/ config directory...",
         scaffold(cwd, {
@@ -808,6 +1115,10 @@ const initCommand = Command.make(
           sandcastleVersion: VERSION,
           ...(presetAgentIds !== undefined && presetAgentIds.length > 0
             ? { presetAgentIds }
+            : {}),
+          capabilityInit,
+          ...(miniprogramCiInstallApproved !== undefined
+            ? { miniprogramCiInstallApproved }
             : {}),
         }).pipe(
           Effect.mapError(
@@ -824,6 +1135,10 @@ const initCommand = Command.make(
           "package.json was updated but `npm install` failed. Run `npm install` in the project root before `npm run sandcastle`.",
           "warn",
         );
+      }
+
+      if (scaffoldResult.capabilityBlankTemplateWarning) {
+        yield* d.status(scaffoldResult.capabilityBlankTemplateWarning, "warn");
       }
 
       const authRequirements = collectAuthRequirements({
@@ -1022,10 +1337,18 @@ const initCommand = Command.make(
           cursorChoice: cursorAuthChoice,
         }),
       };
+
+      const gitRemoteNextSteps =
+        yield* githubIssuesGitRemoteNextStepLinesForCwd(
+          selectedBacklogManager.name,
+        );
+
       const hostRequirementResult: HostRequirementResult = {
         nextStepLines: buildHostRequirementNextStepLines({
           sandboxProvider: selectedSandboxProvider,
           backlogManager: selectedBacklogManager,
+          projectProfile: selectedProjectProfile,
+          gitRemoteNextSteps,
         }),
       };
 
@@ -1058,9 +1381,7 @@ const initCommand = Command.make(
           );
         } else {
           const { buildArgs, hostIsRoot } = resolveDockerUidBuildArgs();
-          if (hostIsRoot) {
-            yield* d.status(rootHostDockerUidGuidance(), "info");
-          }
+          yield* statusDockerRootBuildGuidanceIfNeeded(hostIsRoot);
           yield* d.spinner(
             `Building ${providerLabel} image '${imageName}'...`,
             buildImage(imageName, containerfileDir, { buildArgs }),
@@ -1087,6 +1408,12 @@ const initCommand = Command.make(
           presetAgentIds: scaffoldResult.presetAgentIds,
           packageSetup: scaffoldResult.packageSetup,
           dependencyInstallFailed: scaffoldResult.dependencyInstallFailed,
+          ...(scaffoldResult.capabilityBlankTemplateWarning
+            ? {
+                capabilityBlankTemplateWarning:
+                  scaffoldResult.capabilityBlankTemplateWarning,
+              }
+            : {}),
           authSetupSummary: {
             lines: authSetupResult.nextStepLines,
           },
@@ -1129,9 +1456,7 @@ const buildImageCommand = Command.make(
         dockerfile._tag === "Some" ? dockerfile.value : undefined;
 
       const { buildArgs, hostIsRoot } = resolveDockerUidBuildArgs();
-      if (hostIsRoot) {
-        yield* d.status(rootHostDockerUidGuidance(), "info");
-      }
+      yield* statusDockerRootBuildGuidanceIfNeeded(hostIsRoot);
 
       yield* d.spinner(
         `Building Docker image '${imageName}'...`,

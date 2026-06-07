@@ -656,11 +656,87 @@ For all templates except `blank`, `.sandcastle/bootstrap.sh` is the repository b
 
 After you choose a template, init can optionally add **preset agent roles**. In this mental model, the **template** is the default **workflow**, while a **preset** is an extra **reusable role** (for example reviewer, planner, merger, or WeChat Mini Program–oriented work) with bundled Markdown skills. Selected roles are copied to `.sandcastle/agents/` and `.sandcastle/skills/`, and `.sandcastle/agent-profiles.json` records suggested agent provider, model, and effort. Compose those prompts from `main.mts` with `run()` when you want to involve a role; nothing is auto-wired into the template loop in v1. Provider recommendations are metadata only and may require choosing matching installed runtimes during init.
 
+### Capability packs
+
+A **capability pack** is an explicit **init** choice that specializes Sandcastle for a class of development work. It composes existing init concepts — **template**, **Project profile**, **preset agents**, **skills**, context files, a verification entrypoint, and optional **capability add-ons** — into one coherent agent environment. Sandcastle does **not** auto-detect or infer a capability pack from repository files in the first version.
+
+| Concept               | What it controls                                                                                                           |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| **Project profile**   | Language or build-system shape → Dockerfile/Containerfile tools and `.sandcastle/bootstrap.sh`                             |
+| **Template**          | Orchestration workflow (issue loop, parallel planner, reviewer steps, etc.)                                                |
+| **Preset agent**      | Reusable role with bundled Markdown **skills** (copied to `.sandcastle/agents/` and `.sandcastle/skills/`)                 |
+| **Skill**             | Domain guidance file a preset or capability pack references                                                                |
+| **Capability pack**   | Domain specialization: defaults for template/profile/presets, context files, `.sandcastle/verify.sh`, and optional add-ons |
+| **Capability add-on** | Narrower optional extension (often sandbox-specific); e.g. WeChat DevTools MCP runtime debugging                           |
+
+First-version packs:
+
+| Pack          | Purpose                                                                                       |
+| ------------- | --------------------------------------------------------------------------------------------- |
+| `generic`     | Default low-assumption init (same as omitting `--capability`)                                 |
+| `miniprogram` | WeChat Mini Program (native variant): verification loop, setup checklist, Mini Program preset |
+
+Capability packs provide defaults; explicit init flags override them. For example, `--capability miniprogram` defaults to `parallel-planner-with-review`, `node` project profile, and the `miniprogram` preset, but you can still pass `--template`, `--project-profile`, or `--preset-agents` to customize.
+
+When you pass `--capability` explicitly (or choose a non-generic pack interactively), init writes `.sandcastle/capability.json` as scaffold metadata. Generated verification workflows do **not** require reading the manifest at run time.
+
+#### WeChat Mini Program (`miniprogram`)
+
+Select `miniprogram` during init (`--capability miniprogram`) for native WeChat Mini Programs. Taro, uni-app, mpvue, and other cross-framework outputs are **unsupported** in the first version — the native fallback verifier reports an unsupported variant in `debug/wx-check.log`.
+
+**Init setup**
+
+- Interactive init asks for a capability pack before template selection. Scripted init uses `--capability miniprogram`.
+- Init detects project-local `miniprogram-ci` and can offer to install it as a dev dependency (`--install-miniprogram-ci true` in scripted mode). Global CLI and `npx` do not satisfy Sandcastle's managed loop — the package must live in the project.
+- Init writes `.sandcastle/context/miniprogram-setup.md` with a snapshot of detected AppID, upload key, `wx:check`, and `miniprogram-ci` state plus next-step guidance (not updated by later verification runs).
+
+**AppID and upload key**
+
+- **AppID:** `WX_APPID` overrides `project.config.json`; placeholder or missing AppID keeps platform validation in `not_configured`.
+- **Upload key:** prefer `WX_UPLOAD_KEY_PATH` pointing **outside** the repo. Repository-local drop zone: `.sandcastle/auth/wx-upload/private.{appid}.key` (gitignored). Never commit `private.*.key` files.
+- On the [WeChat public platform](https://mp.weixin.qq.com/), configure the code upload private key and **IP allowlist** for CI preview/upload when using `miniprogram-ci`.
+
+**Verification loop**
+
+After Mini Program code changes, run `.sandcastle/verify.sh` from the repository root:
+
+1. If `npm run wx:check` exists, the wrapper runs it and preserves JSONL diagnostics when the script writes them.
+2. Otherwise `.sandcastle/wx-check-native.mjs` runs native structure checks and optional `miniprogram-ci` preview when platform validation is configured.
+
+Artifacts:
+
+| Path                   | Role                                                 |
+| ---------------------- | ---------------------------------------------------- |
+| `debug/wx-check.log`   | JSONL diagnostic log (read on failure)               |
+| `debug/wx-preview.jpg` | Preview image when `miniprogram-ci` preview succeeds |
+
+`platform_validation_status` in the log is one of: `not_configured`, `configured_missing_tool`, `configured_invalid`, or `passed`. Unconfigured credentials still allow local checks to pass; present but broken configuration fails loudly.
+
+**Final verification summary**
+
+Capability-pack prompts require agents to end work with a structured summary:
+
+- `local`: `passed` or `failed`
+- `platform`: `passed`, `not_configured`, or `failed`
+- `artifacts`: paths such as `debug/wx-check.log` and `debug/wx-preview.jpg` when they exist
+
+Do not claim full platform validation passed when `platform` is `not_configured`.
+
+**Runtime-debug add-on (`runtime-debug`)**
+
+Optional **no-sandbox only** add-on for WeChat Developer Tools / MCP runtime debugging (simulator, console, screenshots). Interactive init offers it after you choose the `miniprogram` capability and sandbox provider; scripted init uses `--capability-addons runtime-debug`. With Docker sandbox, the add-on appears disabled with an explanation. Init scaffolds context and prompt guidance but does **not** install MCP servers, configure DevTools, or start login flows. Runtime debugging supplements — it does not replace — `.sandcastle/verify.sh` unless the task explicitly requires runtime evidence.
+
+**Out of scope (first version)**
+
+- **CloudBase** capability add-on (cloud functions, database, storage) is out of scope for the first Mini Program capability version.
+- Automatic capability pack inference from repo files.
+- `runtime-debug` with Docker sandbox (rejected at init).
+
 ## CLI commands
 
 ### `sandcastle init`
 
-Scaffolds the `.sandcastle/` config directory and optionally builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a default scaffold agent, which agent runtimes to install in the image, sandbox provider, backlog manager, workflow template, and Project profile (after template selection). Init now offers `docker` and `no-sandbox`: choosing `docker` follows the normal image-build flow, while choosing `no-sandbox` skips image build during init and rewrites the scaffolded `main.mts` or `main.ts` to call `noSandbox()`. After scaffold (and before optional image build), init also runs an auth setup step for selected tools, including GitHub Issues, Codex, and Cursor.
+Scaffolds the `.sandcastle/` config directory and optionally builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a capability pack (first), default scaffold agent, installed runtimes, sandbox provider, backlog manager, optional capability add-ons (when the pack exposes them), workflow template, and Project profile. Init now offers `docker` and `no-sandbox`: choosing `docker` follows the normal image-build flow, while choosing `no-sandbox` skips image build during init and rewrites the scaffolded `main.mts` or `main.ts` to call `noSandbox()`. After scaffold (and before optional image build), init also runs an auth setup step for selected tools, including GitHub Issues, Codex, and Cursor. When you select the `miniprogram` capability pack, init may also offer project-local `miniprogram-ci` installation and writes Mini Program verification scaffold files.
 
 Think of the init agent choices as two layers:
 
@@ -670,6 +746,8 @@ Think of the init agent choices as two layers:
 `main.mts`/`main.ts` remains the orchestration surface after init. If you install multiple runtimes, edit that file to import and call the providers you want for each `run()` or `createSandbox()` flow. For scripted init, omit `--runtimes` to install the selected `--agent` runtime, or pass a comma-separated list.
 
 When you pair `--sandbox no-sandbox` with `--backlog beads`, init validates that `bd` is already available on your host `PATH`. In no-sandbox mode, prompt shell expressions run on the host instead of inside a container, so Beads must be installed locally before the generated workflow can run.
+
+With `--sandbox no-sandbox` and `--project-profile python`, bootstrap runs on the host rather than in the Python profile image. Install `python3-venv` and/or `uv` on the host (Debian/Ubuntu: `apt install python3-venv`) so `.sandcastle/bootstrap.sh` can create a working virtualenv, or use the `docker` sandbox provider so the generated image supplies those tools.
 
 #### Project profiles
 
@@ -705,35 +783,43 @@ Bootstrap behavior:
 - Scaffolded `main.mts` hooks use `timeoutMs: 300_000` (5 minutes) for bootstrap so typical dependency installs are not cut off by the generic 60 s hook default. Edit `timeoutMs` in `.sandcastle/main.mts` if your setup needs longer.
 
 ```bash
+# Mini Program capability pack (Docker — core verification loop)
 npx sandcastle init \
   --agent claude-code \
-  --runtimes claude-code,codex,cursor \
+  --runtimes claude-code \
   --sandbox docker \
   --backlog github-issues \
-  --template simple-loop \
+  --capability miniprogram \
+  --template parallel-planner-with-review \
   --project-profile node \
-  --preset-agents none \
+  --preset-agents miniprogram \
+  --install-miniprogram-ci true \
   --create-sandcastle-label false \
   --build-image false
 ```
 
+Omit `--capability` for implicit `generic` without writing `.sandcastle/capability.json`. Add `--capability-addons runtime-debug` only with `--sandbox no-sandbox` when you want WeChat DevTools MCP guidance on the host.
+
 Existing single-runtime projects remain valid. `sandcastle init` does not automatically migrate an existing `.sandcastle/` config directory; it errors instead of overwriting your customizations.
 
-| Option                      | Required | Default                                           | Description                                                                                               |
-| --------------------------- | -------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `--image-name`              | No       | `sandcastle:<repo-dir-name>`                      | Docker image name                                                                                         |
-| `--agent`                   | No       | Interactive prompt                                | Default scaffold agent (`claude-code`, `pi`, `codex`, `cursor`, `opencode`)                               |
-| `--runtimes`                | No       | Selected `--agent` runtime, or interactive prompt | Comma-separated runtimes to install (`claude-code,codex`); `--installed-runtimes` is accepted as an alias |
-| `--model`                   | No       | Agent's default model                             | Model to use (e.g. `claude-sonnet-4-6`). Defaults to agent's default                                      |
-| `--template`                | No       | Interactive prompt                                | Template to scaffold (e.g. `blank`, `simple-loop`)                                                        |
-| `--project-profile`         | No       | `generic`                                         | Project type for containerfile tools and bootstrap (`generic`, `node`, `python`, `cpp`)                   |
-| `--sandbox`                 | No       | Interactive prompt                                | Sandbox provider (`docker` or `no-sandbox`)                                                               |
-| `--backlog`                 | No       | Interactive prompt                                | Backlog manager (`github-issues` or `beads`)                                                              |
-| `--preset-agents`           | No       | Interactive prompt                                | Comma-separated preset ids (e.g. `reviewer,planner`) or `none`                                            |
-| `--create-sandcastle-label` | No       | Interactive prompt                                | `true`/`false` for creating the `Sandcastle` GitHub label                                                 |
-| `--build-image`             | No       | Interactive prompt                                | `true`/`false` to build sandbox image after scaffold                                                      |
+| Option                      | Required | Default                                           | Description                                                                                                 |
+| --------------------------- | -------- | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `--image-name`              | No       | `sandcastle:<repo-dir-name>`                      | Docker image name                                                                                           |
+| `--agent`                   | No       | Interactive prompt                                | Default scaffold agent (`claude-code`, `pi`, `codex`, `cursor`, `opencode`)                                 |
+| `--runtimes`                | No       | Selected `--agent` runtime, or interactive prompt | Comma-separated runtimes to install (`claude-code,codex`); `--installed-runtimes` is accepted as an alias   |
+| `--model`                   | No       | Agent's default model                             | Model to use (e.g. `claude-sonnet-4-6`). Defaults to agent's default                                        |
+| `--template`                | No       | Interactive prompt                                | Template to scaffold (e.g. `blank`, `simple-loop`)                                                          |
+| `--project-profile`         | No       | `generic`                                         | Project type for containerfile tools and bootstrap (`generic`, `node`, `python`, `cpp`)                     |
+| `--sandbox`                 | No       | Interactive prompt                                | Sandbox provider (`docker` or `no-sandbox`)                                                                 |
+| `--backlog`                 | No       | Interactive prompt                                | Backlog manager (`github-issues` or `beads`)                                                                |
+| `--preset-agents`           | No       | Interactive prompt                                | Comma-separated preset ids (e.g. `reviewer,planner`) or `none`                                              |
+| `--capability`              | No       | Implicit `generic`                                | Capability pack (`generic`, `miniprogram`). Explicit non-generic values write `.sandcastle/capability.json` |
+| `--capability-addons`       | No       | None                                              | Comma-separated add-on ids for the selected pack (e.g. `runtime-debug` for `miniprogram` + no-sandbox)      |
+| `--install-miniprogram-ci`  | No       | Interactive prompt when applicable                | `true`/`false` to install project-local `miniprogram-ci` during `miniprogram` init                          |
+| `--create-sandcastle-label` | No       | Interactive prompt                                | `true`/`false` for creating the `Sandcastle` GitHub label                                                   |
+| `--build-image`             | No       | Interactive prompt                                | `true`/`false` to build sandbox image after scaffold                                                        |
 
-Creates the following files (plus optional `agents/`, `skills/`, and `agent-profiles.json` when you add preset roles):
+Creates the following files (plus optional `agents/`, `skills/`, `agent-profiles.json`, and Mini Program capability files when applicable):
 
 ```
 .sandcastle/
@@ -743,6 +829,15 @@ Creates the following files (plus optional `agents/`, `skills/`, and `agent-prof
 ├── prompt.md       # Agent instructions
 ├── .env.example    # Token placeholders
 └── .gitignore      # Ignores .env, logs/
+
+# When --capability miniprogram (or explicit non-generic pack):
+├── capability.json           # Init-time metadata (optional record)
+├── verify.sh                   # Mini Program verification entrypoint
+├── wx-check-native.mjs         # Native fallback verifier
+├── context/
+│   ├── miniprogram.md
+│   └── miniprogram-setup.md    # Init-time setup checklist snapshot
+└── auth/wx-upload/             # Gitignored upload-key drop zone
 ```
 
 Errors if `.sandcastle/` already exists to prevent overwriting customizations.

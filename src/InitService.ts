@@ -6,6 +6,27 @@ import { basename, dirname, isAbsolute, join } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import {
+  buildCapabilityManifest,
+  validateCapabilityRegistries,
+  type CapabilityManifest,
+  type CapabilitySetupAction,
+  type ResolvedCapabilityInit,
+  validateCapabilityTemplateSelection,
+} from "./capabilityPacks.js";
+import {
+  appendMiniprogramRuntimeDebugToPrompt,
+  appendMiniprogramVerificationToPrompt,
+  listTemplatePromptFiles,
+  shouldAssembleMiniprogramPrompts,
+  shouldAssembleMiniprogramRuntimeDebugPrompts,
+} from "./capabilityPromptAssembly.js";
+import {
+  scaffoldMiniprogramCapabilityCore,
+  scaffoldMiniprogramRuntimeDebugAddon,
+  shouldScaffoldMiniprogramCore,
+  shouldScaffoldMiniprogramRuntimeDebug,
+} from "./miniprogramScaffold.js";
+import {
   getPresetAgentDefinition,
   getPresetBundlesRoot,
   PRESET_AGENT_DEFINITIONS,
@@ -13,11 +34,13 @@ import {
   type PresetAgentDefinition,
 } from "./presetAgents.js";
 import { renderBootstrapScript } from "./bootstrap.js";
+import { injectDockerRootRuntimeUid } from "./dockerUidBuildArgs.js";
 import {
   DEFAULT_PROJECT_PROFILE,
   type ProjectProfileEntry,
 } from "./projectProfiles.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
+import { SCAFFOLD_TEMPLATES } from "./initTemplates.js";
 
 export {
   DEFAULT_PROJECT_PROFILE,
@@ -34,38 +57,8 @@ logs/
 worktrees/
 `;
 
-export interface TemplateMetadata {
-  name: string;
-  description: string;
-}
-
-const TEMPLATES: TemplateMetadata[] = [
-  {
-    name: "blank",
-    description: "Bare scaffold — write your own prompt and orchestration",
-  },
-  {
-    name: "simple-loop",
-    description: "Picks issues one by one and closes them",
-  },
-  {
-    name: "sequential-reviewer",
-    description:
-      "Implements issues one by one, with a code review step after each",
-  },
-  {
-    name: "parallel-planner",
-    description:
-      "Plans parallelizable issues, executes on separate branches, merges",
-  },
-  {
-    name: "parallel-planner-with-review",
-    description:
-      "Plans parallelizable issues, executes with per-branch review, merges",
-  },
-];
-
-export const listTemplates = (): TemplateMetadata[] => TEMPLATES;
+export type { TemplateMetadata } from "./initTemplates.js";
+export { listTemplates } from "./initTemplates.js";
 
 // ---------------------------------------------------------------------------
 // Agent registry (internal — not part of public API)
@@ -1021,6 +1014,7 @@ export function getNextStepsLines(
     hostRequirementSummary?: AuthSetupSummary;
     packageSetup?: ProjectPackageSetup;
     dependencyInstallFailed?: boolean;
+    capabilityBlankTemplateWarning?: string;
   },
 ): string[] {
   const presetHintText =
@@ -1035,6 +1029,7 @@ export function getNextStepsLines(
   const dependencyInstallStep = dependencyInstallFailed
     ? DEPENDENCY_INSTALL_NEXT_STEP
     : undefined;
+  const capabilityBlankWarning = options?.capabilityBlankTemplateWarning;
 
   if (template === "blank") {
     let step = 1;
@@ -1047,6 +1042,9 @@ export function getNextStepsLines(
       `${step++}. ${packageScriptStep}`,
     ];
     lines.push(`${step++}. ${blankBootstrapNextStep}`);
+    if (capabilityBlankWarning) {
+      lines.push(`${step++}. ${capabilityBlankWarning}`);
+    }
     if (presetHintText) {
       lines.push(`${step++}. ${presetHintText}`);
     }
@@ -1100,13 +1098,26 @@ function getTemplatesDir(): string {
   return join(dirname(thisFile), "templates");
 }
 
+function resolveCapabilityBlankTemplateWarning(
+  capabilityInit: ResolvedCapabilityInit | undefined,
+  templateName: string,
+): string | undefined {
+  if (capabilityInit === undefined) {
+    return undefined;
+  }
+  return validateCapabilityTemplateSelection(
+    capabilityInit.capabilityId,
+    templateName,
+  ).blankTemplateWarning;
+}
+
 const getTemplateDir = (
   templateName: string,
 ): Effect.Effect<string, Error, never> =>
   Effect.gen(function* () {
-    const template = TEMPLATES.find((t) => t.name === templateName);
+    const template = SCAFFOLD_TEMPLATES.find((t) => t.name === templateName);
     if (!template) {
-      const names = TEMPLATES.map((t) => t.name).join(", ");
+      const names = SCAFFOLD_TEMPLATES.map((t) => t.name).join(", ");
       yield* Effect.fail(
         new Error(`Unknown template: "${templateName}". Available: ${names}`),
       );
@@ -1305,6 +1316,10 @@ const rewriteMainFile = (
       renderAuthMountsProperty(authMounts),
     );
 
+    if (sandboxProvider.name === "docker") {
+      content = injectDockerRootRuntimeUid(content);
+    }
+
     yield* fs
       .writeFileString(mainTsPath, content)
       .pipe(Effect.mapError((e) => new Error(e.message)));
@@ -1423,6 +1438,40 @@ const isTextFile = (filename: string): boolean => {
  * Replace `{{KEY}}` template arguments in all text files in the scaffolded
  * config directory.
  */
+const assembleMiniprogramCapabilityPrompts = (
+  configDir: string,
+  templateName: string,
+  capabilityInit?: ResolvedCapabilityInit,
+): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const includeRuntimeDebug =
+      shouldAssembleMiniprogramRuntimeDebugPrompts(capabilityInit);
+    for (const promptFile of listTemplatePromptFiles(templateName)) {
+      const filePath = join(configDir, promptFile);
+      const exists = yield* fs
+        .exists(filePath)
+        .pipe(Effect.orElseSucceed(() => false));
+      if (!exists) {
+        throw new Error(
+          `Expected template prompt "${promptFile}" for "${templateName}" was not scaffolded.`,
+        );
+      }
+      const content = yield* fs
+        .readFileString(filePath)
+        .pipe(Effect.mapError((e) => new Error(e.message)));
+      let updated = appendMiniprogramVerificationToPrompt(content);
+      if (includeRuntimeDebug) {
+        updated = appendMiniprogramRuntimeDebugToPrompt(updated);
+      }
+      if (updated !== content) {
+        yield* fs
+          .writeFileString(filePath, updated)
+          .pipe(Effect.mapError((e) => new Error(e.message)));
+      }
+    }
+  });
+
 const substituteTemplateArgs = (
   configDir: string,
   templateArgs: Record<string, string>,
@@ -1473,10 +1522,14 @@ export interface ScaffoldOptions {
   projectProfile?: ProjectProfileEntry;
   /** Optional preset agent role ids (see `presetAgents.ts`). */
   presetAgentIds?: readonly string[];
+  /** Resolved capability pack selection from `resolveCapabilityInitOptions`. */
+  capabilityInit?: ResolvedCapabilityInit;
   /** Sandcastle package version for generated devDependency (defaults to this CLI's version). */
   sandcastleVersion?: string;
   /** Skip `npm install` after package.json changes (tests). */
   skipDependencyInstall?: boolean;
+  /** When set, controls user-approved project-local miniprogram-ci installation during Mini Program init. */
+  miniprogramCiInstallApproved?: boolean;
 }
 
 export interface ScaffoldResult {
@@ -1484,6 +1537,7 @@ export interface ScaffoldResult {
   presetAgentIds?: readonly string[];
   packageSetup: ProjectPackageSetup;
   dependencyInstallFailed?: boolean;
+  capabilityBlankTemplateWarning?: string;
 }
 
 /**
@@ -1516,6 +1570,7 @@ export const scaffold = (
   options: ScaffoldOptions,
 ): Effect.Effect<ScaffoldResult, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
+    validateCapabilityRegistries();
     const {
       agent,
       model,
@@ -1526,10 +1581,14 @@ export const scaffold = (
       sandboxProvider = SANDBOX_PROVIDER_REGISTRY[0]!, // default: docker
       projectProfile = DEFAULT_PROJECT_PROFILE,
       presetAgentIds = [],
+      capabilityInit,
       skipDependencyInstall = false,
+      miniprogramCiInstallApproved,
     } = options;
     const fs = yield* FileSystem.FileSystem;
     const configDir = join(repoDir, ".sandcastle");
+    const capabilityBlankTemplateWarning =
+      resolveCapabilityBlankTemplateWarning(capabilityInit, templateName);
 
     const exists = yield* fs
       .exists(configDir)
@@ -1629,6 +1688,47 @@ export const scaffold = (
       yield* rewriteMainCopyToWorktreeForPresets(configDir, mainFilename);
     }
 
+    if (
+      capabilityInit &&
+      shouldAssembleMiniprogramPrompts(
+        capabilityInit.capabilityId,
+        capabilityInit.verification,
+      )
+    ) {
+      yield* assembleMiniprogramCapabilityPrompts(
+        configDir,
+        templateName,
+        capabilityInit,
+      );
+    }
+
+    let miniprogramSetupActions: readonly CapabilitySetupAction[] = [];
+    if (shouldScaffoldMiniprogramCore(capabilityInit)) {
+      const scaffolded = yield* scaffoldMiniprogramCapabilityCore(
+        configDir,
+        repoDir,
+        { miniprogramCiInstallApproved },
+      );
+      miniprogramSetupActions = scaffolded.setupActions;
+    }
+
+    if (shouldScaffoldMiniprogramRuntimeDebug(capabilityInit)) {
+      yield* scaffoldMiniprogramRuntimeDebugAddon(configDir);
+    }
+
+    if (capabilityInit?.writeCapabilityManifest) {
+      const manifest: CapabilityManifest = buildCapabilityManifest(
+        capabilityInit,
+        miniprogramSetupActions,
+      );
+      yield* fs
+        .writeFileString(
+          join(configDir, "capability.json"),
+          `${JSON.stringify(manifest, null, 2)}\n`,
+        )
+        .pipe(Effect.mapError((e) => new Error(e.message)));
+    }
+
     const packageResult = yield* ensureProjectPackage(repoDir, {
       mainFilename,
       sandcastleVersion: options.sandcastleVersion,
@@ -1643,6 +1743,9 @@ export const scaffold = (
       mainFilename,
       packageSetup: packageResult.setup,
       ...(dependencyInstallFailed ? { dependencyInstallFailed } : {}),
+      ...(capabilityBlankTemplateWarning
+        ? { capabilityBlankTemplateWarning }
+        : {}),
       ...(presetAgentIds.length > 0
         ? { presetAgentIds: [...presetAgentIds] }
         : {}),

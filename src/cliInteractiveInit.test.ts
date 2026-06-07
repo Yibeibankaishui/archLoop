@@ -31,6 +31,7 @@ vi.mock("@clack/prompts", async (importOriginal) => {
 });
 
 import { cli } from "./cli.js";
+import { RUNTIME_DEBUG_ADDON_ID } from "./capabilityPacks.js";
 
 describe("sandcastle init interactive runtime selection", () => {
   let hostDir: string;
@@ -52,6 +53,9 @@ describe("sandcastle init interactive runtime selection", () => {
         }
         if (opts.message === "Select a backlog manager:") {
           return "beads";
+        }
+        if (opts.message === "Select a capability pack:") {
+          return "generic";
         }
         if (opts.message === "Select a template:") {
           return "blank";
@@ -92,6 +96,7 @@ describe("sandcastle init interactive runtime selection", () => {
           return "cursor";
         if (opts.message === "Select a sandbox provider:") return "docker";
         if (opts.message === "Select a backlog manager:") return "beads";
+        if (opts.message === "Select a capability pack:") return "generic";
         if (opts.message === "Select a template:") return "simple-loop";
         if (opts.message === "Select a project profile:") {
           expect(opts.initialValue).toBe("generic");
@@ -195,6 +200,7 @@ describe("sandcastle init interactive runtime selection", () => {
           return "cursor";
         if (opts.message === "Select a sandbox provider:") return "docker";
         if (opts.message === "Select a backlog manager:") return "beads";
+        if (opts.message === "Select a capability pack:") return "generic";
         if (opts.message === "Select a template:") return "blank";
         if (opts.message === "Select a project profile:") return "generic";
         if (opts.message === "Set up Cursor authentication now?") {
@@ -237,6 +243,7 @@ describe("sandcastle init interactive runtime selection", () => {
       if (opts.message === "Select the default scaffold agent:") return "codex";
       if (opts.message === "Select a sandbox provider:") return "docker";
       if (opts.message === "Select a backlog manager:") return "github-issues";
+      if (opts.message === "Select a capability pack:") return "generic";
       if (opts.message === "Select a template:") return "blank";
       if (opts.message === "Select a project profile:") return "generic";
       if (opts.message === "Set up GitHub authentication now?") return "env";
@@ -295,6 +302,7 @@ describe("sandcastle init interactive runtime selection", () => {
       if (opts.message === "Select the default scaffold agent:") return "codex";
       if (opts.message === "Select a sandbox provider:") return "docker";
       if (opts.message === "Select a backlog manager:") return "github-issues";
+      if (opts.message === "Select a capability pack:") return "generic";
       if (opts.message === "Select a template:") return "blank";
       if (opts.message === "Select a project profile:") return "generic";
       if (opts.message === "Set up GitHub authentication now?") return "login";
@@ -365,6 +373,7 @@ describe("sandcastle init interactive runtime selection", () => {
       if (opts.message === "Select the default scaffold agent:") return "codex";
       if (opts.message === "Select a sandbox provider:") return "docker";
       if (opts.message === "Select a backlog manager:") return "github-issues";
+      if (opts.message === "Select a capability pack:") return "generic";
       if (opts.message === "Select a template:") return "blank";
       if (opts.message === "Select a project profile:") return "generic";
       if (opts.message === "Set up GitHub authentication now?") return "skip";
@@ -530,5 +539,159 @@ describe("sandcastle init interactive runtime selection", () => {
         message: expect.stringContaining("CURSOR_CONFIG_DIR"),
       }),
     );
+  });
+});
+
+describe("sandcastle init interactive capability add-ons", () => {
+  let hostDir: string;
+  let originalCwd: string;
+
+  const runMiniprogramInteractiveInit = async (options: {
+    sandbox: "docker" | "no-sandbox";
+    addonSelection: readonly string[];
+    backlog?: "beads" | "github-issues";
+  }) => {
+    const backlog =
+      options.backlog ??
+      (options.sandbox === "no-sandbox" ? "github-issues" : "beads");
+    mockSelect.mockImplementation(
+      async (opts: { message: string; initialValue?: string }) => {
+        if (opts.message === "Select the default scaffold agent:")
+          return "cursor";
+        if (opts.message === "Select a sandbox provider:")
+          return options.sandbox;
+        if (opts.message === "Select a backlog manager:") return backlog;
+        if (opts.message === "Select a capability pack:") return "miniprogram";
+        if (opts.message === "Select a template:")
+          return "parallel-planner-with-review";
+        if (opts.message === "Select a project profile:") return "node";
+        if (opts.message === "Set up GitHub authentication now?") return "skip";
+        if (opts.message === "Set up Cursor authentication now?") return "skip";
+        throw new Error(`Unexpected select prompt: ${opts.message}`);
+      },
+    );
+
+    mockMultiselect.mockImplementation(
+      async (opts: { message: string; options?: unknown[] }) => {
+        if (opts.message.includes("Select agent runtimes")) {
+          return ["cursor"];
+        }
+        if (opts.message === "Select capability add-ons (optional):") {
+          return [...options.addonSelection];
+        }
+        throw new Error(`Unexpected multiselect prompt: ${opts.message}`);
+      },
+    );
+
+    mockConfirm.mockImplementation(async (opts: { message: string }) => {
+      if (opts.message.startsWith('Create a "Sandcastle" GitHub label?'))
+        return false;
+      if (opts.message.startsWith("Add preset agent roles")) return false;
+      if (opts.message.startsWith("Build the default Docker image now"))
+        return false;
+      if (
+        opts.message.startsWith(
+          "Install project-local miniprogram-ci as a dev dependency",
+        )
+      ) {
+        return false;
+      }
+      throw new Error(`Unexpected confirm prompt: ${opts.message}`);
+    });
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const ref = yield* Ref.make<ReadonlyArray<DisplayEntry>>([]);
+        yield* cli(["node", "sandcastle", "init"]).pipe(
+          Effect.provide(SilentDisplay.layer(ref)),
+          Effect.provide(NodeContext.layer),
+        );
+      }),
+    );
+  };
+
+  beforeEach(async () => {
+    originalCwd = process.cwd();
+    hostDir = await mkdtemp(
+      join(tmpdir(), "cli-interactive-capability-addons-"),
+    );
+    process.chdir(hostDir);
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    process.chdir(originalCwd);
+    vi.clearAllMocks();
+  });
+
+  it("offers runtime-debug when miniprogram and no-sandbox are selected", async () => {
+    await runMiniprogramInteractiveInit({
+      sandbox: "no-sandbox",
+      addonSelection: [RUNTIME_DEBUG_ADDON_ID],
+    });
+
+    const addonPromptCall = mockMultiselect.mock.calls.find(
+      ([args]) =>
+        (args as { message: string }).message ===
+        "Select capability add-ons (optional):",
+    );
+    expect(addonPromptCall?.[0]).toEqual(
+      expect.objectContaining({
+        message: "Select capability add-ons (optional):",
+        options: [
+          expect.objectContaining({
+            value: RUNTIME_DEBUG_ADDON_ID,
+            hint: expect.stringContaining("no-sandbox"),
+          }),
+        ],
+        required: false,
+      }),
+    );
+
+    const runtimeDebugContext = await readFile(
+      join(hostDir, ".sandcastle", "context", "miniprogram-runtime-debug.md"),
+      "utf-8",
+    );
+    expect(runtimeDebugContext).toContain("WaterTian");
+    expect(runtimeDebugContext).toMatch(/does not replace.*verify\.sh/is);
+
+    const manifest = JSON.parse(
+      await readFile(join(hostDir, ".sandcastle", "capability.json"), "utf-8"),
+    ) as { addons: string[] };
+    expect(manifest.addons).toEqual([RUNTIME_DEBUG_ADDON_ID]);
+  });
+
+  it("shows runtime-debug disabled with docker sandbox and skips context", async () => {
+    await runMiniprogramInteractiveInit({
+      sandbox: "docker",
+      addonSelection: [],
+    });
+
+    const addonPromptCall = mockMultiselect.mock.calls.find(
+      ([args]) =>
+        (args as { message: string }).message ===
+        "Select capability add-ons (optional):",
+    );
+    expect(addonPromptCall?.[0]).toEqual(
+      expect.objectContaining({
+        message: "Select capability add-ons (optional):",
+        options: [
+          expect.objectContaining({
+            value: RUNTIME_DEBUG_ADDON_ID,
+            disabled: true,
+            hint: expect.stringMatching(
+              /Unavailable with "docker" sandbox.*no-sandbox/i,
+            ),
+          }),
+        ],
+      }),
+    );
+
+    await expect(
+      readFile(
+        join(hostDir, ".sandcastle", "context", "miniprogram-runtime-debug.md"),
+        "utf-8",
+      ),
+    ).rejects.toThrow();
   });
 });

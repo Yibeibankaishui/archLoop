@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_AGENT_GID,
   DEFAULT_AGENT_UID,
+  buildDockerRootHostNextStepLines,
+  injectDockerRootRuntimeUid,
   resolveDockerUidBuildArgs,
-  rootHostDockerUidGuidance,
+  ROOT_HOST_DOCKER_UID_GUIDANCE,
 } from "./dockerUidBuildArgs.js";
 
 describe("resolveDockerUidBuildArgs", () => {
@@ -54,10 +56,48 @@ describe("resolveDockerUidBuildArgs", () => {
   });
 });
 
-describe("rootHostDockerUidGuidance", () => {
+describe("ROOT_HOST_DOCKER_UID_GUIDANCE", () => {
   it("mentions containerUid/containerGid and the image build UID", () => {
-    expect(rootHostDockerUidGuidance()).toContain("containerUid");
-    expect(rootHostDockerUidGuidance()).toContain("containerGid");
-    expect(rootHostDockerUidGuidance()).toContain(String(DEFAULT_AGENT_UID));
+    expect(ROOT_HOST_DOCKER_UID_GUIDANCE).toContain("containerUid");
+    expect(ROOT_HOST_DOCKER_UID_GUIDANCE).toContain("containerGid");
+    expect(ROOT_HOST_DOCKER_UID_GUIDANCE).toContain(String(DEFAULT_AGENT_UID));
+  });
+});
+
+describe("injectDockerRootRuntimeUid", () => {
+  const sample = `const sandboxProvider = docker({
+  mounts: [],
+});`;
+
+  it("injects containerUid and containerGid when host UID is 0", () => {
+    const updated = injectDockerRootRuntimeUid(sample, 0);
+    expect(updated).toContain("containerUid: 1000");
+    expect(updated).toContain("containerGid: 1000");
+  });
+
+  it("leaves content unchanged for non-root hosts", () => {
+    expect(injectDockerRootRuntimeUid(sample, 1001)).toBe(sample);
+  });
+
+  it("does not double-inject when containerUid is already present", () => {
+    const withUid = `const sandboxProvider = docker({
+  containerUid: 1000,
+  containerGid: 1000,
+  mounts: [],
+});`;
+    expect(injectDockerRootRuntimeUid(withUid, 0)).toBe(withUid);
+  });
+});
+
+describe("buildDockerRootHostNextStepLines", () => {
+  it("returns WSL/root guidance for docker when host UID is 0", () => {
+    const lines = buildDockerRootHostNextStepLines("docker", 0);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain("containerUid");
+  });
+
+  it("returns nothing for podman or non-root hosts", () => {
+    expect(buildDockerRootHostNextStepLines("docker", 1000)).toEqual([]);
+    expect(buildDockerRootHostNextStepLines("no-sandbox", 0)).toEqual([]);
   });
 });
