@@ -1291,6 +1291,22 @@ hooks: {
 - If any hook exits non-zero, setup fails fast.
 - When a `signal` is passed to `run()`, it is threaded to all hooks — aborting the signal cancels any in-flight hook commands.
 
+## Agent skill
+
+This repo ships a portable agent skill at [`skills/sandcastle-usage/SKILL.md`](./skills/sandcastle-usage/SKILL.md) that teaches AI coding agents (Cursor, Claude, Codex, and others) how to set up and run Sandcastle in a target project.
+
+It is **not auto-installed**. To make it available to your agent, copy the skill directory into one of your agent's skills directories:
+
+```bash
+# Pick the directory matching your agent (create it if missing):
+cp -R skills/sandcastle-usage ~/.agents/skills/sandcastle-usage    # portable / shared
+cp -R skills/sandcastle-usage ~/.cursor/skills/sandcastle-usage    # Cursor
+cp -R skills/sandcastle-usage ~/.claude/skills/sandcastle-usage    # Claude
+cp -R skills/sandcastle-usage ~/.codex/skills/sandcastle-usage     # Codex
+```
+
+After a Sandcastle release that changes CLI, init flow, templates, or APIs, re-copy the updated skill to pick up the changes.
+
 ## Development
 
 ```bash

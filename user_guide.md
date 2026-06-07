@@ -210,8 +210,17 @@ await interactive({
 
 ---
 
+---
+
+# 6 Agent skill
+
+仓库附带可移植 agent skill：`skills/sandcastle-usage/SKILL.md`，指导 AI 代理在目标项目中接入并运行 Sandcastle。该 skill 不会自动安装，需复制到对应代理的 skills 目录（`~/.agents/skills`、`~/.cursor/skills`、`~/.claude/skills`、`~/.codex/skills`）后启用，详见 `README.md` / `readme_cn.md` 的 Agent skill 章节。
+
+---
+
 ## 文档修改记录
 
 | 修改日期   | 修改项                                                                 |
 | ---------- | ---------------------------------------------------------------------- |
 | 2026-05-17 | 初始创建用户指南，补充功能概述、配置参数、外部接口、使用示例与工作流程 |
+| 2026-06-07 | 补充 Agent skill 章节，说明 `skills/sandcastle-usage` 的复制安装方式   |
