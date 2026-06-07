@@ -39,6 +39,7 @@ export const formatErrorMessage = (error: SandboxError): string => {
     case "CopyToWorktreeError":
     case "SyncInTimeoutError":
     case "HookTimeoutError":
+    case "MissingSandboxHookScriptError":
     case "GitSetupTimeoutError":
     case "PromptExpansionTimeoutError":
     case "CommitCollectionTimeoutError":
@@ -84,6 +85,7 @@ export const withFriendlyErrors = <A, E, R>(
     CopyToWorktreeError: showErrorAndExit,
     SyncInTimeoutError: showErrorAndExit,
     HookTimeoutError: showErrorAndExit,
+    MissingSandboxHookScriptError: showErrorAndExit,
     GitSetupTimeoutError: showErrorAndExit,
     PromptExpansionTimeoutError: showErrorAndExit,
     CommitCollectionTimeoutError: showErrorAndExit,

@@ -33,6 +33,7 @@ import {
   runHostHooks,
   type SandboxHooks,
 } from "./SandboxLifecycle.js";
+import { validateSandboxHookScripts } from "./sandboxHookPreflight.js";
 import {
   Sandbox as SandboxTag,
   SandboxFactory,
@@ -624,6 +625,9 @@ export const createSandboxFromWorktree = async (
 
   if (sandboxOnReady?.length || hostOnReady?.length) {
     await Effect.runPromise(
+      validateSandboxHookScripts(worktreePath, options.hooks),
+    );
+    await Effect.runPromise(
       Effect.gen(function* () {
         const sandbox = yield* SandboxTag;
         yield* sandbox.exec(
@@ -814,6 +818,9 @@ export const createSandbox = async (
     const hostOnReady = options.hooks?.host?.onSandboxReady;
 
     if (sandboxOnReady?.length || hostOnReady?.length) {
+      await Effect.runPromise(
+        validateSandboxHookScripts(worktreePath, options.hooks),
+      );
       await Effect.runPromise(
         Effect.gen(function* () {
           const sandbox = yield* SandboxTag;

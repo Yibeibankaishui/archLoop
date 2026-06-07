@@ -131,6 +131,15 @@ export class HookTimeoutError extends Data.TaggedError("HookTimeoutError")<{
   readonly command: string;
 }> {}
 
+/** Sandbox hook references a .sandcastle script that is missing from the worktree */
+export class MissingSandboxHookScriptError extends Data.TaggedError(
+  "MissingSandboxHookScriptError",
+)<{
+  readonly message: string;
+  readonly command: string;
+  readonly scriptPath: string;
+}> {}
+
 /** Git config setup command timed out */
 export class GitSetupTimeoutError extends Data.TaggedError(
   "GitSetupTimeoutError",
@@ -214,6 +223,7 @@ export type SandboxError =
   | CopyToWorktreeError
   | SyncInTimeoutError
   | HookTimeoutError
+  | MissingSandboxHookScriptError
   | GitSetupTimeoutError
   | PromptExpansionTimeoutError
   | CommitCollectionTimeoutError

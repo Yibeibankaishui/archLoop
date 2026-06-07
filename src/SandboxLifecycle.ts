@@ -17,6 +17,7 @@ import {
   type ExecResult,
   type SandboxService,
 } from "./SandboxFactory.js";
+import { validateSandboxHookScripts } from "./sandboxHookPreflight.js";
 
 const GIT_SETUP_TIMEOUT_MS = 10_000;
 const HOOK_TIMEOUT_MS = 60_000;
@@ -225,6 +226,8 @@ export const withSandboxLifecycle = <A>(
         // Run sandbox.onSandboxReady and host.onSandboxReady in parallel
         const sandboxHooks = hooks?.sandbox?.onSandboxReady;
         const hostOnSandboxReady = hooks?.host?.onSandboxReady;
+
+        yield* validateSandboxHookScripts(hostSideWorktreePath, hooks);
 
         if (sandboxHooks?.length) {
           for (const hook of sandboxHooks) {
