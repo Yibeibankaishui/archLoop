@@ -24,6 +24,16 @@ An issue is **unblocked** if it has zero blocking dependencies on other open iss
 
 For each unblocked issue, assign a branch name using the format `sandcastle/issue-{id}-{slug}`.
 
+# EXISTING BRANCHES
+
+Before scheduling an issue for fresh implementation, check whether a matching branch (`sandcastle/issue-{id}-*`) already exists with **unmerged commits** ahead of the current branch:
+
+```bash
+git rev-list <base>..refs/heads/<branch> --count
+```
+
+When that count is greater than zero, the issue branch already contains implementation work pending review or merge. **Do not treat it as needing fresh implementation.** Prefer scheduling issues that still need implementation commits. The template will still pick up branches with unmerged commits for review and merge even if you omit them from the plan.
+
 # OUTPUT
 
 Output your plan as a JSON object wrapped in `<plan>` tags:

@@ -14,9 +14,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+import { EMPTY_REPO_ERROR_MESSAGE } from "./errors.js";
 import {
   create,
   generateTempBranchName,
+  getCurrentBranch,
   hasUncommittedChanges,
   pruneStale,
   remove,
@@ -72,6 +74,34 @@ const runFail = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem>) =>
       Effect.provide(NodeFileSystem.layer),
     ) as Effect.Effect<E, never>,
   );
+
+describe("WorktreeManager empty repository", () => {
+  it("getCurrentBranch fails with an actionable message when HEAD is unborn", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "wt-empty-repo-"));
+    await initRepo(repoDir);
+
+    const err = await runFail(getCurrentBranch(repoDir));
+    expect(err.message).toBe(EMPTY_REPO_ERROR_MESSAGE);
+    expect(err.message).toContain("no commits yet");
+    expect(err.message).toContain("git commit");
+  });
+
+  it("create fails with an actionable message when HEAD is unborn", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "wt-empty-repo-"));
+    await initRepo(repoDir);
+
+    const err = await runFail(create(repoDir));
+    expect(err.message).toBe(EMPTY_REPO_ERROR_MESSAGE);
+  });
+
+  it("does not mislabel unrelated git failures as empty-repo errors", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "wt-not-git-"));
+
+    const err = await runFail(getCurrentBranch(repoDir));
+    expect(err.message).not.toBe(EMPTY_REPO_ERROR_MESSAGE);
+    expect(err.message).toMatch(/not a git repository/i);
+  });
+});
 
 describe("sanitizeName", () => {
   it("lowercases the name", () => {

@@ -24,6 +24,40 @@ const MARKED_SHELL_BLOCK_PATTERN = new RegExp(
   "g",
 );
 
+const GH_AUTH_FAILURE_PATTERN =
+  /401|bad credentials|token.*invalid|not logged in/i;
+
+const isGhCommand = (command: string): boolean => /(?:^|\s)gh\b/.test(command);
+
+const isGhAuthFailure = (command: string, stderr: string): boolean =>
+  isGhCommand(command) && GH_AUTH_FAILURE_PATTERN.test(stderr);
+
+const formatGhAuthFailureMessage = (command: string, stderr: string): string =>
+  [
+    `GitHub authentication failed while expanding prompt shell expression \`${command}\`.`,
+    "Sandbox `gh` uses credentials from `.sandcastle/auth/gh` (mounted to `~/.config/gh`), not your host keyring.",
+    "A successful host `gh auth status` does not mean sandbox auth is valid.",
+    "",
+    "Fix one of:",
+    "- Set a non-empty `GH_TOKEN` in `.sandcastle/.env`",
+    "- Run `GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login --insecure-storage`",
+    "",
+    "See `docs/agents/issue-tracker.md` for fork/default-repo setup.",
+    "",
+    `Original error: ${stderr.trim()}`,
+  ].join("\n");
+
+const formatShellExpansionFailure = (
+  command: string,
+  exitCode: number,
+  stderr: string,
+): string => {
+  if (isGhAuthFailure(command, stderr)) {
+    return formatGhAuthFailureMessage(command, stderr);
+  }
+  return `Command \`${command}\` exited with code ${exitCode}: ${stderr}`;
+};
+
 export const preprocessPrompt = (
   prompt: string,
   sandbox: SandboxService,
@@ -53,7 +87,11 @@ export const preprocessPrompt = (
                 execResult.exitCode !== 0
                   ? Effect.fail(
                       new PromptError({
-                        message: `Command \`${command}\` exited with code ${execResult.exitCode}: ${execResult.stderr}`,
+                        message: formatShellExpansionFailure(
+                          command,
+                          execResult.exitCode,
+                          execResult.stderr,
+                        ),
                       }),
                     )
                   : Effect.succeed(execResult.stdout.trimEnd()),

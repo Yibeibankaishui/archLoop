@@ -18,7 +18,7 @@ Sandcastle is provider-agnostic — it ships with built-in providers for Docker,
 
 ## Prerequisites
 
-- [Git](https://git-scm.com/)
+- [Git](https://git-scm.com/) with at least one commit on the current branch (an initialized repo with no commits yet is not enough — run an initial `git commit` before using Sandcastle)
 - A sandbox provider — Sandcastle needs an isolated environment to run agents in. Built-in options:
   - [Docker Desktop](https://www.docker.com/) — most common for local development
   - [Podman](https://podman.io/) — rootless alternative to Docker
@@ -645,6 +645,8 @@ console.log(result.output.score); // typed as number
 | `sequential-reviewer`          | Implements issues one by one, with a code review step after each          |
 | `parallel-planner`             | Plans parallelizable issues, executes on separate branches, then merges   |
 | `parallel-planner-with-review` | Plans parallelizable issues, executes with per-branch review, then merges |
+
+`parallel-planner-with-review` runs review and merge when an issue branch already has commits ahead of your current branch, even if the latest implementer run made no new commits (for example after a prior review failure). Prompts document the implement → review → merge → close lifecycle (only the merge phase closes issues), and the template stops repeated empty implement loops with actionable recovery steps. Re-run `sandcastle init` in an existing project to pick up template updates.
 
 Select a template during `sandcastle init` when prompted, or re-run init in a fresh repo to try a different one.
 
@@ -1383,6 +1385,22 @@ hooks: {
 - Within each hook point, sandbox hooks run in parallel; host hooks within `onSandboxReady` also run in parallel with sandbox hooks. `host.onWorktreeReady` hooks run sequentially in declared order.
 - If any hook exits non-zero, setup fails fast.
 - When a `signal` is passed to `run()`, it is threaded to all hooks — aborting the signal cancels any in-flight hook commands.
+
+## Agent skill
+
+This repo ships a portable agent skill at [`skills/sandcastle-usage/SKILL.md`](./skills/sandcastle-usage/SKILL.md) that teaches AI coding agents (Cursor, Claude, Codex, and others) how to set up and run Sandcastle in a target project.
+
+It is **not auto-installed**. To make it available to your agent, copy the skill directory into one of your agent's skills directories:
+
+```bash
+# Pick the directory matching your agent (create it if missing):
+cp -R skills/sandcastle-usage ~/.agents/skills/sandcastle-usage    # portable / shared
+cp -R skills/sandcastle-usage ~/.cursor/skills/sandcastle-usage    # Cursor
+cp -R skills/sandcastle-usage ~/.claude/skills/sandcastle-usage    # Claude
+cp -R skills/sandcastle-usage ~/.codex/skills/sandcastle-usage     # Codex
+```
+
+After a Sandcastle release that changes CLI, init flow, templates, or APIs, re-copy the updated skill to pick up the changes.
 
 ## Development
 

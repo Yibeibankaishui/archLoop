@@ -872,6 +872,10 @@ describe("cursor factory", () => {
       stderr:
         "Error: [aborted] Client network socket disconnected before secure TLS connection was established",
     },
+    {
+      label: "HTTP/2 keepalive teardown",
+      stderr: "T: [internal] HTTP/2 keepalive ping timed out after 5000ms",
+    },
   ] as const)(
     "acceptRecoverableExit allows $label when result text exists",
     ({ stderr }) => {
@@ -909,6 +913,69 @@ describe("cursor factory", () => {
         resultText: "partial output",
       }),
     ).toBe(false);
+  });
+
+  it.each([
+    {
+      label: "ECONNRESET teardown",
+      stderr: "T: [aborted] read ECONNRESET",
+    },
+    {
+      label: "TLS handshake teardown",
+      stderr:
+        "Error: [aborted] Client network socket disconnected before secure TLS connection was established",
+    },
+    {
+      label: "HTTP/2 keepalive teardown",
+      stderr: "T: [internal] HTTP/2 keepalive ping timed out after 5000ms",
+    },
+  ] as const)(
+    "describeNonZeroExit returns transport diagnostics for $label without result",
+    ({ stderr }) => {
+      const provider = cursor("auto");
+      const message = provider.describeNonZeroExit?.({
+        exitCode: 1,
+        stderr,
+        stdout: "",
+        resultText: "",
+      });
+
+      expect(message).toContain("Cursor provider transport failure");
+      expect(message).toContain(stderr);
+      expect(message).toContain(
+        "not from your repository's tests or implementation",
+      );
+      expect(message).toContain("did not capture a completed agent result");
+      expect(message).toContain("Re-run the sandcastle command");
+      expect(message).toContain("reduce concurrent Cursor agents");
+      expect(message).toContain("retry review/merge");
+    },
+  );
+
+  it("describeNonZeroExit omits recovery guidance when a result was captured", () => {
+    const provider = cursor("auto");
+    const message = provider.describeNonZeroExit?.({
+      exitCode: 1,
+      stderr: "T: [aborted] read ECONNRESET",
+      stdout: "",
+      resultText: '<plan>{"issues":[]}</plan>',
+    });
+
+    expect(message).toContain("Cursor provider transport failure");
+    expect(message).not.toContain("did not capture a completed agent result");
+    expect(message).not.toContain("Recovery:");
+  });
+
+  it("describeNonZeroExit returns undefined for unrelated non-zero errors", () => {
+    const provider = cursor("auto");
+    expect(
+      provider.describeNonZeroExit?.({
+        exitCode: 1,
+        stderr: "fatal: authentication failed",
+        stdout: "",
+        resultText: "",
+      }),
+    ).toBeUndefined();
   });
 });
 

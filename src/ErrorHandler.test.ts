@@ -13,6 +13,7 @@ import {
   InitError,
   PromptError,
   SyncError,
+  EMPTY_REPO_ERROR_MESSAGE,
   WorktreeError,
 } from "./errors.js";
 import { formatErrorMessage, withFriendlyErrors } from "./ErrorHandler.js";
@@ -64,12 +65,35 @@ describe("formatErrorMessage", () => {
     expect(msg).toContain("already exists");
   });
 
+  it("WorktreeError for empty Git repo passes through the actionable message", () => {
+    const msg = formatErrorMessage(
+      new WorktreeError({ message: EMPTY_REPO_ERROR_MESSAGE }),
+    );
+    expect(msg).toBe(EMPTY_REPO_ERROR_MESSAGE);
+    expect(msg).not.toContain("Git worktree operation failed");
+  });
+
   it("PromptError includes message", () => {
     const msg = formatErrorMessage(
       new PromptError({ message: "file not found" }),
     );
     expect(msg).toContain("Failed to resolve prompt");
     expect(msg).toContain("file not found");
+  });
+
+  it("PromptError with GitHub auth guidance passes through remediation hints", () => {
+    const msg = formatErrorMessage(
+      new PromptError({
+        message:
+          "GitHub authentication failed while expanding prompt shell expression `gh issue list`.\n" +
+          "Fix one of:\n" +
+          "- Set a non-empty `GH_TOKEN` in `.sandcastle/.env`\n" +
+          "- Run `GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login --insecure-storage`",
+      }),
+    );
+    expect(msg).toContain("GitHub authentication failed");
+    expect(msg).toContain("GH_TOKEN");
+    expect(msg).toContain("GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login");
   });
 
   it("AgentError includes message", () => {

@@ -138,6 +138,11 @@ export interface AgentProvider {
    * Providers without this hook fail on every non-zero exit.
    */
   acceptRecoverableExit?(failure: AgentExecFailure): boolean;
+  /**
+   * When set, formats provider-specific diagnostics for a non-zero exit.
+   * Return undefined to fall back to generic stderr/stdout formatting.
+   */
+  describeNonZeroExit?(failure: AgentExecFailure): string | undefined;
 }
 
 export const DEFAULT_MODEL = "claude-opus-4-6";
@@ -211,6 +216,7 @@ const agentExecIoDetail = (failure: AgentExecFailure): string =>
 const cursorConnectionTeardownPatterns = [
   /ECONNRESET/i,
   /secure TLS connection was established/i,
+  /HTTP\/2 keepalive ping timed out/i,
 ] as const;
 
 const isCursorConnectionTeardown = (failure: AgentExecFailure): boolean =>
@@ -218,8 +224,46 @@ const isCursorConnectionTeardown = (failure: AgentExecFailure): boolean =>
     pattern.test(agentExecIoDetail(failure)),
   );
 
+const hasCapturedAgentResult = (failure: AgentExecFailure): boolean =>
+  failure.resultText.trim().length > 0;
+
 const cursorAcceptRecoverableExit = (failure: AgentExecFailure): boolean =>
-  failure.resultText.trim().length > 0 && isCursorConnectionTeardown(failure);
+  hasCapturedAgentResult(failure) && isCursorConnectionTeardown(failure);
+
+const cursorTransportFailureDetail = (failure: AgentExecFailure): string => {
+  if (failure.stderr.trim()) return failure.stderr.trim();
+  if (failure.stdout.trim()) return failure.stdout.trim();
+  return "connection teardown";
+};
+
+const cursorTransportRecoveryGuidance = [
+  "Sandcastle did not capture a completed agent result, so this iteration cannot be treated as successful.",
+  "",
+  "Recovery:",
+  "- Re-run the sandcastle command",
+  "- For parallel workflows, reduce concurrent Cursor agents or stagger review runs",
+  "- Inspect the agent run log for this role",
+  "- If implementation already completed on a branch, retry review/merge for that branch",
+] as const;
+
+const cursorDescribeNonZeroExit = (
+  failure: AgentExecFailure,
+): string | undefined => {
+  if (!isCursorConnectionTeardown(failure)) return undefined;
+
+  const lines = [
+    "Cursor provider transport failure (likely transient network/API error):",
+    cursorTransportFailureDetail(failure),
+    "",
+    "This failure came from the Cursor CLI transport layer, not from your repository's tests or implementation.",
+  ];
+
+  if (!hasCapturedAgentResult(failure)) {
+    lines.push(...cursorTransportRecoveryGuidance);
+  }
+
+  return lines.join("\n");
+};
 
 /** Options for the Cursor agent provider. */
 export interface CursorOptions {
@@ -265,6 +309,7 @@ export const cursor = (
   },
 
   acceptRecoverableExit: cursorAcceptRecoverableExit,
+  describeNonZeroExit: cursorDescribeNonZeroExit,
 });
 
 // ---------------------------------------------------------------------------

@@ -153,11 +153,13 @@ const invokeAgent = (
           execResult.stdout,
           resultText,
         );
-        const errorDetail = formatNonZeroExitDetail(
-          failure.stderr,
-          failure.stdout,
-          failure.resultText,
-        );
+        const errorDetail =
+          provider.describeNonZeroExit?.(failure) ??
+          formatNonZeroExitDetail(
+            failure.stderr,
+            failure.stdout,
+            failure.resultText,
+          );
 
         if (provider.acceptRecoverableExit?.(failure)) {
           const display = yield* Display;

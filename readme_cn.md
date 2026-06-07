@@ -270,6 +270,22 @@ await run({
 | `sandcastle podman build-image`  | Podman 构建                          |
 | `sandcastle podman remove-image` | Podman 删除镜像                      |
 
+## Agent skill（接入说明）
+
+本仓库附带可移植的 agent skill：[`skills/sandcastle-usage/SKILL.md`](./skills/sandcastle-usage/SKILL.md)，用于指导 AI 编程代理（Cursor、Claude、Codex 等）在目标项目中接入并运行 Sandcastle。
+
+该 skill **不会自动安装**。将其目录复制到对应代理的 skills 目录即可启用：
+
+```bash
+# 按所用代理选择目录（不存在则先创建）：
+cp -R skills/sandcastle-usage ~/.agents/skills/sandcastle-usage    # 通用 / 共享
+cp -R skills/sandcastle-usage ~/.cursor/skills/sandcastle-usage    # Cursor
+cp -R skills/sandcastle-usage ~/.claude/skills/sandcastle-usage    # Claude
+cp -R skills/sandcastle-usage ~/.codex/skills/sandcastle-usage     # Codex
+```
+
+Sandcastle 升级后若改动了 CLI、init 流程、模板或 API，请重新复制最新 skill。
+
 ## 进一步阅读
 
 - [README.md](./README.md) — 完整 API、`run()` / `createSandbox()` / `createWorktree()`、Hooks、Prompt 占位符

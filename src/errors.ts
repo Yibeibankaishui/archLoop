@@ -37,6 +37,18 @@ export class WorktreeError extends Data.TaggedError("WorktreeError")<{
   readonly message: string;
 }> {}
 
+/** User-facing message when Sandcastle runs in a Git repo with no commits. */
+export const EMPTY_REPO_ERROR_MESSAGE =
+  "This directory is a Git repository but has no commits yet. Sandcastle needs at least one commit on the current branch before it can create worktrees or resolve HEAD.\n\n" +
+  'Fix: stage your files and run `git commit` (e.g. `git add . && git commit -m "Initial commit"`), then retry.';
+
+export const emptyRepoWorktreeError = (): WorktreeError =>
+  new WorktreeError({ message: EMPTY_REPO_ERROR_MESSAGE });
+
+/** Worktree errors that already include full user-facing guidance. */
+export const isPreformattedWorktreeMessage = (message: string): boolean =>
+  message === EMPTY_REPO_ERROR_MESSAGE;
+
 /** Prompt resolution or preprocessing failed */
 export class PromptError extends Data.TaggedError("PromptError")<{
   readonly message: string;
@@ -117,6 +129,15 @@ export class HookTimeoutError extends Data.TaggedError("HookTimeoutError")<{
   readonly message: string;
   readonly timeoutMs: number;
   readonly command: string;
+}> {}
+
+/** Sandbox hook references a .sandcastle script that is missing from the worktree */
+export class MissingSandboxHookScriptError extends Data.TaggedError(
+  "MissingSandboxHookScriptError",
+)<{
+  readonly message: string;
+  readonly command: string;
+  readonly scriptPath: string;
 }> {}
 
 /** Git config setup command timed out */
@@ -202,6 +223,7 @@ export type SandboxError =
   | CopyToWorktreeError
   | SyncInTimeoutError
   | HookTimeoutError
+  | MissingSandboxHookScriptError
   | GitSetupTimeoutError
   | PromptExpansionTimeoutError
   | CommitCollectionTimeoutError

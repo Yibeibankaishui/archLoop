@@ -1756,6 +1756,11 @@ describe("Orchestrator error handling", () => {
       tempPrefix: "orch-cursor-econnreset-",
       stderr: "T: [aborted] read ECONNRESET",
     },
+    {
+      label: "HTTP/2 keepalive teardown",
+      tempPrefix: "orch-cursor-keepalive-",
+      stderr: "T: [internal] HTTP/2 keepalive ping timed out after 5000ms",
+    },
   ] as const)(
     "accepts cursor result on $label after valid stream result",
     async ({ tempPrefix, stderr }) => {
@@ -1809,31 +1814,58 @@ describe("Orchestrator error handling", () => {
     },
   );
 
-  it("still fails cursor non-zero exit without captured result on ECONNRESET", async () => {
-    const hostDir = await mkdtemp(join(tmpdir(), "orch-cursor-no-result-"));
-    const cursorProvider = cursorFactory("auto");
+  it.each([
+    {
+      label: "ECONNRESET teardown",
+      tempPrefix: "orch-cursor-no-result-",
+      stderr: "T: [aborted] read ECONNRESET",
+    },
+    {
+      label: "HTTP/2 keepalive teardown",
+      tempPrefix: "orch-cursor-keepalive-diag-",
+      stderr: "T: [internal] HTTP/2 keepalive ping timed out after 5000ms",
+    },
+  ] as const)(
+    "reports cursor $label transport diagnostics when no result captured",
+    async ({ tempPrefix, stderr }) => {
+      const hostDir = await mkdtemp(join(tmpdir(), tempPrefix));
+      const cursorProvider = cursorFactory("auto");
 
-    await initRepo(hostDir);
-    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+      await initRepo(hostDir);
+      await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) =>
-      makeMockCursorAgentLayer(dir, {
-        stderr: "T: [aborted] read ECONNRESET",
-        exitCode: 1,
-      }),
-    );
+      const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) =>
+        makeMockCursorAgentLayer(dir, {
+          stderr,
+          exitCode: 1,
+        }),
+      );
 
-    const exit = await Effect.runPromiseExit(
-      orchestrate({
-        provider: cursorProvider,
-        hostRepoDir: hostDir,
-        iterations: 1,
-        prompt: "plan work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
-    );
+      const exit = await Effect.runPromiseExit(
+        orchestrate({
+          provider: cursorProvider,
+          hostRepoDir: hostDir,
+          iterations: 1,
+          prompt: "plan work",
+        }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      );
 
-    expect(exit._tag).toBe("Failure");
-  });
+      expect(exit._tag).toBe("Failure");
+      if (exit._tag === "Failure") {
+        const err = Cause.squash(exit.cause);
+        expect(err).toBeInstanceOf(AgentError);
+        if (err instanceof AgentError) {
+          expect(err.message).toContain("cursor exited with code 1:");
+          expect(err.message).toContain("Cursor provider transport failure");
+          expect(err.message).toContain(stderr);
+          expect(err.message).toContain(
+            "did not capture a completed agent result",
+          );
+          expect(err.message).toContain("reduce concurrent Cursor agents");
+        }
+      }
+    },
+  );
 
   it("still fails cursor non-zero exit for unrelated errors with captured result", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "orch-cursor-unrelated-"));
