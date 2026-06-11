@@ -1556,6 +1556,25 @@ const normalizeTaskOrigin = (
     : undefined;
 };
 
+const resolveTaskOrigin = (
+  origin: OptionalTextFlag,
+): Effect.Effect<"manual" | "user-feedback", TaskBoardError, never> => {
+  if (origin._tag !== "Some") {
+    return Effect.succeed("manual");
+  }
+
+  const resolvedOrigin = normalizeTaskOrigin(origin.value);
+  if (resolvedOrigin) {
+    return Effect.succeed(resolvedOrigin);
+  }
+
+  return Effect.fail(
+    new TaskBoardError({
+      message: 'Invalid task origin. Use "manual" or "user-feedback".',
+    }),
+  );
+};
+
 const tasksListCommand = Command.make("list", {}, () =>
   Effect.gen(function* () {
     const d = yield* Display;
@@ -1583,23 +1602,15 @@ const tasksCreateCommand = Command.make(
     Effect.gen(function* () {
       const d = yield* Display;
       const cwd = process.cwd();
-      const originValue =
-        origin._tag === "Some" ? normalizeTaskOrigin(origin.value) : "manual";
-      if (!originValue) {
-        yield* Effect.fail(
-          new TaskBoardError({
-            message: 'Invalid task origin. Use "manual" or "user-feedback".',
-          }),
-        );
-      }
-      const resolvedOrigin = originValue ?? "manual";
+      const resolvedOrigin = yield* resolveTaskOrigin(origin);
+      const kindValue = optionalTextValue(kind);
       const created = yield* Effect.try({
         try: () =>
           createHubTask(cwd, {
             title,
             description: optionalTextValue(description),
             origin: resolvedOrigin,
-            kind: optionalTextValue(kind),
+            kind: kindValue,
           }),
         catch: toTaskBoardError,
       });
@@ -1608,7 +1619,7 @@ const tasksCreateCommand = Command.make(
         "Beads id": created.id,
         Title: created.title,
         Origin: resolvedOrigin,
-        ...(kind._tag === "Some" ? { Kind: kind.value } : {}),
+        ...(kindValue !== undefined ? { Kind: kindValue } : {}),
       });
     }),
 );
