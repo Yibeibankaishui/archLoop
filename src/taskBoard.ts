@@ -1,5 +1,14 @@
 import { execFileSync } from "node:child_process";
 
+import {
+  appendHubTaskEvent,
+  createHubRunContext,
+  createHubTaskClaimMetadata,
+  isHubTaskClaimActive,
+  readHubTaskClaim,
+  resolveHubTaskClaimState,
+  type HubTaskClaimMetadata,
+} from "./hubExecution.js";
 import { TaskBoardError } from "./errors.js";
 
 export const HUB_TASK_STATUSES = [
@@ -83,6 +92,12 @@ const METADATA_STATUS_RULES = [
     status: "wontfix" as const,
   },
 ] as const;
+const IMPLEMENTING_LABEL_STATUSES = new Set([
+  "inbox",
+  "needs_info",
+  "ready_for_agent",
+  "ready_for_human",
+]);
 
 const STATUS_LABEL_TO_HUB_STATUS: Readonly<Record<string, HubTaskStatus>> = {
   needs_triage: "inbox",
@@ -117,6 +132,8 @@ export interface HubTaskProjection {
   readonly title: string;
   readonly beadsStatus: string | undefined;
   readonly hubStatus: HubTaskStatus;
+  readonly claim: HubTaskClaimMetadata | undefined;
+  readonly claimState: "active" | "stale" | undefined;
   readonly labels: readonly string[];
   readonly metadata: Readonly<Record<string, unknown>>;
   readonly description: string | undefined;
@@ -312,14 +329,22 @@ const resolveStatusFromTaskShape = (
     return reasonStatus;
   }
 
+  const beadsLifecycle = normalizeBeadsLifecycle(
+    readFirstString(task, BEADS_LIFECYCLE_KEYS),
+  );
+
   const labelStatus = resolveStatusFromLabels(labels);
+  if (
+    beadsLifecycle === "in_progress" &&
+    labelStatus &&
+    IMPLEMENTING_LABEL_STATUSES.has(labelStatus)
+  ) {
+    return "implementing";
+  }
   if (labelStatus) {
     return labelStatus;
   }
 
-  const beadsLifecycle = normalizeBeadsLifecycle(
-    readFirstString(task, BEADS_LIFECYCLE_KEYS),
-  );
   if (beadsLifecycle === "blocked") {
     return "blocked";
   }
@@ -329,6 +354,7 @@ const resolveStatusFromTaskShape = (
   if (beadsLifecycle === "in_progress") {
     return "implementing";
   }
+
   return "inbox";
 };
 
@@ -346,6 +372,9 @@ export const projectHubTask = (task: BeadsTaskRecord): HubTaskProjection => {
   const runRefs = readRefs(task.runRefs ?? task.run_refs ?? task.runReferences);
   const hubStatus = resolveStatusFromTaskShape(task, labels, metadata);
   const beadsStatus = readFirstString(task, BEADS_LIFECYCLE_KEYS) ?? undefined;
+  const claim = readHubTaskClaim(metadata);
+  const resolvedHubStatus = hubStatus ?? "inbox";
+  const claimState = resolveHubTaskClaimState(resolvedHubStatus, claim);
 
   return {
     id: String(task.id ?? task.key ?? task.slug ?? task.title ?? "unknown"),
@@ -353,7 +382,9 @@ export const projectHubTask = (task: BeadsTaskRecord): HubTaskProjection => {
       readFirstString(task, ["title", "summary", "name"]) ??
       String(task.id ?? "untitled"),
     beadsStatus,
-    hubStatus: hubStatus ?? "inbox",
+    hubStatus: resolvedHubStatus,
+    claim,
+    claimState,
     labels,
     metadata,
     description: readFirstString(task, ["description", "body", "details"]),
@@ -416,12 +447,14 @@ const runBdText = (
   cwd: string,
   args: readonly string[],
   failureLabel: string,
+  env: NodeJS.ProcessEnv = process.env,
 ): string => {
   try {
     return execFileSync("bd", [...args], {
       cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
+      env,
     });
   } catch (error) {
     const message =
@@ -436,21 +469,30 @@ const runBdJson = (
   cwd: string,
   args: readonly string[],
   failureLabel: string,
+  env: NodeJS.ProcessEnv = process.env,
 ): unknown[] => {
-  const stdout = runBdText(cwd, args, failureLabel);
+  const stdout = runBdText(cwd, args, failureLabel, env);
   return parseBdJsonOutput(stdout);
 };
 
-export const loadHubTaskBoard = (cwd: string): HubTaskBoard =>
+export const loadHubTaskBoard = (
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): HubTaskBoard =>
   projectHubTaskBoard(
-    runBdJson(cwd, ["list", "--json"], "tasks list") as BeadsTaskRecord[],
+    runBdJson(cwd, ["list", "--json"], "tasks list", env) as BeadsTaskRecord[],
   );
 
-export const loadHubTask = (cwd: string, id: string): HubTaskProjection => {
+export const loadHubTask = (
+  cwd: string,
+  id: string,
+  env: NodeJS.ProcessEnv = process.env,
+): HubTaskProjection => {
   const [task] = runBdJson(
     cwd,
     ["show", id, "--json", "--include-comments", "--include-dependents"],
     `tasks show ${id}`,
+    env,
   ) as BeadsTaskRecord[];
 
   if (!task) {
@@ -460,6 +502,119 @@ export const loadHubTask = (cwd: string, id: string): HubTaskProjection => {
   }
 
   return projectHubTask(task);
+};
+
+export interface ClaimHubTaskInput {
+  readonly cwd: string;
+  readonly taskId: string;
+  readonly branch: string;
+  readonly hubProjectDir?: string;
+  readonly runId?: string;
+  readonly batchId?: string;
+  readonly startedAt?: Date;
+  readonly env?: NodeJS.ProcessEnv;
+}
+
+export interface ClaimHubTaskResult {
+  readonly outcome: "claimed" | "skipped";
+  readonly reason?: "active_claim";
+  readonly runId: string;
+  readonly batchId: string;
+  readonly runDir: string;
+  readonly eventsDir: string;
+  readonly task: HubTaskProjection;
+  readonly claim: HubTaskClaimMetadata | undefined;
+}
+
+export const claimHubTask = (input: ClaimHubTaskInput): ClaimHubTaskResult => {
+  const startedAt = input.startedAt ?? new Date();
+  const claimedAt = startedAt.toISOString();
+  const context = createHubRunContext({
+    cwd: input.cwd,
+    hubProjectDir: input.hubProjectDir,
+    branch: input.branch,
+    runId: input.runId,
+    batchId: input.batchId,
+    startedAt,
+    env: input.env,
+  });
+
+  const task = loadHubTask(input.cwd, input.taskId, input.env);
+  const existingClaim = task.claim;
+
+  if (isHubTaskClaimActive(task.hubStatus)) {
+    appendHubTaskEvent(context.runDir, {
+      type: "task_claim_skipped",
+      runId: context.runId,
+      batchId: context.batchId,
+      taskId: input.taskId,
+      branch: input.branch,
+      createdAt: claimedAt,
+      status: task.hubStatus,
+      reason: "active_claim",
+      claim: existingClaim,
+    });
+
+    return {
+      outcome: "skipped",
+      reason: "active_claim",
+      runId: context.runId,
+      batchId: context.batchId,
+      runDir: context.runDir,
+      eventsDir: context.eventsDir,
+      task,
+      claim: existingClaim,
+    };
+  }
+
+  const claim = createHubTaskClaimMetadata({
+    runId: context.runId,
+    batchId: context.batchId,
+    branch: input.branch,
+    claimedAt,
+  });
+  const metadata = {
+    ...task.metadata,
+    claim: claim.raw,
+  };
+
+  runBdText(
+    input.cwd,
+    [
+      "update",
+      input.taskId,
+      "--status",
+      "in_progress",
+      "--add-labels",
+      "implementing",
+      "--set-metadata",
+      JSON.stringify(metadata),
+    ],
+    `tasks claim ${input.taskId}`,
+    input.env,
+  );
+
+  const updatedTask = loadHubTask(input.cwd, input.taskId, input.env);
+  appendHubTaskEvent(context.runDir, {
+    type: "task_claimed",
+    runId: context.runId,
+    batchId: context.batchId,
+    taskId: input.taskId,
+    branch: input.branch,
+    createdAt: claimedAt,
+    status: updatedTask.hubStatus,
+    claim,
+  });
+
+  return {
+    outcome: "claimed",
+    runId: context.runId,
+    batchId: context.batchId,
+    runDir: context.runDir,
+    eventsDir: context.eventsDir,
+    task: updatedTask,
+    claim,
+  };
 };
 
 export interface CreateHubTaskInput {
@@ -590,6 +745,10 @@ export const formatHubTaskDetailsRows = (
   }
   if (Object.keys(task.metadata).length > 0) {
     rows.Metadata = formatInlineObject(task.metadata);
+  }
+  if (task.claim) {
+    rows.Claim = formatInlineObject(task.claim.raw);
+    rows["Claim state"] = task.claimState ?? "stale";
   }
   if (task.remoteRefs.length > 0) {
     rows["Remote refs"] = cleanJoinedValues(task.remoteRefs);
