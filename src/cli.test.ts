@@ -5,6 +5,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -131,6 +132,17 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("--capability");
   });
 
+  it("root help exposes the project namespace", async () => {
+    const { stdout } = await runCli("--help", process.cwd());
+    expect(stdout).toContain("project");
+    expect(stdout).toContain("project status");
+  });
+
+  it("project --help shows the status subcommand", async () => {
+    const { stdout } = await runCli("project --help", process.cwd());
+    expect(stdout).toContain("status");
+  });
+
   it("init --help no longer advertises podman as a sandbox option", async () => {
     const { stdout } = await runCli("init --help", process.cwd());
     expect(stdout).toContain("Sandbox provider");
@@ -170,6 +182,30 @@ describe("sandcastle CLI", () => {
     } catch (err: unknown) {
       expect(err).toBeDefined();
     }
+  });
+
+  it("project status works from a git repo that has not run init", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const dataDir = join(hostDir, "xdg-data");
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+    const { stdout } = await runCli("project status", hostDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+      PATH: binDir,
+    });
+
+    expect(stdout).toContain("Hub project status");
+    expect(stdout).toContain(hostDir);
+    expect(stdout).toContain(join(dataDir, "sandcastle"));
+    expect(stdout).toContain("Beads available");
+    expect(stdout).toContain("Task board ready");
+    expect(stdout).toContain("Task board total");
   });
 
   it("--help shows podman namespace", async () => {

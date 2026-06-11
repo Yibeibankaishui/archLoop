@@ -819,6 +819,12 @@ Existing single-runtime projects remain valid. `sandcastle init` does not automa
 | `--create-sandcastle-label` | No       | Interactive prompt                                | `true`/`false` for creating the `Sandcastle` GitHub label                                                   |
 | `--build-image`             | No       | Interactive prompt                                | `true`/`false` to build sandbox image after scaffold                                                        |
 
+### `sandcastle project status`
+
+Reports the canonical git repo root, the Sandcastle user data directory, the Hub project directory, whether `bd` is available, and the current task-board counts. It works from any git repository, even if you have not run `sandcastle init` yet.
+
+Sandcastle resolves the user data directory from `XDG_DATA_HOME` when it is set and falls back to `~/.local/share/sandcastle`.
+
 Creates the following files (plus optional `agents/`, `skills/`, `agent-profiles.json`, and Mini Program capability files when applicable):
 
 ```

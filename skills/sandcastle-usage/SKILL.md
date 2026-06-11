@@ -39,6 +39,7 @@ Replace `<TARGET_REPO>` with the project being developed.
    npm link @ai-hero/sandcastle
    ```
    Verify it resolves and runs: `npx sandcastle --help` (confirms the link is usable).
+   If you want to inspect the repo before init, `npx sandcastle project status` shows the canonical repo root, Sandcastle user data dir, `bd` availability, and task-board counts.
 2. **Init once**: `npx sandcastle init`. Interactive prompts: sandbox provider, backlog manager, workflow template, project profile, default agent, installed runtimes.
    - Non-interactive example:
      ```bash
@@ -100,12 +101,13 @@ Key APIs: `run()`, `interactive()`, `createSandbox()`, `createWorktree()`; sandb
 
 ## Common CLI
 
-| Command                          | Purpose                     |
-| -------------------------------- | --------------------------- |
-| `sandcastle init`                | Generate `.sandcastle/`     |
-| `sandcastle docker build-image`  | Build image from Dockerfile |
-| `sandcastle docker remove-image` | Remove image                |
-| `sandcastle --help`              | Help                        |
+| Command                          | Purpose                      |
+| -------------------------------- | ---------------------------- |
+| `sandcastle init`                | Generate `.sandcastle/`      |
+| `sandcastle project status`      | Show Hub status for the repo |
+| `sandcastle docker build-image`  | Build image from Dockerfile  |
+| `sandcastle docker remove-image` | Remove image                 |
+| `sandcastle --help`              | Help                         |
 
 ## Troubleshooting (known failure modes)
 

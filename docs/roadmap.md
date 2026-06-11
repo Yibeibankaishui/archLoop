@@ -263,6 +263,7 @@ Goal: 让用户能从 README、模板、init next steps 和 roadmap 中理解 Sa
 
 - [ ] 审阅 README，并按当前代码更新 public API 与 CLI 示例（Project profile 文档收口见 [#26](https://github.com/Yibeibankaishui/sandcastle/issues/26)）。
 - [ ] 补齐 provider/runtime/template/preset role 的概念说明。
+- [ ] 补齐 `sandcastle project status` 与 Sandcastle user data directory 的用户说明（见 [#63](https://github.com/Yibeibankaishui/sandcastle/issues/63)）。
 - [x] 补齐 capability pack 和小程序开发闭环说明（见 [capability-packs](./prd/capability-packs.md)、[ADR-0016](./adr/0016-capability-packs-compose-specialized-init-scaffolds.md)、[#48](https://github.com/Yibeibankaishui/sandcastle/issues/48)）。
 - [ ] 为常见工作流补充用户指南。
 - [ ] 建立 roadmap 与 PRD、ADR、changeset、issue 的链接规范。

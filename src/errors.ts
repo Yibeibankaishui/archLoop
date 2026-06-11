@@ -71,6 +71,11 @@ export class InitError extends Data.TaggedError("InitError")<{
   readonly message: string;
 }> {}
 
+/** Hub project status operation failed */
+export class ProjectStatusError extends Data.TaggedError("ProjectStatusError")<{
+  readonly message: string;
+}> {}
+
 /** Run exceeded the configured agent idle timeout */
 export class AgentIdleTimeoutError extends Data.TaggedError(
   "AgentIdleTimeoutError",
@@ -216,6 +221,7 @@ export type SandboxError =
   | AgentError
   | ConfigDirError
   | InitError
+  | ProjectStatusError
   | AgentIdleTimeoutError
   | WorktreeTimeoutError
   | ContainerStartTimeoutError

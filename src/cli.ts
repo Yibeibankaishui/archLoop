@@ -47,7 +47,7 @@ import type {
   ProjectProfileEntry,
   SandboxProviderEntry,
 } from "./InitService.js";
-import { ConfigDirError, InitError } from "./errors.js";
+import { ConfigDirError, InitError, ProjectStatusError } from "./errors.js";
 import {
   getCapabilityPackDefinition,
   listCapabilityAddonPromptOptions,
@@ -64,6 +64,7 @@ import {
   getPresetAgentDefinition,
   listPresetAgentsForInit,
 } from "./presetAgents.js";
+import { resolveHubProjectStatus } from "./projectStatus.js";
 
 const require = createRequire(import.meta.url);
 const VERSION = (require("../package.json") as { version: string }).version;
@@ -1492,6 +1493,44 @@ const removeImageCommand = Command.make(
     }),
 );
 
+// --- Project status command ---
+
+const projectStatusCommand = Command.make("status", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const cwd = process.cwd();
+    const status = yield* Effect.try({
+      try: () => resolveHubProjectStatus({ cwd }),
+      catch: (error) =>
+        new ProjectStatusError({
+          message: error instanceof Error ? error.message : String(error),
+        }),
+    });
+
+    yield* d.summary("Hub project status", {
+      "Repository root": status.repoRoot,
+      "Sandcastle user data dir": status.sandcastleUserDataDir,
+      "Hub project dir": status.hubProjectDir,
+      "Hub project registration": status.projectRegistered
+        ? "existing"
+        : "created",
+      "Beads available": status.beadsAvailable ? "yes" : "no",
+      "Task board ready": String(status.taskCounts.ready),
+      "Task board total": String(status.taskCounts.total),
+    });
+  }),
+);
+
+const projectCommand = Command.make("project", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.status(
+      "Hub project commands. Use --help to see available subcommands.",
+      "info",
+    );
+  }),
+).pipe(Command.withSubcommands([projectStatusCommand]));
+
 // --- Docker namespace command ---
 
 const dockerCommand = Command.make("docker", {}, () =>
@@ -1588,7 +1627,12 @@ const rootCommand = Command.make("sandcastle", {}, () =>
 );
 
 export const sandcastle = rootCommand.pipe(
-  Command.withSubcommands([initCommand, dockerCommand, podmanCommand]),
+  Command.withSubcommands([
+    initCommand,
+    projectCommand,
+    dockerCommand,
+    podmanCommand,
+  ]),
 );
 
 export const cli = Command.run(sandcastle, {
