@@ -526,6 +526,145 @@ export interface ClaimHubTaskResult {
   readonly claim: HubTaskClaimMetadata | undefined;
 }
 
+export type HubFailureReason =
+  | "agent_failed"
+  | "sandbox_failed"
+  | "merge_conflict"
+  | "verification_failure"
+  | "close_failed"
+  | "unknown";
+
+export const loadHubReadyQueue = (
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): HubTaskBoard =>
+  projectHubTaskBoard(
+    runBdJson(
+      cwd,
+      ["ready", "--json"],
+      "tasks ready",
+      env,
+    ) as BeadsTaskRecord[],
+  );
+
+export const selectHubFlowTasks = (
+  board: HubTaskBoard,
+): readonly HubTaskProjection[] =>
+  board.tasks.filter(
+    (task) =>
+      task.hubStatus === "ready_for_agent" && task.claimState !== "active",
+  );
+
+const slugifyHubTaskTitle = (title: string): string => {
+  const slug = title
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return slug.length > 0 ? slug.slice(0, 48) : "task";
+};
+
+export const resolveHubTaskBranch = (taskId: string, title: string): string => {
+  const normalizedId = taskId
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return `sandcastle/${normalizedId}-${slugifyHubTaskTitle(title)}`;
+};
+
+const HUB_STATUS_LABELS: Readonly<Partial<Record<HubTaskStatus, string>>> = {
+  implementing: "implementing",
+  reviewing: "reviewing",
+  waiting_for_merge: "waiting-for-merge",
+  merging: "merging",
+  failed: "failed",
+  ready_for_agent: "ready-for-agent",
+  ready_for_human: "ready-for-human",
+  needs_info: "needs-info",
+  inbox: "needs-triage",
+  sync_conflict: "sync-conflict",
+};
+
+const HUB_STATUS_BEADS_LIFECYCLE: Readonly<
+  Partial<Record<HubTaskStatus, string>>
+> = {
+  implementing: "in_progress",
+  reviewing: "in_progress",
+  waiting_for_merge: "in_progress",
+  merging: "in_progress",
+  failed: "open",
+  ready_for_agent: "open",
+  ready_for_human: "open",
+  needs_info: "open",
+  inbox: "open",
+  blocked: "blocked",
+  done: "closed",
+  wontfix: "closed",
+  sync_conflict: "blocked",
+};
+
+const EXECUTION_STATUS_LABELS = new Set([
+  "implementing",
+  "reviewing",
+  "waiting-for-merge",
+  "merging",
+  "failed",
+]);
+
+export interface UpdateHubTaskStatusInput {
+  readonly cwd: string;
+  readonly taskId: string;
+  readonly hubStatus: HubTaskStatus;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly failureReason?: HubFailureReason;
+  readonly env?: NodeJS.ProcessEnv;
+}
+
+export const updateHubTaskStatus = (
+  input: UpdateHubTaskStatusInput,
+): HubTaskProjection => {
+  const task = loadHubTask(input.cwd, input.taskId, input.env);
+  const label = HUB_STATUS_LABELS[input.hubStatus];
+  const beadsStatus = HUB_STATUS_BEADS_LIFECYCLE[input.hubStatus];
+  const labelKey = normalizeKey(label ?? "");
+  const metadata: Record<string, unknown> = {
+    ...task.metadata,
+    ...(input.metadata ?? {}),
+    hubStatus: input.hubStatus,
+  };
+
+  if (input.failureReason) {
+    metadata.failureReason = input.failureReason;
+    metadata.failed = true;
+  } else {
+    delete metadata.failureReason;
+    delete metadata.failed;
+  }
+
+  const args = ["update", input.taskId];
+  if (beadsStatus) {
+    args.push("--status", beadsStatus);
+  }
+  if (label) {
+    args.push("--add-labels", label);
+  }
+
+  const labelsToRemove = task.labels.filter(
+    (existingLabel) =>
+      EXECUTION_STATUS_LABELS.has(existingLabel) &&
+      normalizeKey(existingLabel) !== labelKey,
+  );
+  if (labelsToRemove.length > 0) {
+    args.push("--remove-labels", labelsToRemove.join(","));
+  }
+
+  args.push("--set-metadata", JSON.stringify(metadata));
+  runBdText(input.cwd, args, `tasks update ${input.taskId}`, input.env);
+
+  return loadHubTask(input.cwd, input.taskId, input.env);
+};
+
 export const claimHubTask = (input: ClaimHubTaskInput): ClaimHubTaskResult => {
   const startedAt = input.startedAt ?? new Date();
   const claimedAt = startedAt.toISOString();
@@ -632,7 +771,7 @@ export interface CreateHubTaskResult {
   readonly title: string;
 }
 
-const HUB_STATUS_LABELS: Readonly<
+const CREATE_HUB_STATUS_LABELS: Readonly<
   Record<NonNullable<CreateHubTaskInput["hubStatus"]>, string>
 > = {
   inbox: "needs-triage",
@@ -665,7 +804,7 @@ export const createHubTask = (
     "--type",
     "task",
     "-l",
-    HUB_STATUS_LABELS[input.hubStatus ?? "inbox"],
+    CREATE_HUB_STATUS_LABELS[input.hubStatus ?? "inbox"],
     "--metadata",
     JSON.stringify(metadata),
     "--json",

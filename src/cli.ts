@@ -49,6 +49,7 @@ import type {
 } from "./InitService.js";
 import {
   ConfigDirError,
+  HubFlowError,
   InitError,
   ProjectStatusError,
   TaskBoardError,
@@ -69,7 +70,16 @@ import {
   getPresetAgentDefinition,
   listPresetAgentsForInit,
 } from "./presetAgents.js";
-import { resolveHubProjectStatus } from "./projectStatus.js";
+import {
+  resolveGitRepoRoot,
+  resolveHubProjectStatus,
+} from "./projectStatus.js";
+import {
+  createHubFlowRunImplementer,
+  formatHubFlowResultLines,
+  runHubFlow,
+} from "./hubFlowExecution.js";
+import { getHubFlowDefinition, listHubFlows } from "./hubFlows.js";
 import {
   draftPrdSlices,
   formatPrdDraftPlan,
@@ -1993,6 +2003,82 @@ const projectCommand = Command.make("project", {}, () =>
   }),
 ).pipe(Command.withSubcommands([projectStatusCommand]));
 
+const getHubFlowIds = (): string =>
+  listHubFlows()
+    .map((flow) => flow.id)
+    .join(", ");
+
+const flowOption = Options.text("flow").pipe(
+  Options.withDescription(`Hub flow id (${getHubFlowIds()})`),
+);
+
+const toHubFlowError = (error: unknown): HubFlowError =>
+  error instanceof HubFlowError
+    ? error
+    : new HubFlowError({
+        message: error instanceof Error ? error.message : String(error),
+      });
+
+const runCommand = Command.make(
+  "run",
+  {
+    project: Args.text({ name: "project" }).pipe(
+      Args.withDescription(
+        "Path to the git repository (use . for current repo)",
+      ),
+    ),
+    flow: flowOption,
+  },
+  ({ project, flow }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const projectDir = project.trim().length > 0 ? project : ".";
+      const flowDefinition = getHubFlowDefinition(flow);
+      if (!flowDefinition) {
+        return yield* Effect.fail(
+          new HubFlowError({
+            message: `Unknown Hub flow "${flow}". Available flows: ${getHubFlowIds()}`,
+          }),
+        );
+      }
+
+      const repoRoot = yield* Effect.try({
+        try: () => resolveGitRepoRoot(projectDir),
+        catch: toHubFlowError,
+      });
+
+      const result = yield* Effect.tryPromise({
+        try: () =>
+          runHubFlow({
+            flowId: flowDefinition.id,
+            cwd: repoRoot,
+            implementer: createHubFlowRunImplementer({ cwd: repoRoot }),
+          }),
+        catch: toHubFlowError,
+      });
+
+      for (const line of formatHubFlowResultLines(result)) {
+        yield* d.status(line, "info");
+      }
+
+      const failures = result.results.filter(
+        (taskResult) =>
+          taskResult.outcome === "agent_failed" ||
+          taskResult.outcome === "sandbox_failed",
+      );
+      if (failures.length > 0) {
+        yield* d.status(
+          `Hub flow completed with ${failures.length} failed task(s).`,
+          "warn",
+        );
+      } else if (result.results.length > 0) {
+        yield* d.status("Hub flow completed.", "success");
+      } else {
+        yield* d.status("Hub flow found no ready tasks to run.", "info");
+      }
+    }),
+);
+
 // --- Docker namespace command ---
 
 const dockerCommand = Command.make("docker", {}, () =>
@@ -2091,6 +2177,7 @@ const rootCommand = Command.make("sandcastle", {}, () =>
 export const sandcastle = rootCommand.pipe(
   Command.withSubcommands([
     initCommand,
+    runCommand,
     tasksCommand,
     projectCommand,
     dockerCommand,
