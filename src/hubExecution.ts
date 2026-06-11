@@ -70,6 +70,9 @@ export interface HubTaskEvent {
     | "task_implementation_started"
     | "task_implementation_succeeded"
     | "task_implementation_failed"
+    | "task_review_started"
+    | "task_review_succeeded"
+    | "task_review_failed"
     | "task_status_advanced";
   readonly runId: string;
   readonly batchId: string;

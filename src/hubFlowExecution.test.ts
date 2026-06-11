@@ -8,7 +8,9 @@ import {
   formatHubFlowResultLines,
   runHubFlow,
   type HubFlowImplementer,
+  type HubFlowReviewer,
   type HubImplementTaskInput,
+  type HubReviewTaskInput,
 } from "./hubFlowExecution.js";
 import {
   resolveHubFlowPromptPath,
@@ -157,6 +159,17 @@ describe("Hub flow registry", () => {
     const promptPath = resolveHubFlowPromptPath("no-review", "implement");
     expect(promptPath).toContain("hub-flows/no-review/implement-prompt.md");
     expect(promptPath).not.toContain(".sandcastle");
+  });
+
+  it("ships bundled with-review prompts outside repo-local .sandcastle/", () => {
+    validateHubFlowRegistries();
+    const implementPath = resolveHubFlowPromptPath("with-review", "implement");
+    const reviewPath = resolveHubFlowPromptPath("with-review", "review");
+    expect(implementPath).toContain(
+      "hub-flows/with-review/implement-prompt.md",
+    );
+    expect(reviewPath).toContain("hub-flows/with-review/review-prompt.md");
+    expect(reviewPath).not.toContain(".sandcastle");
   });
 });
 
@@ -363,6 +376,142 @@ describe("no-review Hub flow execution", () => {
       outcome: "sandbox_failed",
       hubStatus: "failed",
       failureReason: "sandbox_failed",
+    });
+  });
+});
+
+describe("with-review Hub flow execution", () => {
+  it("advances successful work through reviewing to waiting_for_merge", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-review-run-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-71",
+        title: "Review me",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    const implementInvocations: HubImplementTaskInput[] = [];
+    const reviewInvocations: HubReviewTaskInput[] = [];
+    const implementer: HubFlowImplementer = async (input) => {
+      implementInvocations.push(input);
+      return {
+        outcome: "success",
+        commits: [{ sha: "abc123" }],
+        completionSignal: "<promise>COMPLETE</promise>",
+      };
+    };
+    const reviewer: HubFlowReviewer = async (input) => {
+      reviewInvocations.push(input);
+      return {
+        outcome: "success",
+        commits: [{ sha: "def456" }],
+        completionSignal: "<promise>COMPLETE</promise>",
+      };
+    };
+
+    const result = await runHubFlow({
+      flowId: "with-review",
+      cwd: repoDir,
+      env,
+      implementer,
+      reviewer,
+    });
+
+    expect(result.selectedTaskIds).toEqual(["bd-71"]);
+    expect(implementInvocations).toHaveLength(1);
+    expect(reviewInvocations).toHaveLength(1);
+    expect(reviewInvocations[0]).toMatchObject({
+      taskId: "bd-71",
+      title: "Review me",
+      branch: "sandcastle/bd-71-review-me",
+      flowId: "with-review",
+      implementCommitCount: 1,
+    });
+    expect(reviewInvocations[0]?.promptFile).toContain(
+      "hub-flows/with-review/review-prompt.md",
+    );
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(finalState[0]?.status).toBe("in_progress");
+    expect(finalState[0]?.labels).toContain("waiting-for-merge");
+    expect(finalState[0]?.labels).not.toContain("reviewing");
+    expect(result.results[0]).toMatchObject({
+      taskId: "bd-71",
+      outcome: "reviewed",
+      hubStatus: "waiting_for_merge",
+      commitCount: 1,
+    });
+
+    const taskEvents = await readJsonl(
+      join(result.runDir, "events", "task.jsonl"),
+    );
+    expect(taskEvents.map((event) => (event as { type: string }).type)).toEqual(
+      [
+        "task_claimed",
+        "task_implementation_started",
+        "task_implementation_succeeded",
+        "task_status_advanced",
+        "task_review_started",
+        "task_review_succeeded",
+        "task_status_advanced",
+      ],
+    );
+    expect(formatHubFlowResultLines(result).join("\n")).toContain(
+      "bd-71: reviewed -> waiting_for_merge",
+    );
+  });
+
+  it("marks review failures as failed with agent_failed", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-review-fail-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-review-fail",
+        title: "Review fail task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    const result = await runHubFlow({
+      flowId: "with-review",
+      cwd: repoDir,
+      env,
+      implementer: async () => ({
+        outcome: "success",
+        commits: [{ sha: "abc123" }],
+        completionSignal: "<promise>COMPLETE</promise>",
+      }),
+      reviewer: async () => ({
+        outcome: "agent_failed",
+        commits: [],
+        message: "reviewer exited non-zero",
+      }),
+    });
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(finalState[0]?.status).toBe("open");
+    expect(finalState[0]?.labels).toContain("failed");
+    expect(finalState[0]?.metadata.failureReason).toBe("agent_failed");
+    expect(result.results[0]).toMatchObject({
+      outcome: "agent_failed",
+      hubStatus: "failed",
+      failureReason: "agent_failed",
     });
   });
 });

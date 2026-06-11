@@ -19,6 +19,16 @@ export const HUB_FLOW_DEFINITIONS: readonly HubFlowDefinition[] = [
       implement: "implement-prompt.md",
     },
   },
+  {
+    id: "with-review",
+    description:
+      "Claim ready tasks, run implementers and reviewers with Hub-owned prompts, and advance successful work to waiting for merge",
+    hasReviewer: true,
+    prompts: {
+      implement: "implement-prompt.md",
+      review: "review-prompt.md",
+    },
+  },
 ] as const;
 
 export const getHubFlowsRoot = (): string => {

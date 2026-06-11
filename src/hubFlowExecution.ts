@@ -5,8 +5,9 @@ import {
   appendHubBatchEvent,
   appendHubTaskEvent,
   createHubRunContext,
+  type HubTaskClaimMetadata,
 } from "./hubExecution.js";
-import { resolveHubFlowPromptPath } from "./hubFlows.js";
+import { getHubFlowDefinition, resolveHubFlowPromptPath } from "./hubFlows.js";
 import {
   resolveGitRepoRoot,
   resolveHubProjectDir,
@@ -43,6 +44,28 @@ export type HubFlowImplementer = (
   input: HubImplementTaskInput,
 ) => Promise<HubImplementTaskResult>;
 
+export interface HubReviewTaskInput {
+  readonly flowId: string;
+  readonly taskId: string;
+  readonly title: string;
+  readonly branch: string;
+  readonly promptFile: string;
+  readonly cwd: string;
+  readonly runDir: string;
+  readonly implementCommitCount: number;
+}
+
+export interface HubReviewTaskResult {
+  readonly outcome: "success" | "agent_failed" | "sandbox_failed";
+  readonly commits: readonly { readonly sha: string }[];
+  readonly completionSignal?: string;
+  readonly message?: string;
+}
+
+export type HubFlowReviewer = (
+  input: HubReviewTaskInput,
+) => Promise<HubReviewTaskResult>;
+
 export interface RunHubFlowInput {
   readonly flowId: string;
   readonly cwd?: string;
@@ -50,6 +73,7 @@ export interface RunHubFlowInput {
   readonly env?: NodeJS.ProcessEnv;
   readonly startedAt?: Date;
   readonly implementer: HubFlowImplementer;
+  readonly reviewer?: HubFlowReviewer;
 }
 
 export interface HubFlowTaskResult {
@@ -58,6 +82,7 @@ export interface HubFlowTaskResult {
   readonly branch: string;
   readonly outcome:
     | "implemented"
+    | "reviewed"
     | "claim_skipped"
     | "agent_failed"
     | "sandbox_failed";
@@ -84,6 +109,9 @@ const isSuccessfulImplementation = (result: HubImplementTaskResult): boolean =>
   result.outcome === "success" &&
   result.commits.length > 0 &&
   result.completionSignal !== undefined;
+
+const isSuccessfulReview = (result: HubReviewTaskResult): boolean =>
+  result.outcome === "success" && result.completionSignal !== undefined;
 
 const SANDBOX_FAILURE_TAGS = new Set([
   "DockerError",
@@ -133,11 +161,193 @@ const recordTaskStatusAdvanced = (
   });
 };
 
+const buildHubAgentPromptArgs = (
+  input: Pick<HubImplementTaskInput, "taskId" | "title" | "branch">,
+): Readonly<Record<string, string>> => ({
+  TASK_ID: input.taskId,
+  TASK_TITLE: input.title,
+  BRANCH: input.branch,
+  VIEW_TASK_COMMAND: `bd show ${input.taskId}`,
+});
+
+const runHubAgent = async (input: {
+  readonly cwd: string;
+  readonly promptFile: string;
+  readonly taskId: string;
+  readonly title: string;
+  readonly branch: string;
+  readonly runDir: string;
+  readonly name: string;
+  readonly logFileName: string;
+}) => {
+  const { cursor } = await import("./AgentProvider.js");
+  const { run } = await import("./run.js");
+  const { noSandbox } = await import("./sandboxes/no-sandbox.js");
+
+  return run({
+    agent: cursor("auto"),
+    sandbox: noSandbox(),
+    cwd: input.cwd,
+    promptFile: input.promptFile,
+    promptArgs: buildHubAgentPromptArgs(input),
+    branchStrategy: { type: "branch", branch: input.branch },
+    name: input.name,
+    logging: {
+      type: "file",
+      path: join(input.runDir, "logs", input.logFileName),
+    },
+  });
+};
+
+const reviewSelectedTask = async (
+  input: RunHubFlowInput,
+  context: ReturnType<typeof createHubRunContext>,
+  task: HubTaskProjection,
+  branch: string,
+  claim: HubTaskClaimMetadata,
+  taskMetadata: Readonly<Record<string, unknown>>,
+  promptFile: string,
+  implementCommitCount: number,
+): Promise<HubFlowTaskResult> => {
+  const cwd = input.cwd ?? process.cwd();
+  const reviewer = input.reviewer;
+  if (!reviewer) {
+    throw new Error(
+      `Hub flow "${input.flowId}" requires a reviewer but none was provided`,
+    );
+  }
+
+  const startedAt = new Date().toISOString();
+  appendHubTaskEvent(context.runDir, {
+    type: "task_review_started",
+    runId: context.runId,
+    batchId: context.batchId,
+    taskId: task.id,
+    branch,
+    createdAt: startedAt,
+    status: "reviewing",
+    commitCount: implementCommitCount,
+    claim,
+  });
+
+  let reviewResult: HubReviewTaskResult;
+  try {
+    reviewResult = await reviewer({
+      flowId: input.flowId,
+      taskId: task.id,
+      title: task.title,
+      branch,
+      promptFile,
+      cwd,
+      runDir: context.runDir,
+      implementCommitCount,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Hub reviewer failed";
+    reviewResult = {
+      outcome: "sandbox_failed",
+      commits: [],
+      message,
+    };
+  }
+
+  const finishedAt = new Date().toISOString();
+
+  if (isSuccessfulReview(reviewResult)) {
+    appendHubTaskEvent(context.runDir, {
+      type: "task_review_succeeded",
+      runId: context.runId,
+      batchId: context.batchId,
+      taskId: task.id,
+      branch,
+      createdAt: finishedAt,
+      status: "waiting_for_merge",
+      commitCount: reviewResult.commits.length,
+      claim,
+    });
+
+    const updatedTask = updateHubTaskStatus({
+      cwd,
+      taskId: task.id,
+      hubStatus: "waiting_for_merge",
+      metadata: taskMetadata,
+      env: input.env,
+    });
+    recordTaskStatusAdvanced(context.runDir, {
+      runId: context.runId,
+      batchId: context.batchId,
+      taskId: task.id,
+      branch,
+      createdAt: finishedAt,
+      status: updatedTask.hubStatus,
+      commitCount: reviewResult.commits.length,
+    });
+
+    return {
+      taskId: task.id,
+      title: task.title,
+      branch,
+      outcome: "reviewed",
+      hubStatus: updatedTask.hubStatus,
+      commitCount: reviewResult.commits.length,
+    };
+  }
+
+  const failureReason = resolveFailureReason(reviewResult.outcome);
+  appendHubTaskEvent(context.runDir, {
+    type: "task_review_failed",
+    runId: context.runId,
+    batchId: context.batchId,
+    taskId: task.id,
+    branch,
+    createdAt: finishedAt,
+    status: "failed",
+    failureReason,
+    commitCount: reviewResult.commits.length,
+    claim,
+  });
+
+  const updatedTask = updateHubTaskStatus({
+    cwd,
+    taskId: task.id,
+    hubStatus: "failed",
+    metadata: taskMetadata,
+    failureReason,
+    env: input.env,
+  });
+  recordTaskStatusAdvanced(context.runDir, {
+    runId: context.runId,
+    batchId: context.batchId,
+    taskId: task.id,
+    branch,
+    createdAt: finishedAt,
+    status: updatedTask.hubStatus,
+    failureReason,
+    commitCount: reviewResult.commits.length,
+  });
+
+  return {
+    taskId: task.id,
+    title: task.title,
+    branch,
+    outcome:
+      reviewResult.outcome === "sandbox_failed"
+        ? "sandbox_failed"
+        : "agent_failed",
+    hubStatus: updatedTask.hubStatus,
+    failureReason,
+    commitCount: reviewResult.commits.length,
+  };
+};
+
 const implementSelectedTask = async (
   input: RunHubFlowInput,
   context: ReturnType<typeof createHubRunContext>,
   task: HubTaskProjection,
   promptFile: string,
+  hasReviewer: boolean,
+  reviewPromptFile?: string,
 ): Promise<HubFlowTaskResult> => {
   const cwd = input.cwd ?? process.cwd();
   const branch = resolveHubTaskBranch(task.id, task.title);
@@ -199,6 +409,10 @@ const implementSelectedTask = async (
   const finishedAt = new Date().toISOString();
 
   if (isSuccessfulImplementation(implementationResult)) {
+    const postImplementationStatus = hasReviewer
+      ? "reviewing"
+      : "waiting_for_merge";
+
     appendHubTaskEvent(context.runDir, {
       type: "task_implementation_succeeded",
       runId: context.runId,
@@ -206,7 +420,7 @@ const implementSelectedTask = async (
       taskId: task.id,
       branch,
       createdAt: finishedAt,
-      status: "waiting_for_merge",
+      status: postImplementationStatus,
       commitCount: implementationResult.commits.length,
       claim: claimResult.claim,
     });
@@ -214,7 +428,7 @@ const implementSelectedTask = async (
     const updatedTask = updateHubTaskStatus({
       cwd,
       taskId: task.id,
-      hubStatus: "waiting_for_merge",
+      hubStatus: postImplementationStatus,
       metadata: claimResult.task.metadata,
       env: input.env,
     });
@@ -227,6 +441,19 @@ const implementSelectedTask = async (
       status: updatedTask.hubStatus,
       commitCount: implementationResult.commits.length,
     });
+
+    if (hasReviewer) {
+      return reviewSelectedTask(
+        input,
+        context,
+        task,
+        branch,
+        claimResult.claim!,
+        claimResult.task.metadata,
+        reviewPromptFile ?? "",
+        implementationResult.commits.length,
+      );
+    }
 
     return {
       taskId: task.id,
@@ -290,7 +517,23 @@ export const runHubFlow = async (
 ): Promise<RunHubFlowResult> => {
   const cwd = input.cwd ?? process.cwd();
   const repoRoot = resolveGitRepoRoot(cwd);
-  const promptFile = resolveHubFlowPromptPath(input.flowId, "implement");
+  const flowDefinition = getHubFlowDefinition(input.flowId);
+  if (!flowDefinition) {
+    throw new Error(`Unknown Hub flow: "${input.flowId}"`);
+  }
+  if (flowDefinition.hasReviewer && !input.reviewer) {
+    throw new Error(
+      `Hub flow "${input.flowId}" requires a reviewer but none was provided`,
+    );
+  }
+
+  const implementPromptFile = resolveHubFlowPromptPath(
+    input.flowId,
+    "implement",
+  );
+  const reviewPromptFile = flowDefinition.hasReviewer
+    ? resolveHubFlowPromptPath(input.flowId, "review")
+    : undefined;
 
   const readyBoard = loadHubReadyQueue(repoRoot, input.env);
   const selectedTasks = selectHubFlowTasks(readyBoard);
@@ -324,7 +567,9 @@ export const runHubFlow = async (
         { ...input, cwd: repoRoot },
         context,
         task,
-        promptFile,
+        implementPromptFile,
+        flowDefinition.hasReviewer,
+        reviewPromptFile,
       ),
     );
   }
@@ -368,28 +613,16 @@ export const createHubFlowRunImplementer = (options: {
   readonly cwd: string;
 }): HubFlowImplementer => {
   return async (input) => {
-    const { cursor } = await import("./AgentProvider.js");
-    const { run } = await import("./run.js");
-    const { noSandbox } = await import("./sandboxes/no-sandbox.js");
-
     try {
-      const result = await run({
-        agent: cursor("auto"),
-        sandbox: noSandbox(),
+      const result = await runHubAgent({
         cwd: options.cwd,
         promptFile: input.promptFile,
-        promptArgs: {
-          TASK_ID: input.taskId,
-          TASK_TITLE: input.title,
-          BRANCH: input.branch,
-          VIEW_TASK_COMMAND: `bd show ${input.taskId}`,
-        },
-        branchStrategy: { type: "branch", branch: input.branch },
+        taskId: input.taskId,
+        title: input.title,
+        branch: input.branch,
+        runDir: input.runDir,
         name: `implement-${input.taskId}`,
-        logging: {
-          type: "file",
-          path: join(input.runDir, "logs", `${input.taskId}.log`),
-        },
+        logFileName: `${input.taskId}.log`,
       });
 
       if (!result.completionSignal) {
@@ -406,6 +639,54 @@ export const createHubFlowRunImplementer = (options: {
           commits: result.commits,
           completionSignal: result.completionSignal,
           message: "Implementer completed without commits",
+        };
+      }
+
+      return {
+        outcome: "success",
+        commits: result.commits,
+        completionSignal: result.completionSignal,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (isSandboxFailureTag(getErrorTag(error))) {
+        return {
+          outcome: "sandbox_failed",
+          commits: [],
+          message,
+        };
+      }
+
+      return {
+        outcome: "agent_failed",
+        commits: [],
+        message,
+      };
+    }
+  };
+};
+
+export const createHubFlowRunReviewer = (options: {
+  readonly cwd: string;
+}): HubFlowReviewer => {
+  return async (input) => {
+    try {
+      const result = await runHubAgent({
+        cwd: options.cwd,
+        promptFile: input.promptFile,
+        taskId: input.taskId,
+        title: input.title,
+        branch: input.branch,
+        runDir: input.runDir,
+        name: `review-${input.taskId}`,
+        logFileName: `${input.taskId}-review.log`,
+      });
+
+      if (!result.completionSignal) {
+        return {
+          outcome: "agent_failed",
+          commits: result.commits,
+          message: "Reviewer finished without completion signal",
         };
       }
 
