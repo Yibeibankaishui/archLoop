@@ -27,6 +27,62 @@ const BEADS_LIFECYCLE_STATUSES = new Set([
   "blocked",
   "closed",
 ]);
+const TASK_STATUS_KEYS = [
+  "hub_status",
+  "hubStatus",
+  "task_status",
+  "taskStatus",
+  "hub_state",
+  "hubState",
+  "triage_status",
+  "triageStatus",
+  "task_board_status",
+  "taskBoardStatus",
+] as const;
+const BEADS_LIFECYCLE_KEYS = ["state", "status", "lifecycle"] as const;
+const METADATA_STATUS_RULES = [
+  {
+    keys: [
+      "blocked_reason",
+      "blockedReason",
+      "blocked_reason_kind",
+      "blockedReasonKind",
+      "blocked",
+    ] as const,
+    status: "blocked" as const,
+  },
+  {
+    keys: [
+      "needs_info",
+      "needsInfo",
+      "needs_info_reason",
+      "needsInfoReason",
+    ] as const,
+    status: "needs_info" as const,
+  },
+  {
+    keys: [
+      "failed",
+      "failedReason",
+      "failure_reason",
+      "failureReason",
+    ] as const,
+    status: "failed" as const,
+  },
+  {
+    keys: [
+      "sync_conflict",
+      "syncConflict",
+      "sync_conflict_reason",
+      "syncConflictReason",
+    ] as const,
+    status: "sync_conflict" as const,
+  },
+  {
+    keys: ["wontfix", "wontFix", "rejected"] as const,
+    status: "wontfix" as const,
+  },
+] as const;
 
 const STATUS_LABEL_TO_HUB_STATUS: Readonly<Record<string, HubTaskStatus>> = {
   needs_triage: "inbox",
@@ -188,20 +244,7 @@ const normalizeBeadsLifecycle = (value: unknown): string | undefined => {
 const resolveMetadataStatus = (
   metadata: Readonly<Record<string, unknown>>,
 ): HubTaskStatus | undefined => {
-  const statusKeys = [
-    "hub_status",
-    "hubStatus",
-    "task_status",
-    "taskStatus",
-    "hub_state",
-    "hubState",
-    "triage_status",
-    "triageStatus",
-    "task_board_status",
-    "taskBoardStatus",
-  ] as const;
-
-  for (const key of statusKeys) {
+  for (const key of TASK_STATUS_KEYS) {
     const status = normalizeHubTaskStatus(metadata[key]);
     if (status) {
       return status;
@@ -214,49 +257,10 @@ const resolveMetadataStatus = (
 const resolveStatusFromMetadataReasons = (
   metadata: Readonly<Record<string, unknown>>,
 ): HubTaskStatus | undefined => {
-  if (
-    hasTruthyMetadata(metadata, [
-      "blocked_reason",
-      "blockedReason",
-      "blocked_reason_kind",
-      "blockedReasonKind",
-      "blocked",
-    ])
-  ) {
-    return "blocked";
-  }
-  if (
-    hasTruthyMetadata(metadata, [
-      "needs_info",
-      "needsInfo",
-      "needs_info_reason",
-      "needsInfoReason",
-    ])
-  ) {
-    return "needs_info";
-  }
-  if (
-    hasTruthyMetadata(metadata, [
-      "failed",
-      "failedReason",
-      "failure_reason",
-      "failureReason",
-    ])
-  ) {
-    return "failed";
-  }
-  if (
-    hasTruthyMetadata(metadata, [
-      "sync_conflict",
-      "syncConflict",
-      "sync_conflict_reason",
-      "syncConflictReason",
-    ])
-  ) {
-    return "sync_conflict";
-  }
-  if (hasTruthyMetadata(metadata, ["wontfix", "wontFix", "rejected"])) {
-    return "wontfix";
+  for (const rule of METADATA_STATUS_RULES) {
+    if (hasTruthyMetadata(metadata, rule.keys)) {
+      return rule.status;
+    }
   }
   return undefined;
 };
@@ -292,18 +296,7 @@ const resolveStatusFromTaskShape = (
   metadata: Readonly<Record<string, unknown>>,
 ): HubTaskStatus | undefined => {
   const directStatus = normalizeHubTaskStatus(
-    readFirstString(task, [
-      "hub_status",
-      "hubStatus",
-      "task_status",
-      "taskStatus",
-      "hub_state",
-      "hubState",
-      "triage_status",
-      "triageStatus",
-      "task_board_status",
-      "taskBoardStatus",
-    ]),
+    readFirstString(task, TASK_STATUS_KEYS),
   );
   if (directStatus) {
     return directStatus;
@@ -325,7 +318,7 @@ const resolveStatusFromTaskShape = (
   }
 
   const beadsLifecycle = normalizeBeadsLifecycle(
-    readFirstString(task, ["state", "status", "lifecycle"]),
+    readFirstString(task, BEADS_LIFECYCLE_KEYS),
   );
   if (beadsLifecycle === "blocked") {
     return "blocked";
@@ -352,8 +345,7 @@ export const projectHubTask = (task: BeadsTaskRecord): HubTaskProjection => {
   );
   const runRefs = readRefs(task.runRefs ?? task.run_refs ?? task.runReferences);
   const hubStatus = resolveStatusFromTaskShape(task, labels, metadata);
-  const beadsStatus =
-    readFirstString(task, ["state", "status", "lifecycle"]) ?? undefined;
+  const beadsStatus = readFirstString(task, BEADS_LIFECYCLE_KEYS) ?? undefined;
 
   return {
     id: String(task.id ?? task.key ?? task.slug ?? task.title ?? "unknown"),
@@ -498,15 +490,10 @@ export const formatHubTaskBoardLines = (
 
   lines.push(`Total tasks: ${board.tasks.length}`);
 
-  for (const status of HUB_TASK_STATUSES) {
-    const tasks = board.groups.find((group) => group.status === status)?.tasks;
-    if (!tasks || tasks.length === 0) {
-      continue;
-    }
-
+  for (const group of board.groups) {
     lines.push("");
-    lines.push(`${status} (${tasks.length})`);
-    for (const task of tasks) {
+    lines.push(`${group.status} (${group.tasks.length})`);
+    for (const task of group.tasks) {
       lines.push(`  ${task.id}: ${task.title}`);
     }
   }
