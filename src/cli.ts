@@ -100,6 +100,14 @@ const imageNameOption = Options.text("image-name").pipe(
 const resolveImageName = (cliFlag: OptionalTextFlag, cwd: string): string =>
   cliFlag._tag === "Some" ? cliFlag.value : defaultImageName(cwd);
 
+const optionalTextValue = (flag: OptionalTextFlag): string | undefined =>
+  flag._tag === "Some" ? flag.value : undefined;
+
+const toTaskBoardError = (error: unknown): TaskBoardError =>
+  new TaskBoardError({
+    message: error instanceof Error ? error.message : String(error),
+  });
+
 // --- Config directory check ---
 
 const CONFIG_DIR = ".sandcastle";
@@ -1553,10 +1561,7 @@ const tasksListCommand = Command.make("list", {}, () =>
     const cwd = process.cwd();
     const board = yield* Effect.try({
       try: () => loadHubTaskBoard(cwd),
-      catch: (error) =>
-        new TaskBoardError({
-          message: error instanceof Error ? error.message : String(error),
-        }),
+      catch: toTaskBoardError,
     });
 
     for (const line of formatHubTaskBoardLines(board)) {
@@ -1591,16 +1596,11 @@ const tasksCreateCommand = Command.make(
         try: () =>
           createHubTask(cwd, {
             title,
-            description:
-              description._tag === "Some" ? description.value : undefined,
-            origin:
-              resolvedOrigin === "user-feedback" ? "user-feedback" : "manual",
-            kind: kind._tag === "Some" ? kind.value : undefined,
+            description: optionalTextValue(description),
+            origin: resolvedOrigin,
+            kind: optionalTextValue(kind),
           }),
-        catch: (error) =>
-          new TaskBoardError({
-            message: error instanceof Error ? error.message : String(error),
-          }),
+        catch: toTaskBoardError,
       });
 
       yield* d.summary("Created Beads task", {
@@ -1618,10 +1618,7 @@ const tasksShowCommand = Command.make("show", { id: taskIdArg }, ({ id }) =>
     const cwd = process.cwd();
     const task = yield* Effect.try({
       try: () => loadHubTask(cwd, id),
-      catch: (error) =>
-        new TaskBoardError({
-          message: error instanceof Error ? error.message : String(error),
-        }),
+      catch: toTaskBoardError,
     });
 
     yield* d.summary(`Beads task ${task.id}`, formatHubTaskDetailsRows(task));
@@ -1659,19 +1656,12 @@ const tasksCommentCommand = Command.make(
                 }
                 return String(result);
               },
-              catch: (error) =>
-                new TaskBoardError({
-                  message:
-                    error instanceof Error ? error.message : String(error),
-                }),
+              catch: toTaskBoardError,
             });
 
       yield* Effect.try({
         try: () => appendHubTaskComment(cwd, id, commentBody),
-        catch: (error) =>
-          new TaskBoardError({
-            message: error instanceof Error ? error.message : String(error),
-          }),
+        catch: toTaskBoardError,
       });
 
       yield* d.status(`Appended a comment to Beads task ${id}.`, "success");
