@@ -28,6 +28,18 @@ export interface HubProjectStatusOptions {
   readonly ensureHubProjectDir?: (hubProjectDir: string) => boolean;
 }
 
+const BD_JSON_COUNT_KEYS = [
+  "total_count",
+  "totalCount",
+  "count",
+  "ready_count",
+  "readyCount",
+  "open_count",
+  "openCount",
+  "tasks",
+  "items",
+] as const;
+
 export const resolveSandcastleUserDataDir = (
   env: NodeJS.ProcessEnv = process.env,
   homeDir: string = homedir(),
@@ -58,7 +70,7 @@ export const resolveGitRepoRoot = (cwd: string): string => {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
-    return stdout.toString().trim();
+    return stdout.trim();
   } catch (error) {
     const message =
       error instanceof Error
@@ -68,6 +80,30 @@ export const resolveGitRepoRoot = (cwd: string): string => {
       `sandcastle project status requires a git repository: ${message}`,
     );
   }
+};
+
+const parseJsonCount = (output: string): number => {
+  try {
+    const parsed = JSON.parse(output) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed.length;
+    }
+    if (parsed && typeof parsed === "object") {
+      const record = parsed as Record<string, unknown>;
+      for (const key of BD_JSON_COUNT_KEYS) {
+        const value = record[key];
+        if (typeof value === "number" && Number.isFinite(value)) {
+          return value;
+        }
+        if (Array.isArray(value)) {
+          return value.length;
+        }
+      }
+    }
+  } catch {
+    // Fall through to zero for unreadable output.
+  }
+  return 0;
 };
 
 const commandExists = (command: string): boolean => {
@@ -84,87 +120,85 @@ const commandExists = (command: string): boolean => {
   }
 };
 
-const parseJsonCount = (output: string): number => {
-  try {
-    const parsed = JSON.parse(output) as unknown;
-    if (Array.isArray(parsed)) {
-      return parsed.length;
-    }
-    if (parsed && typeof parsed === "object") {
-      const record = parsed as Record<string, unknown>;
-      for (const key of [
-        "total_count",
-        "totalCount",
-        "count",
-        "ready_count",
-        "readyCount",
-        "open_count",
-        "openCount",
-        "tasks",
-        "items",
-      ]) {
-        const value = record[key];
-        if (typeof value === "number" && Number.isFinite(value)) {
-          return value;
-        }
-        if (Array.isArray(value)) {
-          return value.length;
-        }
-      }
-    }
-  } catch {
-    // Fall through to zero for unreadable output.
-  }
-  return 0;
-};
-
-const readBdJsonCount = (args: readonly string[], cwd: string): number => {
+const countBdJsonResult = (args: readonly string[], cwd: string): number => {
   try {
     const stdout = execFileSync("bd", [...args], {
       cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
-    return parseJsonCount(stdout.toString());
+    return parseJsonCount(stdout);
   } catch {
     return 0;
   }
 };
 
-const ensureHubProjectDir = (hubProjectDir: string): boolean => {
-  const existed = existsSync(hubProjectDir);
+const registerHubProjectDir = (hubProjectDir: string): boolean => {
+  const existedBeforeRegistration = existsSync(hubProjectDir);
   mkdirSync(hubProjectDir, { recursive: true });
-  return existed;
+  return existedBeforeRegistration;
 };
+
+const resolveBeadsAvailable = (
+  detectBeadsAvailable: HubProjectStatusOptions["detectBeadsAvailable"],
+): boolean => (detectBeadsAvailable ?? (() => commandExists("bd")))();
+
+const resolveTaskCounts = (
+  repoRoot: string,
+  beadsAvailable: boolean,
+  countReadyTasks: HubProjectStatusOptions["countReadyTasks"],
+  countTotalTasks: HubProjectStatusOptions["countTotalTasks"],
+): HubProjectTaskCounts =>
+  beadsAvailable
+    ? {
+        ready: (
+          countReadyTasks ??
+          ((repoRootPath) =>
+            countBdJsonResult(["ready", "--json"], repoRootPath))
+        )(repoRoot),
+        total: (
+          countTotalTasks ??
+          ((repoRootPath) =>
+            countBdJsonResult(["list", "--json"], repoRootPath))
+        )(repoRoot),
+      }
+    : { ready: 0, total: 0 };
+
+const resolveProjectRegistration = (
+  hubProjectDir: string,
+  ensureHubProjectDir: HubProjectStatusOptions["ensureHubProjectDir"],
+): boolean => (ensureHubProjectDir ?? registerHubProjectDir)(hubProjectDir);
+
+const resolveRepoRoot = (
+  cwd: string,
+  resolveRepoRootOption: HubProjectStatusOptions["resolveRepoRoot"],
+): string =>
+  resolveRepoRootOption ? resolveRepoRootOption(cwd) : resolveGitRepoRoot(cwd);
+
+const resolveUserDataDir = (
+  sandcastleUserDataDir: HubProjectStatusOptions["sandcastleUserDataDir"],
+): string => sandcastleUserDataDir ?? resolveSandcastleUserDataDir();
 
 export const resolveHubProjectStatus = (
   options: HubProjectStatusOptions = {},
 ): HubProjectStatus => {
   const cwd = options.cwd ?? process.cwd();
-  const repoRoot = options.resolveRepoRoot
-    ? options.resolveRepoRoot(cwd)
-    : resolveGitRepoRoot(cwd);
-  const sandcastleUserDataDir =
-    options.sandcastleUserDataDir ?? resolveSandcastleUserDataDir();
+  const repoRoot = resolveRepoRoot(cwd, options.resolveRepoRoot);
+  const sandcastleUserDataDir = resolveUserDataDir(
+    options.sandcastleUserDataDir,
+  );
   const hubProjectDir = resolveHubProjectDir(sandcastleUserDataDir, repoRoot);
-  const projectRegistered = (
-    options.ensureHubProjectDir ?? ensureHubProjectDir
-  )(hubProjectDir);
-  const beadsAvailable = (
-    options.detectBeadsAvailable ?? (() => commandExists("bd"))
-  )();
-  const taskCounts = beadsAvailable
-    ? {
-        ready: (
-          options.countReadyTasks ??
-          ((repoRootPath) => readBdJsonCount(["ready", "--json"], repoRootPath))
-        )(repoRoot),
-        total: (
-          options.countTotalTasks ??
-          ((repoRootPath) => readBdJsonCount(["list", "--json"], repoRootPath))
-        )(repoRoot),
-      }
-    : { ready: 0, total: 0 };
+  const projectRegistered = resolveProjectRegistration(
+    hubProjectDir,
+    options.ensureHubProjectDir,
+  );
+  const beadsAvailable = resolveBeadsAvailable(options.detectBeadsAvailable);
+  const taskCounts = resolveTaskCounts(
+    repoRoot,
+    beadsAvailable,
+    options.countReadyTasks,
+    options.countTotalTasks,
+  );
 
   return {
     repoRoot,

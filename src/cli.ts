@@ -1495,6 +1495,18 @@ const removeImageCommand = Command.make(
 
 // --- Project status command ---
 
+const formatHubProjectStatusRows = (
+  status: Awaited<ReturnType<typeof resolveHubProjectStatus>>,
+): Record<string, string> => ({
+  "Repository root": status.repoRoot,
+  "Sandcastle user data dir": status.sandcastleUserDataDir,
+  "Hub project dir": status.hubProjectDir,
+  "Hub project registration": status.projectRegistered ? "existing" : "created",
+  "Beads available": status.beadsAvailable ? "yes" : "no",
+  "Task board ready": String(status.taskCounts.ready),
+  "Task board total": String(status.taskCounts.total),
+});
+
 const projectStatusCommand = Command.make("status", {}, () =>
   Effect.gen(function* () {
     const d = yield* Display;
@@ -1507,17 +1519,7 @@ const projectStatusCommand = Command.make("status", {}, () =>
         }),
     });
 
-    yield* d.summary("Hub project status", {
-      "Repository root": status.repoRoot,
-      "Sandcastle user data dir": status.sandcastleUserDataDir,
-      "Hub project dir": status.hubProjectDir,
-      "Hub project registration": status.projectRegistered
-        ? "existing"
-        : "created",
-      "Beads available": status.beadsAvailable ? "yes" : "no",
-      "Task board ready": String(status.taskCounts.ready),
-      "Task board total": String(status.taskCounts.total),
-    });
+    yield* d.summary("Hub project status", formatHubProjectStatusRows(status));
   }),
 );
 
