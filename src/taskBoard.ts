@@ -92,6 +92,12 @@ const METADATA_STATUS_RULES = [
     status: "wontfix" as const,
   },
 ] as const;
+const IMPLEMENTING_LABEL_STATUSES = new Set([
+  "inbox",
+  "needs_info",
+  "ready_for_agent",
+  "ready_for_human",
+]);
 
 const STATUS_LABEL_TO_HUB_STATUS: Readonly<Record<string, HubTaskStatus>> = {
   needs_triage: "inbox",
@@ -331,9 +337,7 @@ const resolveStatusFromTaskShape = (
   if (
     beadsLifecycle === "in_progress" &&
     labelStatus &&
-    ["inbox", "needs_info", "ready_for_agent", "ready_for_human"].includes(
-      labelStatus,
-    )
+    IMPLEMENTING_LABEL_STATUSES.has(labelStatus)
   ) {
     return "implementing";
   }
@@ -369,7 +373,8 @@ export const projectHubTask = (task: BeadsTaskRecord): HubTaskProjection => {
   const hubStatus = resolveStatusFromTaskShape(task, labels, metadata);
   const beadsStatus = readFirstString(task, BEADS_LIFECYCLE_KEYS) ?? undefined;
   const claim = readHubTaskClaim(metadata);
-  const claimState = resolveHubTaskClaimState(hubStatus ?? "inbox", claim);
+  const resolvedHubStatus = hubStatus ?? "inbox";
+  const claimState = resolveHubTaskClaimState(resolvedHubStatus, claim);
 
   return {
     id: String(task.id ?? task.key ?? task.slug ?? task.title ?? "unknown"),
@@ -377,7 +382,7 @@ export const projectHubTask = (task: BeadsTaskRecord): HubTaskProjection => {
       readFirstString(task, ["title", "summary", "name"]) ??
       String(task.id ?? "untitled"),
     beadsStatus,
-    hubStatus: hubStatus ?? "inbox",
+    hubStatus: resolvedHubStatus,
     claim,
     claimState,
     labels,
@@ -523,6 +528,7 @@ export interface ClaimHubTaskResult {
 
 export const claimHubTask = (input: ClaimHubTaskInput): ClaimHubTaskResult => {
   const startedAt = input.startedAt ?? new Date();
+  const claimedAt = startedAt.toISOString();
   const context = createHubRunContext({
     cwd: input.cwd,
     hubProjectDir: input.hubProjectDir,
@@ -543,7 +549,7 @@ export const claimHubTask = (input: ClaimHubTaskInput): ClaimHubTaskResult => {
       batchId: context.batchId,
       taskId: input.taskId,
       branch: input.branch,
-      createdAt: startedAt.toISOString(),
+      createdAt: claimedAt,
       status: task.hubStatus,
       reason: "active_claim",
       claim: existingClaim,
@@ -565,16 +571,11 @@ export const claimHubTask = (input: ClaimHubTaskInput): ClaimHubTaskResult => {
     runId: context.runId,
     batchId: context.batchId,
     branch: input.branch,
-    claimedAt: startedAt.toISOString(),
+    claimedAt,
   });
   const metadata = {
     ...task.metadata,
-    claim: {
-      runId: claim.runId,
-      batchId: claim.batchId,
-      branch: claim.branch,
-      claimedAt: claim.claimedAt,
-    },
+    claim: claim.raw,
   };
 
   runBdText(
@@ -600,7 +601,7 @@ export const claimHubTask = (input: ClaimHubTaskInput): ClaimHubTaskResult => {
     batchId: context.batchId,
     taskId: input.taskId,
     branch: input.branch,
-    createdAt: claim.claimedAt ?? new Date().toISOString(),
+    createdAt: claimedAt,
     status: updatedTask.hubStatus,
     claim,
   });

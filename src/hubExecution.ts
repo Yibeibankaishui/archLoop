@@ -111,6 +111,16 @@ const writeJsonl = (path: string, record: unknown): void => {
   appendFileSync(path, `${JSON.stringify(record)}\n`, "utf8");
 };
 
+const appendHubEvent = <T>(
+  directory: string,
+  path: string,
+  event: T,
+): string => {
+  mkdirSync(directory, { recursive: true });
+  writeJsonl(path, event);
+  return path;
+};
+
 export const createHubRunIdentifiers = (): {
   readonly runId: string;
   readonly batchId: string;
@@ -173,12 +183,13 @@ export const createHubRunContext = (
   const hubProjectDir =
     options.hubProjectDir ??
     resolveHubProjectDir(resolveSandcastleUserDataDir(options.env), repoRoot);
+  const identifiers = createHubRunIdentifiers();
   const ids = options.runId
     ? {
         runId: options.runId,
-        batchId: options.batchId ?? createHubRunIdentifiers().batchId,
+        batchId: options.batchId ?? identifiers.batchId,
       }
-    : createHubRunIdentifiers();
+    : identifiers;
   const runDir = resolveHubRunDirectory(hubProjectDir, ids.runId);
   const eventsDir = resolveHubRunEventsDirectory(runDir);
   const paths = resolveHubRunEventsPaths(runDir);
@@ -217,9 +228,11 @@ export const appendHubRunEvent = (
   event: HubRunStartedEvent,
 ): string => {
   const { runEventsPath } = resolveHubRunEventsPaths(runDir);
-  mkdirSync(resolveHubRunEventsDirectory(runDir), { recursive: true });
-  writeJsonl(runEventsPath, event);
-  return runEventsPath;
+  return appendHubEvent(
+    resolveHubRunEventsDirectory(runDir),
+    runEventsPath,
+    event,
+  );
 };
 
 export const appendHubBatchEvent = (
@@ -227,9 +240,11 @@ export const appendHubBatchEvent = (
   event: HubBatchStartedEvent,
 ): string => {
   const { batchEventsPath } = resolveHubRunEventsPaths(runDir);
-  mkdirSync(resolveHubRunEventsDirectory(runDir), { recursive: true });
-  writeJsonl(batchEventsPath, event);
-  return batchEventsPath;
+  return appendHubEvent(
+    resolveHubRunEventsDirectory(runDir),
+    batchEventsPath,
+    event,
+  );
 };
 
 export const appendHubTaskEvent = (
@@ -237,9 +252,11 @@ export const appendHubTaskEvent = (
   event: HubTaskEvent,
 ): string => {
   const { taskEventsPath } = resolveHubRunEventsPaths(runDir);
-  mkdirSync(resolveHubRunEventsDirectory(runDir), { recursive: true });
-  writeJsonl(taskEventsPath, event);
-  return taskEventsPath;
+  return appendHubEvent(
+    resolveHubRunEventsDirectory(runDir),
+    taskEventsPath,
+    event,
+  );
 };
 
 export const readHubTaskClaim = (
