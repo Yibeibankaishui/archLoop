@@ -503,6 +503,51 @@ exit 1
     expect(args).toContain('"kind":"enhancement"');
   });
 
+  it("tasks create accepts --category as an alias for kind metadata", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const argsFile = join(hostDir, "category-args.txt");
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "create" ]; then
+  printf '%s\n' "$@" > "${argsFile}"
+  cat <<'JSON'
+[
+  {
+    "id": "bd-101",
+    "title": "Categorized task"
+  }
+]
+JSON
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    await runCli(
+      'tasks create "Categorized task" --category enhancement',
+      hostDir,
+      {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      },
+    );
+
+    const args = await readFile(argsFile, "utf-8");
+    expect(args).toContain('"kind":"enhancement"');
+  });
+
   it("tasks comment appends a comment without changing task status", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);

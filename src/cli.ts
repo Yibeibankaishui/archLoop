@@ -1543,6 +1543,7 @@ const taskDescriptionOption = Options.text("description").pipe(
 );
 const taskKindOption = Options.text("kind").pipe(
   Options.withDescription("Optional task kind metadata"),
+  Options.withAlias("category"),
   Options.optional,
 );
 
