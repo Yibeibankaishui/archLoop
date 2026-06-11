@@ -10,7 +10,7 @@ flowchart LR
     P02 --> P03["03 Capability Packs 与专业化开发闭环<br/>Done<br/>能力包 / 小程序 / 验证闭环"]
     P03 --> P04["04 Docker 环境与容器接入<br/>Planned<br/>Custom Dockerfile / Existing Container"]
     P04 --> P05["05 文档与用户体验<br/>Planned<br/>README / Init Next Steps / 用户指南"]
-    P05 --> P06["06 GUI<br/>Planned<br/>运行观察 / 配置管理 / Review 状态"]
+    P05 --> P06["06 Sandcastle Hub 与 GUI<br/>Planned<br/>任务表 / Flow / 配置管理 / 可视化"]
 
     P01 -. "能力沉淀" .-> P04
     P02 -. "使用边界" .-> P05
@@ -268,26 +268,32 @@ Goal: 让用户能从 README、模板、init next steps 和 roadmap 中理解 Sa
 - [ ] 为常见工作流补充用户指南。
 - [ ] 建立 roadmap 与 PRD、ADR、changeset、issue 的链接规范。
 
-## 06 GUI
+## 06 Sandcastle Hub 与 GUI
 
 Status: Planned
 
-Goal: 提供可视化界面，用于配置、运行、观察和管理 Sandcastle workflow。
+Goal: 提供 CLI-first 的 Sandcastle Hub 控制面，并在同一状态模型上承接后续 GUI，用于管理项目、任务表、凭证、flows、运行观察和恢复。
 
 ### Scope
 
-- GUI 的核心用户路径、信息架构和运行入口。
-- Run、sandbox、branch、logs、agent stream、commits 和 review 状态的可视化模型。
-- GUI 与现有 CLI / JS API 的边界、复用关系和数据来源。
+- Sandcastle Hub 与现有 `sandcastle init` scaffold 路径的边界。
+- Hub project config、Hub project assets、Hub env file、Hub auth directory 和 Hub run directory。
+- Beads 本地任务表、远程任务源 pull/push sync、PRD 拆分任务、triage、任务评论和 recovery。
+- Flow、flow batch、task/run/batch 状态机、per-task merge events 和 task board projection。
+- 后续 GUI 的核心用户路径、信息架构和运行入口。
+- GUI 与 Hub CLI / JS API 的边界、复用关系和数据来源。
 
 ### Deliverables
 
-- GUI 的目标用户、核心流程和最小可用范围被明确记录。
-- 可视化状态模型能覆盖 Sandcastle 的 run lifecycle、sandbox lifecycle 和 agent output。
-- GUI 后续实现有独立 PRD 或设计文档承接。
+- Sandcastle Hub 的目标用户、核心流程和最小可用范围被明确记录。
+- Hub task board 的本地任务源、远程同步、任务状态机和 flow 事件模型被明确记录。
+- 可视化状态模型能覆盖 Sandcastle 的 task、batch、run、sandbox lifecycle 和 agent output。
+- GUI 后续实现能复用 Hub task board 与 run/event 数据模型。
 
 ### Tasks
 
-- [ ] 定义 GUI 的核心用户路径。
+- [x] 明确 Hub task board、Beads 本地任务源、远程任务源同步与状态机设计（见 [sandcastle-hub-task-board](./prd/sandcastle-hub-task-board.md)、[ADR-0021](./adr/0021-hub-task-board-uses-beads-local-store.md)、[ADR-0022](./adr/0022-hub-flows-emit-per-task-merge-events.md)、[ADR-0023](./adr/0023-hub-task-statuses.md)）。
+- [ ] 定义 Sandcastle Hub 控制面的核心用户路径。
+- [ ] 设计 Hub project onboarding、credentials、flow run 和 task recovery CLI。
 - [ ] 设计 run / sandbox / branch / logs / agent stream 的可视化模型。
-- [ ] 明确 GUI 与现有 CLI / JS API 的关系。
+- [ ] 明确 GUI 与 Hub CLI / JS API 的关系。

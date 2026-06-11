@@ -33,6 +33,31 @@ const commitFile = async (
   await execAsync(`git commit -m "${message}"`, { cwd: dir });
 };
 
+const seedSandcastlePackage = async (dir: string) => {
+  const { version } = JSON.parse(
+    await readFile(join(process.cwd(), "package.json"), "utf-8"),
+  ) as { version: string };
+
+  await writeFile(
+    join(dir, "package.json"),
+    `${JSON.stringify(
+      {
+        name: "cli-host",
+        private: true,
+        scripts: {
+          sandcastle: "tsx .sandcastle/main.mts",
+        },
+        devDependencies: {
+          "@ai-hero/sandcastle": `^${version}`,
+          tsx: "^4.21.0",
+        },
+      },
+      null,
+      2,
+    )}\n`,
+  );
+};
+
 const cliPath = join(import.meta.dirname, "..", "dist", "main.js");
 
 const runCli = (args: string, cwd: string, env?: NodeJS.ProcessEnv) =>
@@ -289,6 +314,7 @@ describe("sandcastle CLI", () => {
   it("init --sandbox no-sandbox --backlog beads succeeds when bd exists on the host and explains the host requirement", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
+    await seedSandcastlePackage(hostDir);
 
     const binDir = join(hostDir, "test-bin");
     await mkdir(binDir, { recursive: true });
@@ -318,6 +344,7 @@ describe("sandcastle CLI", () => {
   it("init --sandbox no-sandbox --project-profile python explains host Python prerequisites", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
+    await seedSandcastlePackage(hostDir);
 
     const { stdout } = await runCli(
       "init --sandbox no-sandbox --backlog github-issues --template blank --project-profile python --preset-agents none --build-image false --create-sandcastle-label false --agent claude-code",
@@ -406,6 +433,7 @@ describe("sandcastle CLI", () => {
   it("init --project-profile cpp scaffolds C++ Dockerfile tools and bootstrap.sh", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
+    await seedSandcastlePackage(hostDir);
 
     await runNonInteractiveInit(
       hostDir,
