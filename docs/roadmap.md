@@ -299,6 +299,7 @@ Goal: 提供 CLI-first 的 Sandcastle Hub 控制面，并在同一状态模型�
 - [x] 实现 `sandcastle tasks from-prd <prd-ref>` 的 PRD 垂直切片分解、AFK/HITL 分类、人工确认依赖与 Beads 任务创建（见 [#67](https://github.com/Yibeibankaishui/sandcastle/issues/67)）。
 - [x] 实现 task claim metadata 与 Hub run 事件存储，为 flow 执行提供 run/batch/task 记录（见 [#69](https://github.com/Yibeibankaishui/sandcastle/issues/69)）。
 - [x] 实现首个 no-review Hub flow：从 Beads ready queue 选择任务、claim、运行 implementer，并将成功任务推进到 `waiting_for_merge`（见 [#70](https://github.com/Yibeibankaishui/sandcastle/issues/70)）。
+- [x] 实现 `sandcastle tasks sync` 的 GitHub Issues 远程同步：拉取 Issue 到 Beads、推送协作状态标签/关闭动作，并记录 `push_pending` / `sync_conflict`（见 [#68](https://github.com/Yibeibankaishui/sandcastle/issues/68)）。
 - [ ] 定义 Sandcastle Hub 控制面的核心用户路径。
 - [ ] 设计 Hub project onboarding、credentials、flow run 和 task recovery CLI。
 - [ ] 设计 run / sandbox / branch / logs / agent stream 的可视化模型。

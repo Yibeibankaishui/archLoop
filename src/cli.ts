@@ -98,6 +98,10 @@ import {
   loadHubTaskBoard,
 } from "./taskBoard.js";
 import { triageHubTasks, type HubTriageOutcome } from "./hubTriage.js";
+import {
+  formatHubTaskSyncSummaryLines,
+  syncHubTasksWithGithub,
+} from "./hubTaskSync.js";
 
 const require = createRequire(import.meta.url);
 const VERSION = (require("../package.json") as { version: string }).version;
@@ -1918,6 +1922,21 @@ const tasksFromPrdCommand = Command.make(
     }),
 );
 
+const tasksSyncCommand = Command.make("sync", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const cwd = process.cwd();
+    const result = yield* Effect.try({
+      try: () => syncHubTasksWithGithub({ cwd }),
+      catch: toTaskBoardError,
+    });
+
+    for (const line of formatHubTaskSyncSummaryLines(result)) {
+      yield* d.text(line);
+    }
+  }),
+);
+
 const tasksCommentCommand = Command.make(
   "comment",
   {
@@ -1973,6 +1992,7 @@ const tasksCommand = Command.make("tasks", {}, () =>
     tasksCreateCommand,
     tasksTriageCommand,
     tasksFromPrdCommand,
+    tasksSyncCommand,
     tasksCommentCommand,
   ]),
 );
