@@ -1731,6 +1731,52 @@ const promptPrdHubStatus = (): Effect.Effect<
     catch: toTaskBoardError,
   });
 
+const resolvePrdDependencySpec = (
+  deps: OptionalTextFlag,
+  approve: boolean,
+): Effect.Effect<string, TaskBoardError, never> => {
+  if (deps._tag === "Some") {
+    return Effect.succeed(deps.value);
+  }
+
+  if (approve) {
+    return Effect.succeed("");
+  }
+
+  return Effect.tryPromise({
+    try: async () => {
+      const result = await clack.text({
+        message:
+          "Dependency pairs as childIndex:parentIndex (comma-separated, optional):",
+        placeholder: "2:1,3:2",
+        defaultValue: "",
+      });
+      if (clack.isCancel(result)) {
+        throw new TaskBoardError({
+          message: "PRD task creation cancelled.",
+        });
+      }
+      return String(result);
+    },
+    catch: toTaskBoardError,
+  });
+};
+
+const resolvePrdHubStatusSelection = (
+  status: OptionalTextFlag,
+  approve: boolean,
+): Effect.Effect<PrdHubStatus, TaskBoardError, never> => {
+  if (status._tag === "Some") {
+    return resolvePrdHubStatus(status);
+  }
+
+  if (approve) {
+    return Effect.succeed("inbox");
+  }
+
+  return promptPrdHubStatus();
+};
+
 const tasksFromPrdCommand = Command.make(
   "from-prd",
   {
@@ -1761,28 +1807,7 @@ const tasksFromPrdCommand = Command.make(
         );
       }
 
-      const dependencySpec =
-        deps._tag === "Some"
-          ? deps.value
-          : approve
-            ? ""
-            : yield* Effect.tryPromise({
-                try: async () => {
-                  const result = await clack.text({
-                    message:
-                      "Dependency pairs as childIndex:parentIndex (comma-separated, optional):",
-                    placeholder: "2:1,3:2",
-                    defaultValue: "",
-                  });
-                  if (clack.isCancel(result)) {
-                    throw new TaskBoardError({
-                      message: "PRD task creation cancelled.",
-                    });
-                  }
-                  return String(result);
-                },
-                catch: toTaskBoardError,
-              });
+      const dependencySpec = yield* resolvePrdDependencySpec(deps, approve);
 
       const dependencies = yield* Effect.try({
         try: () => parseDependencySpec(dependencySpec, plan.slices.length),
@@ -1822,12 +1847,7 @@ const tasksFromPrdCommand = Command.make(
         }
       }
 
-      const hubStatus =
-        status._tag === "Some"
-          ? yield* resolvePrdHubStatus(status)
-          : approve
-            ? "inbox"
-            : yield* promptPrdHubStatus();
+      const hubStatus = yield* resolvePrdHubStatusSelection(status, approve);
 
       const published = yield* Effect.try({
         try: () =>

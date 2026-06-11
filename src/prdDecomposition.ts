@@ -67,6 +67,9 @@ const extractSection = (
   return content.slice(sectionStart, sectionEnd).trim();
 };
 
+const splitSectionLines = (section: string): readonly string[] =>
+  section.split("\n").map((line) => line.trim());
+
 const normalizeItemText = (value: string): string =>
   value
     .replace(/^[-*]\s+/, "")
@@ -78,27 +81,21 @@ const classifySliceType = (text: string): SliceType =>
   HITL_PATTERN.test(text) ? "HITL" : "AFK";
 
 const extractCheckboxItems = (section: string): string[] =>
-  section
-    .split("\n")
-    .map((line) => line.trim())
+  splitSectionLines(section)
     .filter((line) => /^[-*]\s+\[ \]\s+/.test(line))
-    .map((line) => normalizeItemText(line))
+    .map(normalizeItemText)
     .filter((text) => text.length > 0);
 
 const extractBulletItems = (section: string): string[] =>
-  section
-    .split("\n")
-    .map((line) => line.trim())
+  splitSectionLines(section)
     .filter((line) => /^[-*]\s+(?!\[[ xX]\])/.test(line))
-    .map((line) => normalizeItemText(line))
+    .map(normalizeItemText)
     .filter((text) => text.length > 0);
 
 const extractNumberedItems = (section: string): string[] =>
-  section
-    .split("\n")
-    .map((line) => line.trim())
+  splitSectionLines(section)
     .filter((line) => /^\d+\.\s+/.test(line))
-    .map((line) => normalizeItemText(line))
+    .map(normalizeItemText)
     .filter((text) => text.length > 0);
 
 const toSliceTitle = (text: string): string => {
@@ -117,6 +114,21 @@ const buildSlices = (items: readonly string[]): PrdDraftSlice[] =>
     sliceType: classifySliceType(description),
   }));
 
+const PRD_SECTION_EXTRACTORS = [
+  {
+    pattern: TASKS_SECTION_PATTERN,
+    extractItems: extractCheckboxItems,
+  },
+  {
+    pattern: DELIVERABLES_SECTION_PATTERN,
+    extractItems: extractBulletItems,
+  },
+  {
+    pattern: USER_STORIES_SECTION_PATTERN,
+    extractItems: extractNumberedItems,
+  },
+] as const;
+
 export const resolvePrdPath = (cwd: string, prdRef: string): string =>
   isAbsolute(prdRef) ? prdRef : resolve(cwd, prdRef);
 
@@ -134,25 +146,14 @@ export const draftPrdSlices = (
   content: string,
   prdRef: string,
 ): PrdDraftPlan => {
-  const tasksSection = extractSection(content, TASKS_SECTION_PATTERN);
-  const deliverablesSection = extractSection(
-    content,
-    DELIVERABLES_SECTION_PATTERN,
-  );
-  const userStoriesSection = extractSection(
-    content,
-    USER_STORIES_SECTION_PATTERN,
-  );
-
-  const items =
-    (tasksSection ? extractCheckboxItems(tasksSection) : undefined) ??
-    (deliverablesSection
-      ? extractBulletItems(deliverablesSection)
-      : undefined) ??
-    (userStoriesSection
-      ? extractNumberedItems(userStoriesSection)
-      : undefined) ??
-    [];
+  let items: readonly string[] = [];
+  for (const { pattern, extractItems } of PRD_SECTION_EXTRACTORS) {
+    const section = extractSection(content, pattern);
+    if (section) {
+      items = extractItems(section);
+      break;
+    }
+  }
 
   return {
     prdRef,
@@ -170,11 +171,13 @@ export const parseDependencySpec = (
     return [];
   }
 
-  return trimmed.split(",").flatMap((entry) => {
-    const match = entry.trim().match(/^(\d+)\s*:\s*(\d+)$/);
+  const dependencies: PrdDependencyPair[] = [];
+  for (const entry of trimmed.split(",")) {
+    const normalizedEntry = entry.trim();
+    const match = normalizedEntry.match(/^(\d+)\s*:\s*(\d+)$/);
     if (!match) {
       throw new Error(
-        `Invalid dependency pair "${entry.trim()}". Use childIndex:parentIndex, e.g. 2:1.`,
+        `Invalid dependency pair "${normalizedEntry}". Use childIndex:parentIndex, e.g. 2:1.`,
       );
     }
 
@@ -188,12 +191,14 @@ export const parseDependencySpec = (
       dependentIndex === blockerIndex
     ) {
       throw new Error(
-        `Dependency pair "${entry.trim()}" is out of range for ${sliceCount} drafted slices.`,
+        `Dependency pair "${normalizedEntry}" is out of range for ${sliceCount} drafted slices.`,
       );
     }
 
-    return [{ dependentIndex, blockerIndex }];
-  });
+    dependencies.push({ dependentIndex, blockerIndex });
+  }
+
+  return dependencies;
 };
 
 export const formatPrdDraftPlan = (
@@ -267,16 +272,20 @@ export const publishPrdDraftPlan = (
     }),
   );
 
-  const dependencies = (input.dependencies ?? []).flatMap((dependency) => {
+  const dependencies: {
+    dependentId: string;
+    blockerId: string;
+  }[] = [];
+  for (const dependency of input.dependencies ?? []) {
     const dependent = tasks[dependency.dependentIndex];
     const blocker = tasks[dependency.blockerIndex];
     if (!dependent || !blocker) {
-      return [];
+      continue;
     }
 
     addHubTaskDependency(input.cwd, dependent.id, blocker.id);
-    return [{ dependentId: dependent.id, blockerId: blocker.id }];
-  });
+    dependencies.push({ dependentId: dependent.id, blockerId: blocker.id });
+  }
 
   return { tasks, dependencies };
 };
