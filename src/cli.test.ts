@@ -91,7 +91,7 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("sandcastle");
     expect(stdout).toContain("docker");
     expect(stdout).toContain("init");
-    expect(stdout).not.toMatch(/-\s+run(?:\s|\[|$)/);
+    expect(stdout).toContain("run");
     expect(stdout).not.toMatch(/-\s+interactive(?:\s|\[|$)/);
     // build-image and remove-image are namespaced under docker, not top-level
     expect(stdout).toContain("docker build-image");

@@ -841,6 +841,16 @@ Creates a local Beads task in the Hub `inbox` bucket with a `needs-triage` label
 
 Appends a readable Beads comment to the task without changing its status. Pass the comment text with `--body`, or omit it to enter the body interactively.
 
+### `sandcastle run <project> --flow <id>`
+
+Runs a Hub-owned flow against the Beads task board in the target git repository. Use `.` for the current repository. Hub flows use bundled prompts from Sandcastle itself, not repo-local `.sandcastle/` prompt files.
+
+The first available flow is `no-review`: it reads the Beads ready queue, claims unblocked `ready_for_agent` tasks, runs an implementer with task id/title/branch supplied by TypeScript orchestration, and advances successful work to `waiting_for_merge`. Agent or sandbox failures move tasks to `failed` with a failure reason.
+
+| Option   | Required | Description                         |
+| -------- | -------- | ----------------------------------- |
+| `--flow` | Yes      | Hub flow id (currently `no-review`) |
+
 Hub flow runs write run, batch, and task event records into the Hub run directory under the Sandcastle user data directory. The task board uses that run history to keep claims and execution progress separate from normal Beads task status.
 
 Creates the following files (plus optional `agents/`, `skills/`, `agent-profiles.json`, and Mini Program capability files when applicable):

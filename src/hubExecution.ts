@@ -54,8 +54,23 @@ export interface HubBatchStartedEvent {
   readonly startedAt: string;
 }
 
+export interface HubBatchPlannedEvent {
+  readonly type: "batch_planned";
+  readonly runId: string;
+  readonly batchId: string;
+  readonly flowId: string;
+  readonly createdAt: string;
+  readonly taskIds: readonly string[];
+}
+
 export interface HubTaskEvent {
-  readonly type: "task_claimed" | "task_claim_skipped";
+  readonly type:
+    | "task_claimed"
+    | "task_claim_skipped"
+    | "task_implementation_started"
+    | "task_implementation_succeeded"
+    | "task_implementation_failed"
+    | "task_status_advanced";
   readonly runId: string;
   readonly batchId: string;
   readonly taskId: string;
@@ -63,6 +78,8 @@ export interface HubTaskEvent {
   readonly createdAt: string;
   readonly status: string;
   readonly reason?: string;
+  readonly failureReason?: string;
+  readonly commitCount?: number;
   readonly claim?: HubTaskClaimMetadata;
 }
 
@@ -196,22 +213,24 @@ export const createHubRunContext = (
 
   mkdirSync(eventsDir, { recursive: true });
 
-  writeJsonl(paths.runEventsPath, {
-    type: "run_started",
-    runId: ids.runId,
-    branch: options.branch,
-    startedAt: startedAt.toISOString(),
-    repoRoot,
-    hubProjectDir,
-  } satisfies HubRunStartedEvent);
+  if (!options.runId) {
+    writeJsonl(paths.runEventsPath, {
+      type: "run_started",
+      runId: ids.runId,
+      branch: options.branch,
+      startedAt: startedAt.toISOString(),
+      repoRoot,
+      hubProjectDir,
+    } satisfies HubRunStartedEvent);
 
-  writeJsonl(paths.batchEventsPath, {
-    type: "batch_started",
-    runId: ids.runId,
-    batchId: ids.batchId,
-    branch: options.branch,
-    startedAt: startedAt.toISOString(),
-  } satisfies HubBatchStartedEvent);
+    writeJsonl(paths.batchEventsPath, {
+      type: "batch_started",
+      runId: ids.runId,
+      batchId: ids.batchId,
+      branch: options.branch,
+      startedAt: startedAt.toISOString(),
+    } satisfies HubBatchStartedEvent);
+  }
 
   return {
     hubProjectDir,
@@ -237,7 +256,7 @@ export const appendHubRunEvent = (
 
 export const appendHubBatchEvent = (
   runDir: string,
-  event: HubBatchStartedEvent,
+  event: HubBatchStartedEvent | HubBatchPlannedEvent,
 ): string => {
   const { batchEventsPath } = resolveHubRunEventsPaths(runDir);
   return appendHubEvent(
