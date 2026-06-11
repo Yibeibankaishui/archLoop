@@ -831,7 +831,7 @@ Shows the Hub task board grouped by canonical Hub task status from Beads data in
 
 ### `sandcastle tasks show <id>`
 
-Shows a single Beads task with its Hub status, Beads lifecycle state, labels, metadata, comments, remote refs, and run refs when present.
+Shows a single Beads task with its Hub status, Beads lifecycle state, claim metadata/state, labels, metadata, comments, remote refs, and run refs when present.
 
 ### `sandcastle tasks create <title>`
 
@@ -840,6 +840,8 @@ Creates a local Beads task in the Hub `inbox` bucket with a `needs-triage` label
 ### `sandcastle tasks comment <id>`
 
 Appends a readable Beads comment to the task without changing its status. Pass the comment text with `--body`, or omit it to enter the body interactively.
+
+Hub flow runs write run, batch, and task event records into the Hub run directory under the Sandcastle user data directory. The task board uses that run history to keep claims and execution progress separate from normal Beads task status.
 
 Creates the following files (plus optional `agents/`, `skills/`, `agent-profiles.json`, and Mini Program capability files when applicable):
 

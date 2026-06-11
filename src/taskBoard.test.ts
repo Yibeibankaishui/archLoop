@@ -158,6 +158,30 @@ describe("task status projection", () => {
     ]);
   });
 
+  it("represents task claims in metadata without inventing a claimed status", () => {
+    const task = projectHubTask({
+      id: "bd-69",
+      title: "Claimed task",
+      status: "open",
+      metadata: {
+        claim: {
+          runId: "run-1",
+          batchId: "batch-1",
+          branch: "feature/issue-69",
+          claimedAt: "2026-06-11T16:00:00Z",
+        },
+      },
+    });
+
+    expect(task.hubStatus).toBe("inbox");
+    expect(task.claimState).toBe("stale");
+    expect(formatHubTaskDetailsRows(task)).toMatchObject({
+      Claim:
+        '{"runId":"run-1","batchId":"batch-1","branch":"feature/issue-69","claimedAt":"2026-06-11T16:00:00Z"}',
+      "Claim state": "stale",
+    });
+  });
+
   it("formats grouped task board lines", () => {
     const lines = formatHubTaskBoardLines(
       projectHubTaskBoard([
