@@ -79,6 +79,7 @@ import {
   loadHubTask,
   loadHubTaskBoard,
 } from "./taskBoard.js";
+import { triageHubTasks, type HubTriageOutcome } from "./hubTriage.js";
 
 const require = createRequire(import.meta.url);
 const VERSION = (require("../package.json") as { version: string }).version;
@@ -1640,6 +1641,34 @@ const tasksShowCommand = Command.make("show", { id: taskIdArg }, ({ id }) =>
   }),
 );
 
+const formatTriageOutcomeLabel = (outcome: HubTriageOutcome): string =>
+  outcome.replaceAll("_", " ");
+
+const tasksTriageCommand = Command.make("triage", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const cwd = process.cwd();
+    const result = yield* Effect.try({
+      try: () => triageHubTasks({ cwd }),
+      catch: toTaskBoardError,
+    });
+
+    if (result.triaged.length === 0) {
+      yield* d.status("No inbox or needs_info tasks required triage.", "info");
+      return;
+    }
+
+    yield* d.summary("Triaged Hub tasks", {
+      Total: String(result.triaged.length),
+    });
+    for (const entry of result.triaged) {
+      yield* d.text(
+        `  ${entry.taskId}: ${entry.priorStatus} -> ${formatTriageOutcomeLabel(entry.outcome)}`,
+      );
+    }
+  }),
+);
+
 const tasksCommentCommand = Command.make(
   "comment",
   {
@@ -1693,6 +1722,7 @@ const tasksCommand = Command.make("tasks", {}, () =>
     tasksListCommand,
     tasksShowCommand,
     tasksCreateCommand,
+    tasksTriageCommand,
     tasksCommentCommand,
   ]),
 );

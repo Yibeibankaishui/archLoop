@@ -672,8 +672,9 @@ export const appendHubTaskComment = (
   cwd: string,
   id: string,
   body: string,
+  env: NodeJS.ProcessEnv = process.env,
 ): string =>
-  runBdText(cwd, ["comments", "add", id, body], `tasks comment ${id}`);
+  runBdText(cwd, ["comments", "add", id, body], `tasks comment ${id}`, env);
 
 const cleanJoinedValues = (values: readonly string[]): string =>
   values.filter((value) => value.trim().length > 0).join(", ");
