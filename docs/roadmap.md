@@ -296,6 +296,7 @@ Goal: 提供 CLI-first 的 Sandcastle Hub 控制面，并在同一状态模型�
 - [x] 实现 `sandcastle tasks list` / `sandcastle tasks show <id>` 的只读 task board 投影与 Hub 状态分组。
 - [x] 实现 `sandcastle tasks create <title>` / `sandcastle tasks comment <id>` 的本地任务创建与评论写入。
 - [x] 实现 `sandcastle tasks triage` 的 inbox / needs_info 协作状态分流与 AI triage 评论（见 [#66](https://github.com/Yibeibankaishui/sandcastle/issues/66)）。
+- [x] 实现 `sandcastle tasks from-prd <prd-ref>` 的 PRD 垂直切片分解、AFK/HITL 分类、人工确认依赖与 Beads 任务创建（见 [#67](https://github.com/Yibeibankaishui/sandcastle/issues/67)）。
 - [x] 实现 task claim metadata 与 Hub run 事件存储，为 flow 执行提供 run/batch/task 记录（见 [#69](https://github.com/Yibeibankaishui/sandcastle/issues/69)）。
 - [ ] 定义 Sandcastle Hub 控制面的核心用户路径。
 - [ ] 设计 Hub project onboarding、credentials、flow run 和 task recovery CLI。

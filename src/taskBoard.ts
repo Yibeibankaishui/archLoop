@@ -620,14 +620,25 @@ export const claimHubTask = (input: ClaimHubTaskInput): ClaimHubTaskResult => {
 export interface CreateHubTaskInput {
   readonly title: string;
   readonly description?: string;
-  readonly origin?: "manual" | "user-feedback";
+  readonly origin?: "manual" | "user-feedback" | "prd-decomposition";
   readonly kind?: string;
+  readonly sliceType?: "AFK" | "HITL";
+  readonly prdRef?: string;
+  readonly hubStatus?: "inbox" | "ready_for_agent" | "ready_for_human";
 }
 
 export interface CreateHubTaskResult {
   readonly id: string;
   readonly title: string;
 }
+
+const HUB_STATUS_LABELS: Readonly<
+  Record<NonNullable<CreateHubTaskInput["hubStatus"]>, string>
+> = {
+  inbox: "needs-triage",
+  ready_for_agent: "ready-for-agent",
+  ready_for_human: "ready-for-human",
+};
 
 export const createHubTask = (
   cwd: string,
@@ -639,6 +650,12 @@ export const createHubTask = (
   if (input.kind) {
     metadata.kind = input.kind;
   }
+  if (input.sliceType) {
+    metadata.slice_type = input.sliceType;
+  }
+  if (input.prdRef) {
+    metadata.prd_ref = input.prdRef;
+  }
 
   const args = ["create", input.title];
   if (input.description) {
@@ -648,7 +665,7 @@ export const createHubTask = (
     "--type",
     "task",
     "-l",
-    "needs-triage",
+    HUB_STATUS_LABELS[input.hubStatus ?? "inbox"],
     "--metadata",
     JSON.stringify(metadata),
     "--json",
@@ -675,6 +692,18 @@ export const appendHubTaskComment = (
   env: NodeJS.ProcessEnv = process.env,
 ): string =>
   runBdText(cwd, ["comments", "add", id, body], `tasks comment ${id}`, env);
+
+export const addHubTaskDependency = (
+  cwd: string,
+  dependentId: string,
+  blockerId: string,
+): void => {
+  runBdText(
+    cwd,
+    ["dep", "add", dependentId, blockerId, "--type", "blocks"],
+    `tasks dependency ${dependentId} -> ${blockerId}`,
+  );
+};
 
 const cleanJoinedValues = (values: readonly string[]): string =>
   values.filter((value) => value.trim().length > 0).join(", ");

@@ -71,6 +71,14 @@ import {
 } from "./presetAgents.js";
 import { resolveHubProjectStatus } from "./projectStatus.js";
 import {
+  draftPrdSlices,
+  formatPrdDraftPlan,
+  parseDependencySpec,
+  publishPrdDraftPlan,
+  readPrdFile,
+  type PrdHubStatus,
+} from "./prdDecomposition.js";
+import {
   formatHubTaskBoardLines,
   appendHubTaskComment,
   createHubTask,
@@ -1547,6 +1555,25 @@ const taskKindOption = Options.text("kind").pipe(
   Options.withAlias("category"),
   Options.optional,
 );
+const prdRefArg = Args.text({ name: "prd-ref" });
+const prdApproveOption = Options.boolean("yes").pipe(
+  Options.withDescription(
+    "Approve the drafted PRD slices without interactive confirmation.",
+  ),
+  Options.withDefault(false),
+);
+const prdStatusOption = Options.text("status").pipe(
+  Options.withDescription(
+    "Initial Hub status for PRD-derived tasks (inbox, ready_for_agent, ready_for_human). Defaults to inbox.",
+  ),
+  Options.optional,
+);
+const prdDepsOption = Options.text("deps").pipe(
+  Options.withDescription(
+    "Dependency pairs as childIndex:parentIndex, e.g. 2:1,3:1.",
+  ),
+  Options.optional,
+);
 
 const normalizeTaskOrigin = (
   value: string,
@@ -1669,6 +1696,218 @@ const tasksTriageCommand = Command.make("triage", {}, () =>
   }),
 );
 
+const normalizePrdHubStatus = (value: string): PrdHubStatus | undefined => {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "inbox" ||
+    normalized === "ready_for_agent" ||
+    normalized === "ready_for_human"
+    ? normalized
+    : undefined;
+};
+
+const resolvePrdHubStatus = (
+  status: OptionalTextFlag,
+): Effect.Effect<PrdHubStatus, TaskBoardError, never> => {
+  if (status._tag !== "Some") {
+    return Effect.succeed("inbox");
+  }
+
+  const resolved = normalizePrdHubStatus(status.value);
+  if (resolved) {
+    return Effect.succeed(resolved);
+  }
+
+  return Effect.fail(
+    new TaskBoardError({
+      message:
+        'Invalid PRD task status. Use "inbox", "ready_for_agent", or "ready_for_human".',
+    }),
+  );
+};
+
+const promptPrdHubStatus = (): Effect.Effect<
+  PrdHubStatus,
+  TaskBoardError,
+  never
+> =>
+  Effect.tryPromise({
+    try: async () => {
+      const selected = await clack.select({
+        message:
+          "Initial Hub status for PRD-derived tasks (defaults to inbox):",
+        options: [
+          { value: "inbox", label: "inbox", hint: "needs triage" },
+          {
+            value: "ready_for_agent",
+            label: "ready_for_agent",
+            hint: "AFK-ready after confirmation",
+          },
+          {
+            value: "ready_for_human",
+            label: "ready_for_human",
+            hint: "human-owned work",
+          },
+        ],
+        initialValue: "inbox",
+      });
+      if (clack.isCancel(selected)) {
+        throw new TaskBoardError({
+          message: "PRD task creation cancelled.",
+        });
+      }
+      return selected as PrdHubStatus;
+    },
+    catch: toTaskBoardError,
+  });
+
+const resolvePrdDependencySpec = (
+  deps: OptionalTextFlag,
+  approve: boolean,
+): Effect.Effect<string, TaskBoardError, never> => {
+  if (deps._tag === "Some") {
+    return Effect.succeed(deps.value);
+  }
+
+  if (approve) {
+    return Effect.succeed("");
+  }
+
+  return Effect.tryPromise({
+    try: async () => {
+      const result = await clack.text({
+        message:
+          "Dependency pairs as childIndex:parentIndex (comma-separated, optional):",
+        placeholder: "2:1,3:2",
+        defaultValue: "",
+      });
+      if (clack.isCancel(result)) {
+        throw new TaskBoardError({
+          message: "PRD task creation cancelled.",
+        });
+      }
+      return String(result);
+    },
+    catch: toTaskBoardError,
+  });
+};
+
+const resolvePrdHubStatusSelection = (
+  status: OptionalTextFlag,
+  approve: boolean,
+): Effect.Effect<PrdHubStatus, TaskBoardError, never> => {
+  if (status._tag === "Some") {
+    return resolvePrdHubStatus(status);
+  }
+
+  if (approve) {
+    return Effect.succeed("inbox");
+  }
+
+  return promptPrdHubStatus();
+};
+
+const tasksFromPrdCommand = Command.make(
+  "from-prd",
+  {
+    prdRef: prdRefArg,
+    approve: prdApproveOption,
+    status: prdStatusOption,
+    deps: prdDepsOption,
+  },
+  ({ prdRef, approve, status, deps }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      const content = yield* Effect.try({
+        try: () => readPrdFile(cwd, prdRef),
+        catch: (error) =>
+          new TaskBoardError({
+            message: error instanceof Error ? error.message : String(error),
+          }),
+      });
+      const plan = draftPrdSlices(content, prdRef);
+
+      if (plan.slices.length === 0) {
+        return yield* Effect.fail(
+          new TaskBoardError({
+            message:
+              "No unchecked Tasks, Deliverables, or User Stories were found in the PRD.",
+          }),
+        );
+      }
+
+      const dependencySpec = yield* resolvePrdDependencySpec(deps, approve);
+
+      const dependencies = yield* Effect.try({
+        try: () => parseDependencySpec(dependencySpec, plan.slices.length),
+        catch: (error) =>
+          new TaskBoardError({
+            message: error instanceof Error ? error.message : String(error),
+          }),
+      });
+
+      for (const line of formatPrdDraftPlan(plan, dependencies)) {
+        yield* d.text(line);
+      }
+
+      if (!approve) {
+        const confirmed = yield* Effect.tryPromise({
+          try: async () => {
+            const result = await clack.confirm({
+              message: "Create these PRD-derived Beads tasks?",
+              initialValue: true,
+            });
+            if (clack.isCancel(result)) {
+              throw new TaskBoardError({
+                message: "PRD task creation cancelled.",
+              });
+            }
+            return result;
+          },
+          catch: toTaskBoardError,
+        });
+
+        if (!confirmed) {
+          return yield* Effect.fail(
+            new TaskBoardError({
+              message: "PRD task creation cancelled.",
+            }),
+          );
+        }
+      }
+
+      const hubStatus = yield* resolvePrdHubStatusSelection(status, approve);
+
+      const published = yield* Effect.try({
+        try: () =>
+          publishPrdDraftPlan({
+            cwd,
+            plan,
+            hubStatus,
+            dependencies,
+          }),
+        catch: toTaskBoardError,
+      });
+
+      yield* d.summary("Created PRD-derived Beads tasks", {
+        PRD: plan.prdTitle,
+        Reference: plan.prdRef,
+        Status: hubStatus,
+        Tasks: String(published.tasks.length),
+        Dependencies: String(published.dependencies.length),
+      });
+
+      for (const task of published.tasks) {
+        yield* d.text(`  ${task.id}: ${task.title}`);
+      }
+      for (const dependency of published.dependencies) {
+        yield* d.text(
+          `  ${dependency.dependentId} depends on ${dependency.blockerId}`,
+        );
+      }
+    }),
+);
+
 const tasksCommentCommand = Command.make(
   "comment",
   {
@@ -1723,6 +1962,7 @@ const tasksCommand = Command.make("tasks", {}, () =>
     tasksShowCommand,
     tasksCreateCommand,
     tasksTriageCommand,
+    tasksFromPrdCommand,
     tasksCommentCommand,
   ]),
 );

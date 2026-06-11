@@ -40,7 +40,7 @@ Replace `<TARGET_REPO>` with the project being developed.
    ```
    Verify it resolves and runs: `npx sandcastle --help` (confirms the link is usable).
    If you want to inspect the repo before init, `npx sandcastle project status` shows the canonical repo root, Sandcastle user data dir, `bd` availability, and task-board counts.
-   If the repo already has Beads data, `npx sandcastle tasks list` groups tasks by Hub status and `npx sandcastle tasks show <id>` shows a task's Beads details, Hub status, labels, metadata, comments, remote refs, and run refs. Use `npx sandcastle tasks create <title>` to create a local `inbox` task with `origin` metadata, `npx sandcastle tasks triage` to classify `inbox` and `needs_info` tasks into collaboration states, and `npx sandcastle tasks comment <id>` to append a readable Beads comment without changing task status. `--category` is accepted as an alias for `--kind`.
+   If the repo already has Beads data, `npx sandcastle tasks list` groups tasks by Hub status and `npx sandcastle tasks show <id>` shows a task's Beads details, Hub status, labels, metadata, comments, remote refs, and run refs. Use `npx sandcastle tasks create <title>` to create a local `inbox` task with `origin` metadata, `npx sandcastle tasks triage` to classify `inbox` and `needs_info` tasks into collaboration states, `npx sandcastle tasks from-prd <prd-ref>` to draft PRD vertical slices and create dependency-aware Beads tasks after confirmation, and `npx sandcastle tasks comment <id>` to append a readable Beads comment without changing task status. `--category` is accepted as an alias for `--kind`.
 2. **Init once**: `npx sandcastle init`. Interactive prompts: sandbox provider, backlog manager, workflow template, project profile, default agent, installed runtimes.
    - Non-interactive example:
      ```bash
@@ -110,6 +110,7 @@ Key APIs: `run()`, `interactive()`, `createSandbox()`, `createWorktree()`; sandb
 | `sandcastle tasks show <id>`      | Show one Beads task           |
 | `sandcastle tasks create <title>` | Create a local Hub task       |
 | `sandcastle tasks triage`         | Triage inbox/needs_info tasks |
+| `sandcastle tasks from-prd <ref>` | Decompose a PRD into tasks    |
 | `sandcastle tasks comment <id>`   | Append a Beads comment        |
 | `sandcastle docker build-image`   | Build image from Dockerfile   |
 | `sandcastle docker remove-image`  | Remove image                  |
