@@ -202,7 +202,7 @@ ENTRYPOINT ["sleep", "infinity"]
 `;
 
 const CODEX_DOCKERFILE_INSTALL = `# Install Codex CLI (run as root before USER agent)
-RUN npm install -g @openai/codex @openai/codex-linux-x64 \\
+RUN npm install -g @openai/codex \\
   && codex --version`;
 
 const CODEX_DOCKERFILE = `FROM node:22-bookworm

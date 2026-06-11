@@ -331,10 +331,11 @@ describe("sandcastle CLI", () => {
       join(hostDir, ".sandcastle", "Dockerfile"),
       "utf-8",
     );
-    expect(dockerfile).toContain("@openai/codex");
-    expect(dockerfile).toContain("@openai/codex-linux-x64");
+    expect(dockerfile).toContain("npm install -g @openai/codex");
     expect(dockerfile).toContain("codex --version");
-    expect(dockerfile.match(/npm install -g @openai\/codex /g)).toHaveLength(1);
+    expect(dockerfile).not.toContain("@openai/codex-linux-x64");
+    expect(dockerfile).not.toContain("CODEX_PLATFORM");
+    expect(dockerfile.match(/npm install -g @openai\/codex/g)).toHaveLength(1);
     expect(dockerfile).toContain("cursor.com/install");
     expect(dockerfile).not.toContain("claude.ai/install.sh");
     expect(dockerfile).not.toContain("opencode-ai");

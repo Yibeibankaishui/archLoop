@@ -201,9 +201,10 @@ describe("Agent runtime registry", () => {
       codexRuntime.dockerfileInstall.root!,
       codexRuntime.dockerfileTemplate,
     ]) {
-      expect(dockerfile).toContain("@openai/codex");
-      expect(dockerfile).toContain("@openai/codex-linux-x64");
+      expect(dockerfile).toContain("npm install -g @openai/codex");
       expect(dockerfile).toContain("codex --version");
+      expect(dockerfile).not.toContain("@openai/codex-linux-x64");
+      expect(dockerfile).not.toContain("CODEX_PLATFORM");
     }
   });
 
@@ -811,9 +812,10 @@ describe("InitService scaffold", () => {
       "utf-8",
     );
 
-    expect(dockerfile).toContain("@openai/codex");
-    expect(dockerfile).toContain("@openai/codex-linux-x64");
+    expect(dockerfile).toContain("npm install -g @openai/codex");
     expect(dockerfile).toContain("codex --version");
+    expect(dockerfile).not.toContain("@openai/codex-linux-x64");
+    expect(dockerfile).not.toContain("CODEX_PLATFORM");
     expect(dockerfile).toContain("cursor.com/install");
     expect(dockerfile).toContain('test -x "$HOME/.local/bin/agent"');
     expect(dockerfile).not.toContain("claude.ai/install.sh");
@@ -1382,9 +1384,10 @@ describe("InitService scaffold", () => {
       "utf-8",
     );
     expect(dockerfile).toContain("FROM node:22-bookworm");
-    expect(dockerfile).toContain("@openai/codex");
-    expect(dockerfile).toContain("@openai/codex-linux-x64");
+    expect(dockerfile).toContain("npm install -g @openai/codex");
     expect(dockerfile).toContain("codex --version");
+    expect(dockerfile).not.toContain("@openai/codex-linux-x64");
+    expect(dockerfile).not.toContain("CODEX_PLATFORM");
     expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
   });
 
