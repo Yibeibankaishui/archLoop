@@ -293,6 +293,7 @@ Goal: 提供 CLI-first 的 Sandcastle Hub 控制面，并在同一状态模型�
 ### Tasks
 
 - [x] 明确 Hub task board、Beads 本地任务源、远程任务源同步与状态机设计（见 [sandcastle-hub-task-board](./prd/sandcastle-hub-task-board.md)、[ADR-0021](./adr/0021-hub-task-board-uses-beads-local-store.md)、[ADR-0022](./adr/0022-hub-flows-emit-per-task-merge-events.md)、[ADR-0023](./adr/0023-hub-task-statuses.md)）。
+- [x] 实现 `sandcastle tasks list` / `sandcastle tasks show <id>` 的只读 task board 投影与 Hub 状态分组。
 - [ ] 定义 Sandcastle Hub 控制面的核心用户路径。
 - [ ] 设计 Hub project onboarding、credentials、flow run 和 task recovery CLI。
 - [ ] 设计 run / sandbox / branch / logs / agent stream 的可视化模型。

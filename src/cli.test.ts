@@ -163,9 +163,22 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("project status");
   });
 
+  it("root help exposes the tasks namespace", async () => {
+    const { stdout } = await runCli("--help", process.cwd());
+    expect(stdout).toContain("tasks");
+    expect(stdout).toContain("tasks list");
+    expect(stdout).toContain("tasks show");
+  });
+
   it("project --help shows the status subcommand", async () => {
     const { stdout } = await runCli("project --help", process.cwd());
     expect(stdout).toContain("status");
+  });
+
+  it("tasks --help shows the list and show subcommands", async () => {
+    const { stdout } = await runCli("tasks --help", process.cwd());
+    expect(stdout).toContain("list");
+    expect(stdout).toContain("show");
   });
 
   it("init --help no longer advertises podman as a sandbox option", async () => {
@@ -231,6 +244,153 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("Beads available");
     expect(stdout).toContain("Task board ready");
     expect(stdout).toContain("Task board total");
+  });
+
+  it("tasks list groups representative Beads tasks by Hub status", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const boardJson = JSON.stringify([
+      { id: "bd-1", title: "Inbox task", status: "open" },
+      {
+        id: "bd-2",
+        title: "Ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+      },
+      {
+        id: "bd-3",
+        title: "Done task",
+        status: "closed",
+        labels: ["done"],
+      },
+    ]);
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "list" ]; then
+  printf '%s\n' '${boardJson}'
+  exit 0
+fi
+if [ "$1" = "show" ]; then
+  printf '%s\n' '${JSON.stringify([
+    {
+      id: "bd-3",
+      title: "Done task",
+      status: "closed",
+      labels: ["done"],
+      metadata: { execution_mode: "agent" },
+      description: "Task description",
+      notes: "Task notes",
+      comments: [
+        {
+          author: "alice",
+          body: "Looks good",
+          createdAt: "2026-06-11T15:00:00Z",
+        },
+      ],
+      remoteRefs: [{ url: "github#64" }],
+      runRefs: [{ ref: "run-123" }],
+    },
+  ])}'
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const { stdout } = await runCli("tasks list", hostDir, {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+    });
+
+    expect(stdout).toContain("Hub task board");
+    expect(stdout).toContain("Total tasks: 3");
+    expect(stdout).toContain("inbox (1)");
+    expect(stdout).toContain("ready_for_agent (1)");
+    expect(stdout).toContain("done (1)");
+    expect(stdout).toContain("  bd-2: Ready task");
+  });
+
+  it("tasks show renders Beads details, comments, remote refs, and run refs", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "show" ] && [ "$2" = "bd-3" ]; then
+  cat <<'JSON'
+[
+  {
+    "id": "bd-3",
+    "title": "Done task",
+    "status": "closed",
+    "labels": ["done"],
+    "metadata": { "execution_mode": "agent" },
+    "description": "Task description",
+    "notes": "Task notes",
+    "comments": [
+      {
+        "author": "alice",
+        "body": "Looks good",
+        "createdAt": "2026-06-11T15:00:00Z"
+      }
+    ],
+    "remoteRefs": [
+      { "url": "github#64" }
+    ],
+    "runRefs": [
+      { "ref": "run-123" }
+    ]
+  }
+]
+JSON
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const { stdout } = await runCli("tasks show bd-3", hostDir, {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+    });
+
+    expect(stdout).toContain("Beads task bd-3");
+    expect(stdout).toContain("Hub status");
+    expect(stdout).toContain("done");
+    expect(stdout).toContain("Description");
+    expect(stdout).toContain("Task description");
+    expect(stdout).toContain("Notes");
+    expect(stdout).toContain("Task notes");
+    expect(stdout).toContain("Labels");
+    expect(stdout).toContain("done");
+    expect(stdout).toContain("Metadata");
+    expect(stdout).toContain("execution_mode");
+    expect(stdout).toContain("Remote refs");
+    expect(stdout).toContain("github#64");
+    expect(stdout).toContain("Run refs");
+    expect(stdout).toContain("run-123");
+    expect(stdout).toContain("Comments");
+    expect(stdout).toContain("alice");
+    expect(stdout).toContain("Looks good");
   });
 
   it("--help shows podman namespace", async () => {

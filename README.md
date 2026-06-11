@@ -825,6 +825,14 @@ Reports the canonical git repo root, the Sandcastle user data directory, the Hub
 
 Sandcastle resolves the user data directory from `XDG_DATA_HOME` when it is set and falls back to `~/.local/share/sandcastle`.
 
+### `sandcastle tasks list`
+
+Shows the Hub task board grouped by canonical Hub task status from Beads data in the current git repository. Use it to inspect inbox, ready, blocked, implementation, review, merge, done, failure, and sync-conflict buckets.
+
+### `sandcastle tasks show <id>`
+
+Shows a single Beads task with its Hub status, Beads lifecycle state, labels, metadata, comments, remote refs, and run refs when present.
+
 Creates the following files (plus optional `agents/`, `skills/`, `agent-profiles.json`, and Mini Program capability files when applicable):
 
 ```

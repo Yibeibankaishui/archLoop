@@ -1,4 +1,4 @@
-import { Command, Options } from "@effect/cli";
+import { Args, Command, Options } from "@effect/cli";
 import { FileSystem } from "@effect/platform";
 import { Effect } from "effect";
 import * as clack from "@clack/prompts";
@@ -47,7 +47,12 @@ import type {
   ProjectProfileEntry,
   SandboxProviderEntry,
 } from "./InitService.js";
-import { ConfigDirError, InitError, ProjectStatusError } from "./errors.js";
+import {
+  ConfigDirError,
+  InitError,
+  ProjectStatusError,
+  TaskBoardError,
+} from "./errors.js";
 import {
   getCapabilityPackDefinition,
   listCapabilityAddonPromptOptions,
@@ -65,6 +70,13 @@ import {
   listPresetAgentsForInit,
 } from "./presetAgents.js";
 import { resolveHubProjectStatus } from "./projectStatus.js";
+import {
+  formatHubTaskBoardLines,
+  formatHubTaskCommentLines,
+  formatHubTaskDetailsRows,
+  loadHubTask,
+  loadHubTaskBoard,
+} from "./taskBoard.js";
 
 const require = createRequire(import.meta.url);
 const VERSION = (require("../package.json") as { version: string }).version;
@@ -1507,6 +1519,55 @@ const formatHubProjectStatusRows = (
   "Task board total": String(status.taskCounts.total),
 });
 
+const taskIdArg = Args.text({ name: "id" });
+
+const tasksListCommand = Command.make("list", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const cwd = process.cwd();
+    const board = yield* Effect.try({
+      try: () => loadHubTaskBoard(cwd),
+      catch: (error) =>
+        new TaskBoardError({
+          message: error instanceof Error ? error.message : String(error),
+        }),
+    });
+
+    for (const line of formatHubTaskBoardLines(board)) {
+      yield* d.text(line);
+    }
+  }),
+);
+
+const tasksShowCommand = Command.make("show", { id: taskIdArg }, ({ id }) =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const cwd = process.cwd();
+    const task = yield* Effect.try({
+      try: () => loadHubTask(cwd, id),
+      catch: (error) =>
+        new TaskBoardError({
+          message: error instanceof Error ? error.message : String(error),
+        }),
+    });
+
+    yield* d.summary(`Beads task ${task.id}`, formatHubTaskDetailsRows(task));
+    for (const line of formatHubTaskCommentLines(task)) {
+      yield* d.text(line);
+    }
+  }),
+);
+
+const tasksCommand = Command.make("tasks", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.status(
+      "Hub task board commands. Use --help to see available subcommands.",
+      "info",
+    );
+  }),
+).pipe(Command.withSubcommands([tasksListCommand, tasksShowCommand]));
+
 const projectStatusCommand = Command.make("status", {}, () =>
   Effect.gen(function* () {
     const d = yield* Display;
@@ -1631,6 +1692,7 @@ const rootCommand = Command.make("sandcastle", {}, () =>
 export const sandcastle = rootCommand.pipe(
   Command.withSubcommands([
     initCommand,
+    tasksCommand,
     projectCommand,
     dockerCommand,
     podmanCommand,

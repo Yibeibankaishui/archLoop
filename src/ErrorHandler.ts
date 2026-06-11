@@ -34,6 +34,8 @@ export const formatErrorMessage = (error: SandboxError): string => {
       return `${error.message}`;
     case "ProjectStatusError":
       return `${error.message}`;
+    case "TaskBoardError":
+      return `${error.message}`;
     case "AgentIdleTimeoutError":
     case "WorktreeTimeoutError":
     case "ContainerStartTimeoutError":
@@ -81,6 +83,7 @@ export const withFriendlyErrors = <A, E, R>(
     ConfigDirError: showErrorAndExit,
     InitError: showErrorAndExit,
     ProjectStatusError: showErrorAndExit,
+    TaskBoardError: showErrorAndExit,
     AgentIdleTimeoutError: showErrorAndExit,
     WorktreeTimeoutError: showErrorAndExit,
     ContainerStartTimeoutError: showErrorAndExit,
