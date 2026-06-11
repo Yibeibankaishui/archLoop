@@ -168,6 +168,8 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("tasks");
     expect(stdout).toContain("tasks list");
     expect(stdout).toContain("tasks show");
+    expect(stdout).toContain("tasks create");
+    expect(stdout).toContain("tasks comment");
   });
 
   it("project --help shows the status subcommand", async () => {
@@ -179,6 +181,8 @@ describe("sandcastle CLI", () => {
     const { stdout } = await runCli("tasks --help", process.cwd());
     expect(stdout).toContain("list");
     expect(stdout).toContain("show");
+    expect(stdout).toContain("create");
+    expect(stdout).toContain("comment");
   });
 
   it("init --help no longer advertises podman as a sandbox option", async () => {
@@ -391,6 +395,155 @@ exit 1
     expect(stdout).toContain("Comments");
     expect(stdout).toContain("alice");
     expect(stdout).toContain("Looks good");
+  });
+
+  it("tasks create creates a manual inbox task with origin metadata", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const argsFile = join(hostDir, "create-args.txt");
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "create" ]; then
+  printf '%s\n' "$@" > "${argsFile}"
+  cat <<'JSON'
+[
+  {
+    "id": "bd-99",
+    "title": "Manual task"
+  }
+]
+JSON
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const { stdout } = await runCli(
+      'tasks create "Manual task" --description "Track local work"',
+      hostDir,
+      {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      },
+    );
+
+    const args = await readFile(argsFile, "utf-8");
+    expect(args).toContain("create");
+    expect(args).toContain("Manual task");
+    expect(args).toContain("--description");
+    expect(args).toContain("Track local work");
+    expect(args).toContain("--type");
+    expect(args).toContain("task");
+    expect(args).toContain("-l");
+    expect(args).toContain("needs-triage");
+    expect(args).toContain("--metadata");
+    expect(args).toContain('"origin":"manual"');
+    expect(args).toContain("--json");
+    expect(stdout).toContain("Created Beads task");
+    expect(stdout).toContain("bd-99");
+    expect(stdout).toContain("Manual task");
+    expect(stdout).toContain("manual");
+  });
+
+  it("tasks create records user feedback origin metadata when requested", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const argsFile = join(hostDir, "create-feedback-args.txt");
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "create" ]; then
+  printf '%s\n' "$@" > "${argsFile}"
+  cat <<'JSON'
+[
+  {
+    "id": "bd-100",
+    "title": "Feedback task"
+  }
+]
+JSON
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    await runCli(
+      'tasks create "Feedback task" --origin user-feedback --kind enhancement',
+      hostDir,
+      {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      },
+    );
+
+    const args = await readFile(argsFile, "utf-8");
+    expect(args).toContain("Feedback task");
+    expect(args).toContain('"origin":"user-feedback"');
+    expect(args).toContain('"kind":"enhancement"');
+  });
+
+  it("tasks comment appends a comment without changing task status", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const argsFile = join(hostDir, "comment-args.txt");
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "comments" ] && [ "$2" = "add" ]; then
+  printf '%s\n' "$@" > "${argsFile}"
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const { stdout } = await runCli(
+      'tasks comment bd-99 --body "Still needs a clear acceptance test"',
+      hostDir,
+      {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      },
+    );
+
+    const args = await readFile(argsFile, "utf-8");
+    expect(args).toContain("comments");
+    expect(args).toContain("add");
+    expect(args).toContain("bd-99");
+    expect(args).toContain("Still needs a clear acceptance test");
+    expect(args).not.toContain("update");
+    expect(args).not.toContain("--status");
+    expect(stdout).toContain("Appended a comment to Beads task bd-99.");
   });
 
   it("--help shows podman namespace", async () => {

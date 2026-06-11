@@ -833,6 +833,14 @@ Shows the Hub task board grouped by canonical Hub task status from Beads data in
 
 Shows a single Beads task with its Hub status, Beads lifecycle state, labels, metadata, comments, remote refs, and run refs when present.
 
+### `sandcastle tasks create <title>`
+
+Creates a local Beads task in the Hub `inbox` bucket with a `needs-triage` label and `origin` metadata. The `origin` flag defaults to `manual`; pass `--origin user-feedback` for feedback-driven tasks. Use `--description` for the task body and `--kind` for optional extra classification metadata when you need it.
+
+### `sandcastle tasks comment <id>`
+
+Appends a readable Beads comment to the task without changing its status. Pass the comment text with `--body`, or omit it to enter the body interactively.
+
 Creates the following files (plus optional `agents/`, `skills/`, `agent-profiles.json`, and Mini Program capability files when applicable):
 
 ```

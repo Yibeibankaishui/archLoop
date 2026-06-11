@@ -72,6 +72,8 @@ import {
 import { resolveHubProjectStatus } from "./projectStatus.js";
 import {
   formatHubTaskBoardLines,
+  appendHubTaskComment,
+  createHubTask,
   formatHubTaskCommentLines,
   formatHubTaskDetailsRows,
   loadHubTask,
@@ -1520,6 +1522,30 @@ const formatHubProjectStatusRows = (
 });
 
 const taskIdArg = Args.text({ name: "id" });
+const taskTitleArg = Args.text({ name: "title" });
+const taskOriginOption = Options.text("origin").pipe(
+  Options.withDescription(
+    "Task origin (manual or user-feedback). Defaults to manual.",
+  ),
+  Options.optional,
+);
+const taskDescriptionOption = Options.text("description").pipe(
+  Options.withDescription("Optional task description"),
+  Options.optional,
+);
+const taskKindOption = Options.text("kind").pipe(
+  Options.withDescription("Optional task kind metadata"),
+  Options.optional,
+);
+
+const normalizeTaskOrigin = (
+  value: string,
+): "manual" | "user-feedback" | undefined => {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "manual" || normalized === "user-feedback"
+    ? normalized
+    : undefined;
+};
 
 const tasksListCommand = Command.make("list", {}, () =>
   Effect.gen(function* () {
@@ -1537,6 +1563,53 @@ const tasksListCommand = Command.make("list", {}, () =>
       yield* d.text(line);
     }
   }),
+);
+
+const tasksCreateCommand = Command.make(
+  "create",
+  {
+    title: taskTitleArg,
+    origin: taskOriginOption,
+    description: taskDescriptionOption,
+    kind: taskKindOption,
+  },
+  ({ title, origin, description, kind }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      const originValue =
+        origin._tag === "Some" ? normalizeTaskOrigin(origin.value) : "manual";
+      if (!originValue) {
+        yield* Effect.fail(
+          new TaskBoardError({
+            message: 'Invalid task origin. Use "manual" or "user-feedback".',
+          }),
+        );
+      }
+      const resolvedOrigin = originValue ?? "manual";
+      const created = yield* Effect.try({
+        try: () =>
+          createHubTask(cwd, {
+            title,
+            description:
+              description._tag === "Some" ? description.value : undefined,
+            origin:
+              resolvedOrigin === "user-feedback" ? "user-feedback" : "manual",
+            kind: kind._tag === "Some" ? kind.value : undefined,
+          }),
+        catch: (error) =>
+          new TaskBoardError({
+            message: error instanceof Error ? error.message : String(error),
+          }),
+      });
+
+      yield* d.summary("Created Beads task", {
+        "Beads id": created.id,
+        Title: created.title,
+        Origin: resolvedOrigin,
+        ...(kind._tag === "Some" ? { Kind: kind.value } : {}),
+      });
+    }),
 );
 
 const tasksShowCommand = Command.make("show", { id: taskIdArg }, ({ id }) =>
@@ -1558,6 +1631,53 @@ const tasksShowCommand = Command.make("show", { id: taskIdArg }, ({ id }) =>
   }),
 );
 
+const tasksCommentCommand = Command.make(
+  "comment",
+  {
+    id: taskIdArg,
+    body: Options.text("body").pipe(
+      Options.withDescription("Comment body"),
+      Options.optional,
+    ),
+  },
+  ({ id, body }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      const commentBody =
+        body._tag === "Some"
+          ? body.value
+          : yield* Effect.tryPromise({
+              try: async () => {
+                const result = await clack.text({
+                  message: "Comment body:",
+                });
+                if (clack.isCancel(result)) {
+                  throw new TaskBoardError({
+                    message: "Comment entry cancelled.",
+                  });
+                }
+                return String(result);
+              },
+              catch: (error) =>
+                new TaskBoardError({
+                  message:
+                    error instanceof Error ? error.message : String(error),
+                }),
+            });
+
+      yield* Effect.try({
+        try: () => appendHubTaskComment(cwd, id, commentBody),
+        catch: (error) =>
+          new TaskBoardError({
+            message: error instanceof Error ? error.message : String(error),
+          }),
+      });
+
+      yield* d.status(`Appended a comment to Beads task ${id}.`, "success");
+    }),
+);
+
 const tasksCommand = Command.make("tasks", {}, () =>
   Effect.gen(function* () {
     const d = yield* Display;
@@ -1566,7 +1686,14 @@ const tasksCommand = Command.make("tasks", {}, () =>
       "info",
     );
   }),
-).pipe(Command.withSubcommands([tasksListCommand, tasksShowCommand]));
+).pipe(
+  Command.withSubcommands([
+    tasksListCommand,
+    tasksShowCommand,
+    tasksCreateCommand,
+    tasksCommentCommand,
+  ]),
+);
 
 const projectStatusCommand = Command.make("status", {}, () =>
   Effect.gen(function* () {

@@ -412,18 +412,17 @@ const parseBdJsonOutput = (output: string): unknown[] => {
   return [];
 };
 
-const runBdJson = (
+const runBdText = (
   cwd: string,
   args: readonly string[],
   failureLabel: string,
-): unknown[] => {
+): string => {
   try {
-    const stdout = execFileSync("bd", [...args], {
+    return execFileSync("bd", [...args], {
       cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
-    return parseBdJsonOutput(stdout);
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "unable to execute bd";
@@ -431,6 +430,15 @@ const runBdJson = (
       message: `sandcastle ${failureLabel} requires Beads in the current repo: ${message}`,
     });
   }
+};
+
+const runBdJson = (
+  cwd: string,
+  args: readonly string[],
+  failureLabel: string,
+): unknown[] => {
+  const stdout = runBdText(cwd, args, failureLabel);
+  return parseBdJsonOutput(stdout);
 };
 
 export const loadHubTaskBoard = (cwd: string): HubTaskBoard =>
@@ -453,6 +461,64 @@ export const loadHubTask = (cwd: string, id: string): HubTaskProjection => {
 
   return projectHubTask(task);
 };
+
+export interface CreateHubTaskInput {
+  readonly title: string;
+  readonly description?: string;
+  readonly origin?: "manual" | "user-feedback";
+  readonly kind?: string;
+}
+
+export interface CreateHubTaskResult {
+  readonly id: string;
+  readonly title: string;
+}
+
+export const createHubTask = (
+  cwd: string,
+  input: CreateHubTaskInput,
+): CreateHubTaskResult => {
+  const metadata: Record<string, string> = {
+    origin: input.origin ?? "manual",
+  };
+  if (input.kind) {
+    metadata.kind = input.kind;
+  }
+
+  const args = ["create", input.title];
+  if (input.description) {
+    args.push("--description", input.description);
+  }
+  args.push(
+    "--type",
+    "task",
+    "-l",
+    "needs-triage",
+    "--metadata",
+    JSON.stringify(metadata),
+    "--json",
+  );
+
+  const output = runBdText(cwd, args, "tasks create");
+  const parsed = parseBdJsonOutput(output);
+  const [created] = parsed;
+  const record =
+    created && typeof created === "object"
+      ? (created as Record<string, unknown>)
+      : {};
+
+  return {
+    id: String(record.id ?? record.issue_id ?? record.key ?? "unknown"),
+    title: String(record.title ?? input.title),
+  };
+};
+
+export const appendHubTaskComment = (
+  cwd: string,
+  id: string,
+  body: string,
+): string =>
+  runBdText(cwd, ["comments", "add", id, body], `tasks comment ${id}`);
 
 const cleanJoinedValues = (values: readonly string[]): string =>
   values.filter((value) => value.trim().length > 0).join(", ");
