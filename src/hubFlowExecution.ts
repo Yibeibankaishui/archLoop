@@ -161,6 +161,44 @@ const recordTaskStatusAdvanced = (
   });
 };
 
+const buildHubAgentPromptArgs = (
+  input: Pick<HubImplementTaskInput, "taskId" | "title" | "branch">,
+): Readonly<Record<string, string>> => ({
+  TASK_ID: input.taskId,
+  TASK_TITLE: input.title,
+  BRANCH: input.branch,
+  VIEW_TASK_COMMAND: `bd show ${input.taskId}`,
+});
+
+const runHubAgent = async (input: {
+  readonly cwd: string;
+  readonly promptFile: string;
+  readonly taskId: string;
+  readonly title: string;
+  readonly branch: string;
+  readonly runDir: string;
+  readonly name: string;
+  readonly logFileName: string;
+}) => {
+  const { cursor } = await import("./AgentProvider.js");
+  const { run } = await import("./run.js");
+  const { noSandbox } = await import("./sandboxes/no-sandbox.js");
+
+  return run({
+    agent: cursor("auto"),
+    sandbox: noSandbox(),
+    cwd: input.cwd,
+    promptFile: input.promptFile,
+    promptArgs: buildHubAgentPromptArgs(input),
+    branchStrategy: { type: "branch", branch: input.branch },
+    name: input.name,
+    logging: {
+      type: "file",
+      path: join(input.runDir, "logs", input.logFileName),
+    },
+  });
+};
+
 const reviewSelectedTask = async (
   input: RunHubFlowInput,
   context: ReturnType<typeof createHubRunContext>,
@@ -575,28 +613,16 @@ export const createHubFlowRunImplementer = (options: {
   readonly cwd: string;
 }): HubFlowImplementer => {
   return async (input) => {
-    const { cursor } = await import("./AgentProvider.js");
-    const { run } = await import("./run.js");
-    const { noSandbox } = await import("./sandboxes/no-sandbox.js");
-
     try {
-      const result = await run({
-        agent: cursor("auto"),
-        sandbox: noSandbox(),
+      const result = await runHubAgent({
         cwd: options.cwd,
         promptFile: input.promptFile,
-        promptArgs: {
-          TASK_ID: input.taskId,
-          TASK_TITLE: input.title,
-          BRANCH: input.branch,
-          VIEW_TASK_COMMAND: `bd show ${input.taskId}`,
-        },
-        branchStrategy: { type: "branch", branch: input.branch },
+        taskId: input.taskId,
+        title: input.title,
+        branch: input.branch,
+        runDir: input.runDir,
         name: `implement-${input.taskId}`,
-        logging: {
-          type: "file",
-          path: join(input.runDir, "logs", `${input.taskId}.log`),
-        },
+        logFileName: `${input.taskId}.log`,
       });
 
       if (!result.completionSignal) {
@@ -644,28 +670,16 @@ export const createHubFlowRunReviewer = (options: {
   readonly cwd: string;
 }): HubFlowReviewer => {
   return async (input) => {
-    const { cursor } = await import("./AgentProvider.js");
-    const { run } = await import("./run.js");
-    const { noSandbox } = await import("./sandboxes/no-sandbox.js");
-
     try {
-      const result = await run({
-        agent: cursor("auto"),
-        sandbox: noSandbox(),
+      const result = await runHubAgent({
         cwd: options.cwd,
         promptFile: input.promptFile,
-        promptArgs: {
-          TASK_ID: input.taskId,
-          TASK_TITLE: input.title,
-          BRANCH: input.branch,
-          VIEW_TASK_COMMAND: `bd show ${input.taskId}`,
-        },
-        branchStrategy: { type: "branch", branch: input.branch },
+        taskId: input.taskId,
+        title: input.title,
+        branch: input.branch,
+        runDir: input.runDir,
         name: `review-${input.taskId}`,
-        logging: {
-          type: "file",
-          path: join(input.runDir, "logs", `${input.taskId}-review.log`),
-        },
+        logFileName: `${input.taskId}-review.log`,
       });
 
       if (!result.completionSignal) {
