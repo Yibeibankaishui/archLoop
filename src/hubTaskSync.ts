@@ -159,10 +159,6 @@ export const detectSemanticSyncConflict = (
     return undefined;
   }
 
-  if (localStatus === "done" || localStatus === "wontfix") {
-    return `local ${localStatus} disagrees with remote ${remoteStatus}`;
-  }
-
   return `local ${localStatus} disagrees with remote ${remoteStatus}`;
 };
 
@@ -245,6 +241,13 @@ const buildGithubIssueIndex = (
   }
   return index;
 };
+
+const readGithubIssueNumber = (
+  task: Pick<HubTaskProjection, "remoteRefs">,
+): number | undefined =>
+  task.remoteRefs
+    .map(parseGithubRemoteRef)
+    .find((value) => value !== undefined);
 
 const updateHubTaskRecord = (
   cwd: string,
@@ -372,9 +375,8 @@ const refreshLinkedGithubIssue = (
   const conflict = detectSemanticSyncConflict(task.hubStatus, remoteStatus);
   const syncState = readSyncState(task.metadata);
   const remoteUpdatedAt = readRemoteUpdatedAt(task.metadata);
-  const metadataPatch: Record<string, unknown> = {
-    ...(issue.updatedAt ? { remote_updated_at: issue.updatedAt } : {}),
-  };
+  const metadataPatch: Record<string, unknown> =
+    issue.updatedAt !== undefined ? { remote_updated_at: issue.updatedAt } : {};
 
   if (
     syncState === "push_pending" ||
@@ -382,18 +384,11 @@ const refreshLinkedGithubIssue = (
     isHubExecutionStatus(task.hubStatus)
   ) {
     if (
-      issue.updatedAt &&
+      issue.updatedAt !== undefined &&
       issue.updatedAt !== remoteUpdatedAt &&
       syncState !== "local_only"
     ) {
-      setHubTaskSyncMetadata(
-        cwd,
-        task,
-        {
-          ...metadataPatch,
-        },
-        env,
-      );
+      setHubTaskSyncMetadata(cwd, task, metadataPatch, env);
       return "updated";
     }
     return "unchanged";
@@ -430,10 +425,7 @@ const refreshLinkedGithubIssue = (
     return "updated";
   }
 
-  if (
-    readRemoteUpdatedAt(task.metadata) !== issue.updatedAt ||
-    readSyncState(task.metadata) !== "synced"
-  ) {
+  if (remoteUpdatedAt !== issue.updatedAt || syncState !== "synced") {
     setHubTaskSyncMetadata(
       cwd,
       task,
@@ -454,9 +446,7 @@ const pushHubTaskToGithub = (
   issue: GithubIssueRecord | undefined,
   github: GithubIssueClient,
 ): "synced" | "push_pending" | "closed" | "skipped" => {
-  const issueNumber = task.remoteRefs
-    .map(parseGithubRemoteRef)
-    .find((value) => value !== undefined);
+  const issueNumber = readGithubIssueNumber(task);
 
   if (issueNumber === undefined) {
     return "skipped";
@@ -494,6 +484,20 @@ const pushHubTaskToGithub = (
   } catch {
     return "push_pending";
   }
+};
+
+const updateHubTaskSyncState = (
+  cwd: string,
+  taskId: string,
+  syncState: HubSyncState,
+  env: NodeJS.ProcessEnv,
+): void => {
+  setHubTaskSyncMetadata(
+    cwd,
+    loadHubTask(cwd, taskId, env),
+    { sync_state: syncState },
+    env,
+  );
 };
 
 const pullGithubIssues = (
@@ -538,9 +542,7 @@ const pushHubTasks = (
   const closed: string[] = [];
 
   for (const task of board.tasks) {
-    const issueNumber = task.remoteRefs
-      .map(parseGithubRemoteRef)
-      .find((value) => value !== undefined);
+    const issueNumber = readGithubIssueNumber(task);
     if (issueNumber === undefined) {
       continue;
     }
@@ -562,12 +564,7 @@ const pushHubTasks = (
 
     if (outcome === "push_pending") {
       pushPending.push(task.id);
-      setHubTaskSyncMetadata(
-        cwd,
-        loadHubTask(cwd, task.id, env),
-        { sync_state: "push_pending" },
-        env,
-      );
+      updateHubTaskSyncState(cwd, task.id, "push_pending", env);
       continue;
     }
 
@@ -577,12 +574,7 @@ const pushHubTasks = (
       synced.push(task.id);
     }
 
-    setHubTaskSyncMetadata(
-      cwd,
-      loadHubTask(cwd, task.id, env),
-      { sync_state: "synced" },
-      env,
-    );
+    updateHubTaskSyncState(cwd, task.id, "synced", env);
   }
 
   return { synced, pushPending, closed };
