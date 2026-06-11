@@ -837,6 +837,10 @@ Shows a single Beads task with its Hub status, Beads lifecycle state, claim meta
 
 Creates a local Beads task in the Hub `inbox` bucket with a `needs-triage` label and `origin` metadata. The `origin` flag defaults to `manual`; pass `--origin user-feedback` for feedback-driven tasks. Use `--description` for the task body and `--kind` for optional extra classification metadata when you need it. `--category` is accepted as an alias for `--kind`.
 
+### `sandcastle tasks from-prd <prd-ref>`
+
+Reads a local PRD file, drafts tracer-bullet vertical slices with AFK/HITL classification, and asks you to confirm the breakdown, dependency pairs, and initial Hub status before creating Beads tasks. PRD-derived tasks default to `inbox` (`needs-triage`) unless you confirm `ready_for_agent` or `ready_for_human`. Pass `--yes` to approve the drafted slices without prompts, `--status` to set the initial Hub bucket, and `--deps` with `childIndex:parentIndex` pairs (for example `2:1,3:2`) to write Beads dependency edges.
+
 ### `sandcastle tasks comment <id>`
 
 Appends a readable Beads comment to the task without changing its status. Pass the comment text with `--body`, or omit it to enter the body interactively.
