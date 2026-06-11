@@ -627,6 +627,7 @@ export const updateHubTaskStatus = (
   const task = loadHubTask(input.cwd, input.taskId, input.env);
   const label = HUB_STATUS_LABELS[input.hubStatus];
   const beadsStatus = HUB_STATUS_BEADS_LIFECYCLE[input.hubStatus];
+  const labelKey = normalizeKey(label ?? "");
   const metadata: Record<string, unknown> = {
     ...task.metadata,
     ...(input.metadata ?? {}),
@@ -652,7 +653,7 @@ export const updateHubTaskStatus = (
   const labelsToRemove = task.labels.filter(
     (existingLabel) =>
       EXECUTION_STATUS_LABELS.has(existingLabel) &&
-      normalizeKey(existingLabel) !== normalizeKey(label ?? ""),
+      normalizeKey(existingLabel) !== labelKey,
   );
   if (labelsToRemove.length > 0) {
     args.push("--remove-labels", labelsToRemove.join(","));

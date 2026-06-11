@@ -1733,12 +1733,13 @@ const projectCommand = Command.make("project", {}, () =>
   }),
 ).pipe(Command.withSubcommands([projectStatusCommand]));
 
+const getHubFlowIds = (): string =>
+  listHubFlows()
+    .map((flow) => flow.id)
+    .join(", ");
+
 const flowOption = Options.text("flow").pipe(
-  Options.withDescription(
-    `Hub flow id (${listHubFlows()
-      .map((flow) => flow.id)
-      .join(", ")})`,
-  ),
+  Options.withDescription(`Hub flow id (${getHubFlowIds()})`),
 );
 
 const toHubFlowError = (error: unknown): HubFlowError =>
@@ -1766,9 +1767,7 @@ const runCommand = Command.make(
       if (!flowDefinition) {
         return yield* Effect.fail(
           new HubFlowError({
-            message: `Unknown Hub flow "${flow}". Available flows: ${listHubFlows()
-              .map((item) => item.id)
-              .join(", ")}`,
+            message: `Unknown Hub flow "${flow}". Available flows: ${getHubFlowIds()}`,
           }),
         );
       }

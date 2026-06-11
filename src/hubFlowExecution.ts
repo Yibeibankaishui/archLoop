@@ -1,7 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { HubFlowError } from "./errors.js";
 import {
   appendHubBatchEvent,
   appendHubTaskEvent,
@@ -85,6 +84,26 @@ const isSuccessfulImplementation = (result: HubImplementTaskResult): boolean =>
   result.outcome === "success" &&
   result.commits.length > 0 &&
   result.completionSignal !== undefined;
+
+const SANDBOX_FAILURE_TAGS = new Set([
+  "DockerError",
+  "PodmanError",
+  "ContainerStartTimeoutError",
+  "WorktreeError",
+  "CopyError",
+  "SyncError",
+]);
+
+const getErrorTag = (error: unknown): string | undefined =>
+  typeof error === "object" &&
+  error !== null &&
+  "_tag" in error &&
+  typeof (error as { _tag?: unknown })._tag === "string"
+    ? (error as { _tag: string })._tag
+    : undefined;
+
+const isSandboxFailureTag = (tag: string | undefined): boolean =>
+  tag !== undefined && SANDBOX_FAILURE_TAGS.has(tag);
 
 const recordTaskStatusAdvanced = (
   runDir: string,
@@ -272,14 +291,10 @@ export const runHubFlow = async (
   const cwd = input.cwd ?? process.cwd();
   const repoRoot = resolveGitRepoRoot(cwd);
   const promptFile = resolveHubFlowPromptPath(input.flowId, "implement");
-  if (!promptFile.includes("hub-flows")) {
-    throw new HubFlowError({
-      message: `Hub flow "${input.flowId}" must use Hub-owned prompts, not repo-local .sandcastle/ prompts.`,
-    });
-  }
 
   const readyBoard = loadHubReadyQueue(repoRoot, input.env);
   const selectedTasks = selectHubFlowTasks(readyBoard);
+  const selectedTaskIds = selectedTasks.map((task) => task.id);
   const startedAt = input.startedAt ?? new Date();
   const context = createHubRunContext({
     cwd: repoRoot,
@@ -299,7 +314,7 @@ export const runHubFlow = async (
     batchId: context.batchId,
     flowId: input.flowId,
     createdAt: startedAt.toISOString(),
-    taskIds: selectedTasks.map((task) => task.id),
+    taskIds: selectedTaskIds,
   });
 
   const results: HubFlowTaskResult[] = [];
@@ -319,7 +334,7 @@ export const runHubFlow = async (
     runId: context.runId,
     batchId: context.batchId,
     runDir: context.runDir,
-    selectedTaskIds: selectedTasks.map((task) => task.id),
+    selectedTaskIds,
     results,
   };
 };
@@ -327,14 +342,15 @@ export const runHubFlow = async (
 export const formatHubFlowResultLines = (
   result: RunHubFlowResult,
 ): readonly string[] => {
+  const selectedTaskCount = result.selectedTaskIds.length;
   const lines = [
     `Hub flow ${result.flowId}`,
     `Run id: ${result.runId}`,
     `Batch id: ${result.batchId}`,
-    `Selected tasks: ${result.selectedTaskIds.length}`,
+    `Selected tasks: ${selectedTaskCount}`,
   ];
 
-  if (result.selectedTaskIds.length === 0) {
+  if (selectedTaskCount === 0) {
     lines.push("No ready tasks selected.");
     return lines;
   }
@@ -400,22 +416,7 @@ export const createHubFlowRunImplementer = (options: {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const tag =
-        typeof error === "object" &&
-        error !== null &&
-        "_tag" in error &&
-        typeof (error as { _tag?: unknown })._tag === "string"
-          ? (error as { _tag: string })._tag
-          : undefined;
-
-      if (
-        tag === "DockerError" ||
-        tag === "PodmanError" ||
-        tag === "ContainerStartTimeoutError" ||
-        tag === "WorktreeError" ||
-        tag === "CopyError" ||
-        tag === "SyncError"
-      ) {
+      if (isSandboxFailureTag(getErrorTag(error))) {
         return {
           outcome: "sandbox_failed",
           commits: [],
