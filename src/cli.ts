@@ -76,6 +76,7 @@ import {
 } from "./projectStatus.js";
 import {
   createHubFlowRunImplementer,
+  createHubFlowRunReviewer,
   formatHubFlowResultLines,
   runHubFlow,
 } from "./hubFlowExecution.js";
@@ -2053,6 +2054,9 @@ const runCommand = Command.make(
             flowId: flowDefinition.id,
             cwd: repoRoot,
             implementer: createHubFlowRunImplementer({ cwd: repoRoot }),
+            reviewer: flowDefinition.hasReviewer
+              ? createHubFlowRunReviewer({ cwd: repoRoot })
+              : undefined,
           }),
         catch: toHubFlowError,
       });

@@ -855,9 +855,11 @@ Runs a Hub-owned flow against the Beads task board in the target git repository.
 
 The first available flow is `no-review`: it reads the Beads ready queue, claims unblocked `ready_for_agent` tasks, runs an implementer with task id/title/branch supplied by TypeScript orchestration, and advances successful work to `waiting_for_merge`. Agent or sandbox failures move tasks to `failed` with a failure reason.
 
-| Option   | Required | Description                         |
-| -------- | -------- | ----------------------------------- |
-| `--flow` | Yes      | Hub flow id (currently `no-review`) |
+The `with-review` flow adds a reviewer stage after implementation: successful work moves to `reviewing`, the reviewer receives the task branch and diff/commit context from orchestration, and completed review advances the task to `waiting_for_merge`. Review failures move tasks to `failed` with a failure reason.
+
+| Option   | Required | Description                              |
+| -------- | -------- | ---------------------------------------- |
+| `--flow` | Yes      | Hub flow id (`no-review`, `with-review`) |
 
 Hub flow runs write run, batch, and task event records into the Hub run directory under the Sandcastle user data directory. The task board uses that run history to keep claims and execution progress separate from normal Beads task status.
 
