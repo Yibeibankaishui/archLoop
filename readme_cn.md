@@ -134,7 +134,7 @@ npm run sandcastle
 
 ### Project profile（项目类型）
 
-在 `sandcastle init` 时选择（`--project-profile`），影响 **Dockerfile 工具层** 与 **bootstrap.sh**，不影响 `run()` 等运行时 API。
+在 `sandcastle init` 时选择（`--project-profile`），影响 **Dockerfile 工具层**、**bootstrap.sh** 以及生成 prompt 中的**默认验证命令提示**（如 Node 用 npm、Python 用 pytest 等），不影响 `run()` 等运行时 API。
 
 | Profile   | 适用场景                                        |
 | --------- | ----------------------------------------------- |

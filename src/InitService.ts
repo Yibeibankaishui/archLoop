@@ -1676,6 +1676,7 @@ export const scaffold = (
     yield* substituteTemplateArgs(configDir, {
       ...backlogManager.templateArgs,
       PROJECT_PROFILE_TOOLS: projectProfile.containerfileTools,
+      PROJECT_PROFILE_VERIFY_GUIDANCE: projectProfile.promptVerifyGuidance,
     });
 
     // Strip --label Sandcastle from prompt files when the user declined label creation

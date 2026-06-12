@@ -9,6 +9,11 @@ export interface ProjectProfileEntry {
   readonly containerfileTools: string;
   /** Content written to `.sandcastle/bootstrap.sh` during init. */
   readonly bootstrapScript: string;
+  /**
+   * Init-time substitution for `{{PROJECT_PROFILE_VERIFY_GUIDANCE}}` in
+   * scaffolded workflow prompts (stack-specific verification commands).
+   */
+  readonly promptVerifyGuidance: string;
 }
 
 const bootstrapScriptPreamble = (
@@ -33,6 +38,8 @@ const GENERIC_PROJECT_PROFILE: ProjectProfileEntry = {
     "Language-agnostic scaffold with a no-op bootstrap script you can customize",
   containerfileTools: "",
   bootstrapScript: GENERIC_BOOTSTRAP_SCRIPT,
+  promptVerifyGuidance:
+    "your project's verification commands (customize this prompt section after init to match your stack)",
 };
 
 const NODE_BOOTSTRAP_SCRIPT =
@@ -69,6 +76,7 @@ export const NODE_PROJECT_PROFILE: ProjectProfileEntry = {
     "Node.js projects with lockfile-aware dependency install at sandbox ready time",
   containerfileTools: "",
   bootstrapScript: NODE_BOOTSTRAP_SCRIPT,
+  promptVerifyGuidance: "`npm run typecheck` and `npm run test`",
 };
 
 const PYTHON_CONTAINERFILE_TOOLS = `# Python development tools (pip, venv) and uv
@@ -163,6 +171,8 @@ export const PYTHON_PROJECT_PROFILE: ProjectProfileEntry = {
     "Python, pip, venv, and uv in the sandbox image with setup-only bootstrap for common dependency layouts",
   containerfileTools: PYTHON_CONTAINERFILE_TOOLS,
   bootstrapScript: PYTHON_BOOTSTRAP_SCRIPT,
+  promptVerifyGuidance:
+    "`python -m pytest` when tests are configured, plus any type or lint checks your project uses (e.g. `mypy`, `ruff check`)",
 };
 
 const CPP_CONTAINERFILE_TOOLS = `# Install common C++ build tooling
@@ -199,6 +209,8 @@ export const CPP_PROJECT_PROFILE: ProjectProfileEntry = {
     "C++ toolchain with setup-only bootstrap for CMake and Makefile projects",
   containerfileTools: CPP_CONTAINERFILE_TOOLS,
   bootstrapScript: CPP_BOOTSTRAP_SCRIPT,
+  promptVerifyGuidance:
+    "`cmake --build build` for CMake projects configured by bootstrap, or `make` for Makefile projects",
 };
 
 export const DEFAULT_PROJECT_PROFILE = GENERIC_PROJECT_PROFILE;

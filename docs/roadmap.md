@@ -129,6 +129,7 @@ Goal: 让 Sandcastle 不再默认假设 Node 项目，而是通过项目级 boot
 - [x] 完成 `sandcastle init` 项目类型选择的产品/交互设计，包括 scripted init 参数和交互式选择（见 [#20](https://github.com/Yibeibankaishui/sandcastle/issues/20)）。
 - [x] 完成 Node、Python、C++ Project profiles 的实现拆分与 issue 准备（见 [#23](https://github.com/Yibeibankaishui/sandcastle/issues/23)、[#24](https://github.com/Yibeibankaishui/sandcastle/issues/24)、[#25](https://github.com/Yibeibankaishui/sandcastle/issues/25)）。
 - [x] 明确通用 Docker 镜像与 Project profile 的边界，并确认 bootstrap 不参与 image build、不由 init 验证（见 [ADR-0015](./adr/0015-project-profiles-generate-bootstrap-at-init-time.md)）。
+- [x] Project profile 影响生成 prompt 中的默认验证命令提示（见 [#75](https://github.com/Yibeibankaishui/sandcastle/issues/75)）。
 - [x] 调整 `sandcastle init` 的 sandbox 选项：新增 `no-sandbox`，隐藏 `podman`（保留 podman 命令与运行时代码）。
 - [x] 修复 `sandcastle init` 的 scaffold 入口与 sandbox 选择脱节的问题，并为 `no-sandbox + beads` 增加 `bd` host 依赖校验与提示。
 - [ ] 实现 `generic` Project profile 与 `--project-profile` 基础路径（见 [#21](https://github.com/Yibeibankaishui/sandcastle/issues/21)）。

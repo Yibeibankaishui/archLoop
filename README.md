@@ -768,6 +768,7 @@ What Project profile affects:
 
 - **Dockerfile or Containerfile** — language-specific tool layers composed with agent runtime and backlog manager layers.
 - **`.sandcastle/bootstrap.sh`** — a deterministic, user-editable scaffold script generated at init.
+- **Workflow prompts** — stack-specific verification guidance substituted into scaffolded prompt templates (for example npm checks for `node`, pytest-oriented checks for `python`, CMake/Make checks for `cpp`; `generic` stays user-editable).
 
 What Project profile does **not** affect:
 

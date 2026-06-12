@@ -73,7 +73,7 @@ Replace `<TARGET_REPO>` with the project being developed.
 
 ## Project profiles
 
-`--project-profile` only affects the Dockerfile tool layers and `bootstrap.sh`; it does not change runtime APIs. Choices: `generic` (default), `node`, `python`, `cpp`. v1 does not auto-detect — pick the closest. Non-blank templates run `.sandcastle/bootstrap.sh` from `sandbox.onSandboxReady`.
+`--project-profile` affects the Dockerfile tool layers, `bootstrap.sh`, and stack-specific verification guidance in generated workflow prompts. Choices: `generic` (default), `node`, `python`, `cpp`. v1 does not auto-detect — pick the closest. Non-blank templates run `.sandcastle/bootstrap.sh` from `sandbox.onSandboxReady`.
 
 ## Common env vars
 
