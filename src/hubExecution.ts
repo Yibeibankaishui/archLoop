@@ -63,6 +63,23 @@ export interface HubBatchPlannedEvent {
   readonly taskIds: readonly string[];
 }
 
+export interface HubBatchMergeStartedEvent {
+  readonly type: "batch_merge_started";
+  readonly runId: string;
+  readonly batchId: string;
+  readonly createdAt: string;
+  readonly taskIds: readonly string[];
+}
+
+export interface HubBatchMergeCompletedEvent {
+  readonly type: "batch_merge_completed";
+  readonly runId: string;
+  readonly batchId: string;
+  readonly createdAt: string;
+  readonly taskIds: readonly string[];
+  readonly batchStatus: "done" | "partial_failed";
+}
+
 export interface HubTaskEvent {
   readonly type:
     | "task_claimed"
@@ -73,6 +90,15 @@ export interface HubTaskEvent {
     | "task_review_started"
     | "task_review_succeeded"
     | "task_review_failed"
+    | "merge_started"
+    | "merge_succeeded"
+    | "merge_failed"
+    | "verification_started"
+    | "verification_passed"
+    | "verification_failed"
+    | "task_close_started"
+    | "task_closed"
+    | "task_close_failed"
     | "task_status_advanced";
   readonly runId: string;
   readonly batchId: string;
@@ -259,7 +285,11 @@ export const appendHubRunEvent = (
 
 export const appendHubBatchEvent = (
   runDir: string,
-  event: HubBatchStartedEvent | HubBatchPlannedEvent,
+  event:
+    | HubBatchStartedEvent
+    | HubBatchPlannedEvent
+    | HubBatchMergeStartedEvent
+    | HubBatchMergeCompletedEvent,
 ): string => {
   const { batchEventsPath } = resolveHubRunEventsPaths(runDir);
   return appendHubEvent(

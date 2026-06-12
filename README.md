@@ -861,6 +861,8 @@ The first available flow is `no-review`: it reads the Beads ready queue, claims 
 
 The `with-review` flow adds a reviewer stage after implementation: successful work moves to `reviewing`, the reviewer receives the task branch and diff/commit context from orchestration, and completed review advances the task to `waiting_for_merge`. Review failures move tasks to `failed` with a failure reason.
 
+After implementation and review complete, Hub moves eligible `waiting_for_merge` tasks in the batch to `merging`, merges each branch with per-task events, runs verification after each merge, and closes the local Beads task only when merge, verification, and close all succeed. Merge conflicts, verification failures, or close failures stop the batch: the current task becomes `failed`, unprocessed tasks return to `waiting_for_merge`, and the batch becomes `partial_failed`.
+
 | Option   | Required | Description                              |
 | -------- | -------- | ---------------------------------------- |
 | `--flow` | Yes      | Hub flow id (`no-review`, `with-review`) |

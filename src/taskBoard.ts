@@ -555,6 +555,15 @@ export const selectHubFlowTasks = (
       task.hubStatus === "ready_for_agent" && task.claimState !== "active",
   );
 
+export const selectHubBatchMergeTasks = (
+  board: HubTaskBoard,
+  batchId: string,
+): readonly HubTaskProjection[] =>
+  board.tasks.filter(
+    (task) =>
+      task.hubStatus === "waiting_for_merge" && task.claim?.batchId === batchId,
+  );
+
 const slugifyHubTaskTitle = (title: string): string => {
   const slug = title
     .trim()
@@ -661,6 +670,46 @@ export const updateHubTaskStatus = (
 
   args.push("--set-metadata", JSON.stringify(metadata));
   runBdText(input.cwd, args, `tasks update ${input.taskId}`, input.env);
+
+  return loadHubTask(input.cwd, input.taskId, input.env);
+};
+
+export interface CloseHubTaskInput {
+  readonly cwd: string;
+  readonly taskId: string;
+  readonly metadata?: Readonly<Record<string, unknown>>;
+  readonly env?: NodeJS.ProcessEnv;
+}
+
+export const closeHubTask = (input: CloseHubTaskInput): HubTaskProjection => {
+  const task = loadHubTask(input.cwd, input.taskId, input.env);
+  const metadata: Record<string, unknown> = {
+    ...task.metadata,
+    ...(input.metadata ?? {}),
+    hubStatus: "done",
+    done: true,
+  };
+  delete metadata.failureReason;
+  delete metadata.failed;
+
+  const labelsToRemove = task.labels.filter((existingLabel) =>
+    EXECUTION_STATUS_LABELS.has(existingLabel),
+  );
+  const args = [
+    "update",
+    input.taskId,
+    "--status",
+    "closed",
+    "--add-labels",
+    "done",
+    "--set-metadata",
+    JSON.stringify(metadata),
+  ];
+  if (labelsToRemove.length > 0) {
+    args.push("--remove-labels", labelsToRemove.join(","));
+  }
+
+  runBdText(input.cwd, args, `tasks close ${input.taskId}`, input.env);
 
   return loadHubTask(input.cwd, input.taskId, input.env);
 };
