@@ -220,20 +220,36 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       });
 
       try {
-        // Run the implementer
-        const implement = await sandbox.run({
-          name: "implementer",
-          maxIterations: 100,
-          agent: sandcastle.claudeCode("claude-sonnet-4-6"),
-          promptFile: "./.sandcastle/implement-prompt.md",
-          promptArgs: {
-            TASK_ID: issue.id,
-            ISSUE_TITLE: issue.title,
-            BRANCH: issue.branch,
-          },
-        });
+        // Check the LOCAL issue branch first. If it already has commits ahead
+        // of the base (e.g. a prior iteration implemented it but review/merge
+        // never finished), skip a fresh implementer run and go straight to
+        // review/merge. This uses local refs only, so it never matches an
+        // unrelated same-numbered branch from another remote.
+        const priorCommitsAhead = await countBranchCommitsAhead(
+          currentBranch,
+          issue.branch,
+        );
 
-        const commitsThisRun = implement.commits.length;
+        let implement: Awaited<ReturnType<typeof sandbox.run>> | undefined;
+        if (priorCommitsAhead > 0) {
+          console.log(
+            `  ${issue.id}: branch already has ${priorCommitsAhead} commit(s) ahead of ${currentBranch}; skipping fresh implementation.`,
+          );
+        } else {
+          implement = await sandbox.run({
+            name: "implementer",
+            maxIterations: 100,
+            agent: sandcastle.claudeCode("claude-sonnet-4-6"),
+            promptFile: "./.sandcastle/implement-prompt.md",
+            promptArgs: {
+              TASK_ID: issue.id,
+              ISSUE_TITLE: issue.title,
+              BRANCH: issue.branch,
+            },
+          });
+        }
+
+        const commitsThisRun = implement?.commits.length ?? 0;
         const branchCommitsAhead = await countBranchCommitsAhead(
           currentBranch,
           issue.branch,
@@ -264,11 +280,11 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           // Each sandbox.run() only returns commits from its own run.
           pipelineResult = {
             ...review,
-            commits: [...implement.commits, ...review.commits],
+            commits: [...(implement?.commits ?? []), ...review.commits],
           };
         }
 
-        return { ...pipelineResult, branchHasUnmergedWork };
+        return { ...pipelineResult!, branchHasUnmergedWork };
       } finally {
         await sandbox.close();
       }

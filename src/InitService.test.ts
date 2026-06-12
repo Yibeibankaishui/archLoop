@@ -1755,7 +1755,7 @@ describe("InitService scaffold", () => {
       // Reviewer result must be captured, not discarded
       expect(mainTs).toContain("const review = await sandbox.run");
       // Commits from both implementer and reviewer must be merged
-      expect(mainTs).toContain("implement.commits");
+      expect(mainTs).toContain("implement?.commits");
       expect(mainTs).toContain("review.commits");
     });
 
@@ -1930,7 +1930,7 @@ describe("InitService scaffold", () => {
       expect(prompt).not.toMatch(/left open for human review/i);
     });
 
-    it("plan-prompt.md guides planner to skip fresh implementation for branches with unmerged commits", async () => {
+    it("plan-prompt.md leaves branch detection to the template, not the planner", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
@@ -1938,8 +1938,28 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "plan-prompt.md"),
         "utf-8",
       );
-      expect(prompt).toMatch(/unmerged commits|commits ahead/i);
-      expect(prompt).toMatch(/sandcastle\/issue-\{id\}/);
+      // The planner must only do dependency analysis; deterministic branch
+      // detection lives in main.mts. Instructing the LLM to match
+      // `sandcastle/issue-{id}-*` branches caused it to pick up unrelated
+      // same-numbered branches from other remotes.
+      expect(prompt).not.toContain("# EXISTING BRANCHES");
+      expect(prompt).not.toContain("git rev-list <base>..refs/heads/<branch>");
+      expect(prompt).toMatch(/do \*\*not\*\* inspect git branches/i);
+    });
+
+    it("main.mts skips fresh implementation when the local branch is already ahead", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain(
+        "const priorCommitsAhead = await countBranchCommitsAhead",
+      );
+      expect(mainTs).toMatch(/if \(priorCommitsAhead > 0\)/);
+      expect(mainTs).toContain("skipping fresh implementation");
     });
 
     it("main.mts applies an empty-run circuit breaker with actionable recovery steps", async () => {

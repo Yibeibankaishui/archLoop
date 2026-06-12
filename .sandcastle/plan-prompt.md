@@ -24,6 +24,12 @@ An issue is **unblocked** if it has zero blocking dependencies on other open iss
 
 For each unblocked issue, assign a branch name using the format `sandcastle/issue-{id}-{slug}`.
 
+Include every unblocked issue in your plan. Do **not** inspect git branches or
+try to detect existing implementation work — the template handles that
+deterministically. It checks the local issue branch before each implementer run
+and, when that branch already has commits ahead of the base, skips fresh
+implementation and goes straight to review and merge.
+
 # OUTPUT
 
 Output your plan as a JSON object wrapped in `<plan>` tags:
