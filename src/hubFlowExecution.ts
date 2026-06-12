@@ -7,6 +7,15 @@ import {
   createHubRunContext,
   type HubTaskClaimMetadata,
 } from "./hubExecution.js";
+import {
+  createHubFlowRunMerger,
+  createHubFlowRunVerifier,
+  formatHubBatchMergeResultLines,
+  runHubBatchMerge,
+  type HubFlowMerger,
+  type HubFlowVerifier,
+  type RunHubBatchMergeResult,
+} from "./hubBatchMerge.js";
 import { getHubFlowDefinition, resolveHubFlowPromptPath } from "./hubFlows.js";
 import {
   resolveGitRepoRoot,
@@ -74,6 +83,9 @@ export interface RunHubFlowInput {
   readonly startedAt?: Date;
   readonly implementer: HubFlowImplementer;
   readonly reviewer?: HubFlowReviewer;
+  readonly merger?: HubFlowMerger;
+  readonly verifier?: HubFlowVerifier;
+  readonly runMergePhase?: boolean;
 }
 
 export interface HubFlowTaskResult {
@@ -98,6 +110,7 @@ export interface RunHubFlowResult {
   readonly runDir: string;
   readonly selectedTaskIds: readonly string[];
   readonly results: readonly HubFlowTaskResult[];
+  readonly mergeResult?: RunHubBatchMergeResult;
 }
 
 const resolveFailureReason = (
@@ -450,7 +463,7 @@ const implementSelectedTask = async (
         branch,
         claimResult.claim!,
         claimResult.task.metadata,
-        reviewPromptFile ?? "",
+        reviewPromptFile!,
         implementationResult.commits.length,
       );
     }
@@ -574,6 +587,21 @@ export const runHubFlow = async (
     );
   }
 
+  const runMergePhase = input.runMergePhase ?? true;
+  let mergeResult: RunHubBatchMergeResult | undefined;
+  if (runMergePhase) {
+    mergeResult = await runHubBatchMerge({
+      flowId: input.flowId,
+      cwd: repoRoot,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId: context.batchId,
+      env: input.env,
+      merger: input.merger ?? createHubFlowRunMerger({ cwd: repoRoot }),
+      verifier: input.verifier ?? createHubFlowRunVerifier({ cwd: repoRoot }),
+    });
+  }
+
   return {
     flowId: input.flowId,
     runId: context.runId,
@@ -581,6 +609,7 @@ export const runHubFlow = async (
     runDir: context.runDir,
     selectedTaskIds,
     results,
+    mergeResult,
   };
 };
 
@@ -604,6 +633,13 @@ export const formatHubFlowResultLines = (
     lines.push(
       `  ${taskResult.taskId}: ${taskResult.outcome} -> ${taskResult.hubStatus}`,
     );
+  }
+
+  if (result.mergeResult) {
+    lines.push("Merge phase:");
+    for (const line of formatHubBatchMergeResultLines(result.mergeResult)) {
+      lines.push(`  ${line}`);
+    }
   }
 
   return lines;

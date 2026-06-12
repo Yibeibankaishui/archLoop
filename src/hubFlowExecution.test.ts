@@ -263,6 +263,7 @@ describe("no-review Hub flow execution", () => {
       hubProjectDir,
       env,
       implementer,
+      runMergePhase: false,
     });
 
     expect(result.selectedTaskIds).toEqual(["bd-70"]);
@@ -332,6 +333,7 @@ describe("no-review Hub flow execution", () => {
         commits: [],
         message: "agent exited non-zero",
       }),
+      runMergePhase: false,
     });
 
     const finalState = JSON.parse(
@@ -370,6 +372,7 @@ describe("no-review Hub flow execution", () => {
       implementer: async () => {
         throw new Error("sandbox start failed");
       },
+      runMergePhase: false,
     });
 
     expect(result.results[0]).toMatchObject({
@@ -422,6 +425,7 @@ describe("with-review Hub flow execution", () => {
       env,
       implementer,
       reviewer,
+      runMergePhase: false,
     });
 
     expect(result.selectedTaskIds).toEqual(["bd-71"]);
@@ -500,6 +504,7 @@ describe("with-review Hub flow execution", () => {
         commits: [],
         message: "reviewer exited non-zero",
       }),
+      runMergePhase: false,
     });
 
     const finalState = JSON.parse(
