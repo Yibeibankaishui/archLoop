@@ -627,6 +627,7 @@ export interface UpdateHubTaskStatusInput {
   readonly hubStatus: HubTaskStatus;
   readonly metadata?: Readonly<Record<string, unknown>>;
   readonly failureReason?: HubFailureReason;
+  readonly replaceMetadata?: boolean;
   readonly env?: NodeJS.ProcessEnv;
 }
 
@@ -637,11 +638,16 @@ export const updateHubTaskStatus = (
   const label = HUB_STATUS_LABELS[input.hubStatus];
   const beadsStatus = HUB_STATUS_BEADS_LIFECYCLE[input.hubStatus];
   const labelKey = normalizeKey(label ?? "");
-  const metadata: Record<string, unknown> = {
-    ...task.metadata,
-    ...(input.metadata ?? {}),
-    hubStatus: input.hubStatus,
-  };
+  const metadata: Record<string, unknown> = input.replaceMetadata
+    ? {
+        ...(input.metadata ?? {}),
+        hubStatus: input.hubStatus,
+      }
+    : {
+        ...task.metadata,
+        ...(input.metadata ?? {}),
+        hubStatus: input.hubStatus,
+      };
 
   if (input.failureReason) {
     metadata.failureReason = input.failureReason;

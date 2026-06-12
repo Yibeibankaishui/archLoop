@@ -103,6 +103,7 @@ import {
   formatHubTaskSyncSummaryLines,
   syncHubTasksWithGithub,
 } from "./hubTaskSync.js";
+import { formatHubRecoveryComment, recoverHubTask } from "./hubTaskRecover.js";
 
 const require = createRequire(import.meta.url);
 const VERSION = (require("../package.json") as { version: string }).version;
@@ -1978,6 +1979,28 @@ const tasksCommentCommand = Command.make(
     }),
 );
 
+const tasksRecoverCommand = Command.make(
+  "recover",
+  { id: taskIdArg },
+  ({ id }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      const result = yield* Effect.tryPromise({
+        try: () => recoverHubTask({ cwd, taskId: id }),
+        catch: toTaskBoardError,
+      });
+
+      yield* d.summary(`Recovered Beads task ${id}`, {
+        Outcome: result.outcome,
+        "Prior status": result.priorStatus,
+        "Hub status": result.hubStatus,
+        Summary: result.summary,
+      });
+      yield* d.status(formatHubRecoveryComment(result.summary), "info");
+    }),
+);
+
 const tasksCommand = Command.make("tasks", {}, () =>
   Effect.gen(function* () {
     const d = yield* Display;
@@ -1995,6 +2018,7 @@ const tasksCommand = Command.make("tasks", {}, () =>
     tasksFromPrdCommand,
     tasksSyncCommand,
     tasksCommentCommand,
+    tasksRecoverCommand,
   ]),
 );
 
