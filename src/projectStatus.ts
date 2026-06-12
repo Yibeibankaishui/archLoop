@@ -102,6 +102,20 @@ const EMPTY_SYNC_COUNTS: HubProjectSyncCounts = {
   synced: 0,
 };
 
+type MutableHubProjectSyncCounts = {
+  pushPending: number;
+  conflict: number;
+  localOnly: number;
+  synced: number;
+};
+
+const ACTIVE_RUN_TASK_STATUSES = new Set<HubTaskProjection["hubStatus"]>([
+  "failed",
+  "implementing",
+  "reviewing",
+  "merging",
+]);
+
 const readObject = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -175,6 +189,13 @@ const readSyncState = (
   return undefined;
 };
 
+const createEmptySyncCounts = (): MutableHubProjectSyncCounts => ({
+  ...EMPTY_SYNC_COUNTS,
+});
+
+const readTaskCount = (value: unknown): number | undefined =>
+  Array.isArray(value) ? value.length : undefined;
+
 export const resolveFailedTaskNextAction = (
   task: Pick<HubTaskProjection, "id">,
   failureReason: HubFailureReason | undefined,
@@ -206,7 +227,7 @@ const summarizeTaskBoard = (
     return {
       statusCounts: {},
       failedTasks: [],
-      syncCounts: { ...EMPTY_SYNC_COUNTS },
+      syncCounts: createEmptySyncCounts(),
     };
   }
 
@@ -227,12 +248,7 @@ const summarizeTaskBoard = (
       };
     });
 
-  const syncCounts = {
-    pushPending: 0,
-    conflict: 0,
-    localOnly: 0,
-    synced: 0,
-  };
+  const syncCounts = createEmptySyncCounts();
   for (const task of board.tasks) {
     const syncState = readSyncState(task.metadata);
     if (task.hubStatus === "sync_conflict") {
@@ -245,6 +261,29 @@ const summarizeTaskBoard = (
   }
 
   return { statusCounts, failedTasks, syncCounts };
+};
+
+const readBatchSummary = (
+  runId: string,
+  runDir: string,
+  batchId: string,
+  events: readonly unknown[],
+): HubProjectBatchSummary => {
+  const status = resolveBatchStatus(events);
+  const plannedEvent = events.find(
+    (event) => readObject(event).type === "batch_planned",
+  );
+  const plannedRecord = readObject(plannedEvent);
+
+  return {
+    runId,
+    batchId,
+    runDir,
+    status,
+    flowId: readFirstString(plannedRecord, ["flowId", "flow_id"]),
+    taskCount: readTaskCount(plannedRecord.taskIds),
+    active: status !== "done",
+  };
 };
 
 const resolveBatchStatus = (
@@ -321,27 +360,9 @@ export const listHubRunSummaries = (
     const eventsDir = join(runDir, "events");
     const runEvents = readJsonl(join(eventsDir, "run.jsonl"));
     const batchEvents = readJsonl(join(eventsDir, "batch.jsonl"));
-    const taskEvents = readJsonl(join(eventsDir, "task.jsonl"));
     const runStarted = readObject(runEvents[0]);
     const batches = [...groupBatchEvents(batchEvents).entries()].map(
-      ([batchId, events]) => {
-        const status = resolveBatchStatus(events);
-        const plannedEvent = events.find(
-          (event) => readObject(event).type === "batch_planned",
-        );
-        const plannedRecord = readObject(plannedEvent);
-        return {
-          runId,
-          batchId,
-          runDir,
-          status,
-          flowId: readFirstString(plannedRecord, ["flowId", "flow_id"]),
-          taskCount: Array.isArray(plannedRecord.taskIds)
-            ? plannedRecord.taskIds.length
-            : undefined,
-          active: status !== "done",
-        } satisfies HubProjectBatchSummary;
-      },
+      ([batchId, events]) => readBatchSummary(runId, runDir, batchId, events),
     );
 
     summaries.push({
@@ -395,17 +416,13 @@ const collectRunDirectories = (
 
   for (const task of board?.tasks ?? []) {
     const runId = task.claim?.runId;
-    if (
-      runId &&
-      (task.hubStatus === "failed" ||
-        task.hubStatus === "implementing" ||
-        task.hubStatus === "reviewing" ||
-        task.hubStatus === "merging")
-    ) {
-      const run = runSummaries.find((summary) => summary.runId === runId);
-      if (run) {
-        directories.add(run.runDir);
-      }
+    if (!runId || !ACTIVE_RUN_TASK_STATUSES.has(task.hubStatus)) {
+      continue;
+    }
+
+    const run = runSummaries.find((summary) => summary.runId === runId);
+    if (run) {
+      directories.add(run.runDir);
     }
   }
 
@@ -418,98 +435,141 @@ const collectRunDirectories = (
   return [...directories].sort();
 };
 
-export const formatHubProjectStatusLines = (
-  status: HubProjectStatus,
-): readonly string[] => {
-  const lines: string[] = [];
-
+const appendTaskCountLines = (lines: string[], status: HubProjectStatus) => {
   lines.push("Task counts by Hub status");
   if (!status.beadsAvailable) {
     lines.push("  Beads unavailable — install bd to load the task board.");
-  } else if (Object.keys(status.statusCounts).length === 0) {
+    return;
+  }
+
+  if (Object.keys(status.statusCounts).length === 0) {
     lines.push("  No Beads tasks found.");
-  } else {
-    for (const [hubStatus, count] of Object.entries(status.statusCounts).sort(
-      ([left], [right]) => left.localeCompare(right),
-    )) {
-      lines.push(`  ${hubStatus}: ${count}`);
-    }
+    return;
   }
 
-  lines.push("");
+  for (const [hubStatus, count] of Object.entries(status.statusCounts).sort(
+    ([left], [right]) => left.localeCompare(right),
+  )) {
+    lines.push(`  ${hubStatus}: ${count}`);
+  }
+};
+
+const appendActiveBatchLines = (
+  lines: string[],
+  activeBatches: readonly HubProjectBatchSummary[],
+) => {
   lines.push("Active runs and batch status");
-  if (status.activeBatches.length === 0) {
+  if (activeBatches.length === 0) {
     lines.push("  No active Hub runs.");
-  } else {
-    for (const batch of status.activeBatches) {
-      const details = [
-        batch.flowId ? `flow ${batch.flowId}` : undefined,
-        batch.taskCount !== undefined ? `${batch.taskCount} tasks` : undefined,
-      ]
-        .filter((detail) => detail !== undefined)
-        .join(", ");
-      lines.push(
-        `  ${batch.runId} / ${batch.batchId}: ${batch.status}${details ? ` (${details})` : ""}`,
-      );
-      lines.push(`    Run directory: ${batch.runDir}`);
-    }
+    return;
   }
 
-  lines.push("");
+  for (const batch of activeBatches) {
+    const details = [
+      batch.flowId ? `flow ${batch.flowId}` : undefined,
+      batch.taskCount !== undefined ? `${batch.taskCount} tasks` : undefined,
+    ]
+      .filter((detail) => detail !== undefined)
+      .join(", ");
+    lines.push(
+      `  ${batch.runId} / ${batch.batchId}: ${batch.status}${details ? ` (${details})` : ""}`,
+    );
+    lines.push(`    Run directory: ${batch.runDir}`);
+  }
+};
+
+const appendFailedTaskLines = (
+  lines: string[],
+  failedTasks: readonly HubProjectFailedTask[],
+) => {
   lines.push("Failed tasks");
-  if (status.failedTasks.length === 0) {
+  if (failedTasks.length === 0) {
     lines.push("  No failed tasks.");
-  } else {
-    for (const task of status.failedTasks) {
-      lines.push(
-        `  ${task.id}: ${task.failureReason ?? "unknown"} — ${task.nextAction}`,
-      );
-    }
+    return;
   }
 
-  lines.push("");
+  for (const task of failedTasks) {
+    lines.push(
+      `  ${task.id}: ${task.failureReason ?? "unknown"} — ${task.nextAction}`,
+    );
+  }
+};
+
+const appendSyncStateLines = (
+  lines: string[],
+  syncCounts: HubProjectSyncCounts,
+) => {
   lines.push("Sync state");
   const syncTotal =
-    status.syncCounts.pushPending +
-    status.syncCounts.conflict +
-    status.syncCounts.localOnly +
-    status.syncCounts.synced;
+    syncCounts.pushPending +
+    syncCounts.conflict +
+    syncCounts.localOnly +
+    syncCounts.synced;
   if (syncTotal === 0) {
     lines.push(
       "  No sync metadata — GitHub sync may be unconfigured or no remote-linked tasks.",
     );
-  } else {
-    if (status.syncCounts.pushPending > 0) {
-      lines.push(`  push_pending: ${status.syncCounts.pushPending}`);
-    }
-    if (status.syncCounts.conflict > 0) {
-      lines.push(`  conflict: ${status.syncCounts.conflict}`);
-    }
-    if (status.syncCounts.localOnly > 0) {
-      lines.push(`  local_only: ${status.syncCounts.localOnly}`);
-    }
-    if (status.syncCounts.synced > 0) {
-      lines.push(`  synced: ${status.syncCounts.synced}`);
-    }
+    return;
   }
 
-  if (status.recentEvents.length > 0) {
-    lines.push("");
-    lines.push("Recent Hub events");
-    for (const event of status.recentEvents) {
-      lines.push(`  ${event}`);
-    }
+  if (syncCounts.pushPending > 0) {
+    lines.push(`  push_pending: ${syncCounts.pushPending}`);
+  }
+  if (syncCounts.conflict > 0) {
+    lines.push(`  conflict: ${syncCounts.conflict}`);
+  }
+  if (syncCounts.localOnly > 0) {
+    lines.push(`  local_only: ${syncCounts.localOnly}`);
+  }
+  if (syncCounts.synced > 0) {
+    lines.push(`  synced: ${syncCounts.synced}`);
+  }
+};
+
+const appendRecentEventLines = (
+  lines: string[],
+  recentEvents: readonly string[],
+) => {
+  if (recentEvents.length === 0) {
+    return;
   }
 
   lines.push("");
-  lines.push("Hub run directories");
-  if (status.runDirectories.length === 0) {
-    lines.push("  No Hub run directories yet.");
-  } else {
-    for (const runDir of status.runDirectories) {
-      lines.push(`  ${runDir}`);
-    }
+  lines.push("Recent Hub events");
+  for (const event of recentEvents) {
+    lines.push(`  ${event}`);
   }
+};
+
+const appendRunDirectoryLines = (
+  lines: string[],
+  runDirectories: readonly string[],
+) => {
+  lines.push("");
+  lines.push("Hub run directories");
+  if (runDirectories.length === 0) {
+    lines.push("  No Hub run directories yet.");
+    return;
+  }
+
+  for (const runDir of runDirectories) {
+    lines.push(`  ${runDir}`);
+  }
+};
+
+export const formatHubProjectStatusLines = (
+  status: HubProjectStatus,
+): readonly string[] => {
+  const lines: string[] = [];
+  appendTaskCountLines(lines, status);
+  lines.push("");
+  appendActiveBatchLines(lines, status.activeBatches);
+  lines.push("");
+  appendFailedTaskLines(lines, status.failedTasks);
+  lines.push("");
+  appendSyncStateLines(lines, status.syncCounts);
+  appendRecentEventLines(lines, status.recentEvents);
+  appendRunDirectoryLines(lines, status.runDirectories);
 
   return lines;
 };
