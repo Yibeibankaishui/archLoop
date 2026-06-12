@@ -60,6 +60,13 @@ worktrees/
 export type { TemplateMetadata } from "./initTemplates.js";
 export { listTemplates } from "./initTemplates.js";
 
+const buildProjectProfileTemplateArgs = (
+  projectProfile: ProjectProfileEntry,
+): Readonly<Record<string, string>> => ({
+  PROJECT_PROFILE_TOOLS: projectProfile.containerfileTools,
+  PROJECT_PROFILE_VERIFY_GUIDANCE: projectProfile.promptVerifyGuidance,
+});
+
 // ---------------------------------------------------------------------------
 // Agent registry (internal — not part of public API)
 // ---------------------------------------------------------------------------
@@ -1675,7 +1682,7 @@ export const scaffold = (
     // Replace backlog manager and project profile template arguments in all text files (must run before label stripping)
     yield* substituteTemplateArgs(configDir, {
       ...backlogManager.templateArgs,
-      PROJECT_PROFILE_TOOLS: projectProfile.containerfileTools,
+      ...buildProjectProfileTemplateArgs(projectProfile),
     });
 
     // Strip --label Sandcastle from prompt files when the user declined label creation

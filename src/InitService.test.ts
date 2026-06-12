@@ -512,6 +512,97 @@ describe("InitService scaffold", () => {
     expect(dockerfile).not.toContain("{{PROJECT_PROFILE_TOOLS}}");
   });
 
+  describe("project profile prompt verification guidance", () => {
+    const promptFilesWithVerifyGuidance = [
+      "implement-prompt.md",
+      "merge-prompt.md",
+    ] as const;
+
+    it.each([
+      {
+        profileName: "python" as const,
+        includes: ["python -m pytest"],
+        excludes: ["npm run typecheck", "npm run test"],
+      },
+      {
+        profileName: "cpp" as const,
+        includes: ["cmake --build build"],
+        excludes: ["npm run typecheck", "npm run test"],
+      },
+      {
+        profileName: "node" as const,
+        includes: ["npm run typecheck", "npm run test"],
+        excludes: ["python -m pytest", "cmake --build build"],
+      },
+      {
+        profileName: "generic" as const,
+        includes: ["customize this prompt section"],
+        excludes: ["npm run typecheck", "npm run test"],
+      },
+    ])(
+      "scaffolds $profileName verification guidance into parallel-planner-with-review prompts",
+      async ({ profileName, includes, excludes }) => {
+        const dir = await makeDir();
+        await runScaffold(dir, {
+          templateName: "parallel-planner-with-review",
+          projectProfile: getProjectProfile(profileName)!,
+        });
+
+        for (const promptFile of promptFilesWithVerifyGuidance) {
+          const content = await readFile(
+            join(dir, ".sandcastle", promptFile),
+            "utf-8",
+          );
+          expect(content).not.toContain("{{PROJECT_PROFILE_VERIFY_GUIDANCE}}");
+          for (const text of includes) {
+            expect(content, promptFile).toContain(text);
+          }
+          for (const text of excludes) {
+            expect(content, promptFile).not.toContain(text);
+          }
+        }
+      },
+    );
+
+    it("preserves backlog placeholders while substituting project profile guidance", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner-with-review",
+        projectProfile: getProjectProfile("python")!,
+      });
+
+      const implementPrompt = await readFile(
+        join(dir, ".sandcastle", "implement-prompt.md"),
+        "utf-8",
+      );
+      expect(implementPrompt).toContain("{{TASK_ID}}");
+      expect(implementPrompt).toContain("gh issue view <ID>");
+      expect(implementPrompt).toContain("{{BRANCH}}");
+      expect(implementPrompt).toContain("python -m pytest");
+    });
+
+    it("appends Mini Program verification contract after project profile guidance", async () => {
+      const dir = await makeDir();
+      const capabilityInit = resolveCapabilityInitOptions({
+        capabilityId: "miniprogram",
+      });
+      await runScaffold(dir, {
+        templateName: "parallel-planner-with-review",
+        projectProfile: getProjectProfile("node")!,
+        capabilityInit,
+      });
+
+      const implementPrompt = await readFile(
+        join(dir, ".sandcastle", "implement-prompt.md"),
+        "utf-8",
+      );
+      expect(implementPrompt).toContain("npm run typecheck");
+      expect(implementPrompt).toContain(MINIPROGRAM_VERIFICATION_PROMPT_MARKER);
+      expect(implementPrompt).toContain(".sandcastle/verify.sh");
+      expect(implementPrompt).toContain("debug/wx-check.log");
+    });
+  });
+
   // --- Dynamic .env.example generation ---
 
   it.each([

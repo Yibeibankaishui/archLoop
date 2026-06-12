@@ -121,4 +121,43 @@ describe("Project profile registry", () => {
   it("returns undefined for unknown profiles", () => {
     expect(getProjectProfile("rust")).toBeUndefined();
   });
+
+  it.each([
+    {
+      profileName: "generic" as const,
+      includes: ["customize this prompt section"],
+      excludes: [
+        "npm run typecheck",
+        "npm run test",
+        "python -m pytest",
+        "cmake --build",
+      ],
+    },
+    {
+      profileName: "node" as const,
+      includes: ["npm run typecheck", "npm run test"],
+      excludes: ["python -m pytest", "cmake --build"],
+    },
+    {
+      profileName: "python" as const,
+      includes: ["python -m pytest", "mypy"],
+      excludes: ["npm run typecheck", "npm run test", "cmake --build"],
+    },
+    {
+      profileName: "cpp" as const,
+      includes: ["cmake --build build", "make"],
+      excludes: ["npm run typecheck", "npm run test", "python -m pytest"],
+    },
+  ])(
+    "$profileName profile defines stack-specific prompt verification guidance",
+    ({ profileName, includes, excludes }) => {
+      const profile = getProjectProfile(profileName)!;
+      for (const text of includes) {
+        expect(profile.promptVerifyGuidance).toContain(text);
+      }
+      for (const text of excludes) {
+        expect(profile.promptVerifyGuidance).not.toContain(text);
+      }
+    },
+  );
 });

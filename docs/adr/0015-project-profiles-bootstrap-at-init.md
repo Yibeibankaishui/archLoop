@@ -1,10 +1,10 @@
 # Project profiles generate bootstrap at init time
 
-Sandcastle init asks for a **Project profile** (`generic`, `node`, `python`, `cpp`) that is independent of workflow template, agent runtime, and backlog manager. The selected profile drives two init-time artifacts only: optional Dockerfile / Containerfile tool layers (`PROJECT_PROFILE_TOOLS`) and `.sandcastle/bootstrap.sh`.
+Sandcastle init asks for a **Project profile** (`generic`, `node`, `python`, `cpp`) that is independent of workflow template, agent runtime, and backlog manager. The selected profile drives init-time artifacts: optional Dockerfile / Containerfile tool layers (`PROJECT_PROFILE_TOOLS`), `.sandcastle/bootstrap.sh`, and stack-specific verification guidance substituted into scaffolded workflow prompts (`PROJECT_PROFILE_VERIFY_GUIDANCE`).
 
 ## Decision
 
-1. **Init-time generation** — Bootstrap scripts are rendered during `sandcastle init` from a small Project profile registry and written to `.sandcastle/bootstrap.sh` as a user-editable scaffold. Init does not execute or validate bootstrap.
+1. **Init-time generation** — Bootstrap scripts are rendered during `sandcastle init` from a small Project profile registry and written to `.sandcastle/bootstrap.sh` as a user-editable scaffold. Init does not execute or validate bootstrap. Workflow prompts receive stack-specific verification guidance via `{{PROJECT_PROFILE_VERIFY_GUIDANCE}}` substitution during the same init pass.
 2. **Runtime hook only** — Non-blank workflow templates run the scaffolded `bootstrap.sh` from `sandbox.onSandboxReady` after the worktree is mounted. Templates do not generate, repair, or prompt for bootstrap at run time.
 3. **Image vs repo setup** — Project profiles may add language or build-tool packages to the containerfile. Bootstrap is not part of image build; it prepares the mounted repository at sandbox ready time.
 4. **Orthogonal choices** — Project profile does not alter `.env.example`, cache mounts, or `copyToWorktree` defaults in the first version.
