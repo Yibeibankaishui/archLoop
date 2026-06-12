@@ -463,7 +463,7 @@ const implementSelectedTask = async (
         branch,
         claimResult.claim!,
         claimResult.task.metadata,
-        reviewPromptFile ?? "",
+        reviewPromptFile!,
         implementationResult.commits.length,
       );
     }

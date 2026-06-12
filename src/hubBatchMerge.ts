@@ -129,6 +129,56 @@ const recordTaskStatusAdvanced = (
   });
 };
 
+const recordTaskFailure = (
+  input: RunHubBatchMergeInput,
+  task: HubTaskProjection,
+  branch: string,
+  claim: HubTaskClaimMetadata | undefined,
+  failureReason: HubFailureReason,
+  eventType: "merge_failed" | "verification_failed" | "task_close_failed",
+  createdAt: string,
+  outcome: HubBatchMergeTaskResult["outcome"],
+): HubBatchMergeTaskResult => {
+  appendHubTaskEvent(input.runDir, {
+    type: eventType,
+    runId: input.runId,
+    batchId: input.batchId,
+    taskId: task.id,
+    branch,
+    createdAt,
+    status: "failed",
+    failureReason,
+    claim,
+  });
+
+  const updatedTask = updateHubTaskStatus({
+    cwd: input.cwd,
+    taskId: task.id,
+    hubStatus: "failed",
+    metadata: task.metadata,
+    failureReason,
+    env: input.env,
+  });
+  recordTaskStatusAdvanced(input.runDir, {
+    runId: input.runId,
+    batchId: input.batchId,
+    taskId: task.id,
+    branch,
+    createdAt,
+    status: updatedTask.hubStatus,
+    failureReason,
+  });
+
+  return {
+    taskId: task.id,
+    title: task.title,
+    branch,
+    outcome,
+    hubStatus: updatedTask.hubStatus,
+    failureReason,
+  };
+};
+
 const revertTasksToWaitingForMerge = (
   cwd: string,
   tasks: readonly HubTaskProjection[],
@@ -185,47 +235,18 @@ const processMergeTask = async (
   if (mergeResult.outcome !== "success") {
     const failureReason: HubFailureReason =
       mergeResult.outcome === "merge_conflict" ? "merge_conflict" : "unknown";
-    appendHubTaskEvent(input.runDir, {
-      type: "merge_failed",
-      runId: input.runId,
-      batchId: input.batchId,
-      taskId: task.id,
+    return recordTaskFailure(
+      input,
+      task,
       branch,
-      createdAt: mergeFinishedAt,
-      status: "failed",
-      failureReason,
       claim,
-    });
-
-    const updatedTask = updateHubTaskStatus({
-      cwd: input.cwd,
-      taskId: task.id,
-      hubStatus: "failed",
-      metadata: task.metadata,
       failureReason,
-      env: input.env,
-    });
-    recordTaskStatusAdvanced(input.runDir, {
-      runId: input.runId,
-      batchId: input.batchId,
-      taskId: task.id,
-      branch,
-      createdAt: mergeFinishedAt,
-      status: updatedTask.hubStatus,
-      failureReason,
-    });
-
-    return {
-      taskId: task.id,
-      title: task.title,
-      branch,
-      outcome:
-        mergeResult.outcome === "merge_conflict"
-          ? "merge_conflict"
-          : "merge_failed",
-      hubStatus: updatedTask.hubStatus,
-      failureReason,
-    };
+      "merge_failed",
+      mergeFinishedAt,
+      mergeResult.outcome === "merge_conflict"
+        ? "merge_conflict"
+        : "merge_failed",
+    );
   }
 
   appendHubTaskEvent(input.runDir, {
@@ -262,44 +283,16 @@ const processMergeTask = async (
 
   if (verifyResult.outcome !== "success") {
     const failureReason: HubFailureReason = "verification_failure";
-    appendHubTaskEvent(input.runDir, {
-      type: "verification_failed",
-      runId: input.runId,
-      batchId: input.batchId,
-      taskId: task.id,
+    return recordTaskFailure(
+      input,
+      task,
       branch,
-      createdAt: verifyFinishedAt,
-      status: "failed",
-      failureReason,
       claim,
-    });
-
-    const updatedTask = updateHubTaskStatus({
-      cwd: input.cwd,
-      taskId: task.id,
-      hubStatus: "failed",
-      metadata: task.metadata,
       failureReason,
-      env: input.env,
-    });
-    recordTaskStatusAdvanced(input.runDir, {
-      runId: input.runId,
-      batchId: input.batchId,
-      taskId: task.id,
-      branch,
-      createdAt: verifyFinishedAt,
-      status: updatedTask.hubStatus,
-      failureReason,
-    });
-
-    return {
-      taskId: task.id,
-      title: task.title,
-      branch,
-      outcome: "verification_failed",
-      hubStatus: updatedTask.hubStatus,
-      failureReason,
-    };
+      "verification_failed",
+      verifyFinishedAt,
+      "verification_failed",
+    );
   }
 
   appendHubTaskEvent(input.runDir, {
@@ -336,44 +329,16 @@ const processMergeTask = async (
   } catch (error) {
     const failureReason: HubFailureReason = "close_failed";
     const closeFailedAt = new Date().toISOString();
-    appendHubTaskEvent(input.runDir, {
-      type: "task_close_failed",
-      runId: input.runId,
-      batchId: input.batchId,
-      taskId: task.id,
+    return recordTaskFailure(
+      input,
+      task,
       branch,
-      createdAt: closeFailedAt,
-      status: "failed",
-      failureReason,
       claim,
-    });
-
-    const updatedTask = updateHubTaskStatus({
-      cwd: input.cwd,
-      taskId: task.id,
-      hubStatus: "failed",
-      metadata: task.metadata,
       failureReason,
-      env: input.env,
-    });
-    recordTaskStatusAdvanced(input.runDir, {
-      runId: input.runId,
-      batchId: input.batchId,
-      taskId: task.id,
-      branch,
-      createdAt: closeFailedAt,
-      status: updatedTask.hubStatus,
-      failureReason,
-    });
-
-    return {
-      taskId: task.id,
-      title: task.title,
-      branch,
-      outcome: "close_failed",
-      hubStatus: updatedTask.hubStatus,
-      failureReason,
-    };
+      "task_close_failed",
+      closeFailedAt,
+      "close_failed",
+    );
   }
 
   const closedAt = new Date().toISOString();
@@ -444,10 +409,7 @@ export const runHubBatchMerge = async (
   const results: HubBatchMergeTaskResult[] = [];
   for (let index = 0; index < selectedTasks.length; index += 1) {
     const task = selectedTasks[index]!;
-    const currentTask = loadHubTaskBoard(input.cwd, input.env).tasks.find(
-      (entry) => entry.id === task.id,
-    );
-    const claim = currentTask?.claim;
+    const claim = task.claim;
 
     const result = await processMergeTask(input, task, claim);
     results.push(result);
