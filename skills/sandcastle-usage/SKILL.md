@@ -39,7 +39,7 @@ Replace `<TARGET_REPO>` with the project being developed.
    npm link @ai-hero/sandcastle
    ```
    Verify it resolves and runs: `npx sandcastle --help` (confirms the link is usable).
-   If you want to inspect the repo before init, `npx sandcastle project status` shows the canonical repo root, Sandcastle user data dir, `bd` availability, and task-board counts.
+   If you want to inspect the repo before init, `npx sandcastle project status` shows the canonical repo root, Sandcastle user data dir, `bd` availability, task counts by Hub status, active runs and batch status, failed tasks with next actions, sync state summaries, recent Hub events, and paths to Hub run directories for full logs.
    If the repo already has Beads data, `npx sandcastle tasks list` groups tasks by Hub status and `npx sandcastle tasks show <id>` shows a task's Beads details, Hub status, labels, metadata, comments, remote refs, and run refs. Use `npx sandcastle tasks create <title>` to create a local `inbox` task with `origin` metadata, `npx sandcastle tasks triage` to classify `inbox` and `needs_info` tasks into collaboration states, `npx sandcastle tasks sync` to pull GitHub Issues into Beads and push collaboration labels or closures back to GitHub, `npx sandcastle tasks from-prd <prd-ref>` to draft PRD vertical slices and create dependency-aware Beads tasks after confirmation, `npx sandcastle tasks comment <id>` to append a readable Beads comment without changing task status, and `npx sandcastle tasks recover <id>` to repair failed or stale execution states (including `close_failed` when the branch is already merged). Run `npx sandcastle run . --flow no-review` to execute the first Hub flow: it reads the Beads ready queue, claims tasks, runs bundled Hub prompts, advances successful work to `waiting_for_merge`, then merges eligible batch tasks with per-task events, runs verification after each merge, and closes local Beads tasks on success. Use `--flow with-review` when the flow should run a reviewer stage (`reviewing`) before merge. `--category` is accepted as an alias for `--kind`.
 2. **Init once**: `npx sandcastle init`. Interactive prompts: sandbox provider, backlog manager, workflow template, project profile, default agent, installed runtimes.
    - Non-interactive example:
@@ -105,7 +105,7 @@ Key APIs: `run()`, `interactive()`, `createSandbox()`, `createWorktree()`; sandb
 | Command                           | Purpose                        |
 | --------------------------------- | ------------------------------ |
 | `sandcastle init`                 | Generate `.sandcastle/`        |
-| `sandcastle project status`       | Show Hub status for the repo   |
+| `sandcastle project status`       | Show Hub task board summary    |
 | `sandcastle tasks list`           | Group Beads tasks by status    |
 | `sandcastle tasks show <id>`      | Show one Beads task            |
 | `sandcastle run . --flow <id>`    | Run a Hub-owned flow           |

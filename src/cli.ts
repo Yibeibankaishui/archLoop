@@ -72,6 +72,7 @@ import {
 } from "./presetAgents.js";
 import {
   resolveGitRepoRoot,
+  formatHubProjectStatusLines,
   resolveHubProjectStatus,
 } from "./projectStatus.js";
 import {
@@ -2035,6 +2036,9 @@ const projectStatusCommand = Command.make("status", {}, () =>
     });
 
     yield* d.summary("Hub project status", formatHubProjectStatusRows(status));
+    for (const line of formatHubProjectStatusLines(status)) {
+      yield* d.text(line);
+    }
   }),
 );
 

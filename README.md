@@ -821,7 +821,9 @@ Existing single-runtime projects remain valid. `sandcastle init` does not automa
 
 ### `sandcastle project status`
 
-Reports the canonical git repo root, the Sandcastle user data directory, the Hub project directory, whether `bd` is available, and the current task-board counts. It works from any git repository, even if you have not run `sandcastle init` yet.
+Reports the canonical git repo root, the Sandcastle user data directory, the Hub project directory, whether `bd` is available, and a CLI-first Hub task board summary. It works from any git repository, even if you have not run `sandcastle init` yet.
+
+The summary includes task counts by Hub status, active runs and batch statuses, failed tasks with failure reason and suggested next action, sync state counts such as `push_pending` or `conflict`, recent Hub events, and paths to Hub run directories for full logs and artifacts. Output remains useful when Beads is unavailable, there are no tasks, no active runs, or GitHub sync is not configured.
 
 Sandcastle resolves the user data directory from `XDG_DATA_HOME` when it is set and falls back to `~/.local/share/sandcastle`.
 
