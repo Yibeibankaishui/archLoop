@@ -3,14 +3,18 @@ import { join } from "node:path";
 
 import { claudeCode, codex, cursor, opencode, pi } from "./AgentProvider.js";
 import type { AgentProvider } from "./AgentProvider.js";
-import type { HubAgentRoleEntry } from "./hubAgentConfig.js";
-import { run } from "./run.js";
-import { noSandbox } from "./sandboxes/no-sandbox.js";
+import {
+  readHubAgentConfig,
+  type HubAgentRole,
+  type HubAgentRoleEntry,
+} from "./hubAgentConfig.js";
 import type {
   ProposalAgentInvokeInput,
   ProposalAgentInvokeResult,
   ProposalAgentInvoker,
 } from "./hubProposalSession.js";
+import { run } from "./run.js";
+import { noSandbox } from "./sandboxes/no-sandbox.js";
 
 const resolveCodexOptions = (
   options: HubAgentRoleEntry["options"],
@@ -65,12 +69,41 @@ export const resolveHubAgentProvider = (
   }
 };
 
-export const createHubProposalAgentInvoker = (input: {
-  readonly cwd: string;
-  readonly roleEntry: HubAgentRoleEntry;
-  readonly env?: NodeJS.ProcessEnv;
-}): ProposalAgentInvoker => {
-  const agent = resolveHubAgentProvider(input.roleEntry);
+type CreateHubProposalAgentInvokerInput =
+  | {
+      readonly cwd: string;
+      readonly roleEntry: HubAgentRoleEntry;
+      readonly env?: NodeJS.ProcessEnv;
+    }
+  | {
+      readonly cwd: string;
+      readonly role: HubAgentRole;
+      readonly env?: NodeJS.ProcessEnv;
+      readonly homeDir?: string;
+    };
+
+const resolveHubProposalRoleEntry = (
+  input: CreateHubProposalAgentInvokerInput,
+): HubAgentRoleEntry => {
+  if ("roleEntry" in input) {
+    return input.roleEntry;
+  }
+
+  const config = readHubAgentConfig({
+    env: input.env,
+    homeDir: input.homeDir,
+  });
+  const entry = config.roles[input.role];
+  if (!entry) {
+    throw new Error(`Missing Hub agent role config: ${input.role}`);
+  }
+  return entry;
+};
+
+export const createHubProposalAgentInvoker = (
+  input: CreateHubProposalAgentInvokerInput,
+): ProposalAgentInvoker => {
+  const agent = resolveHubAgentProvider(resolveHubProposalRoleEntry(input));
 
   return async (
     invokeInput: ProposalAgentInvokeInput,
@@ -83,10 +116,11 @@ export const createHubProposalAgentInvoker = (input: {
       sandbox: noSandbox(),
       cwd: input.cwd,
       prompt: invokeInput.prompt,
+      branchStrategy: { type: "head" },
       name: `proposal-${invokeInput.flowId}-${invokeInput.phase}`,
       logging: {
         type: "file",
-        path: join(logDir, `${invokeInput.phase}.log`),
+        path: join(logDir, `${invokeInput.flowId}-${invokeInput.phase}.log`),
       },
       completionSignal: [],
       maxIterations: 1,

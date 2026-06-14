@@ -85,6 +85,7 @@ import {
 import { getHubFlowDefinition, listHubFlows } from "./hubFlows.js";
 import {
   formatValidatedHubFlowInputSummary,
+  mapTriageToFlowInput,
   validateHubFlowInput,
 } from "./hubFlowInput.js";
 import {
@@ -103,7 +104,8 @@ import {
   loadHubTaskBoard,
   resolveHubTaskSelector,
 } from "./taskBoard.js";
-import { triageHubTasks, type HubTriageOutcome } from "./hubTriage.js";
+import { type HubTriageOutcome } from "./hubTriage.js";
+import { runTriageProposalFlow } from "./hubTriageProposalFlow.js";
 import {
   formatHubTaskSyncSummaryLines,
   syncHubTasksWithGithub,
@@ -115,6 +117,8 @@ import {
   readHubAgentConfig,
   resolveHubAgentConfigPath,
   setHubAgentRole,
+  type HubAgentRole,
+  type HubAgentRoleEntry,
 } from "./hubAgentConfig.js";
 
 const require = createRequire(import.meta.url);
@@ -1602,6 +1606,45 @@ const prdDepsOption = Options.text("deps").pipe(
   ),
   Options.optional,
 );
+const triageApproveOption = Options.boolean("yes").pipe(
+  Options.withDescription(
+    "Run a one-shot triage proposal and apply only high-confidence, low-risk, non-closing decisions.",
+  ),
+  Options.withDefault(false),
+);
+
+const promptHubAgentRoleEntry = async (
+  role: HubAgentRole,
+): Promise<HubAgentRoleEntry> => {
+  const providers = listAgents();
+  const providerSelection = await clack.select({
+    message: `Select agent provider for ${role} role:`,
+    options: providers.map((provider) => ({
+      value: provider.name,
+      label: provider.label,
+    })),
+  });
+  if (clack.isCancel(providerSelection)) {
+    throw new TaskBoardError({
+      message: "Hub agent role setup cancelled.",
+    });
+  }
+
+  const model = await clack.text({
+    message: `Model for ${role} role:`,
+    defaultValue: "auto",
+  });
+  if (clack.isCancel(model)) {
+    throw new TaskBoardError({
+      message: "Hub agent role setup cancelled.",
+    });
+  }
+
+  return {
+    provider: String(providerSelection),
+    model: String(model),
+  };
+};
 
 const normalizeTaskOrigin = (
   value: string,
@@ -1699,36 +1742,128 @@ const tasksShowCommand = Command.make("show", { id: taskIdArg }, ({ id }) =>
 const formatTriageOutcomeLabel = (outcome: HubTriageOutcome): string =>
   outcome.replaceAll("_", " ");
 
-const tasksTriageCommand = Command.make("triage", {}, () =>
-  Effect.gen(function* () {
-    const d = yield* Display;
-    const cwd = process.cwd();
-    yield* Effect.try({
-      try: () => validateHubFlowInput("triage", { cwd }),
-      catch: (error) =>
-        new TaskBoardError({
-          message: error instanceof Error ? error.message : String(error),
-        }),
-    });
-    const result = yield* Effect.try({
-      try: () => triageHubTasks({ cwd }),
-      catch: toTaskBoardError,
-    });
+const tasksTriageCommand = Command.make(
+  "triage",
+  { yes: triageApproveOption },
+  ({ yes }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      const validatedInput = yield* Effect.try({
+        try: () => mapTriageToFlowInput(cwd),
+        catch: (error) =>
+          new TaskBoardError({
+            message: error instanceof Error ? error.message : String(error),
+          }),
+      });
 
-    if (result.triaged.length === 0) {
-      yield* d.status("No inbox or needs_info tasks required triage.", "info");
-      return;
-    }
+      const result = yield* Effect.tryPromise({
+        try: () =>
+          runTriageProposalFlow({
+            cwd,
+            taskQuery: validatedInput.query,
+            yes,
+            interactive: !yes,
+            isTTY: process.stdin.isTTY,
+            configureRole: async (role) => {
+              const entry = await promptHubAgentRoleEntry(role);
+              setHubAgentRole(role, entry);
+              return entry;
+            },
+            interaction: yes
+              ? undefined
+              : {
+                  requestRefinement: async () => {
+                    const message = await clack.text({
+                      message:
+                        "Refine the triage recommendations (leave blank to continue):",
+                      placeholder:
+                        "Ask for more context or adjust a recommendation",
+                    });
+                    if (clack.isCancel(message)) {
+                      return null;
+                    }
+                    const trimmed = String(message).trim();
+                    return trimmed.length > 0 ? trimmed : null;
+                  },
+                  requestApproval: async () => {
+                    const approved = await clack.confirm({
+                      message: "Apply the triage proposal?",
+                      initialValue: false,
+                    });
+                    if (clack.isCancel(approved)) {
+                      return false;
+                    }
+                    return approved === true;
+                  },
+                },
+            confirmRiskyDecisions: yes
+              ? undefined
+              : async (recommendations) => {
+                  const approved = await clack.confirm({
+                    message: `${recommendations.length} triage decision(s) require explicit confirmation. Apply them?`,
+                    initialValue: false,
+                  });
+                  if (clack.isCancel(approved)) {
+                    return false;
+                  }
+                  return approved === true;
+                },
+          }),
+        catch: toTaskBoardError,
+      });
 
-    yield* d.summary("Triaged Hub tasks", {
-      Total: String(result.triaged.length),
-    });
-    for (const entry of result.triaged) {
-      yield* d.text(
-        `  ${entry.taskId}: ${entry.priorStatus} -> ${formatTriageOutcomeLabel(entry.outcome)}`,
-      );
-    }
-  }),
+      if (result.preparedContext.tasks.length === 0) {
+        yield* d.status(
+          "No inbox or needs_info tasks required triage.",
+          "info",
+        );
+        return;
+      }
+
+      if (result.session.outcome === "cancelled") {
+        yield* d.status("Triage proposal cancelled.", "info");
+        return;
+      }
+
+      if (result.session.outcome === "failed") {
+        return yield* Effect.fail(
+          new TaskBoardError({
+            message: result.session.reason,
+          }),
+        );
+      }
+
+      if (!result.apply || result.apply.applied.length === 0) {
+        if (result.apply?.blocked.length) {
+          yield* d.status(
+            "No triage decisions were applied automatically.",
+            "warn",
+          );
+          for (const entry of result.apply.blocked) {
+            yield* d.text(`  ${entry.taskId}: blocked (${entry.reason})`);
+          }
+          return;
+        }
+
+        yield* d.status("No triage decisions were applied.", "info");
+        return;
+      }
+
+      yield* d.summary("Applied triage recommendations", {
+        Applied: String(result.apply.applied.length),
+        Blocked: String(result.apply.blocked.length),
+        "Run id": result.session.runId,
+      });
+      for (const entry of result.apply.applied) {
+        yield* d.text(
+          `  ${entry.taskId}: ${formatTriageOutcomeLabel(entry.outcome)}`,
+        );
+      }
+      for (const entry of result.apply.blocked) {
+        yield* d.text(`  ${entry.taskId}: blocked (${entry.reason})`);
+      }
+    }),
 );
 
 const normalizePrdHubStatusMode = (

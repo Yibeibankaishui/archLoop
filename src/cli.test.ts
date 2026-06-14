@@ -921,10 +921,28 @@ exit 1
     expect(args).toContain('"kind":"enhancement"');
   });
 
-  it("tasks triage classifies inbox and needs_info tasks into collaboration states", async () => {
+  it("tasks triage applies approved proposal recommendations via the triage flow", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const dataDir = join(hostDir, "..", "sandcastle-data");
+    await mkdir(join(dataDir, "sandcastle", "hub"), { recursive: true });
+    await writeFile(
+      join(dataDir, "sandcastle", "hub", "agent-roles.json"),
+      `${JSON.stringify(
+        {
+          roles: {
+            triage: {
+              provider: "cursor",
+              model: "auto",
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
 
     const binDir = join(hostDir, "bin");
     await mkdir(binDir, { recursive: true });
@@ -947,38 +965,110 @@ exit 1
         labels: ["needs-info"],
       },
     ]);
+    const stateFile = join(hostDir, "bd-state.json");
+    await writeFile(stateFile, boardJson);
     const updateArgsFile = join(hostDir, "triage-update-args.txt");
     const commentArgsFile = join(hostDir, "triage-comment-args.txt");
     const bdPath = join(binDir, "bd");
     await writeFile(
       bdPath,
-      `#!/bin/sh
-if [ "$1" = "list" ]; then
-  printf '%s\n' '${boardJson}'
-  exit 0
-fi
-if [ "$1" = "update" ]; then
-  printf '%s\n' "$@" >> "${updateArgsFile}"
-  exit 0
-fi
-if [ "$1" = "comments" ] && [ "$2" = "add" ]; then
-  printf '%s\n' "$@" >> "${commentArgsFile}"
-  exit 0
-fi
-exit 1
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = process.env.BD_STATE_FILE;
+const updateArgsFile = process.env.BD_UPDATE_ARGS_FILE;
+const commentArgsFile = process.env.BD_COMMENT_ARGS_FILE;
+const args = process.argv.slice(2);
+const [command, id] = args;
+
+if (command === "list") {
+  process.stdout.write(fs.readFileSync(stateFile, "utf8"));
+  process.exit(0);
+}
+
+if (command === "show") {
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  const task = state.find((entry) => entry.id === id);
+  if (!task) {
+    process.exit(1);
+  }
+  process.stdout.write(JSON.stringify([task], null, 2));
+  process.exit(0);
+}
+
+if (command === "update") {
+  fs.appendFileSync(updateArgsFile, args.join(" ") + "\\n");
+  process.exit(0);
+}
+
+if (command === "comments" && args[1] === "add") {
+  fs.appendFileSync(commentArgsFile, args.join(" ") + "\\n");
+  process.exit(0);
+}
+
+process.exit(1);
 `,
     );
     await chmod(bdPath, 0o755);
 
-    const { stdout } = await runCli("tasks triage", hostDir, {
+    const agentPath = join(binDir, "agent");
+    await writeFile(
+      agentPath,
+      `#!/usr/bin/env node
+const prompt = process.argv.slice(2).join(" ");
+const isFinal = prompt.includes("Emit the final approved task proposal");
+if (isFinal) {
+  const proposal = {
+    taskQuery: "inbox,needs_info",
+    recommendations: [
+      {
+        taskId: "bd-1",
+        outcome: "ready_for_agent",
+        confidence: "high",
+        rationale: "Fully specified.",
+        comment: "Ready for agent implementation.",
+      },
+      {
+        taskId: "bd-2",
+        outcome: "needs_info",
+        confidence: "high",
+        rationale: "Underspecified.",
+        comment: "Need more reporter input.",
+      },
+    ],
+  };
+  process.stdout.write(
+    JSON.stringify({
+      type: "result",
+      result: \`<triage-proposal>\${JSON.stringify(proposal)}</triage-proposal>\`,
+    }) + "\\n",
+  );
+  process.exit(0);
+}
+
+process.stdout.write(
+  JSON.stringify({
+    type: "result",
+    result: "Recommend bd-1 -> ready_for_agent and bd-2 -> needs_info.",
+  }) + "\\n",
+);
+process.exit(0);
+`,
+    );
+    await chmod(agentPath, 0o755);
+
+    const { stdout } = await runCli("tasks triage --yes", hostDir, {
       ...process.env,
+      XDG_DATA_HOME: dataDir,
       PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      BD_STATE_FILE: stateFile,
+      BD_UPDATE_ARGS_FILE: updateArgsFile,
+      BD_COMMENT_ARGS_FILE: commentArgsFile,
     });
 
     const updateArgs = await readFile(updateArgsFile, "utf-8");
     const commentArgs = await readFile(commentArgsFile, "utf-8");
 
-    expect(stdout).toContain("Triaged Hub tasks");
+    expect(stdout).toContain("Applied triage recommendations");
     expect(stdout).toContain("bd-1");
     expect(stdout).toContain("ready for agent");
     expect(stdout).toContain("bd-2");
