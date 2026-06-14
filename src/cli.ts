@@ -1772,6 +1772,41 @@ const resolvePrdDependencyOverride = (
   deps: OptionalTextFlag,
 ): string | undefined => (deps._tag === "Some" ? deps.value : undefined);
 
+const promptPrdHubStatusMode = async (): Promise<PrdHubStatusMode> => {
+  const selected = await clack.select({
+    message: "Initial Hub status for PRD-derived tasks (defaults to inbox):",
+    options: [
+      {
+        value: "inbox",
+        label: "inbox",
+        hint: "needs triage",
+      },
+      {
+        value: "classified_ready",
+        label: "classified_ready",
+        hint: "AFK -> ready_for_agent, HITL -> ready_for_human",
+      },
+    ],
+    initialValue: "inbox",
+  });
+  if (clack.isCancel(selected)) {
+    throw new TaskBoardError({
+      message: "PRD task creation cancelled.",
+    });
+  }
+  return selected as PrdHubStatusMode;
+};
+
+const createPrdHubStatusModeResolver = (
+  approve: boolean,
+  explicitHubStatusMode: PrdHubStatusMode | undefined,
+): (() => Promise<PrdHubStatusMode>) | undefined => {
+  if (approve || explicitHubStatusMode) {
+    return undefined;
+  }
+  return promptPrdHubStatusMode;
+};
+
 const createPrdDecompositionInteraction = (): {
   readonly requestRefinement: () => Promise<string | null>;
   readonly requestApproval: () => Promise<boolean>;
@@ -1829,34 +1864,10 @@ const tasksFromPrdCommand = Command.make(
             prdRef,
             yes: approve,
             hubStatusMode: explicitHubStatusMode,
-            resolveHubStatusMode:
-              approve || explicitHubStatusMode
-                ? undefined
-                : async () => {
-                    const selected = await clack.select({
-                      message:
-                        "Initial Hub status for PRD-derived tasks (defaults to inbox):",
-                      options: [
-                        {
-                          value: "inbox",
-                          label: "inbox",
-                          hint: "needs triage",
-                        },
-                        {
-                          value: "classified_ready",
-                          label: "classified_ready",
-                          hint: "AFK -> ready_for_agent, HITL -> ready_for_human",
-                        },
-                      ],
-                      initialValue: "inbox",
-                    });
-                    if (clack.isCancel(selected)) {
-                      throw new TaskBoardError({
-                        message: "PRD task creation cancelled.",
-                      });
-                    }
-                    return selected as PrdHubStatusMode;
-                  },
+            resolveHubStatusMode: createPrdHubStatusModeResolver(
+              approve,
+              explicitHubStatusMode,
+            ),
             dependencyOverride: resolvePrdDependencyOverride(deps),
             interaction: approve
               ? undefined

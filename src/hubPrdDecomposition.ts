@@ -19,7 +19,11 @@ import {
   type ProposalSessionInteraction,
   type RunProposalSessionResult,
 } from "./hubProposalSession.js";
-import { extractPrdTitle } from "./prdDecomposition.js";
+import {
+  extractPrdTitle,
+  mapSliceTypeToReadyHubStatus,
+  type SliceType,
+} from "./prdDecomposition.js";
 import {
   addHubTaskDependency,
   createHubTask,
@@ -27,7 +31,7 @@ import {
   type CreateHubTaskResult,
 } from "./taskBoard.js";
 
-export type PrdSliceType = "AFK" | "HITL";
+export type PrdSliceType = SliceType;
 export type PrdWarningSeverity = "low" | "medium" | "high";
 export type PrdHubStatusMode = "inbox" | "classified_ready";
 
@@ -139,6 +143,16 @@ const readNonEmptyString = (value: unknown, label: string): string => {
   return value.trim();
 };
 
+const readRecord = (value: unknown, label: string): Record<string, unknown> => {
+  if (typeof value !== "object" || value === null) {
+    throw new Error(`${label} must be an object.`);
+  }
+  return value as Record<string, unknown>;
+};
+
+const toErrorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 const readStringArray = (value: unknown, label: string): readonly string[] => {
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error(`${label} must be a non-empty array.`);
@@ -173,11 +187,7 @@ const parseProposalSlice = (
   value: unknown,
   index: number,
 ): PrdProposalSlice => {
-  if (typeof value !== "object" || value === null) {
-    throw new Error(`slices[${index}] must be an object.`);
-  }
-
-  const record = value as Record<string, unknown>;
+  const record = readRecord(value, `slices[${index}]`);
   return {
     tempId: readNonEmptyString(record.tempId, `slices[${index}].tempId`),
     title: readNonEmptyString(record.title, `slices[${index}].title`),
@@ -201,11 +211,7 @@ const parseProposalDependency = (
   value: unknown,
   index: number,
 ): PrdProposalDependency => {
-  if (typeof value !== "object" || value === null) {
-    throw new Error(`dependencies[${index}] must be an object.`);
-  }
-
-  const record = value as Record<string, unknown>;
+  const record = readRecord(value, `dependencies[${index}]`);
   return {
     dependentTempId: readNonEmptyString(
       record.dependentTempId,
@@ -222,11 +228,7 @@ const parseProposalWarning = (
   value: unknown,
   index: number,
 ): PrdProposalWarning => {
-  if (typeof value !== "object" || value === null) {
-    throw new Error(`warnings[${index}] must be an object.`);
-  }
-
-  const record = value as Record<string, unknown>;
+  const record = readRecord(value, `warnings[${index}]`);
   return {
     tempId: readNonEmptyString(record.tempId, `warnings[${index}].tempId`),
     severity: assertWarningSeverity(
@@ -240,11 +242,7 @@ const parseProposalWarning = (
 const parsePrdDecompositionProposal = (
   value: unknown,
 ): PrdDecompositionProposal => {
-  if (typeof value !== "object" || value === null) {
-    throw new Error("PRD decomposition proposal must be an object.");
-  }
-
-  const record = value as Record<string, unknown>;
+  const record = readRecord(value, "PRD decomposition proposal");
   const slices = Array.isArray(record.slices)
     ? record.slices.map((slice, index) => parseProposalSlice(slice, index))
     : [];
@@ -281,11 +279,7 @@ const prdDecompositionProposalSchema = (): StandardSchemaV1<
         return { value: parsePrdDecompositionProposal(value) };
       } catch (error) {
         return {
-          issues: [
-            {
-              message: error instanceof Error ? error.message : String(error),
-            },
-          ],
+          issues: [{ message: toErrorMessage(error) }],
         };
       }
     },
@@ -582,7 +576,7 @@ const resolveSliceHubStatus = (
     return "inbox";
   }
 
-  return slice.sliceType === "AFK" ? "ready_for_agent" : "ready_for_human";
+  return mapSliceTypeToReadyHubStatus(slice.sliceType);
 };
 
 export const applyPrdDecompositionProposal = (
@@ -650,7 +644,7 @@ const writeApplyResult = (
   );
 };
 
-const resolveHubStatusMode = async (
+const determineHubStatusMode = async (
   input: RunPrdDecompositionFlowInput,
 ): Promise<PrdHubStatusMode> => {
   if (input.yes) {
@@ -752,7 +746,7 @@ export const runPrdDecompositionFlow = async (
     return toFailedFlowResult(session, session.reason);
   }
 
-  const hubStatusMode = await resolveHubStatusMode(input);
+  const hubStatusMode = await determineHubStatusMode(input);
   const proposal = resolveProposalDependencies(
     session.finalProposal,
     input.dependencyOverride,

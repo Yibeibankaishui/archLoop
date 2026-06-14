@@ -1,6 +1,11 @@
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+
 import { claudeCode, codex, cursor, opencode, pi } from "./AgentProvider.js";
 import type { AgentProvider } from "./AgentProvider.js";
 import type { HubAgentRoleEntry } from "./hubAgentConfig.js";
+import { run } from "./run.js";
+import { noSandbox } from "./sandboxes/no-sandbox.js";
 import type {
   ProposalAgentInvokeInput,
   ProposalAgentInvokeResult,
@@ -70,11 +75,6 @@ export const createHubProposalAgentInvoker = (input: {
   return async (
     invokeInput: ProposalAgentInvokeInput,
   ): Promise<ProposalAgentInvokeResult> => {
-    const { run } = await import("./run.js");
-    const { noSandbox } = await import("./sandboxes/no-sandbox.js");
-    const { join } = await import("node:path");
-    const { mkdirSync } = await import("node:fs");
-
     const logDir = join(invokeInput.runDir, "logs");
     mkdirSync(logDir, { recursive: true });
 
