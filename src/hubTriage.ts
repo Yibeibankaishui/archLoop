@@ -44,6 +44,10 @@ export const HUB_TRIAGE_OUTCOME_LABELS: Readonly<
   wontfix: "wontfix",
 };
 
+export const formatHubTriageOutcomeDisplayLabel = (
+  outcome: HubTriageOutcome,
+): string => outcome.replaceAll("_", " ");
+
 export const HUB_TRIAGE_LABELS_TO_CLEAR = [
   "needs-triage",
   "needs-info",

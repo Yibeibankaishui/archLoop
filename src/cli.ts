@@ -88,10 +88,7 @@ import {
   mapTriageToFlowInput,
   validateHubFlowInput,
 } from "./hubFlowInput.js";
-import {
-  formatPrdDecompositionProposalLines,
-  type PrdHubStatusMode,
-} from "./hubPrdDecomposition.js";
+import { type PrdHubStatusMode } from "./hubPrdDecomposition.js";
 import {
   formatHubTaskBoardLines,
   appendHubTaskComment,
@@ -102,8 +99,9 @@ import {
   loadHubTaskBoard,
   resolveHubTaskSelector,
 } from "./taskBoard.js";
-import { type HubTriageOutcome } from "./hubTriage.js";
 import {
+  displayPrdDecompositionFlowResult,
+  displayTriageProposalFlowResult,
   runHubProposalFlowFromCli,
   runPrdDecompositionProposalFlowFromCli,
   runTriageProposalFlowFromCli,
@@ -1708,15 +1706,11 @@ const tasksShowCommand = Command.make("show", { id: taskIdArg }, ({ id }) =>
   }),
 );
 
-const formatTriageOutcomeLabel = (outcome: HubTriageOutcome): string =>
-  outcome.replaceAll("_", " ");
-
 const tasksTriageCommand = Command.make(
   "triage",
   { yes: triageApproveOption },
   ({ yes }) =>
     Effect.gen(function* () {
-      const d = yield* Display;
       const cwd = process.cwd();
       const validatedInput = yield* Effect.try({
         try: () => mapTriageToFlowInput(cwd),
@@ -1737,55 +1731,13 @@ const tasksTriageCommand = Command.make(
         catch: toTaskBoardError,
       });
 
-      if (result.preparedContext.tasks.length === 0) {
-        yield* d.status(
-          "No inbox or needs_info tasks required triage.",
-          "info",
-        );
-        return;
-      }
-
-      if (result.session.outcome === "cancelled") {
-        yield* d.status("Triage proposal cancelled.", "info");
-        return;
-      }
-
-      if (result.session.outcome === "failed") {
+      const displayOutcome = yield* displayTriageProposalFlowResult(result);
+      if (displayOutcome.kind === "failed") {
         return yield* Effect.fail(
           new TaskBoardError({
-            message: result.session.reason,
+            message: displayOutcome.reason,
           }),
         );
-      }
-
-      if (!result.apply || result.apply.applied.length === 0) {
-        if (result.apply?.blocked.length) {
-          yield* d.status(
-            "No triage decisions were applied automatically.",
-            "warn",
-          );
-          for (const entry of result.apply.blocked) {
-            yield* d.text(`  ${entry.taskId}: blocked (${entry.reason})`);
-          }
-          return;
-        }
-
-        yield* d.status("No triage decisions were applied.", "info");
-        return;
-      }
-
-      yield* d.summary("Applied triage recommendations", {
-        Applied: String(result.apply.applied.length),
-        Blocked: String(result.apply.blocked.length),
-        "Run id": result.session.runId,
-      });
-      for (const entry of result.apply.applied) {
-        yield* d.text(
-          `  ${entry.taskId}: ${formatTriageOutcomeLabel(entry.outcome)}`,
-        );
-      }
-      for (const entry of result.apply.blocked) {
-        yield* d.text(`  ${entry.taskId}: blocked (${entry.reason})`);
       }
     }),
 );
@@ -1841,7 +1793,6 @@ const tasksFromPrdCommand = Command.make(
   },
   ({ prdRef, approve, status, deps }) =>
     Effect.gen(function* () {
-      const d = yield* Display;
       const cwd = process.cwd();
       const explicitHubStatusMode =
         !approve && status._tag === "Some"
@@ -1861,41 +1812,19 @@ const tasksFromPrdCommand = Command.make(
         catch: toTaskBoardError,
       });
 
-      if (result.outcome === "cancelled") {
+      const displayOutcome = yield* displayPrdDecompositionFlowResult(result);
+      if (displayOutcome.kind === "cancelled") {
         return yield* Effect.fail(
           new TaskBoardError({
             message: "PRD task creation cancelled.",
           }),
         );
       }
-
-      if (result.outcome === "failed") {
+      if (displayOutcome.kind === "failed") {
         return yield* Effect.fail(
           new TaskBoardError({
-            message: result.reason,
+            message: displayOutcome.reason,
           }),
-        );
-      }
-
-      for (const line of formatPrdDecompositionProposalLines(result.proposal)) {
-        yield* d.text(line);
-      }
-
-      yield* d.summary("Created PRD-derived Beads tasks", {
-        PRD: result.proposal.prdTitle,
-        Reference: result.proposal.prdRef,
-        "Proposal run": result.runId,
-        Status: result.hubStatusMode,
-        Tasks: String(result.tasks.length),
-        Dependencies: String(result.dependencies.length),
-      });
-
-      for (const task of result.tasks) {
-        yield* d.text(`  ${task.id}: ${task.title}`);
-      }
-      for (const dependency of result.dependencies) {
-        yield* d.text(
-          `  ${dependency.dependentId} depends on ${dependency.blockerId}`,
         );
       }
     }),
@@ -2258,97 +2187,35 @@ const runCommand = Command.make(
           });
 
           if (execution.flowId === "prd-decomposition") {
-            const result = execution.result;
-            if (result.outcome === "cancelled") {
+            const displayOutcome = yield* displayPrdDecompositionFlowResult(
+              execution.result,
+            );
+            if (displayOutcome.kind === "cancelled") {
               return yield* Effect.fail(
                 new HubFlowError({
                   message: "PRD task creation cancelled.",
                 }),
               );
             }
-            if (result.outcome === "failed") {
+            if (displayOutcome.kind === "failed") {
               return yield* Effect.fail(
                 new HubFlowError({
-                  message: result.reason,
+                  message: displayOutcome.reason,
                 }),
               );
             }
-
-            for (const line of formatPrdDecompositionProposalLines(
-              result.proposal,
-            )) {
-              yield* d.text(line);
-            }
-
-            yield* d.summary("Created PRD-derived Beads tasks", {
-              PRD: result.proposal.prdTitle,
-              Reference: result.proposal.prdRef,
-              "Proposal run": result.runId,
-              Status: result.hubStatusMode,
-              Tasks: String(result.tasks.length),
-              Dependencies: String(result.dependencies.length),
-            });
-            for (const task of result.tasks) {
-              yield* d.text(`  ${task.id}: ${task.title}`);
-            }
-            for (const dependency of result.dependencies) {
-              yield* d.text(
-                `  ${dependency.dependentId} depends on ${dependency.blockerId}`,
-              );
-            }
             return;
           }
 
-          const result = execution.result;
-          if (result.preparedContext.tasks.length === 0) {
-            yield* d.status(
-              "No inbox or needs_info tasks required triage.",
-              "info",
-            );
-            return;
-          }
-
-          if (result.session.outcome === "cancelled") {
-            yield* d.status("Triage proposal cancelled.", "info");
-            return;
-          }
-
-          if (result.session.outcome === "failed") {
+          const displayOutcome = yield* displayTriageProposalFlowResult(
+            execution.result,
+          );
+          if (displayOutcome.kind === "failed") {
             return yield* Effect.fail(
               new HubFlowError({
-                message: result.session.reason,
+                message: displayOutcome.reason,
               }),
             );
-          }
-
-          if (!result.apply || result.apply.applied.length === 0) {
-            if (result.apply?.blocked.length) {
-              yield* d.status(
-                "No triage decisions were applied automatically.",
-                "warn",
-              );
-              for (const entry of result.apply.blocked) {
-                yield* d.text(`  ${entry.taskId}: blocked (${entry.reason})`);
-              }
-              return;
-            }
-
-            yield* d.status("No triage decisions were applied.", "info");
-            return;
-          }
-
-          yield* d.summary("Applied triage recommendations", {
-            Applied: String(result.apply.applied.length),
-            Blocked: String(result.apply.blocked.length),
-            "Run id": result.session.runId,
-          });
-          for (const entry of result.apply.applied) {
-            yield* d.text(
-              `  ${entry.taskId}: ${formatTriageOutcomeLabel(entry.outcome)}`,
-            );
-          }
-          for (const entry of result.apply.blocked) {
-            yield* d.text(`  ${entry.taskId}: blocked (${entry.reason})`);
           }
           return;
         }

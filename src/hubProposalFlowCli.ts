@@ -1,10 +1,13 @@
 import * as clack from "@clack/prompts";
+import { Effect } from "effect";
 
+import { Display } from "./Display.js";
 import { TaskBoardError } from "./errors.js";
 import { promptHubAgentRoleSetup } from "./hubAgentConfigPrompt.js";
-import { setHubAgentRole, type HubAgentRoleEntry } from "./hubAgentConfig.js";
+import type { HubAgentRole, HubAgentRoleEntry } from "./hubAgentConfig.js";
 import type { ValidatedHubFlowInput } from "./hubFlowInput.js";
 import {
+  formatPrdDecompositionProposalLines,
   runPrdDecompositionFlow,
   type PrdHubStatusMode,
   type RunPrdDecompositionFlowResult,
@@ -13,8 +16,8 @@ import {
   runTriageProposalFlow,
   type RunTriageProposalFlowResult,
 } from "./hubTriageProposalFlow.js";
+import { formatHubTriageOutcomeDisplayLabel } from "./hubTriage.js";
 import { listAgents } from "./InitService.js";
-import type { HubAgentRole } from "./hubAgentConfig.js";
 
 export type HubProposalFlowExecutionResult =
   | {
@@ -140,7 +143,7 @@ const createTriageProposalInteraction = (): {
     if (clack.isCancel(approved)) {
       return false;
     }
-    return approved === true;
+    return approved;
   },
 });
 
@@ -157,9 +160,111 @@ const createTriageRiskyDecisionConfirmation = (): ((
     if (clack.isCancel(approved)) {
       return false;
     }
-    return approved === true;
+    return approved;
   };
 };
+
+export type TriageProposalFlowDisplayOutcome =
+  | { readonly kind: "no_tasks" }
+  | { readonly kind: "cancelled" }
+  | { readonly kind: "failed"; readonly reason: string }
+  | { readonly kind: "displayed" };
+
+export const displayTriageProposalFlowResult = (
+  result: RunTriageProposalFlowResult,
+): Effect.Effect<TriageProposalFlowDisplayOutcome, never, Display> =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+
+    if (result.preparedContext.tasks.length === 0) {
+      yield* d.status("No inbox or needs_info tasks required triage.", "info");
+      return { kind: "no_tasks" };
+    }
+
+    if (result.session.outcome === "cancelled") {
+      yield* d.status("Triage proposal cancelled.", "info");
+      return { kind: "cancelled" };
+    }
+
+    if (result.session.outcome === "failed") {
+      return { kind: "failed", reason: result.session.reason };
+    }
+
+    if (!result.apply || result.apply.applied.length === 0) {
+      if (result.apply?.blocked.length) {
+        yield* d.status(
+          "No triage decisions were applied automatically.",
+          "warn",
+        );
+        for (const entry of result.apply.blocked) {
+          yield* d.text(`  ${entry.taskId}: blocked (${entry.reason})`);
+        }
+        return { kind: "displayed" };
+      }
+
+      yield* d.status("No triage decisions were applied.", "info");
+      return { kind: "displayed" };
+    }
+
+    yield* d.summary("Applied triage recommendations", {
+      Applied: String(result.apply.applied.length),
+      Blocked: String(result.apply.blocked.length),
+      "Run id": result.session.runId,
+    });
+    for (const entry of result.apply.applied) {
+      yield* d.text(
+        `  ${entry.taskId}: ${formatHubTriageOutcomeDisplayLabel(entry.outcome)}`,
+      );
+    }
+    for (const entry of result.apply.blocked) {
+      yield* d.text(`  ${entry.taskId}: blocked (${entry.reason})`);
+    }
+
+    return { kind: "displayed" };
+  });
+
+export type PrdDecompositionFlowDisplayOutcome =
+  | { readonly kind: "cancelled" }
+  | { readonly kind: "failed"; readonly reason: string }
+  | { readonly kind: "displayed" };
+
+export const displayPrdDecompositionFlowResult = (
+  result: RunPrdDecompositionFlowResult,
+): Effect.Effect<PrdDecompositionFlowDisplayOutcome, never, Display> =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+
+    if (result.outcome === "cancelled") {
+      return { kind: "cancelled" };
+    }
+
+    if (result.outcome === "failed") {
+      return { kind: "failed", reason: result.reason };
+    }
+
+    for (const line of formatPrdDecompositionProposalLines(result.proposal)) {
+      yield* d.text(line);
+    }
+
+    yield* d.summary("Created PRD-derived Beads tasks", {
+      PRD: result.proposal.prdTitle,
+      Reference: result.proposal.prdRef,
+      "Proposal run": result.runId,
+      Status: result.hubStatusMode,
+      Tasks: String(result.tasks.length),
+      Dependencies: String(result.dependencies.length),
+    });
+    for (const task of result.tasks) {
+      yield* d.text(`  ${task.id}: ${task.title}`);
+    }
+    for (const dependency of result.dependencies) {
+      yield* d.text(
+        `  ${dependency.dependentId} depends on ${dependency.blockerId}`,
+      );
+    }
+
+    return { kind: "displayed" };
+  });
 
 export const runPrdDecompositionProposalFlowFromCli = async (input: {
   readonly cwd: string;
@@ -194,11 +299,7 @@ export const runTriageProposalFlowFromCli = async (input: {
     yes: input.yes,
     interactive: !input.yes,
     isTTY: input.isTTY,
-    configureRole: async (role) => {
-      const entry = await promptHubAgentRoleEntry(role);
-      setHubAgentRole(role, entry);
-      return entry;
-    },
+    configureRole: promptHubAgentRoleEntry,
     interaction: input.yes ? undefined : createTriageProposalInteraction(),
     confirmRiskyDecisions: input.yes
       ? undefined
@@ -213,7 +314,8 @@ export const runHubProposalFlowFromCli = async (input: {
   readonly hubStatusMode?: PrdHubStatusMode;
   readonly dependencyOverride?: string;
 }): Promise<HubProposalFlowExecutionResult> => {
-  switch (input.validatedInput.flowId) {
+  const flowId = input.validatedInput.flowId;
+  switch (flowId) {
     case "prd-decomposition":
       return {
         flowId: "prd-decomposition",
@@ -237,9 +339,9 @@ export const runHubProposalFlowFromCli = async (input: {
         }),
       };
     default: {
-      const unsupportedFlow: never = input.validatedInput;
+      const unsupportedFlowId: never = flowId;
       throw new TaskBoardError({
-        message: `Unsupported proposal flow "${unsupportedFlow}".`,
+        message: `Unsupported proposal flow "${unsupportedFlowId}".`,
       });
     }
   }
