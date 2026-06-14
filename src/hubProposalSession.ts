@@ -2,7 +2,10 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { extractStructuredOutput } from "./extractStructuredOutput.js";
-import { createHubRunContext } from "./hubExecution.js";
+import {
+  createHubRunContext,
+  resolveHubRunEventsDirectory,
+} from "./hubExecution.js";
 import {
   resolveGitRepoRoot,
   resolveHubProjectDir,
@@ -166,26 +169,55 @@ type ProposalSessionEvent =
       readonly reason: string;
     };
 
+interface ProposalSessionState {
+  readonly flowId: string;
+  readonly runId: string;
+  readonly runDir: string;
+  readonly paths: ProposalSessionArtifactPaths;
+}
+
 const writeJson = (path: string, value: unknown): void => {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 };
 
+const readOptionalJsonFile = <T>(path: string): T | undefined => {
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as T;
+  } catch {
+    return undefined;
+  }
+};
+
+const proposalAgentErrorMessage = (error: unknown, fallback: string): string =>
+  error instanceof Error ? error.message : fallback;
+
 const appendProposalEvent = (
-  paths: ProposalSessionArtifactPaths,
+  runDir: string,
   event: ProposalSessionEvent,
 ): void => {
-  mkdirSync(join(paths.artifactsDir, "..", "events"), { recursive: true });
-  writeFileSync(paths.proposalEventsPath, `${JSON.stringify(event)}\n`, {
-    encoding: "utf8",
-    flag: "a",
-  });
+  const eventsDir = resolveHubRunEventsDirectory(runDir);
+  mkdirSync(eventsDir, { recursive: true });
+  writeFileSync(
+    join(eventsDir, "proposal.jsonl"),
+    `${JSON.stringify(event)}\n`,
+    {
+      encoding: "utf8",
+      flag: "a",
+    },
+  );
 };
+
+const proposalEventBase = (state: ProposalSessionState) => ({
+  flowId: state.flowId,
+  runId: state.runId,
+  createdAt: new Date().toISOString(),
+});
 
 export const resolveProposalSessionArtifactPaths = (
   runDir: string,
 ): ProposalSessionArtifactPaths => {
   const artifactsDir = join(runDir, "artifacts");
-  const eventsDir = join(runDir, "events");
+  const eventsDir = resolveHubRunEventsDirectory(runDir);
   return {
     artifactsDir,
     preparedContextPath: join(artifactsDir, "prepared-context.json"),
@@ -257,22 +289,23 @@ const createTranscriptTurn = (
   phase,
 });
 
-const invokeAgentTurn = async (input: {
-  readonly phase: ProposalSessionPhase;
-  readonly prompt: string;
-  readonly transcript: readonly ProposalTranscriptTurn[];
-  readonly preparedContext: Readonly<Record<string, unknown>>;
-  readonly flowId: string;
-  readonly runDir: string;
-  readonly agentInvoker: ProposalAgentInvoker;
-}): Promise<ProposalAgentInvokeResult> =>
+const invokeProposalAgent = (
+  state: ProposalSessionState,
+  input: {
+    readonly preparedContext: Readonly<Record<string, unknown>>;
+    readonly agentInvoker: ProposalAgentInvoker;
+  },
+  phase: ProposalSessionPhase,
+  prompt: string,
+  transcript: readonly ProposalTranscriptTurn[],
+): Promise<ProposalAgentInvokeResult> =>
   input.agentInvoker({
-    phase: input.phase,
-    prompt: input.prompt,
-    transcript: input.transcript,
+    phase,
+    prompt,
+    transcript,
     preparedContext: input.preparedContext,
-    flowId: input.flowId,
-    runDir: input.runDir,
+    flowId: state.flowId,
+    runDir: state.runDir,
   });
 
 const requestNextRefinement = async (input: {
@@ -307,31 +340,36 @@ const requestApprovalDecision = async (input: {
 };
 
 const failSession = <T>(
-  input: {
-    readonly flowId: string;
-    readonly runId: string;
-    readonly runDir: string;
-    readonly paths: ProposalSessionArtifactPaths;
-  },
+  state: ProposalSessionState,
   phase: ProposalSessionPhase,
   reason: string,
 ): RunProposalSessionResult<T> => {
-  appendProposalEvent(input.paths, {
+  appendProposalEvent(state.runDir, {
     type: "session_failed",
-    flowId: input.flowId,
-    runId: input.runId,
-    createdAt: new Date().toISOString(),
+    ...proposalEventBase(state),
     phase,
     reason,
   });
   return {
     outcome: "failed",
-    flowId: input.flowId,
-    runId: input.runId,
-    runDir: input.runDir,
+    flowId: state.flowId,
+    runId: state.runId,
+    runDir: state.runDir,
     phase,
     reason,
   };
+};
+
+const failFinalization = <T>(
+  state: ProposalSessionState,
+  reason: string,
+): RunProposalSessionResult<T> => {
+  appendProposalEvent(state.runDir, {
+    type: "finalization_failed",
+    ...proposalEventBase(state),
+    reason,
+  });
+  return failSession(state, "finalization", reason);
 };
 
 export const runProposalSession = async <T>(
@@ -349,69 +387,53 @@ export const runProposalSession = async <T>(
     startedAt,
     env: input.env,
   });
-  const paths = resolveProposalSessionArtifactPaths(context.runDir);
-  const transcript: ProposalTranscriptTurn[] = [];
-
-  persistPreparedContext(paths, input.preparedContext);
-  persistTranscript(paths, transcript);
-
-  appendProposalEvent(paths, {
-    type: "session_started",
+  const state: ProposalSessionState = {
     flowId: input.flowId,
     runId: context.runId,
+    runDir: context.runDir,
+    paths: resolveProposalSessionArtifactPaths(context.runDir),
+  };
+  const transcript: ProposalTranscriptTurn[] = [];
+
+  persistPreparedContext(state.paths, input.preparedContext);
+  persistTranscript(state.paths, transcript);
+
+  appendProposalEvent(state.runDir, {
+    type: "session_started",
+    flowId: state.flowId,
+    runId: state.runId,
     createdAt: startedAt.toISOString(),
   });
 
-  appendProposalEvent(paths, {
+  appendProposalEvent(state.runDir, {
     type: "draft_started",
-    flowId: input.flowId,
-    runId: context.runId,
-    createdAt: new Date().toISOString(),
+    ...proposalEventBase(state),
   });
 
   let draftResult: ProposalAgentInvokeResult;
   try {
-    draftResult = await invokeAgentTurn({
-      phase: "draft",
-      prompt: input.draftPrompt,
-      transcript,
-      preparedContext: input.preparedContext,
-      flowId: input.flowId,
-      runDir: context.runDir,
-      agentInvoker: input.agentInvoker,
-    });
-  } catch (error) {
-    const reason =
-      error instanceof Error ? error.message : "Proposal draft agent failed";
-    appendProposalEvent(paths, {
-      type: "session_failed",
-      flowId: input.flowId,
-      runId: context.runId,
-      createdAt: new Date().toISOString(),
-      phase: "draft",
-      reason,
-    });
-    return failSession(
-      {
-        flowId: input.flowId,
-        runId: context.runId,
-        runDir: context.runDir,
-        paths,
-      },
+    draftResult = await invokeProposalAgent(
+      state,
+      input,
       "draft",
-      reason,
+      input.draftPrompt,
+      transcript,
+    );
+  } catch (error) {
+    return failSession(
+      state,
+      "draft",
+      proposalAgentErrorMessage(error, "Proposal draft agent failed"),
     );
   }
 
   transcript.push(
     createTranscriptTurn("assistant", draftResult.assistantMessage, "draft"),
   );
-  persistTranscript(paths, transcript);
-  appendProposalEvent(paths, {
+  persistTranscript(state.paths, transcript);
+  appendProposalEvent(state.runDir, {
     type: "draft_succeeded",
-    flowId: input.flowId,
-    runId: context.runId,
-    createdAt: new Date().toISOString(),
+    ...proposalEventBase(state),
     assistantMessage: draftResult.assistantMessage,
   });
 
@@ -429,40 +451,27 @@ export const runProposalSession = async <T>(
 
       refinementIndex += 1;
       transcript.push(createTranscriptTurn("user", userMessage, "refinement"));
-      persistTranscript(paths, transcript);
-      appendProposalEvent(paths, {
+      persistTranscript(state.paths, transcript);
+      appendProposalEvent(state.runDir, {
         type: "refinement_requested",
-        flowId: input.flowId,
-        runId: context.runId,
-        createdAt: new Date().toISOString(),
+        ...proposalEventBase(state),
         userMessage,
       });
 
       let refinementResult: ProposalAgentInvokeResult;
       try {
-        refinementResult = await invokeAgentTurn({
-          phase: "refinement",
-          prompt: buildRefinementPrompt(transcript),
-          transcript,
-          preparedContext: input.preparedContext,
-          flowId: input.flowId,
-          runDir: context.runDir,
-          agentInvoker: input.agentInvoker,
-        });
-      } catch (error) {
-        const reason =
-          error instanceof Error
-            ? error.message
-            : "Proposal refinement agent failed";
-        return failSession(
-          {
-            flowId: input.flowId,
-            runId: context.runId,
-            runDir: context.runDir,
-            paths,
-          },
+        refinementResult = await invokeProposalAgent(
+          state,
+          input,
           "refinement",
-          reason,
+          buildRefinementPrompt(transcript),
+          transcript,
+        );
+      } catch (error) {
+        return failSession(
+          state,
+          "refinement",
+          proposalAgentErrorMessage(error, "Proposal refinement agent failed"),
         );
       }
 
@@ -473,12 +482,10 @@ export const runProposalSession = async <T>(
           "refinement",
         ),
       );
-      persistTranscript(paths, transcript);
-      appendProposalEvent(paths, {
+      persistTranscript(state.paths, transcript);
+      appendProposalEvent(state.runDir, {
         type: "refinement_succeeded",
-        flowId: input.flowId,
-        runId: context.runId,
-        createdAt: new Date().toISOString(),
+        ...proposalEventBase(state),
         assistantMessage: refinementResult.assistantMessage,
       });
     }
@@ -489,65 +496,42 @@ export const runProposalSession = async <T>(
     approve: input.approve,
   });
   if (!approved) {
-    appendProposalEvent(paths, {
+    appendProposalEvent(state.runDir, {
       type: "session_cancelled",
-      flowId: input.flowId,
-      runId: context.runId,
-      createdAt: new Date().toISOString(),
+      ...proposalEventBase(state),
       phase: "approval",
     });
     return {
       outcome: "cancelled",
-      flowId: input.flowId,
-      runId: context.runId,
-      runDir: context.runDir,
+      flowId: state.flowId,
+      runId: state.runId,
+      runDir: state.runDir,
       phase: "approval",
     };
   }
 
-  appendProposalEvent(paths, {
+  appendProposalEvent(state.runDir, {
     type: "finalization_started",
-    flowId: input.flowId,
-    runId: context.runId,
-    createdAt: new Date().toISOString(),
+    ...proposalEventBase(state),
   });
 
   let finalizationResult: ProposalAgentInvokeResult;
   try {
-    finalizationResult = await invokeAgentTurn({
-      phase: "finalization",
-      prompt: buildFinalizationPrompt(
+    finalizationResult = await invokeProposalAgent(
+      state,
+      input,
+      "finalization",
+      buildFinalizationPrompt(
         input.finalizationPrompt,
         transcript,
         input.output.tag,
       ),
       transcript,
-      preparedContext: input.preparedContext,
-      flowId: input.flowId,
-      runDir: context.runDir,
-      agentInvoker: input.agentInvoker,
-    });
+    );
   } catch (error) {
-    const reason =
-      error instanceof Error
-        ? error.message
-        : "Proposal finalization agent failed";
-    appendProposalEvent(paths, {
-      type: "finalization_failed",
-      flowId: input.flowId,
-      runId: context.runId,
-      createdAt: new Date().toISOString(),
-      reason,
-    });
-    return failSession(
-      {
-        flowId: input.flowId,
-        runId: context.runId,
-        runDir: context.runDir,
-        paths,
-      },
-      "finalization",
-      reason,
+    return failFinalization(
+      state,
+      proposalAgentErrorMessage(error, "Proposal finalization agent failed"),
     );
   }
 
@@ -562,49 +546,31 @@ export const runProposalSession = async <T>(
       },
     );
   } catch (error) {
-    const reason =
-      error instanceof Error
-        ? error.message
-        : "Proposal finalization structured output failed";
-    appendProposalEvent(paths, {
-      type: "finalization_failed",
-      flowId: input.flowId,
-      runId: context.runId,
-      createdAt: new Date().toISOString(),
-      reason,
-    });
-    return failSession(
-      {
-        flowId: input.flowId,
-        runId: context.runId,
-        runDir: context.runDir,
-        paths,
-      },
-      "finalization",
-      reason,
+    return failFinalization(
+      state,
+      proposalAgentErrorMessage(
+        error,
+        "Proposal finalization structured output failed",
+      ),
     );
   }
 
-  writeJson(paths.finalProposalPath, finalProposal);
-  writeJson(paths.applyResultPath, { status: "pending" });
-  appendProposalEvent(paths, {
+  writeJson(state.paths.finalProposalPath, finalProposal);
+  writeJson(state.paths.applyResultPath, { status: "pending" });
+  appendProposalEvent(state.runDir, {
     type: "finalization_succeeded",
-    flowId: input.flowId,
-    runId: context.runId,
-    createdAt: new Date().toISOString(),
+    ...proposalEventBase(state),
   });
-  appendProposalEvent(paths, {
+  appendProposalEvent(state.runDir, {
     type: "session_completed",
-    flowId: input.flowId,
-    runId: context.runId,
-    createdAt: new Date().toISOString(),
+    ...proposalEventBase(state),
   });
 
   return {
     outcome: "completed",
-    flowId: input.flowId,
-    runId: context.runId,
-    runDir: context.runDir,
+    flowId: state.flowId,
+    runId: state.runId,
+    runDir: state.runDir,
     finalProposal,
   };
 };
@@ -625,28 +591,12 @@ export const readProposalSessionArtifacts = (
     readFileSync(paths.transcriptPath, "utf8"),
   ) as ProposalTranscriptTurn[];
 
-  let finalProposal: unknown;
-  try {
-    finalProposal = JSON.parse(
-      readFileSync(paths.finalProposalPath, "utf8"),
-    ) as unknown;
-  } catch {
-    finalProposal = undefined;
-  }
-
-  let applyResult: { readonly status: string } | undefined;
-  try {
-    applyResult = JSON.parse(readFileSync(paths.applyResultPath, "utf8")) as {
-      readonly status: string;
-    };
-  } catch {
-    applyResult = undefined;
-  }
-
   return {
     preparedContext,
     transcript,
-    finalProposal,
-    applyResult,
+    finalProposal: readOptionalJsonFile(paths.finalProposalPath),
+    applyResult: readOptionalJsonFile<{ readonly status: string }>(
+      paths.applyResultPath,
+    ),
   };
 };
