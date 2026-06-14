@@ -108,6 +108,7 @@ import {
 import { formatHubRecoveryComment, recoverHubTask } from "./hubTaskRecover.js";
 import {
   formatHubAgentConfigShowLines,
+  formatHubAgentRoleOptions,
   readHubAgentConfig,
   resolveHubAgentConfigPath,
   setHubAgentRole,
@@ -2158,7 +2159,7 @@ const agentConfigSetRoleCommand = Command.make(
         try: () => parseHubAgentRoleOptions(optionalTextValue(options)),
         catch: toHubAgentConfigError,
       });
-      const config = yield* Effect.try({
+      const saved = yield* Effect.try({
         try: () =>
           setHubAgentRole(role, {
             provider,
@@ -2167,15 +2168,10 @@ const agentConfigSetRoleCommand = Command.make(
           }),
         catch: toHubAgentConfigError,
       });
-      const saved = config.roles[role as keyof typeof config.roles];
-      yield* d.summary(`Saved Hub agent role ${role}`, {
-        Provider: saved?.provider ?? provider,
-        Model: saved?.model ?? model,
-        Options: saved?.options
-          ? Object.entries(saved.options)
-              .map(([key, value]) => `${key}=${value}`)
-              .join(", ")
-          : "(none)",
+      yield* d.summary(`Saved Hub agent role ${saved.role}`, {
+        Provider: saved.entry.provider,
+        Model: saved.entry.model,
+        Options: formatHubAgentRoleOptions(saved.entry.options) ?? "(none)",
       });
     }),
 );

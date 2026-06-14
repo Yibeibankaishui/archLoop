@@ -37,7 +37,7 @@ describe("hub agent config store", () => {
 
   it("persists provider, model, and options for a supported role", async () => {
     const { env } = await tempHome();
-    const config = setHubAgentRole(
+    const { config } = setHubAgentRole(
       "planning",
       {
         provider: "codex",
@@ -87,14 +87,14 @@ describe("hub agent config store", () => {
     const { env } = await tempHome();
     setHubAgentRole("planning", { provider: "cursor", model: "auto" }, { env });
 
-    const lines = formatHubAgentConfigShowLines(readHubAgentConfig({ env }), {
+    const output = formatHubAgentConfigShowLines(readHubAgentConfig({ env }), {
       env,
-    });
-    expect(lines.join("\n")).toContain("planning");
-    expect(lines.join("\n")).toContain("cursor");
-    expect(lines.join("\n")).toContain("auto");
-    expect(lines.join("\n")).toContain("missing");
-    expect(lines.join("\n")).toContain("triage");
+    }).join("\n");
+    expect(output).toContain("planning");
+    expect(output).toContain("cursor");
+    expect(output).toContain("auto");
+    expect(output).toContain("missing");
+    expect(output).toContain("triage");
   });
 
   it("lists all supported roles as missing from an empty config", () => {

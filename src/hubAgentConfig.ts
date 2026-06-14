@@ -1,7 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
-import { getAgent } from "./InitService.js";
+import { getAgent, listAgents } from "./InitService.js";
 import { resolveSandcastleUserDataDir } from "./projectStatus.js";
 
 export const HUB_AGENT_ROLES = [
@@ -14,6 +14,8 @@ export const HUB_AGENT_ROLES = [
 ] as const;
 
 export type HubAgentRole = (typeof HUB_AGENT_ROLES)[number];
+
+const HUB_AGENT_ROLE_SET = new Set<string>(HUB_AGENT_ROLES);
 
 export interface HubAgentRoleEntry {
   readonly provider: string;
@@ -35,7 +37,7 @@ export type HubAgentRoleConfigurator = (
 ) => Promise<HubAgentRoleEntry>;
 
 const isHubAgentRole = (role: string): role is HubAgentRole =>
-  (HUB_AGENT_ROLES as readonly string[]).includes(role);
+  HUB_AGENT_ROLE_SET.has(role);
 
 const normalizeCredentialKey = (key: string): string =>
   key.toLowerCase().replace(/[_-]/g, "");
@@ -93,10 +95,28 @@ const normalizeOptions = (
 };
 
 const normalizeRoleEntry = (entry: HubAgentRoleEntry): HubAgentRoleEntry => {
+  const normalized: HubAgentRoleEntry = {
+    provider: entry.provider,
+    model: entry.model,
+  };
   const options = normalizeOptions(entry.options);
-  return options
-    ? { ...entry, options }
-    : { provider: entry.provider, model: entry.model };
+  if (options) {
+    return { ...normalized, options };
+  }
+  return normalized;
+};
+
+export const formatHubAgentRoleOptions = (
+  options: HubAgentRoleEntry["options"],
+): string | undefined => {
+  if (!options) {
+    return undefined;
+  }
+
+  const formatted = Object.entries(options)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(", ");
+  return formatted.length > 0 ? formatted : undefined;
 };
 
 export const resolveHubAgentConfigPath = (
@@ -174,8 +194,11 @@ export const validateHubAgentRoleEntry = (
   }
 
   if (!getAgent(provider)) {
+    const supportedProviders = listAgents()
+      .map((agent) => agent.name)
+      .join(", ");
     throw new Error(
-      `Unknown agent provider "${provider}" for role "${role}". Supported providers: claude-code, pi, codex, cursor, opencode`,
+      `Unknown agent provider "${provider}" for role "${role}". Supported providers: ${supportedProviders}`,
     );
   }
 
@@ -183,21 +206,28 @@ export const validateHubAgentRoleEntry = (
   return role;
 };
 
+export interface SetHubAgentRoleResult {
+  readonly config: HubAgentConfig;
+  readonly role: HubAgentRole;
+  readonly entry: HubAgentRoleEntry;
+}
+
 export const setHubAgentRole = (
   role: string,
   entry: HubAgentRoleEntry,
   options: HubAgentConfigStoreOptions = {},
-): HubAgentConfig => {
+): SetHubAgentRoleResult => {
   const validatedRole = validateHubAgentRoleEntry(role, entry);
+  const normalizedEntry = normalizeRoleEntry(entry);
   const config = readHubAgentConfig(options);
   const nextConfig: HubAgentConfig = {
     roles: {
       ...config.roles,
-      [validatedRole]: normalizeRoleEntry(entry),
+      [validatedRole]: normalizedEntry,
     },
   };
   writeHubAgentConfig(nextConfig, options);
-  return nextConfig;
+  return { config: nextConfig, role: validatedRole, entry: normalizedEntry };
 };
 
 export const listMissingHubAgentRoles = (
@@ -241,12 +271,10 @@ export const formatHubAgentConfigShowLines = (
       continue;
     }
 
-    const optionSuffix = entry.options
-      ? ` (${Object.entries(entry.options)
-          .map(([key, value]) => `${key}=${value}`)
-          .join(", ")})`
-      : "";
-    lines.push(`  ${role}: ${entry.provider} / ${entry.model}${optionSuffix}`);
+    const optionSuffix = formatHubAgentRoleOptions(entry.options);
+    lines.push(
+      `  ${role}: ${entry.provider} / ${entry.model}${optionSuffix ? ` (${optionSuffix})` : ""}`,
+    );
   }
 
   const missingRoles = listMissingHubAgentRoles(config);
@@ -278,12 +306,13 @@ export const ensureHubAgentRolesConfigured = async (input: {
 
   const interactive =
     input.interactive ?? input.isTTY ?? process.stdin.isTTY ?? false;
-  const canPrompt = interactive && !input.yes && input.configureRole;
+  const configureRole = input.configureRole;
+  const canPrompt = interactive && !input.yes && configureRole !== undefined;
 
   if (canPrompt) {
     for (const role of missingRoles) {
-      const entry = await input.configureRole(role);
-      config = setHubAgentRole(role, entry, storeOptions);
+      const entry = await configureRole(role);
+      config = setHubAgentRole(role, entry, storeOptions).config;
     }
     return config;
   }

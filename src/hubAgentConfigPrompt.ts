@@ -42,7 +42,3 @@ export const promptHubAgentRoleSetup = async (
     model: String(model).trim(),
   };
 };
-
-export const createDefaultHubAgentRoleConfigurator = (): ((
-  role: HubAgentRole,
-) => Promise<HubAgentRoleEntry>) => promptHubAgentRoleSetup;
