@@ -7,6 +7,8 @@ import {
   type CreateHubTaskResult,
 } from "./taskBoard.js";
 
+/** Internal deterministic PRD parsing helpers for tests and explicit fallback only. */
+
 export type SliceType = "AFK" | "HITL";
 
 export type PrdHubStatus = "inbox" | "ready_for_agent" | "ready_for_human";

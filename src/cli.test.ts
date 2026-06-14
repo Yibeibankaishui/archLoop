@@ -229,23 +229,121 @@ describe("sandcastle CLI", () => {
     }
   });
 
-  it("run --flow prd-decomposition validates readable PRD input before execution", async () => {
+  it("run --flow prd-decomposition executes the proposal flow via the shared CLI path", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-run-flow-input-"));
     await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
     await mkdir(join(hostDir, "docs"), { recursive: true });
     await writeFile(
       join(hostDir, "docs", "feature.md"),
       "# PRD: Feature\n\n## Tasks\n\n- [ ] Build it\n",
     );
 
+    const dataDir = join(hostDir, "..", "sandcastle-data");
+    await mkdir(join(dataDir, "sandcastle", "hub"), { recursive: true });
+    await writeFile(
+      join(dataDir, "sandcastle", "hub", "agent-roles.json"),
+      `${JSON.stringify(
+        {
+          roles: {
+            planning: {
+              provider: "cursor",
+              model: "auto",
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const createArgsFile = join(hostDir, "create-args.txt");
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const createArgsFile = process.env.BD_CREATE_ARGS_FILE;
+const args = process.argv.slice(2);
+if (args[0] === "list") {
+  process.stdout.write("[]\\n");
+  process.exit(0);
+}
+if (args[0] === "create") {
+  fs.appendFileSync(createArgsFile, args.join(" ") + "\\n");
+  process.stdout.write(JSON.stringify([{ id: "bd-prd-1", title: args[1] }]) + "\\n");
+  process.exit(0);
+}
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const agentPath = join(binDir, "agent");
+    await writeFile(
+      agentPath,
+      `#!/usr/bin/env node
+const prompt = process.argv.slice(2).join(" ");
+const isFinal = prompt.includes("Emit the final approved task proposal");
+if (isFinal) {
+  const proposal = {
+    prdRef: "docs/feature.md",
+    prdTitle: "Feature",
+    summary: "One tracer-bullet slice.",
+    slices: [
+      {
+        tempId: "slice-1",
+        title: "Build it",
+        description: "Deliver the feature core path.",
+        sliceType: "AFK",
+        acceptanceCriteria: ["Feature works end-to-end"],
+        rationale: "Single vertical slice from the PRD.",
+      },
+    ],
+    dependencies: [],
+    warnings: [],
+  };
+  process.stdout.write(
+    JSON.stringify({
+      type: "result",
+      result: \`<prd-decomposition-proposal>\${JSON.stringify(proposal)}</prd-decomposition-proposal>\`,
+    }) + "\\n",
+  );
+  process.exit(0);
+}
+
+process.stdout.write(
+  JSON.stringify({
+    type: "result",
+    result: "Draft one AFK slice for Build it.",
+  }) + "\\n",
+);
+process.exit(0);
+`,
+    );
+    await chmod(agentPath, 0o755);
+
     const { stdout } = await runCli(
-      "run . --flow prd-decomposition --input docs/feature.md",
+      "run . --flow prd-decomposition --input docs/feature.md --yes",
       hostDir,
+      {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        BD_CREATE_ARGS_FILE: createArgsFile,
+      },
     );
+
+    const createArgs = await readFile(createArgsFile, "utf-8");
     expect(stdout).toContain("PRD input: docs/feature.md");
-    expect(stdout).toContain(
-      "Proposal flow execution via sandcastle run is not available yet",
-    );
+    expect(stdout).toContain("Created PRD-derived Beads tasks");
+    expect(stdout).toContain("Build it");
+    expect(createArgs).toContain('"origin":"prd-decomposition"');
   });
 
   it("run --flow prd-decomposition rejects missing required input", async () => {
@@ -263,9 +361,136 @@ describe("sandcastle CLI", () => {
   it("run --flow triage defaults task query to inbox and needs_info", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-run-flow-input-"));
     await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-    const { stdout } = await runCli("run . --flow triage", hostDir);
+    const dataDir = join(hostDir, "..", "sandcastle-data");
+    await mkdir(join(dataDir, "sandcastle", "hub"), { recursive: true });
+    await writeFile(
+      join(dataDir, "sandcastle", "hub", "agent-roles.json"),
+      `${JSON.stringify(
+        {
+          roles: {
+            triage: {
+              provider: "cursor",
+              model: "auto",
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const boardJson = JSON.stringify([
+      {
+        id: "bd-1",
+        title: "Add retry to sync",
+        status: "open",
+        labels: ["needs-triage"],
+        description:
+          "When sync-out fails with ECONNRESET, retry up to three times before surfacing an error.",
+      },
+    ]);
+    const stateFile = join(hostDir, "bd-state.json");
+    await writeFile(stateFile, boardJson);
+    const updateArgsFile = join(hostDir, "triage-update-args.txt");
+    const commentArgsFile = join(hostDir, "triage-comment-args.txt");
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = process.env.BD_STATE_FILE;
+const updateArgsFile = process.env.BD_UPDATE_ARGS_FILE;
+const commentArgsFile = process.env.BD_COMMENT_ARGS_FILE;
+const args = process.argv.slice(2);
+const [command, id] = args;
+
+if (command === "list") {
+  process.stdout.write(fs.readFileSync(stateFile, "utf8"));
+  process.exit(0);
+}
+
+if (command === "show") {
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  const task = state.find((entry) => entry.id === id);
+  if (!task) {
+    process.exit(1);
+  }
+  process.stdout.write(JSON.stringify([task], null, 2));
+  process.exit(0);
+}
+
+if (command === "update") {
+  fs.appendFileSync(updateArgsFile, args.join(" ") + "\\n");
+  process.exit(0);
+}
+
+if (command === "comments" && args[1] === "add") {
+  fs.appendFileSync(commentArgsFile, args.join(" ") + "\\n");
+  process.exit(0);
+}
+
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const agentPath = join(binDir, "agent");
+    await writeFile(
+      agentPath,
+      `#!/usr/bin/env node
+const prompt = process.argv.slice(2).join(" ");
+const isFinal = prompt.includes("Emit the final approved task proposal");
+if (isFinal) {
+  const proposal = {
+    taskQuery: "inbox,needs_info",
+    recommendations: [
+      {
+        taskId: "bd-1",
+        outcome: "ready_for_agent",
+        confidence: "high",
+        rationale: "Fully specified.",
+        comment: "Ready for agent implementation.",
+      },
+    ],
+  };
+  process.stdout.write(
+    JSON.stringify({
+      type: "result",
+      result: \`<triage-proposal>\${JSON.stringify(proposal)}</triage-proposal>\`,
+    }) + "\\n",
+  );
+  process.exit(0);
+}
+
+process.stdout.write(
+  JSON.stringify({
+    type: "result",
+    result: "Recommend bd-1 -> ready_for_agent.",
+  }) + "\\n",
+);
+process.exit(0);
+`,
+    );
+    await chmod(agentPath, 0o755);
+
+    const { stdout } = await runCli("run . --flow triage --yes", hostDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      BD_STATE_FILE: stateFile,
+      BD_UPDATE_ARGS_FILE: updateArgsFile,
+      BD_COMMENT_ARGS_FILE: commentArgsFile,
+    });
     expect(stdout).toContain("Task query: inbox,needs_info");
+    expect(stdout).toContain("Applied triage recommendations");
+    expect(stdout).toContain("bd-1");
   });
 
   it("run --flow no-review rejects unsupported --input values", async () => {

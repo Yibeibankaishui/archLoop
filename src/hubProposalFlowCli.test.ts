@@ -1,0 +1,75 @@
+import { describe, expect, it, vi } from "vitest";
+
+import * as hubPrdDecomposition from "./hubPrdDecomposition.js";
+import { runHubProposalFlowFromCli } from "./hubProposalFlowCli.js";
+import * as hubTriageProposalFlow from "./hubTriageProposalFlow.js";
+
+describe("runHubProposalFlowFromCli", () => {
+  it("dispatches prd-decomposition input to the shared proposal flow runner", async () => {
+    const runPrd = vi
+      .spyOn(hubPrdDecomposition, "runPrdDecompositionFlow")
+      .mockResolvedValue({
+        outcome: "cancelled",
+        runId: "run-1",
+        runDir: "/tmp/run-1",
+        phase: "approval",
+      });
+
+    await runHubProposalFlowFromCli({
+      cwd: "/tmp/repo",
+      yes: true,
+      validatedInput: {
+        flowId: "prd-decomposition",
+        kind: "prd-file",
+        ref: "docs/prd/feature.md",
+        path: "/tmp/repo/docs/prd/feature.md",
+        content: "# PRD: Feature",
+      },
+    });
+
+    expect(runPrd).toHaveBeenCalledOnce();
+    expect(runPrd.mock.calls[0]?.[0]).toMatchObject({
+      cwd: "/tmp/repo",
+      prdRef: "docs/prd/feature.md",
+      yes: true,
+    });
+  });
+
+  it("dispatches triage input to the shared proposal flow runner", async () => {
+    const runTriage = vi
+      .spyOn(hubTriageProposalFlow, "runTriageProposalFlow")
+      .mockResolvedValue({
+        preparedContext: {
+          flowId: "triage",
+          taskQuery: "inbox,needs_info",
+          tasks: [],
+        },
+        session: {
+          outcome: "failed",
+          flowId: "triage",
+          runId: "none",
+          runDir: "",
+          phase: "draft",
+          reason: "No tasks",
+        },
+      });
+
+    await runHubProposalFlowFromCli({
+      cwd: "/tmp/repo",
+      yes: false,
+      validatedInput: {
+        flowId: "triage",
+        kind: "task-query",
+        query: "inbox,needs_info",
+      },
+    });
+
+    expect(runTriage).toHaveBeenCalledOnce();
+    expect(runTriage.mock.calls[0]?.[0]).toMatchObject({
+      cwd: "/tmp/repo",
+      taskQuery: "inbox,needs_info",
+      yes: false,
+      interactive: true,
+    });
+  });
+});

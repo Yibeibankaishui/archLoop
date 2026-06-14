@@ -536,7 +536,7 @@ export const runHubFlow = async (
   }
   if (flowDefinition.kind === "proposal") {
     throw new Error(
-      `Hub flow "${input.flowId}" is a proposal flow and must be executed through its task shortcut or proposal session runtime.`,
+      `Hub flow "${input.flowId}" is a proposal flow and must be executed through sandcastle run --flow or its task shortcut.`,
     );
   }
   if (flowDefinition.hasReviewer && !input.reviewer) {

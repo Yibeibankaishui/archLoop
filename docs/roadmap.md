@@ -311,6 +311,7 @@ Goal: 提供 CLI-first 的 Sandcastle Hub 控制面，并在同一状态模型�
 - [x] 实现 proposal flow mutation detection：在 proposal flow 前后快照 repo 与本地 task store，检测意外变更后 fail before apply，报告变更且不自动回滚（见 [#82](https://github.com/Yibeibankaishui/sandcastle/issues/82)、parent [#78](https://github.com/Yibeibankaishui/sandcastle/issues/78)）。
 - [x] 实现 prd-decomposition proposal flow：Sandcastle-owned prompt、结构化 proposal schema、proposal session 编排、Beads apply 与 `sandcastle tasks from-prd` 接线（见 [#83](https://github.com/Yibeibankaishui/sandcastle/issues/83)、parent [#78](https://github.com/Yibeibankaishui/sandcastle/issues/78)）。
 - [x] 实现 triage proposal flow：Sandcastle-owned prompt、结构化 triage proposal schema、proposal session 编排、guarded `--yes` apply，并将 `sandcastle tasks triage` 接到 agent-driven proposal path（见 [#84](https://github.com/Yibeibankaishui/sandcastle/issues/84)、parent [#78](https://github.com/Yibeibankaishui/sandcastle/issues/78)）。
+- [x] 将 `sandcastle run --flow prd-decomposition/triage` 与 task shortcut 统一到 proposal flow 主路径，并将 deterministic PRD/triage helper 保留为测试或显式 fallback（见 [#85](https://github.com/Yibeibankaishui/sandcastle/issues/85)、parent [#78](https://github.com/Yibeibankaishui/sandcastle/issues/78)）。
 - [ ] 定义 Sandcastle Hub 控制面的核心用户路径。
 - [ ] 设计 Hub project onboarding、credentials 和 flow run CLI。
 - [ ] 设计 run / sandbox / branch / logs / agent stream 的可视化模型。

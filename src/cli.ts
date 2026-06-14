@@ -90,10 +90,8 @@ import {
 } from "./hubFlowInput.js";
 import {
   formatPrdDecompositionProposalLines,
-  runPrdDecompositionFlow,
   type PrdHubStatusMode,
 } from "./hubPrdDecomposition.js";
-import { promptHubAgentRoleSetup } from "./hubAgentConfigPrompt.js";
 import {
   formatHubTaskBoardLines,
   appendHubTaskComment,
@@ -105,7 +103,11 @@ import {
   resolveHubTaskSelector,
 } from "./taskBoard.js";
 import { type HubTriageOutcome } from "./hubTriage.js";
-import { runTriageProposalFlow } from "./hubTriageProposalFlow.js";
+import {
+  runHubProposalFlowFromCli,
+  runPrdDecompositionProposalFlowFromCli,
+  runTriageProposalFlowFromCli,
+} from "./hubProposalFlowCli.js";
 import {
   formatHubTaskSyncSummaryLines,
   syncHubTasksWithGithub,
@@ -1613,39 +1615,6 @@ const triageApproveOption = Options.boolean("yes").pipe(
   Options.withDefault(false),
 );
 
-const promptHubAgentRoleEntry = async (
-  role: HubAgentRole,
-): Promise<HubAgentRoleEntry> => {
-  const providers = listAgents();
-  const providerSelection = await clack.select({
-    message: `Select agent provider for ${role} role:`,
-    options: providers.map((provider) => ({
-      value: provider.name,
-      label: provider.label,
-    })),
-  });
-  if (clack.isCancel(providerSelection)) {
-    throw new TaskBoardError({
-      message: "Hub agent role setup cancelled.",
-    });
-  }
-
-  const model = await clack.text({
-    message: `Model for ${role} role:`,
-    defaultValue: "auto",
-  });
-  if (clack.isCancel(model)) {
-    throw new TaskBoardError({
-      message: "Hub agent role setup cancelled.",
-    });
-  }
-
-  return {
-    provider: String(providerSelection),
-    model: String(model),
-  };
-};
-
 const normalizeTaskOrigin = (
   value: string,
 ): "manual" | "user-feedback" | undefined => {
@@ -1759,56 +1728,11 @@ const tasksTriageCommand = Command.make(
 
       const result = yield* Effect.tryPromise({
         try: () =>
-          runTriageProposalFlow({
+          runTriageProposalFlowFromCli({
             cwd,
             taskQuery: validatedInput.query,
             yes,
-            interactive: !yes,
             isTTY: process.stdin.isTTY,
-            configureRole: async (role) => {
-              const entry = await promptHubAgentRoleEntry(role);
-              setHubAgentRole(role, entry);
-              return entry;
-            },
-            interaction: yes
-              ? undefined
-              : {
-                  requestRefinement: async () => {
-                    const message = await clack.text({
-                      message:
-                        "Refine the triage recommendations (leave blank to continue):",
-                      placeholder:
-                        "Ask for more context or adjust a recommendation",
-                    });
-                    if (clack.isCancel(message)) {
-                      return null;
-                    }
-                    const trimmed = String(message).trim();
-                    return trimmed.length > 0 ? trimmed : null;
-                  },
-                  requestApproval: async () => {
-                    const approved = await clack.confirm({
-                      message: "Apply the triage proposal?",
-                      initialValue: false,
-                    });
-                    if (clack.isCancel(approved)) {
-                      return false;
-                    }
-                    return approved === true;
-                  },
-                },
-            confirmRiskyDecisions: yes
-              ? undefined
-              : async (recommendations) => {
-                  const approved = await clack.confirm({
-                    message: `${recommendations.length} triage decision(s) require explicit confirmation. Apply them?`,
-                    initialValue: false,
-                  });
-                  if (clack.isCancel(approved)) {
-                    return false;
-                  }
-                  return approved === true;
-                },
           }),
         catch: toTaskBoardError,
       });
@@ -1907,74 +1831,6 @@ const resolvePrdDependencyOverride = (
   deps: OptionalTextFlag,
 ): string | undefined => (deps._tag === "Some" ? deps.value : undefined);
 
-const promptPrdHubStatusMode = async (): Promise<PrdHubStatusMode> => {
-  const selected = await clack.select({
-    message: "Initial Hub status for PRD-derived tasks (defaults to inbox):",
-    options: [
-      {
-        value: "inbox",
-        label: "inbox",
-        hint: "needs triage",
-      },
-      {
-        value: "classified_ready",
-        label: "classified_ready",
-        hint: "AFK -> ready_for_agent, HITL -> ready_for_human",
-      },
-    ],
-    initialValue: "inbox",
-  });
-  if (clack.isCancel(selected)) {
-    throw new TaskBoardError({
-      message: "PRD task creation cancelled.",
-    });
-  }
-  return selected as PrdHubStatusMode;
-};
-
-const createPrdHubStatusModeResolver = (
-  approve: boolean,
-  explicitHubStatusMode: PrdHubStatusMode | undefined,
-): (() => Promise<PrdHubStatusMode>) | undefined => {
-  if (approve || explicitHubStatusMode) {
-    return undefined;
-  }
-  return promptPrdHubStatusMode;
-};
-
-const createPrdDecompositionInteraction = (): {
-  readonly requestRefinement: () => Promise<string | null>;
-  readonly requestApproval: () => Promise<boolean>;
-} => ({
-  requestRefinement: async () => {
-    const result = await clack.text({
-      message: "Refine the PRD decomposition (leave empty to stop refining):",
-      placeholder:
-        "Split slice 2, reorder dependencies, reclassify AFK/HITL...",
-      defaultValue: "",
-    });
-    if (clack.isCancel(result)) {
-      throw new TaskBoardError({
-        message: "PRD task creation cancelled.",
-      });
-    }
-    const value = String(result).trim();
-    return value.length > 0 ? value : null;
-  },
-  requestApproval: async () => {
-    const result = await clack.confirm({
-      message: "Approve this PRD decomposition and create Beads tasks?",
-      initialValue: true,
-    });
-    if (clack.isCancel(result)) {
-      throw new TaskBoardError({
-        message: "PRD task creation cancelled.",
-      });
-    }
-    return result;
-  },
-});
-
 const tasksFromPrdCommand = Command.make(
   "from-prd",
   {
@@ -1994,20 +1850,12 @@ const tasksFromPrdCommand = Command.make(
 
       const result = yield* Effect.tryPromise({
         try: () =>
-          runPrdDecompositionFlow({
+          runPrdDecompositionProposalFlowFromCli({
             cwd,
             prdRef,
             yes: approve,
             hubStatusMode: explicitHubStatusMode,
-            resolveHubStatusMode: createPrdHubStatusModeResolver(
-              approve,
-              explicitHubStatusMode,
-            ),
             dependencyOverride: resolvePrdDependencyOverride(deps),
-            interaction: approve
-              ? undefined
-              : createPrdDecompositionInteraction(),
-            configureHubAgentRole: promptHubAgentRoleSetup,
             isTTY: process.stdin.isTTY,
           }),
         catch: toTaskBoardError,
@@ -2207,6 +2055,13 @@ const flowInputOption = Options.text("input").pipe(
   Options.optional,
 );
 
+const flowYesOption = Options.boolean("yes").pipe(
+  Options.withDescription(
+    "Run proposal flows in one-shot mode without interactive prompts.",
+  ),
+  Options.withDefault(false),
+);
+
 const toHubAgentConfigError = (error: unknown): HubAgentConfigError =>
   error instanceof HubAgentConfigError
     ? error
@@ -2347,8 +2202,9 @@ const runCommand = Command.make(
     ),
     flow: flowOption,
     input: flowInputOption,
+    yes: flowYesOption,
   },
-  ({ project, flow, input }) =>
+  ({ project, flow, input, yes }) =>
     Effect.gen(function* () {
       const d = yield* Display;
       const projectDir = project.trim().length > 0 ? project : ".";
@@ -2390,10 +2246,110 @@ const runCommand = Command.make(
         );
 
         if (flowDefinition.kind === "proposal") {
-          yield* d.status(
-            `Validated "${flowDefinition.id}" flow input. Proposal flow execution via sandcastle run is not available yet; use the matching sandcastle tasks shortcut.`,
-            "info",
-          );
+          const execution = yield* Effect.tryPromise({
+            try: () =>
+              runHubProposalFlowFromCli({
+                cwd: repoRoot,
+                validatedInput,
+                yes,
+                isTTY: process.stdin.isTTY,
+              }),
+            catch: toHubFlowError,
+          });
+
+          if (execution.flowId === "prd-decomposition") {
+            const result = execution.result;
+            if (result.outcome === "cancelled") {
+              return yield* Effect.fail(
+                new HubFlowError({
+                  message: "PRD task creation cancelled.",
+                }),
+              );
+            }
+            if (result.outcome === "failed") {
+              return yield* Effect.fail(
+                new HubFlowError({
+                  message: result.reason,
+                }),
+              );
+            }
+
+            for (const line of formatPrdDecompositionProposalLines(
+              result.proposal,
+            )) {
+              yield* d.text(line);
+            }
+
+            yield* d.summary("Created PRD-derived Beads tasks", {
+              PRD: result.proposal.prdTitle,
+              Reference: result.proposal.prdRef,
+              "Proposal run": result.runId,
+              Status: result.hubStatusMode,
+              Tasks: String(result.tasks.length),
+              Dependencies: String(result.dependencies.length),
+            });
+            for (const task of result.tasks) {
+              yield* d.text(`  ${task.id}: ${task.title}`);
+            }
+            for (const dependency of result.dependencies) {
+              yield* d.text(
+                `  ${dependency.dependentId} depends on ${dependency.blockerId}`,
+              );
+            }
+            return;
+          }
+
+          const result = execution.result;
+          if (result.preparedContext.tasks.length === 0) {
+            yield* d.status(
+              "No inbox or needs_info tasks required triage.",
+              "info",
+            );
+            return;
+          }
+
+          if (result.session.outcome === "cancelled") {
+            yield* d.status("Triage proposal cancelled.", "info");
+            return;
+          }
+
+          if (result.session.outcome === "failed") {
+            return yield* Effect.fail(
+              new HubFlowError({
+                message: result.session.reason,
+              }),
+            );
+          }
+
+          if (!result.apply || result.apply.applied.length === 0) {
+            if (result.apply?.blocked.length) {
+              yield* d.status(
+                "No triage decisions were applied automatically.",
+                "warn",
+              );
+              for (const entry of result.apply.blocked) {
+                yield* d.text(`  ${entry.taskId}: blocked (${entry.reason})`);
+              }
+              return;
+            }
+
+            yield* d.status("No triage decisions were applied.", "info");
+            return;
+          }
+
+          yield* d.summary("Applied triage recommendations", {
+            Applied: String(result.apply.applied.length),
+            Blocked: String(result.apply.blocked.length),
+            "Run id": result.session.runId,
+          });
+          for (const entry of result.apply.applied) {
+            yield* d.text(
+              `  ${entry.taskId}: ${formatTriageOutcomeLabel(entry.outcome)}`,
+            );
+          }
+          for (const entry of result.apply.blocked) {
+            yield* d.text(`  ${entry.taskId}: blocked (${entry.reason})`);
+          }
           return;
         }
       }
