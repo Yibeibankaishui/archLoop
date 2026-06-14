@@ -102,22 +102,25 @@ Key APIs: `run()`, `interactive()`, `createSandbox()`, `createWorktree()`; sandb
 
 ## Common CLI
 
-| Command                           | Purpose                        |
-| --------------------------------- | ------------------------------ |
-| `sandcastle init`                 | Generate `.sandcastle/`        |
-| `sandcastle project status`       | Show Hub task board summary    |
-| `sandcastle tasks list`           | Group Beads tasks by status    |
-| `sandcastle tasks show <id>`      | Show one Beads task            |
-| `sandcastle run . --flow <id>`    | Run a Hub-owned flow           |
-| `sandcastle tasks create <title>` | Create a local Hub task        |
-| `sandcastle tasks triage`         | Triage inbox/needs_info tasks  |
-| `sandcastle tasks sync`           | Sync GitHub Issues with Beads  |
-| `sandcastle tasks from-prd <ref>` | Decompose a PRD into tasks     |
-| `sandcastle tasks comment <id>`   | Append a Beads comment         |
-| `sandcastle tasks recover <id>`   | Repair failed/stale task state |
-| `sandcastle docker build-image`   | Build image from Dockerfile    |
-| `sandcastle docker remove-image`  | Remove image                   |
-| `sandcastle --help`               | Help                           |
+| Command                                   | Purpose                              |
+| ----------------------------------------- | ------------------------------------ |
+| `sandcastle init`                         | Generate `.sandcastle/`              |
+| `sandcastle project status`               | Show Hub task board summary          |
+| `sandcastle agent-config path`            | Show Hub agent config path           |
+| `sandcastle agent-config show`            | Show configured Hub agent roles      |
+| `sandcastle agent-config set-role <role>` | Save a Hub agent role provider/model |
+| `sandcastle tasks list`                   | Group Beads tasks by status          |
+| `sandcastle tasks show <id>`              | Show one Beads task                  |
+| `sandcastle run . --flow <id>`            | Run a Hub-owned flow                 |
+| `sandcastle tasks create <title>`         | Create a local Hub task              |
+| `sandcastle tasks triage`                 | Triage inbox/needs_info tasks        |
+| `sandcastle tasks sync`                   | Sync GitHub Issues with Beads        |
+| `sandcastle tasks from-prd <ref>`         | Decompose a PRD into tasks           |
+| `sandcastle tasks comment <id>`           | Append a Beads comment               |
+| `sandcastle tasks recover <id>`           | Repair failed/stale task state       |
+| `sandcastle docker build-image`           | Build image from Dockerfile          |
+| `sandcastle docker remove-image`          | Remove image                         |
+| `sandcastle --help`                       | Help                                 |
 
 ## Troubleshooting (known failure modes)
 

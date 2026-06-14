@@ -50,6 +50,7 @@ import type {
 import {
   ConfigDirError,
   HubFlowError,
+  HubAgentConfigError,
   InitError,
   ProjectStatusError,
   TaskBoardError,
@@ -105,6 +106,12 @@ import {
   syncHubTasksWithGithub,
 } from "./hubTaskSync.js";
 import { formatHubRecoveryComment, recoverHubTask } from "./hubTaskRecover.js";
+import {
+  formatHubAgentConfigShowLines,
+  readHubAgentConfig,
+  resolveHubAgentConfigPath,
+  setHubAgentRole,
+} from "./hubAgentConfig.js";
 
 const require = createRequire(import.meta.url);
 const VERSION = (require("../package.json") as { version: string }).version;
@@ -2061,6 +2068,134 @@ const flowOption = Options.text("flow").pipe(
   Options.withDescription(`Hub flow id (${getHubFlowIds()})`),
 );
 
+const toHubAgentConfigError = (error: unknown): HubAgentConfigError =>
+  error instanceof HubAgentConfigError
+    ? error
+    : new HubAgentConfigError({
+        message: error instanceof Error ? error.message : String(error),
+      });
+
+const parseHubAgentRoleOptions = (
+  raw: string | undefined,
+): Record<string, string> | undefined => {
+  if (!raw || raw.trim().length === 0) {
+    return undefined;
+  }
+
+  const options: Record<string, string> = {};
+  for (const part of raw.split(",")) {
+    const trimmed = part.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    const separator = trimmed.indexOf("=");
+    if (separator <= 0 || separator === trimmed.length - 1) {
+      throw new HubAgentConfigError({
+        message: `Invalid --options value "${trimmed}". Use comma-separated key=value pairs.`,
+      });
+    }
+    const key = trimmed.slice(0, separator).trim();
+    const value = trimmed.slice(separator + 1).trim();
+    options[key] = value;
+  }
+
+  return Object.keys(options).length > 0 ? options : undefined;
+};
+
+const agentConfigPathCommand = Command.make("path", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.text(resolveHubAgentConfigPath());
+  }),
+);
+
+const agentConfigShowCommand = Command.make("show", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const config = yield* Effect.try({
+      try: () => readHubAgentConfig(),
+      catch: toHubAgentConfigError,
+    });
+    for (const line of formatHubAgentConfigShowLines(config)) {
+      yield* d.text(line);
+    }
+  }),
+);
+
+const agentConfigProviderOption = Options.text("provider").pipe(
+  Options.withDescription(
+    "Agent provider (claude-code, pi, codex, cursor, opencode)",
+  ),
+);
+
+const agentConfigModelOption = Options.text("model").pipe(
+  Options.withDescription("Agent model"),
+);
+
+const agentConfigOptionsOption = Options.text("options").pipe(
+  Options.withDescription(
+    "Comma-separated provider options as key=value pairs (e.g. effort=medium,mode=plan)",
+  ),
+  Options.optional,
+);
+
+const agentConfigSetRoleCommand = Command.make(
+  "set-role",
+  {
+    role: Args.text({ name: "role" }).pipe(
+      Args.withDescription(
+        "Hub agent role (planning, triage, implementation, review, merge, recovery)",
+      ),
+    ),
+    provider: agentConfigProviderOption,
+    model: agentConfigModelOption,
+    options: agentConfigOptionsOption,
+  },
+  ({ role, provider, model, options }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const parsedOptions = yield* Effect.try({
+        try: () => parseHubAgentRoleOptions(optionalTextValue(options)),
+        catch: toHubAgentConfigError,
+      });
+      const config = yield* Effect.try({
+        try: () =>
+          setHubAgentRole(role, {
+            provider,
+            model,
+            options: parsedOptions,
+          }),
+        catch: toHubAgentConfigError,
+      });
+      const saved = config.roles[role as keyof typeof config.roles];
+      yield* d.summary(`Saved Hub agent role ${role}`, {
+        Provider: saved?.provider ?? provider,
+        Model: saved?.model ?? model,
+        Options: saved?.options
+          ? Object.entries(saved.options)
+              .map(([key, value]) => `${key}=${value}`)
+              .join(", ")
+          : "(none)",
+      });
+    }),
+);
+
+const agentConfigCommand = Command.make("agent-config", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.status(
+      "Hub-wide agent role configuration. Use --help to see available subcommands.",
+      "info",
+    );
+  }),
+).pipe(
+  Command.withSubcommands([
+    agentConfigPathCommand,
+    agentConfigShowCommand,
+    agentConfigSetRoleCommand,
+  ]),
+);
+
 const toHubFlowError = (error: unknown): HubFlowError =>
   error instanceof HubFlowError
     ? error
@@ -2232,6 +2367,7 @@ export const sandcastle = rootCommand.pipe(
     runCommand,
     tasksCommand,
     projectCommand,
+    agentConfigCommand,
     dockerCommand,
     podmanCommand,
   ]),

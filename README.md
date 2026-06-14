@@ -828,6 +828,18 @@ The summary includes task counts by Hub status, active runs and batch statuses, 
 
 Sandcastle resolves the user data directory from `XDG_DATA_HOME` when it is set and falls back to `~/.local/share/sandcastle`.
 
+### `sandcastle agent-config path`
+
+Prints the Hub-wide agent role config file path under the Sandcastle user data directory. Hub agent roles configure reusable stage providers and models for planning, triage, implementation, review, merge, and recovery. Credentials and login state stay in Hub env files and auth directories, not in role config.
+
+### `sandcastle agent-config show`
+
+Displays configured Hub agent roles and clearly reports missing roles. Use this before running agent-driven Hub flows to confirm provider/model settings are present.
+
+### `sandcastle agent-config set-role <role> --provider <provider> --model <model>`
+
+Persists provider, model, and optional provider options for a supported Hub agent role. Pass `--options` with comma-separated `key=value` pairs for provider-specific settings such as `effort=medium` or `mode=plan`. Role config stores provider/model/options only and rejects credential-like fields.
+
 ### `sandcastle tasks list`
 
 Shows the Hub task board grouped by canonical Hub task status from Beads data in the current git repository. Use it to inspect inbox, ready, blocked, implementation, review, merge, done, failure, and sync-conflict buckets.
