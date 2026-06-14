@@ -3,6 +3,11 @@ import { join } from "node:path";
 
 import { extractStructuredOutput } from "./extractStructuredOutput.js";
 import {
+  captureProposalFlowStateSnapshot,
+  detectProposalFlowMutations,
+  formatProposalFlowMutationReason,
+} from "./hubProposalMutation.js";
+import {
   createHubRunContext,
   resolveHubRunEventsDirectory,
 } from "./hubExecution.js";
@@ -166,6 +171,13 @@ type ProposalSessionEvent =
       readonly runId: string;
       readonly createdAt: string;
       readonly phase: ProposalSessionPhase;
+      readonly reason: string;
+    }
+  | {
+      readonly type: "mutation_detected";
+      readonly flowId: string;
+      readonly runId: string;
+      readonly createdAt: string;
       readonly reason: string;
     };
 
@@ -394,6 +406,10 @@ export const runProposalSession = async <T>(
     paths: resolveProposalSessionArtifactPaths(context.runDir),
   };
   const transcript: ProposalTranscriptTurn[] = [];
+  const mutationBeforeSnapshot = captureProposalFlowStateSnapshot({
+    cwd: repoRoot,
+    env: input.env,
+  });
 
   persistPreparedContext(state.paths, input.preparedContext);
   persistTranscript(state.paths, transcript);
@@ -556,6 +572,29 @@ export const runProposalSession = async <T>(
   }
 
   writeJson(state.paths.finalProposalPath, finalProposal);
+
+  const mutationAfterSnapshot = captureProposalFlowStateSnapshot({
+    cwd: repoRoot,
+    env: input.env,
+  });
+  const mutationReport = detectProposalFlowMutations(
+    mutationBeforeSnapshot,
+    mutationAfterSnapshot,
+  );
+  if (mutationReport.hasMutations) {
+    const reason = formatProposalFlowMutationReason(mutationReport);
+    writeJson(state.paths.applyResultPath, {
+      status: "blocked_mutations",
+      reason,
+    });
+    appendProposalEvent(state.runDir, {
+      type: "mutation_detected",
+      ...proposalEventBase(state),
+      reason,
+    });
+    return failSession(state, "finalization", reason);
+  }
+
   writeJson(state.paths.applyResultPath, { status: "pending" });
   appendProposalEvent(state.runDir, {
     type: "finalization_succeeded",

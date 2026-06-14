@@ -70,12 +70,15 @@ const createFakeInvoker = (
   return { invoker, calls };
 };
 
+const createHubProjectDir = (prefix: string) => mkdtemp(join(tmpdir(), prefix));
+
 describe("runProposalSession", () => {
   it("runs an initial draft turn from prepared context and persists artifacts", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "proposal-session-draft-"));
     await initRepo(repoDir);
-    const hubProjectDir = join(repoDir, "hub", "projects", "demo");
-    await mkdir(hubProjectDir, { recursive: true });
+    const hubProjectDir = await createHubProjectDir(
+      "proposal-session-draft-hub-",
+    );
 
     const { invoker, calls } = createFakeInvoker({
       draft: { assistantMessage: "Draft proposal summary" },
@@ -152,8 +155,9 @@ describe("runProposalSession", () => {
   it("appends user refinement turns and invokes the agent with transcript context", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "proposal-session-refine-"));
     await initRepo(repoDir);
-    const hubProjectDir = join(repoDir, "hub", "projects", "demo");
-    await mkdir(hubProjectDir, { recursive: true });
+    const hubProjectDir = await createHubProjectDir(
+      "proposal-session-refine-hub-",
+    );
 
     const { invoker, calls } = createFakeInvoker({
       draft: { assistantMessage: "Initial draft" },
@@ -206,8 +210,9 @@ describe("runProposalSession", () => {
   it("fails when final structured output is missing or invalid", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "proposal-session-invalid-"));
     await initRepo(repoDir);
-    const hubProjectDir = join(repoDir, "hub", "projects", "demo");
-    await mkdir(hubProjectDir, { recursive: true });
+    const hubProjectDir = await createHubProjectDir(
+      "proposal-session-invalid-hub-",
+    );
 
     const missingTagInvoker = createFakeInvoker({
       draft: { assistantMessage: "Draft only" },
@@ -291,8 +296,9 @@ describe("runProposalSession", () => {
   it("cancels the session when approval is rejected", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "proposal-session-cancel-"));
     await initRepo(repoDir);
-    const hubProjectDir = join(repoDir, "hub", "projects", "demo");
-    await mkdir(hubProjectDir, { recursive: true });
+    const hubProjectDir = await createHubProjectDir(
+      "proposal-session-cancel-hub-",
+    );
 
     const { invoker, calls } = createFakeInvoker({
       draft: { assistantMessage: "Draft proposal" },
