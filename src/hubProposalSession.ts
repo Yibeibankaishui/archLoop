@@ -6,6 +6,7 @@ import {
   captureProposalFlowStateSnapshot,
   detectProposalFlowMutations,
   formatProposalFlowMutationReason,
+  type ProposalFlowStateSnapshot,
 } from "./hubProposalMutation.js";
 import {
   createHubRunContext,
@@ -384,6 +385,39 @@ const failFinalization = <T>(
   return failSession(state, "finalization", reason);
 };
 
+const failOnProposalFlowMutations = <T>(
+  state: ProposalSessionState,
+  input: {
+    readonly repoRoot: string;
+    readonly env?: NodeJS.ProcessEnv;
+    readonly beforeSnapshot: ProposalFlowStateSnapshot;
+  },
+): RunProposalSessionResult<T> | undefined => {
+  const afterSnapshot = captureProposalFlowStateSnapshot({
+    cwd: input.repoRoot,
+    env: input.env,
+  });
+  const mutationReport = detectProposalFlowMutations(
+    input.beforeSnapshot,
+    afterSnapshot,
+  );
+  if (!mutationReport.hasMutations) {
+    return undefined;
+  }
+
+  const reason = formatProposalFlowMutationReason(mutationReport);
+  writeJson(state.paths.applyResultPath, {
+    status: "blocked_mutations",
+    reason,
+  });
+  appendProposalEvent(state.runDir, {
+    type: "mutation_detected",
+    ...proposalEventBase(state),
+    reason,
+  });
+  return failSession(state, "finalization", reason);
+};
+
 export const runProposalSession = async <T>(
   input: RunProposalSessionInput<T>,
 ): Promise<RunProposalSessionResult<T>> => {
@@ -573,26 +607,13 @@ export const runProposalSession = async <T>(
 
   writeJson(state.paths.finalProposalPath, finalProposal);
 
-  const mutationAfterSnapshot = captureProposalFlowStateSnapshot({
-    cwd: repoRoot,
+  const mutationFailure = failOnProposalFlowMutations<T>(state, {
+    repoRoot,
     env: input.env,
+    beforeSnapshot: mutationBeforeSnapshot,
   });
-  const mutationReport = detectProposalFlowMutations(
-    mutationBeforeSnapshot,
-    mutationAfterSnapshot,
-  );
-  if (mutationReport.hasMutations) {
-    const reason = formatProposalFlowMutationReason(mutationReport);
-    writeJson(state.paths.applyResultPath, {
-      status: "blocked_mutations",
-      reason,
-    });
-    appendProposalEvent(state.runDir, {
-      type: "mutation_detected",
-      ...proposalEventBase(state),
-      reason,
-    });
-    return failSession(state, "finalization", reason);
+  if (mutationFailure) {
+    return mutationFailure;
   }
 
   writeJson(state.paths.applyResultPath, { status: "pending" });

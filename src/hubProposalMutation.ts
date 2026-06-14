@@ -150,82 +150,102 @@ const sortTasks = (
     return leftId.localeCompare(rightId);
   });
 
-const parseStatusPath = (line: string): string | undefined => {
-  const match = line.trimEnd().match(/^.. (.+)$/);
+const parseGitStatusLine = (
+  line: string,
+): { readonly path: string; readonly code: string } | undefined => {
+  const trimmed = line.trimEnd();
+  const match = trimmed.match(/^.. (.+)$/);
   if (!match) {
     return undefined;
   }
-  const path = match[1]?.trim();
-  if (!path) {
+
+  const code = trimmed.slice(0, 2);
+  const rawPath = match[1]?.trim();
+  if (!rawPath) {
     return undefined;
   }
-  if (path.startsWith('"') && path.endsWith('"')) {
-    return path.slice(1, -1);
-  }
-  return path;
+
+  const path =
+    rawPath.startsWith('"') && rawPath.endsWith('"')
+      ? rawPath.slice(1, -1)
+      : rawPath;
+  return { path, code };
 };
 
-const parseStatusCode = (line: string): string | undefined => {
-  const trimmed = line.trim();
-  if (trimmed.length < 2) {
-    return undefined;
+const statusLinesToPathMap = (
+  lines: readonly string[],
+): Map<string, string> => {
+  const byPath = new Map<string, string>();
+  for (const line of lines) {
+    const entry = parseGitStatusLine(line);
+    if (entry) {
+      byPath.set(entry.path, entry.code);
+    }
   }
-  return trimmed.slice(0, 2);
+  return byPath;
+};
+
+const diffStringKeyedMaps = (
+  before: ReadonlyMap<string, string>,
+  after: ReadonlyMap<string, string>,
+): {
+  readonly added: string[];
+  readonly removed: string[];
+  readonly changed: string[];
+} => {
+  const added: string[] = [];
+  const changed: string[] = [];
+
+  for (const [key, afterValue] of after) {
+    const beforeValue = before.get(key);
+    if (beforeValue === undefined) {
+      added.push(key);
+      continue;
+    }
+    if (beforeValue !== afterValue) {
+      changed.push(key);
+    }
+  }
+
+  const removed: string[] = [];
+  for (const key of before.keys()) {
+    if (!after.has(key)) {
+      removed.push(key);
+    }
+  }
+
+  return {
+    added: added.sort(),
+    removed: removed.sort(),
+    changed: changed.sort(),
+  };
 };
 
 const diffStatusLines = (
   beforeLines: readonly string[],
   afterLines: readonly string[],
-): {
-  readonly addedPaths: string[];
-  readonly removedPaths: string[];
-  readonly changedPaths: string[];
-} => {
-  const beforeByPath = new Map<string, string>();
-  for (const line of beforeLines) {
-    const path = parseStatusPath(line);
-    const code = parseStatusCode(line);
-    if (path && code) {
-      beforeByPath.set(path, code);
-    }
-  }
+): ReturnType<typeof diffStringKeyedMaps> =>
+  diffStringKeyedMaps(
+    statusLinesToPathMap(beforeLines),
+    statusLinesToPathMap(afterLines),
+  );
 
-  const afterByPath = new Map<string, string>();
-  for (const line of afterLines) {
-    const path = parseStatusPath(line);
-    const code = parseStatusCode(line);
-    if (path && code) {
-      afterByPath.set(path, code);
-    }
-  }
+const buildTaskIdSnapshotMap = (
+  tasks: readonly Record<string, unknown>[],
+): Map<string, string> =>
+  new Map(
+    tasks.flatMap((task) => {
+      const id = readTaskId(task);
+      return id ? [[id, stableStringify(task)] as const] : [];
+    }),
+  );
 
-  const addedPaths: string[] = [];
-  const removedPaths: string[] = [];
-  const changedPaths: string[] = [];
-
-  for (const [path, code] of afterByPath) {
-    const beforeCode = beforeByPath.get(path);
-    if (beforeCode === undefined) {
-      addedPaths.push(path);
-      continue;
-    }
-    if (beforeCode !== code) {
-      changedPaths.push(path);
-    }
-  }
-
-  for (const path of beforeByPath.keys()) {
-    if (!afterByPath.has(path)) {
-      removedPaths.push(path);
-    }
-  }
-
-  return {
-    addedPaths: addedPaths.sort(),
-    removedPaths: removedPaths.sort(),
-    changedPaths: changedPaths.sort(),
-  };
-};
+const hasKeyedDiff = (diff: {
+  readonly added: readonly string[];
+  readonly removed: readonly string[];
+  readonly changed: readonly string[];
+}): boolean =>
+  diff.added.length > 0 || diff.removed.length > 0 || diff.changed.length > 0;
 
 export const captureProposalFlowStateSnapshot = (input: {
   readonly cwd: string;
@@ -276,64 +296,27 @@ export const detectProposalFlowMutations = (
     before.repo.statusLines,
     after.repo.statusLines,
   );
-  if (
-    workingTreeDiff.addedPaths.length > 0 ||
-    workingTreeDiff.removedPaths.length > 0 ||
-    workingTreeDiff.changedPaths.length > 0
-  ) {
+  if (hasKeyedDiff(workingTreeDiff)) {
     repoMutations.push({
       kind: "working_tree_changed",
-      addedPaths: workingTreeDiff.addedPaths,
-      removedPaths: workingTreeDiff.removedPaths,
-      changedPaths: workingTreeDiff.changedPaths,
+      addedPaths: workingTreeDiff.added,
+      removedPaths: workingTreeDiff.removed,
+      changedPaths: workingTreeDiff.changed,
     });
   }
 
-  const beforeTasks = new Map(
-    before.taskStore.tasks.flatMap((task) => {
-      const id = readTaskId(task);
-      return id ? [[id, stableStringify(task)] as const] : [];
-    }),
+  const taskDiff = diffStringKeyedMaps(
+    buildTaskIdSnapshotMap(before.taskStore.tasks),
+    buildTaskIdSnapshotMap(after.taskStore.tasks),
   );
-  const afterTasks = new Map(
-    after.taskStore.tasks.flatMap((task) => {
-      const id = readTaskId(task);
-      return id ? [[id, stableStringify(task)] as const] : [];
-    }),
-  );
-
-  const addedTaskIds: string[] = [];
-  const removedTaskIds: string[] = [];
-  const changedTaskIds: string[] = [];
-
-  for (const [taskId, serialized] of afterTasks) {
-    const beforeSerialized = beforeTasks.get(taskId);
-    if (beforeSerialized === undefined) {
-      addedTaskIds.push(taskId);
-      continue;
-    }
-    if (beforeSerialized !== serialized) {
-      changedTaskIds.push(taskId);
-    }
-  }
-
-  for (const taskId of beforeTasks.keys()) {
-    if (!afterTasks.has(taskId)) {
-      removedTaskIds.push(taskId);
-    }
-  }
 
   const taskStoreMutations: ProposalFlowTaskStoreMutation[] = [];
-  if (
-    addedTaskIds.length > 0 ||
-    removedTaskIds.length > 0 ||
-    changedTaskIds.length > 0
-  ) {
+  if (hasKeyedDiff(taskDiff)) {
     taskStoreMutations.push({
       kind: "tasks_changed",
-      addedTaskIds: addedTaskIds.sort(),
-      removedTaskIds: removedTaskIds.sort(),
-      changedTaskIds: changedTaskIds.sort(),
+      addedTaskIds: taskDiff.added,
+      removedTaskIds: taskDiff.removed,
+      changedTaskIds: taskDiff.changed,
     });
   }
 
@@ -344,8 +327,10 @@ export const detectProposalFlowMutations = (
   };
 };
 
-const formatPathList = (label: string, paths: readonly string[]): string[] =>
-  paths.length > 0 ? [`  ${label}: ${paths.join(", ")}`] : [];
+const formatLabeledItemList = (
+  label: string,
+  items: readonly string[],
+): string[] => (items.length > 0 ? [`  ${label}: ${items.join(", ")}`] : []);
 
 export const formatProposalFlowMutationLines = (
   report: ProposalFlowMutationReport,
@@ -368,18 +353,18 @@ export const formatProposalFlowMutationLines = (
 
     lines.push("Repository working tree changed:");
     lines.push(
-      ...formatPathList("added", mutation.addedPaths),
-      ...formatPathList("removed", mutation.removedPaths),
-      ...formatPathList("modified", mutation.changedPaths),
+      ...formatLabeledItemList("added", mutation.addedPaths),
+      ...formatLabeledItemList("removed", mutation.removedPaths),
+      ...formatLabeledItemList("modified", mutation.changedPaths),
     );
   }
 
   for (const mutation of report.taskStoreMutations) {
     lines.push("Local task store changed:");
     lines.push(
-      ...formatPathList("added tasks", mutation.addedTaskIds),
-      ...formatPathList("removed tasks", mutation.removedTaskIds),
-      ...formatPathList("changed tasks", mutation.changedTaskIds),
+      ...formatLabeledItemList("added tasks", mutation.addedTaskIds),
+      ...formatLabeledItemList("removed tasks", mutation.removedTaskIds),
+      ...formatLabeledItemList("changed tasks", mutation.changedTaskIds),
     );
   }
 
