@@ -103,6 +103,7 @@ import {
   formatHubTaskDetailsRows,
   loadHubTask,
   loadHubTaskBoard,
+  resolveHubTaskSelector,
 } from "./taskBoard.js";
 import { triageHubTasks, type HubTriageOutcome } from "./hubTriage.js";
 import {
@@ -1973,6 +1974,10 @@ const tasksCommentCommand = Command.make(
     Effect.gen(function* () {
       const d = yield* Display;
       const cwd = process.cwd();
+      const task = yield* Effect.try({
+        try: () => resolveHubTaskSelector(cwd, id),
+        catch: toTaskBoardError,
+      });
       const commentBody =
         body._tag === "Some"
           ? body.value
@@ -1992,11 +1997,14 @@ const tasksCommentCommand = Command.make(
             });
 
       yield* Effect.try({
-        try: () => appendHubTaskComment(cwd, id, commentBody),
+        try: () => appendHubTaskComment(cwd, task.id, commentBody),
         catch: toTaskBoardError,
       });
 
-      yield* d.status(`Appended a comment to Beads task ${id}.`, "success");
+      yield* d.status(
+        `Appended a comment to Beads task ${task.id}.`,
+        "success",
+      );
     }),
 );
 
@@ -2007,12 +2015,16 @@ const tasksRecoverCommand = Command.make(
     Effect.gen(function* () {
       const d = yield* Display;
       const cwd = process.cwd();
+      const task = yield* Effect.try({
+        try: () => resolveHubTaskSelector(cwd, id),
+        catch: toTaskBoardError,
+      });
       const result = yield* Effect.tryPromise({
-        try: () => recoverHubTask({ cwd, taskId: id }),
+        try: () => recoverHubTask({ cwd, taskId: task.id }),
         catch: toTaskBoardError,
       });
 
-      yield* d.summary(`Recovered Beads task ${id}`, {
+      yield* d.summary(`Recovered Beads task ${task.id}`, {
         Outcome: result.outcome,
         "Prior status": result.priorStatus,
         "Hub status": result.hubStatus,

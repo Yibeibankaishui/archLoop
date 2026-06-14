@@ -475,6 +475,50 @@ const runBdJson = (
   return parseBdJsonOutput(stdout);
 };
 
+const tryRunBdJson = (
+  cwd: string,
+  args: readonly string[],
+  failureLabel: string,
+  env: NodeJS.ProcessEnv = process.env,
+): unknown[] => {
+  try {
+    return runBdJson(cwd, args, failureLabel, env);
+  } catch {
+    return [];
+  }
+};
+
+const mergeOptionalTaskDetails = (
+  task: BeadsTaskRecord,
+  optionalRecords: readonly BeadsTaskRecord[],
+): BeadsTaskRecord => {
+  const merged: Record<string, unknown> = { ...task };
+
+  for (const record of optionalRecords) {
+    if (!record || typeof record !== "object") {
+      continue;
+    }
+
+    for (const key of [
+      "comments",
+      "comment_threads",
+      "commentThreads",
+      "remoteRefs",
+      "remote_refs",
+      "remoteReferences",
+      "runRefs",
+      "run_refs",
+      "runReferences",
+    ]) {
+      if (merged[key] === undefined && record[key] !== undefined) {
+        merged[key] = record[key];
+      }
+    }
+  }
+
+  return merged as BeadsTaskRecord;
+};
+
 export const loadHubTaskBoard = (
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
@@ -483,25 +527,112 @@ export const loadHubTaskBoard = (
     runBdJson(cwd, ["list", "--json"], "tasks list", env) as BeadsTaskRecord[],
   );
 
-export const loadHubTask = (
+export const getHubTaskBoardDisplayTasks = (
+  board: HubTaskBoard,
+): readonly HubTaskProjection[] => board.groups.flatMap((group) => group.tasks);
+
+const isPositiveIntegerSelector = (value: string): boolean =>
+  /^[1-9]\d*$/.test(value);
+
+const formatSelectorCandidates = (
+  tasks: readonly HubTaskProjection[],
+): string => tasks.map((task) => task.id).join(", ");
+
+export const resolveHubTaskSelector = (
   cwd: string,
-  id: string,
+  selector: string,
   env: NodeJS.ProcessEnv = process.env,
 ): HubTaskProjection => {
+  const trimmedSelector = selector.trim();
+  if (trimmedSelector.length === 0) {
+    throw new TaskBoardError({
+      message:
+        "sandcastle tasks require a task id, exact title, or list number.",
+    });
+  }
+
+  if (!isPositiveIntegerSelector(trimmedSelector)) {
+    const [task] = tryRunBdJson(
+      cwd,
+      ["show", trimmedSelector, "--json"],
+      `tasks show ${trimmedSelector}`,
+      env,
+    ) as BeadsTaskRecord[];
+    if (task) {
+      return projectHubTask(task);
+    }
+  }
+
+  const board = loadHubTaskBoard(cwd, env);
+
+  const idMatch = board.tasks.find((task) => task.id === trimmedSelector);
+  if (idMatch) {
+    return idMatch;
+  }
+
+  const titleMatches = board.tasks.filter(
+    (task) => task.title === trimmedSelector,
+  );
+  if (titleMatches.length === 1) {
+    return titleMatches[0]!;
+  }
+  if (titleMatches.length > 1) {
+    throw new TaskBoardError({
+      message: `sandcastle tasks selector "${selector}" matched multiple tasks with the same exact title: ${formatSelectorCandidates(titleMatches)}. Use a Beads id or the list number instead.`,
+    });
+  }
+
+  if (isPositiveIntegerSelector(trimmedSelector)) {
+    const displayTasks = getHubTaskBoardDisplayTasks(board);
+    const position = Number(trimmedSelector);
+    if (position < 1 || position > displayTasks.length) {
+      throw new TaskBoardError({
+        message: `sandcastle tasks selector ${position} is out of range for the current task list (1-${displayTasks.length}).`,
+      });
+    }
+    return displayTasks[position - 1]!;
+  }
+
+  throw new TaskBoardError({
+    message: `sandcastle tasks selector "${selector}" did not match a Beads id, an exact task title, or a list number.`,
+  });
+};
+
+export const loadHubTask = (
+  cwd: string,
+  selector: string,
+  env: NodeJS.ProcessEnv = process.env,
+): HubTaskProjection => {
+  const resolvedTask = resolveHubTaskSelector(cwd, selector, env);
   const [task] = runBdJson(
     cwd,
-    ["show", id, "--json", "--include-comments", "--include-dependents"],
-    `tasks show ${id}`,
+    ["show", resolvedTask.id, "--json", "--long"],
+    `tasks show ${resolvedTask.id}`,
     env,
   ) as BeadsTaskRecord[];
 
   if (!task) {
     throw new TaskBoardError({
-      message: `sandcastle tasks show ${id} did not return a Beads task`,
+      message: `sandcastle tasks show ${resolvedTask.id} did not return a Beads task`,
     });
   }
 
-  return projectHubTask(task);
+  const optionalRecords = [
+    ...tryRunBdJson(
+      cwd,
+      ["show", resolvedTask.id, "--json", "--thread"],
+      `tasks show ${resolvedTask.id} thread`,
+      env,
+    ),
+    ...tryRunBdJson(
+      cwd,
+      ["show", resolvedTask.id, "--json", "--refs"],
+      `tasks show ${resolvedTask.id} refs`,
+      env,
+    ),
+  ] as BeadsTaskRecord[];
+
+  return projectHubTask(mergeOptionalTaskDetails(task, optionalRecords));
 };
 
 export interface ClaimHubTaskInput {
@@ -935,11 +1066,18 @@ export const formatHubTaskBoardLines = (
 
   lines.push(`Total tasks: ${board.tasks.length}`);
 
+  const displayTasks = getHubTaskBoardDisplayTasks(board);
+  const displayIndexById = new Map<string, number>();
+  displayTasks.forEach((task, index) => {
+    displayIndexById.set(task.id, index + 1);
+  });
+
   for (const group of board.groups) {
     lines.push("");
     lines.push(`${group.status} (${group.tasks.length})`);
     for (const task of group.tasks) {
-      lines.push(`  ${task.id}: ${task.title}`);
+      const displayIndex = displayIndexById.get(task.id);
+      lines.push(`  ${displayIndex ?? "?"}. ${task.id}: ${task.title}`);
     }
   }
 

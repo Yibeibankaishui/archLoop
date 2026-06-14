@@ -199,7 +199,7 @@ describe("task status projection", () => {
     expect(lines).toContain("Total tasks: 2");
     expect(lines).toContain("inbox (1)");
     expect(lines).toContain("ready_for_agent (1)");
-    expect(lines).toContain("  bd-1: Inbox task");
-    expect(lines).toContain("  bd-2: Ready task");
+    expect(lines).toContain("  1. bd-1: Inbox task");
+    expect(lines).toContain("  2. bd-2: Ready task");
   });
 });

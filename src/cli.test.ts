@@ -367,7 +367,7 @@ describe("sandcastle CLI", () => {
 
     expect(stdout).toContain("Hub project status");
     expect(stdout).toContain(hostDir);
-    expect(stdout).toContain(join(dataDir, "sandcastle"));
+    expect(stdout).toContain("xdg-data/sandcastle");
     expect(stdout).toContain("Beads available");
     expect(stdout).toContain("Task board ready");
     expect(stdout).toContain("Task board total");
@@ -444,7 +444,9 @@ exit 1
     expect(stdout).toContain("inbox (1)");
     expect(stdout).toContain("ready_for_agent (1)");
     expect(stdout).toContain("done (1)");
-    expect(stdout).toContain("  bd-2: Ready task");
+    expect(stdout).toContain("  1. bd-1: Inbox task");
+    expect(stdout).toContain("  2. bd-2: Ready task");
+    expect(stdout).toContain("  3. bd-3: Done task");
   });
 
   it("tasks show renders Beads details, comments, remote refs, and run refs", async () => {
@@ -461,6 +463,19 @@ exit 1
     await writeFile(
       bdPath,
       `#!/bin/sh
+if [ "$1" = "list" ]; then
+  cat <<'JSON'
+[
+  {
+    "id": "bd-3",
+    "title": "Done task",
+    "status": "closed",
+    "labels": ["done"]
+  }
+]
+JSON
+  exit 0
+fi
 if [ "$1" = "show" ] && [ "$2" = "bd-3" ]; then
   cat <<'JSON'
 [
@@ -518,6 +533,241 @@ exit 1
     expect(stdout).toContain("Comments");
     expect(stdout).toContain("alice");
     expect(stdout).toContain("Looks good");
+  });
+
+  it("tasks show resolves exact titles and list indices and uses supported Beads flags", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const showArgsFile = join(hostDir, "show-args.txt");
+    const boardJson = JSON.stringify([
+      { id: "bd-1", title: "Inbox task", status: "open" },
+      {
+        id: "bd-2",
+        title: "Write docs",
+        status: "open",
+        labels: ["ready-for-agent"],
+      },
+      { id: "bd-3", title: "Done task", status: "closed", labels: ["done"] },
+    ]);
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "list" ]; then
+  printf '%s\n' '${boardJson}'
+  exit 0
+fi
+if [ "$1" = "show" ] && [ "$2" = "bd-2" ]; then
+  printf '%s\n' "$*" >> "${showArgsFile}"
+  cat <<'JSON'
+[
+  {
+    "id": "bd-2",
+    "title": "Write docs",
+    "status": "open",
+    "labels": ["ready-for-agent"],
+    "metadata": { "execution_mode": "agent" },
+    "description": "Task description",
+    "comments": [],
+    "remoteRefs": [],
+    "runRefs": []
+  }
+]
+JSON
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const titleResult = await runCli('tasks show "Write docs"', hostDir, {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+    });
+    expect(titleResult.stdout).toContain("Beads task bd-2");
+
+    const indexResult = await runCli("tasks show 2", hostDir, {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+    });
+    expect(indexResult.stdout).toContain("Beads task bd-2");
+
+    const showArgs = await readFile(showArgsFile, "utf-8");
+    expect(showArgs).toContain("show bd-2 --json --long");
+    expect(showArgs).toContain("show bd-2 --json --thread");
+    expect(showArgs).toContain("show bd-2 --json --refs");
+    expect(showArgs).not.toContain("--long --thread");
+    expect(showArgs).not.toContain("--include-comments");
+    expect(showArgs).not.toContain("--include-dependents");
+  });
+
+  it("tasks show still renders primary details when optional Beads thread lookup fails", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "list" ]; then
+  cat <<'JSON'
+[
+  {
+    "id": "bd-2",
+    "title": "Write docs",
+    "status": "open",
+    "labels": ["ready-for-agent"]
+  }
+]
+JSON
+  exit 0
+fi
+if [ "$1" = "show" ] && [ "$2" = "bd-2" ] && [ "$4" = "--long" ]; then
+  cat <<'JSON'
+[
+  {
+    "id": "bd-2",
+    "title": "Write docs",
+    "status": "open",
+    "labels": ["ready-for-agent"],
+    "description": "Primary details"
+  }
+]
+JSON
+  exit 0
+fi
+if [ "$1" = "show" ] && [ "$2" = "bd-2" ] && [ "$4" = "--thread" ]; then
+  cat >&2 <<'JSON'
+{
+  "error": "fetching message bd-2: not found: issue bd-2",
+  "schema_version": 1
+}
+JSON
+  exit 1
+fi
+if [ "$1" = "show" ] && [ "$2" = "bd-2" ] && [ "$4" = "--refs" ]; then
+  cat <<'JSON'
+[]
+JSON
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const { stdout } = await runCli('tasks show "Write docs"', hostDir, {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+    });
+
+    expect(stdout).toContain("Beads task bd-2");
+    expect(stdout).toContain("Primary details");
+  });
+
+  it("tasks show fails with actionable error for ambiguous exact titles", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const boardJson = JSON.stringify([
+      { id: "bd-1", title: "Duplicate task", status: "open" },
+      {
+        id: "bd-2",
+        title: "Duplicate task",
+        status: "open",
+        labels: ["ready-for-agent"],
+      },
+    ]);
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "list" ]; then
+  printf '%s\n' '${boardJson}'
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    try {
+      await runCli('tasks show "Duplicate task"', hostDir, {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      });
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain("multiple tasks with the same exact title");
+      expect(output).toContain("bd-1");
+      expect(output).toContain("bd-2");
+    }
+  });
+
+  it("tasks show fails with actionable error for out-of-range list numbers", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const boardJson = JSON.stringify([
+      { id: "bd-1", title: "Inbox task", status: "open" },
+      {
+        id: "bd-2",
+        title: "Ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+      },
+    ]);
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "list" ]; then
+  printf '%s\n' '${boardJson}'
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    try {
+      await runCli("tasks show 3", hostDir, {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      });
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain("out of range");
+      expect(output).toContain("1-2");
+    }
   });
 
   it("tasks create creates a manual inbox task with origin metadata", async () => {
@@ -937,6 +1187,18 @@ exit 1
     await writeFile(
       bdPath,
       `#!/bin/sh
+if [ "$1" = "list" ]; then
+  cat <<'JSON'
+[
+  {
+    "id": "bd-99",
+    "title": "Commented task",
+    "status": "open"
+  }
+]
+JSON
+  exit 0
+fi
 if [ "$1" = "comments" ] && [ "$2" = "add" ]; then
   printf '%s\n' "$@" > "${argsFile}"
   exit 0
@@ -963,6 +1225,73 @@ exit 1
     expect(args).not.toContain("update");
     expect(args).not.toContain("--status");
     expect(stdout).toContain("Appended a comment to Beads task bd-99.");
+  });
+
+  it("tasks comment resolves exact titles and list indices", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const commentArgsFile = join(hostDir, "comment-args.txt");
+    const boardJson = JSON.stringify([
+      { id: "bd-1", title: "Inbox task", status: "open" },
+      {
+        id: "bd-2",
+        title: "Write docs",
+        status: "open",
+        labels: ["ready-for-agent"],
+      },
+      { id: "bd-3", title: "Done task", status: "closed", labels: ["done"] },
+    ]);
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "list" ]; then
+  printf '%s\n' '${boardJson}'
+  exit 0
+fi
+if [ "$1" = "comments" ] && [ "$2" = "add" ]; then
+  printf '%s\n' "$*" >> "${commentArgsFile}"
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const titleResult = await runCli(
+      'tasks comment "Write docs" --body "Comment from title"',
+      hostDir,
+      {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      },
+    );
+    expect(titleResult.stdout).toContain(
+      "Appended a comment to Beads task bd-2.",
+    );
+
+    const indexResult = await runCli(
+      'tasks comment 2 --body "Comment from index"',
+      hostDir,
+      {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      },
+    );
+    expect(indexResult.stdout).toContain(
+      "Appended a comment to Beads task bd-2.",
+    );
+
+    const commentArgs = await readFile(commentArgsFile, "utf-8");
+    expect(commentArgs).toContain("comments add bd-2 Comment from title");
+    expect(commentArgs).toContain("comments add bd-2 Comment from index");
   });
 
   it("--help shows podman namespace", async () => {

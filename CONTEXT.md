@@ -70,6 +70,10 @@ _Avoid_: "task source", "canonical task", "issue"
 How a **task** entered the **local task store**, such as PRD decomposition, user feedback, manual entry, or **task sync**.
 _Avoid_: "category" (reserved for bug/enhancement), "source of truth"
 
+**Task selector**:
+A user-provided reference to one **task** in the **Hub task board**, resolved as an exact Beads id, exact task title, or the 1-based number shown by `sandcastle tasks list`.
+_Avoid_: "task id" when title or list number is also accepted, "query" (implies fuzzy matching)
+
 **Slice type**:
 Whether a PRD-derived **task** is AFK-ready for an **agent** or HITL-owned by a human.
 _Avoid_: "category" (reserved for bug/enhancement), "status"
@@ -154,6 +158,26 @@ _Avoid_: "run" (ambiguous with the JS `run()` function), "cycle", "loop"
 A runtime-selectable orchestration shape for a Sandcastle run.
 _Avoid_: "template" (reserved for scaffolded files), "script", "main file", "agent-flow" (too narrow)
 
+**Agent-driven task command**:
+A task-board CLI command whose judgment-producing work is performed by a **flow**, while the command remains as a user-friendly shortcut and Sandcastle owns validation, confirmation, and state writes.
+_Avoid_: "plain CLI logic" (misses the **agent** judgment), "skill call" (too provider-specific), "hidden flow"
+
+**Judgment-producing task command**:
+A task-board CLI command whose primary outcome depends on semantic judgment, such as PRD decomposition or task triage.
+_Avoid_: "task command" (too broad), "CRUD command" (not judgment-producing), "heuristic command"
+
+**Task proposal**:
+A schema-validated **structured output** produced by an **agent-driven task command** before Sandcastle writes to the **local task store**.
+_Avoid_: "task mutation" (too early), "agent result" (too vague), "draft" (ambiguous with human notes)
+
+**Proposal flow**:
+A no-sandbox **flow** that produces a **task proposal** without directly changing code or writing to the **local task store**.
+_Avoid_: "analysis command" (too vague), "sandboxed planning flow" (incorrect), "direct task writer"
+
+**Proposal session**:
+An interactive **proposal flow** conversation where the user and **agent** refine a **task proposal** before Sandcastle validates and applies it.
+_Avoid_: "chat" (too generic), "approval prompt" (too narrow), "one-shot proposal"
+
 **Flow batch**:
 A group of **tasks** selected together by a **flow** and coordinated through the same implement/review/merge cycle.
 _Avoid_: "iteration" (already one agent invocation), "run" (too broad), "sprint"
@@ -161,6 +185,14 @@ _Avoid_: "iteration" (already one agent invocation), "run" (too broad), "sprint"
 **Flow prompt**:
 A **prompt** owned by a **flow**, used when Sandcastle runs that **flow** through **Sandcastle Hub**.
 _Avoid_: "prompt template" (ambiguous with scaffolded prompts), "project prompt"
+
+**Hub agent config**:
+A **Sandcastle Hub**-wide configuration that selects the **agent provider**, model, and provider-specific options for each stage inside each **flow**.
+_Avoid_: "agent profile" (already used by init scaffold metadata), "project agent config" (too narrow), "model config" (provider is part of the decision)
+
+**Hub agent role**:
+A reusable stage-level entry in **Hub agent config**, such as planning, triage, implementation, review, merge, or recovery.
+_Avoid_: "flow override" (too specific), "agent profile" (init scaffold metadata), "project role" (too narrow)
 
 **Task**:
 A work item from the **backlog manager** that the **agent** selects and works on during an **iteration**.

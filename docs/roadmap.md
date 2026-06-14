@@ -294,8 +294,8 @@ Goal: 提供 CLI-first 的 Sandcastle Hub 控制面，并在同一状态模型�
 ### Tasks
 
 - [x] 明确 Hub task board、Beads 本地任务源、远程任务源同步与状态机设计（见 [sandcastle-hub-task-board](./prd/sandcastle-hub-task-board.md)、[ADR-0021](./adr/0021-hub-task-board-uses-beads-local-store.md)、[ADR-0022](./adr/0022-hub-flows-emit-per-task-merge-events.md)、[ADR-0023](./adr/0023-hub-task-statuses.md)）。
-- [x] 实现 `sandcastle tasks list` / `sandcastle tasks show <id>` 的只读 task board 投影与 Hub 状态分组。
-- [x] 实现 `sandcastle tasks create <title>` / `sandcastle tasks comment <id>` 的本地任务创建与评论写入。
+- [x] 实现 `sandcastle tasks list` / `sandcastle tasks show <task-selector>` 的只读 task board 投影与 Hub 状态分组；task selector 支持 Beads id、完整标题或 `tasks list` 序号。
+- [x] 实现 `sandcastle tasks create <title>` / `sandcastle tasks comment <task-selector>` 的本地任务创建与评论写入。
 - [x] 实现 `sandcastle tasks triage` 的 inbox / needs_info 协作状态分流与 AI triage 评论（见 [#66](https://github.com/Yibeibankaishui/sandcastle/issues/66)）。
 - [x] 实现 `sandcastle tasks from-prd <prd-ref>` 的 PRD 垂直切片分解、AFK/HITL 分类、人工确认依赖与 Beads 任务创建（见 [#67](https://github.com/Yibeibankaishui/sandcastle/issues/67)）。
 - [x] 实现 task claim metadata 与 Hub run 事件存储，为 flow 执行提供 run/batch/task 记录（见 [#69](https://github.com/Yibeibankaishui/sandcastle/issues/69)）。
@@ -303,7 +303,7 @@ Goal: 提供 CLI-first 的 Sandcastle Hub 控制面，并在同一状态模型�
 - [x] 实现 `sandcastle tasks sync` 的 GitHub Issues 远程同步：拉取 Issue 到 Beads、推送协作状态标签/关闭动作，并记录 `push_pending` / `sync_conflict`（见 [#68](https://github.com/Yibeibankaishui/sandcastle/issues/68)）。
 - [x] 实现 with-review Hub flow：implementation 成功后进入 `reviewing`，reviewer 完成后推进到 `waiting_for_merge`（见 [#71](https://github.com/Yibeibankaishui/sandcastle/issues/71)）。
 - [x] 实现 Hub batch merge：eligible `waiting_for_merge` 任务进入 `merging`，按任务 emit merge/verification/close 事件，并在 merge、verification、本地 close 全部成功后标记 `done`（见 [#72](https://github.com/Yibeibankaishui/sandcastle/issues/72)）。
-- [x] 实现 `sandcastle tasks recover <id>`：释放 stale claim、恢复 recoverable `failed` 任务，并处理已 merge 分支上的 `close_failed`（见 [#73](https://github.com/Yibeibankaishui/sandcastle/issues/73)）。
+- [x] 实现 `sandcastle tasks recover <task-selector>`：释放 stale claim、恢复 recoverable `failed` 任务，并处理已 merge 分支上的 `close_failed`（见 [#73](https://github.com/Yibeibankaishui/sandcastle/issues/73)）。
 - [x] 增强 `sandcastle project status`：汇总 Hub 任务状态计数、active run/batch、失败任务与 sync 状态，并指向 Hub run 目录（见 [#74](https://github.com/Yibeibankaishui/sandcastle/issues/74)）。
 - [x] 实现 Hub-wide agent role config CLI：`agent-config path/show/set-role`、缺失角色提示与非交互失败行为（见 [#79](https://github.com/Yibeibankaishui/sandcastle/issues/79)、parent [#78](https://github.com/Yibeibankaishui/sandcastle/issues/78)）。
 - [x] 为 Hub flow registry 增加 typed input schema，并在 `sandcastle run --flow --input` 与 task shortcut 命令中校验 proposal flow 输入（见 [#80](https://github.com/Yibeibankaishui/sandcastle/issues/80)、parent [#78](https://github.com/Yibeibankaishui/sandcastle/issues/78)）。

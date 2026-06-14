@@ -442,13 +442,13 @@ Hub task board v1 should expose:
 
 ```bash
 sandcastle tasks list
-sandcastle tasks show <id>
+sandcastle tasks show <task-selector>
 sandcastle tasks create
 sandcastle tasks from-prd <prd-ref>
 sandcastle tasks triage
 sandcastle tasks sync
-sandcastle tasks comment <id>
-sandcastle tasks recover <id>
+sandcastle tasks comment <task-selector>
+sandcastle tasks recover <task-selector>
 sandcastle project status
 ```
 
@@ -463,6 +463,8 @@ Command responsibilities:
 - `tasks comment`: append a Beads comment.
 - `tasks recover`: repair failed or stale execution states and write a recovery comment.
 - `project status`: show project summary, credentials, active runs, and task board counts.
+
+`<task-selector>` resolves to one local Beads task by exact Beads id, exact task title, or the 1-based number shown by `tasks list`. Ambiguous titles must fail with candidate ids instead of guessing.
 
 ## Open Questions
 
