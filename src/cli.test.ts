@@ -163,6 +163,72 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("project status");
   });
 
+  it("root help exposes the agent-config namespace", async () => {
+    const { stdout } = await runCli("--help", process.cwd());
+    expect(stdout).toContain("agent-config");
+    expect(stdout).toContain("agent-config path");
+    expect(stdout).toContain("agent-config show");
+    expect(stdout).toContain("agent-config set-role");
+  });
+
+  it("agent-config path prints the Hub agent config file path", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-agent-config-"));
+    const dataDir = join(hostDir, "xdg-data");
+    const { stdout } = await runCli("agent-config path", hostDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    expect(stdout).toContain(
+      join(dataDir, "sandcastle", "hub", "agent-roles.json"),
+    );
+  });
+
+  it("agent-config show reports missing roles from an empty config", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-agent-config-"));
+    const dataDir = join(hostDir, "xdg-data");
+    const { stdout } = await runCli("agent-config show", hostDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    expect(stdout).toContain("Configured roles:");
+    expect(stdout).toContain("planning: (missing)");
+    expect(stdout).toContain("Missing roles:");
+  });
+
+  it("agent-config set-role persists provider and model settings", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-agent-config-"));
+    const dataDir = join(hostDir, "xdg-data");
+    const env = { ...process.env, XDG_DATA_HOME: dataDir };
+    const { stdout } = await runCli(
+      "agent-config set-role planning --provider codex --model gpt-5.4-mini --options effort=medium",
+      hostDir,
+      env,
+    );
+    expect(stdout).toContain("Saved Hub agent role planning");
+    expect(stdout).toContain("codex");
+    expect(stdout).toContain("effort=medium");
+
+    const show = await runCli("agent-config show", hostDir, env);
+    expect(show.stdout).toContain(
+      "planning: codex / gpt-5.4-mini (effort=medium)",
+    );
+  });
+
+  it("agent-config set-role rejects invalid roles", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-agent-config-"));
+    const dataDir = join(hostDir, "xdg-data");
+    try {
+      await runCli(
+        "agent-config set-role invalid --provider codex --model gpt-5.4-mini",
+        hostDir,
+        { ...process.env, XDG_DATA_HOME: dataDir },
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      expect(cliFailureOutput(err)).toMatch(/Unknown Hub agent role/i);
+    }
+  });
+
   it("root help exposes the tasks namespace", async () => {
     const { stdout } = await runCli("--help", process.cwd());
     expect(stdout).toContain("tasks");

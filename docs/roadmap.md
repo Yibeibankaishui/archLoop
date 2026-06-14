@@ -305,6 +305,7 @@ Goal: 提供 CLI-first 的 Sandcastle Hub 控制面，并在同一状态模型�
 - [x] 实现 Hub batch merge：eligible `waiting_for_merge` 任务进入 `merging`，按任务 emit merge/verification/close 事件，并在 merge、verification、本地 close 全部成功后标记 `done`（见 [#72](https://github.com/Yibeibankaishui/sandcastle/issues/72)）。
 - [x] 实现 `sandcastle tasks recover <id>`：释放 stale claim、恢复 recoverable `failed` 任务，并处理已 merge 分支上的 `close_failed`（见 [#73](https://github.com/Yibeibankaishui/sandcastle/issues/73)）。
 - [x] 增强 `sandcastle project status`：汇总 Hub 任务状态计数、active run/batch、失败任务与 sync 状态，并指向 Hub run 目录（见 [#74](https://github.com/Yibeibankaishui/sandcastle/issues/74)）。
+- [x] 实现 Hub-wide agent role config CLI：`agent-config path/show/set-role`、缺失角色提示与非交互失败行为（见 [#79](https://github.com/Yibeibankaishui/sandcastle/issues/79)、parent [#78](https://github.com/Yibeibankaishui/sandcastle/issues/78)）。
 - [ ] 定义 Sandcastle Hub 控制面的核心用户路径。
 - [ ] 设计 Hub project onboarding、credentials 和 flow run CLI。
 - [ ] 设计 run / sandbox / branch / logs / agent stream 的可视化模型。
