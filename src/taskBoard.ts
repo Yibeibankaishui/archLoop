@@ -949,6 +949,7 @@ export interface CreateHubTaskInput {
   readonly kind?: string;
   readonly sliceType?: "AFK" | "HITL";
   readonly prdRef?: string;
+  readonly proposalRunId?: string;
   readonly hubStatus?: "inbox" | "ready_for_agent" | "ready_for_human";
 }
 
@@ -968,6 +969,7 @@ const CREATE_HUB_STATUS_LABELS: Readonly<
 export const createHubTask = (
   cwd: string,
   input: CreateHubTaskInput,
+  env: NodeJS.ProcessEnv = process.env,
 ): CreateHubTaskResult => {
   const metadata: Record<string, string> = {
     origin: input.origin ?? "manual",
@@ -980,6 +982,9 @@ export const createHubTask = (
   }
   if (input.prdRef) {
     metadata.prd_ref = input.prdRef;
+  }
+  if (input.proposalRunId) {
+    metadata.proposal_run_id = input.proposalRunId;
   }
 
   const args = ["create", input.title];
@@ -996,7 +1001,7 @@ export const createHubTask = (
     "--json",
   );
 
-  const output = runBdText(cwd, args, "tasks create");
+  const output = runBdText(cwd, args, "tasks create", env);
   const parsed = parseBdJsonOutput(output);
   const [created] = parsed;
   const record =
@@ -1022,11 +1027,13 @@ export const addHubTaskDependency = (
   cwd: string,
   dependentId: string,
   blockerId: string,
+  env: NodeJS.ProcessEnv = process.env,
 ): void => {
   runBdText(
     cwd,
     ["dep", "add", dependentId, blockerId, "--type", "blocks"],
     `tasks dependency ${dependentId} -> ${blockerId}`,
+    env,
   );
 };
 

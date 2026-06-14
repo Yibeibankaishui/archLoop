@@ -1093,7 +1093,7 @@ process.exit(1);
     expect(state).toHaveLength(1);
   });
 
-  it("tasks from-prd creates dependency-aware Beads tasks from a local PRD", async () => {
+  it("tasks from-prd requires Hub planning agent config in non-interactive mode", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
@@ -1107,36 +1107,17 @@ process.exit(1);
 ### Tasks
 
 - [ ] Implement feature core path
-- [ ] Confirm rollout checklist with maintainer
-- [ ] Add verification coverage for feature core path
 `,
     );
 
     const binDir = join(hostDir, "bin");
     await mkdir(binDir, { recursive: true });
-    const gitPath = (await execAsync("command -v git")).stdout.trim();
-    await symlink(gitPath, join(binDir, "git"));
-
-    const createArgsFile = join(hostDir, "create-args.txt");
-    const depArgsFile = join(hostDir, "dep-args.txt");
-    const createCountFile = join(hostDir, "create-count.txt");
     const bdPath = join(binDir, "bd");
     await writeFile(
       bdPath,
       `#!/bin/sh
-if [ "$1" = "create" ]; then
-  n=0
-  if [ -f "${createCountFile}" ]; then
-    n=$(cat "${createCountFile}")
-  fi
-  n=$((n + 1))
-  printf '%s' "$n" > "${createCountFile}"
-  printf '%s\\n' "$@" >> "${createArgsFile}"
-  printf '[{"id":"bd-%s","title":"%s"}]\\n' "$n" "$2"
-  exit 0
-fi
-if [ "$1" = "dep" ] && [ "$2" = "add" ]; then
-  printf '%s\\n' "$@" >> "${depArgsFile}"
+if [ "$1" = "list" ]; then
+  printf '[]\\n'
   exit 0
 fi
 exit 1
@@ -1144,32 +1125,14 @@ exit 1
     );
     await chmod(bdPath, 0o755);
 
-    const { stdout } = await runCli(
-      'tasks from-prd docs/prd/feature.md --yes --deps "2:1,3:2"',
-      hostDir,
-      {
+    await expect(
+      runCli("tasks from-prd docs/prd/feature.md --yes", hostDir, {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      },
-    );
-
-    const createArgs = await readFile(createArgsFile, "utf-8");
-    const depArgs = await readFile(depArgsFile, "utf-8");
-
-    expect(createArgs).toContain('"origin":"prd-decomposition"');
-    expect(createArgs).toContain('"slice_type":"AFK"');
-    expect(createArgs).toContain('"slice_type":"HITL"');
-    expect(createArgs).toContain('"prd_ref":"docs/prd/feature.md"');
-    expect(createArgs).toContain("needs-triage");
-    expect(depArgs).toContain("dep");
-    expect(depArgs).toContain("add");
-    expect(depArgs).toContain("bd-2");
-    expect(depArgs).toContain("bd-1");
-    expect(depArgs).toContain("bd-3");
-    expect(depArgs).toContain("bd-2");
-    expect(stdout).toContain("Created PRD-derived Beads tasks");
-    expect(stdout).toContain("bd-2 depends on bd-1");
-    expect(stdout).toContain("bd-3 depends on bd-2");
+      }).catch((error) => {
+        throw new Error(cliFailureOutput(error));
+      }),
+    ).rejects.toThrow(/planning/i);
   });
 
   it("tasks comment appends a comment without changing task status", async () => {

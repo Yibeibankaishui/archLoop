@@ -864,7 +864,9 @@ Pulls GitHub Issues labeled `Sandcastle` into Beads and pushes core Hub collabor
 
 ### `sandcastle tasks from-prd <prd-ref>`
 
-Reads a local PRD file, drafts tracer-bullet vertical slices with AFK/HITL classification, and asks you to confirm the breakdown, dependency pairs, and initial Hub status before creating Beads tasks. PRD-derived tasks default to `inbox` (`needs-triage`) unless you confirm `ready_for_agent` or `ready_for_human`. Pass `--yes` to approve the drafted slices without prompts, `--status` to set the initial Hub bucket, and `--deps` with `childIndex:parentIndex` pairs (for example `2:1,3:2`) to write Beads dependency edges.
+Runs the `prd-decomposition` proposal flow: reads a local PRD and Hub task context, invokes the Hub `planning` agent through a proposal session, and lets you refine vertical slices before creating Beads tasks. The agent proposes tracer-bullet slices with AFK/HITL classification, acceptance criteria, dependency suggestions, warnings, and rationale. Approved proposals are validated and applied locally with `prd-decomposition` origin metadata and a concise proposal run reference.
+
+Interactive mode supports multi-turn refinement and lets you choose `inbox` or `classified_ready` initial Hub states after approval (`classified_ready` maps AFK slices to `ready_for_agent` and HITL slices to `ready_for_human`). Pass `--yes` to run a one-shot proposal and create inbox tasks by default. Pass `--deps` with `childIndex:parentIndex` pairs (for example `2:1,3:2`) to override dependency edges after approval.
 
 ### `sandcastle tasks comment <task-selector>`
 
@@ -878,7 +880,7 @@ Repairs failed or stale Hub execution state for a single Beads task. Recovery is
 
 Runs a Hub-owned flow against the Beads task board in the target git repository. Use `.` for the current repository. Hub flows use bundled prompts from Sandcastle itself, not repo-local `.sandcastle/` prompt files.
 
-The first available task-board flows are `no-review` and `with-review`. Proposal flows `prd-decomposition` and `triage` also appear in the flow registry with typed input schemas; `sandcastle run` validates their `--input` values but defers execution to the matching `sandcastle tasks` shortcuts until proposal session runtime lands.
+The first available task-board flows are `no-review` and `with-review`. Proposal flows `prd-decomposition` and `triage` also appear in the flow registry with typed input schemas. `sandcastle tasks from-prd` runs the `prd-decomposition` proposal flow; `sandcastle run --flow prd-decomposition --input <prd-ref>` still validates input and defers full execution wiring to [#85](https://github.com/Yibeibankaishui/sandcastle/issues/85).
 
 The `no-review` flow reads the Beads ready queue, claims unblocked `ready_for_agent` tasks, runs an implementer with task id/title/branch supplied by TypeScript orchestration, and advances successful work to `waiting_for_merge`. Agent or sandbox failures move tasks to `failed` with a failure reason.
 
