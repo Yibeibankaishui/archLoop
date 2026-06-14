@@ -3,6 +3,12 @@ import { join } from "node:path";
 
 import { extractStructuredOutput } from "./extractStructuredOutput.js";
 import {
+  captureProposalFlowStateSnapshot,
+  detectProposalFlowMutations,
+  formatProposalFlowMutationReason,
+  type ProposalFlowStateSnapshot,
+} from "./hubProposalMutation.js";
+import {
   createHubRunContext,
   resolveHubRunEventsDirectory,
 } from "./hubExecution.js";
@@ -166,6 +172,13 @@ type ProposalSessionEvent =
       readonly runId: string;
       readonly createdAt: string;
       readonly phase: ProposalSessionPhase;
+      readonly reason: string;
+    }
+  | {
+      readonly type: "mutation_detected";
+      readonly flowId: string;
+      readonly runId: string;
+      readonly createdAt: string;
       readonly reason: string;
     };
 
@@ -372,6 +385,39 @@ const failFinalization = <T>(
   return failSession(state, "finalization", reason);
 };
 
+const failOnProposalFlowMutations = <T>(
+  state: ProposalSessionState,
+  input: {
+    readonly repoRoot: string;
+    readonly env?: NodeJS.ProcessEnv;
+    readonly beforeSnapshot: ProposalFlowStateSnapshot;
+  },
+): RunProposalSessionResult<T> | undefined => {
+  const afterSnapshot = captureProposalFlowStateSnapshot({
+    cwd: input.repoRoot,
+    env: input.env,
+  });
+  const mutationReport = detectProposalFlowMutations(
+    input.beforeSnapshot,
+    afterSnapshot,
+  );
+  if (!mutationReport.hasMutations) {
+    return undefined;
+  }
+
+  const reason = formatProposalFlowMutationReason(mutationReport);
+  writeJson(state.paths.applyResultPath, {
+    status: "blocked_mutations",
+    reason,
+  });
+  appendProposalEvent(state.runDir, {
+    type: "mutation_detected",
+    ...proposalEventBase(state),
+    reason,
+  });
+  return failSession(state, "finalization", reason);
+};
+
 export const runProposalSession = async <T>(
   input: RunProposalSessionInput<T>,
 ): Promise<RunProposalSessionResult<T>> => {
@@ -394,6 +440,10 @@ export const runProposalSession = async <T>(
     paths: resolveProposalSessionArtifactPaths(context.runDir),
   };
   const transcript: ProposalTranscriptTurn[] = [];
+  const mutationBeforeSnapshot = captureProposalFlowStateSnapshot({
+    cwd: repoRoot,
+    env: input.env,
+  });
 
   persistPreparedContext(state.paths, input.preparedContext);
   persistTranscript(state.paths, transcript);
@@ -556,6 +606,16 @@ export const runProposalSession = async <T>(
   }
 
   writeJson(state.paths.finalProposalPath, finalProposal);
+
+  const mutationFailure = failOnProposalFlowMutations<T>(state, {
+    repoRoot,
+    env: input.env,
+    beforeSnapshot: mutationBeforeSnapshot,
+  });
+  if (mutationFailure) {
+    return mutationFailure;
+  }
+
   writeJson(state.paths.applyResultPath, { status: "pending" });
   appendProposalEvent(state.runDir, {
     type: "finalization_succeeded",
