@@ -534,6 +534,11 @@ export const runHubFlow = async (
   if (!flowDefinition) {
     throw new Error(`Unknown Hub flow: "${input.flowId}"`);
   }
+  if (flowDefinition.kind === "proposal") {
+    throw new Error(
+      `Hub flow "${input.flowId}" is a proposal flow and must be executed through its task shortcut or proposal session runtime.`,
+    );
+  }
   if (flowDefinition.hasReviewer && !input.reviewer) {
     throw new Error(
       `Hub flow "${input.flowId}" requires a reviewer but none was provided`,
@@ -581,7 +586,7 @@ export const runHubFlow = async (
         context,
         task,
         implementPromptFile,
-        flowDefinition.hasReviewer,
+        flowDefinition.hasReviewer === true,
         reviewPromptFile,
       ),
     );

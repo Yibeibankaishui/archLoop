@@ -229,6 +229,57 @@ describe("sandcastle CLI", () => {
     }
   });
 
+  it("run --flow prd-decomposition validates readable PRD input before execution", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-run-flow-input-"));
+    await initRepo(hostDir);
+    await mkdir(join(hostDir, "docs"), { recursive: true });
+    await writeFile(
+      join(hostDir, "docs", "feature.md"),
+      "# PRD: Feature\n\n## Tasks\n\n- [ ] Build it\n",
+    );
+
+    const { stdout } = await runCli(
+      "run . --flow prd-decomposition --input docs/feature.md",
+      hostDir,
+    );
+    expect(stdout).toContain("PRD input: docs/feature.md");
+    expect(stdout).toContain(
+      "Proposal flow execution via sandcastle run is not available yet",
+    );
+  });
+
+  it("run --flow prd-decomposition rejects missing required input", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-run-flow-input-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli("run . --flow prd-decomposition", hostDir);
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      expect(cliFailureOutput(err)).toMatch(/PRD file path is required/i);
+    }
+  });
+
+  it("run --flow triage defaults task query to inbox and needs_info", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-run-flow-input-"));
+    await initRepo(hostDir);
+
+    const { stdout } = await runCli("run . --flow triage", hostDir);
+    expect(stdout).toContain("Task query: inbox,needs_info");
+  });
+
+  it("run --flow no-review rejects unsupported --input values", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-run-flow-input-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli("run . --flow no-review --input docs/feature.md", hostDir);
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      expect(cliFailureOutput(err)).toMatch(/does not accept --input/i);
+    }
+  });
+
   it("root help exposes the tasks namespace", async () => {
     const { stdout } = await runCli("--help", process.cwd());
     expect(stdout).toContain("tasks");

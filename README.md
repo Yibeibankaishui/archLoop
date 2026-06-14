@@ -876,15 +876,18 @@ Repairs failed or stale Hub execution state for a single Beads task. Recovery is
 
 Runs a Hub-owned flow against the Beads task board in the target git repository. Use `.` for the current repository. Hub flows use bundled prompts from Sandcastle itself, not repo-local `.sandcastle/` prompt files.
 
-The first available flow is `no-review`: it reads the Beads ready queue, claims unblocked `ready_for_agent` tasks, runs an implementer with task id/title/branch supplied by TypeScript orchestration, and advances successful work to `waiting_for_merge`. Agent or sandbox failures move tasks to `failed` with a failure reason.
+The first available task-board flows are `no-review` and `with-review`. Proposal flows `prd-decomposition` and `triage` also appear in the flow registry with typed input schemas; `sandcastle run` validates their `--input` values but defers execution to the matching `sandcastle tasks` shortcuts until proposal session runtime lands.
+
+The `no-review` flow reads the Beads ready queue, claims unblocked `ready_for_agent` tasks, runs an implementer with task id/title/branch supplied by TypeScript orchestration, and advances successful work to `waiting_for_merge`. Agent or sandbox failures move tasks to `failed` with a failure reason.
 
 The `with-review` flow adds a reviewer stage after implementation: successful work moves to `reviewing`, the reviewer receives the task branch and diff/commit context from orchestration, and completed review advances the task to `waiting_for_merge`. Review failures move tasks to `failed` with a failure reason.
 
 After implementation and review complete, Hub moves eligible `waiting_for_merge` tasks in the batch to `merging`, merges each branch with per-task events, runs verification after each merge, and closes the local Beads task only when merge, verification, and close all succeed. Merge conflicts, verification failures, or close failures stop the batch: the current task becomes `failed`, unprocessed tasks return to `waiting_for_merge`, and the batch becomes `partial_failed`.
 
-| Option   | Required | Description                              |
-| -------- | -------- | ---------------------------------------- |
-| `--flow` | Yes      | Hub flow id (`no-review`, `with-review`) |
+| Option    | Required | Description                                                                                                             |
+| --------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `--flow`  | Yes      | Hub flow id (`no-review`, `with-review`, `prd-decomposition`, `triage`)                                                 |
+| `--input` | No       | Flow-specific input (`<prd-ref>` for `prd-decomposition`; optional task query for `triage`, default `inbox,needs_info`) |
 
 Hub flow runs write run, batch, and task event records into the Hub run directory under the Sandcastle user data directory. The task board uses that run history to keep claims and execution progress separate from normal Beads task status.
 

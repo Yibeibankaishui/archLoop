@@ -84,11 +84,16 @@ import {
 } from "./hubFlowExecution.js";
 import { getHubFlowDefinition, listHubFlows } from "./hubFlows.js";
 import {
+  formatValidatedHubFlowInputSummary,
+  mapFromPrdArgToFlowInput,
+  mapTriageToFlowInput,
+  validateHubFlowInput,
+} from "./hubFlowInput.js";
+import {
   draftPrdSlices,
   formatPrdDraftPlan,
   parseDependencySpec,
   publishPrdDraftPlan,
-  readPrdFile,
   type PrdHubStatus,
 } from "./prdDecomposition.js";
 import {
@@ -1700,6 +1705,13 @@ const tasksTriageCommand = Command.make("triage", {}, () =>
   Effect.gen(function* () {
     const d = yield* Display;
     const cwd = process.cwd();
+    yield* Effect.try({
+      try: () => mapTriageToFlowInput(cwd),
+      catch: (error) =>
+        new TaskBoardError({
+          message: error instanceof Error ? error.message : String(error),
+        }),
+    });
     const result = yield* Effect.try({
       try: () => triageHubTasks({ cwd }),
       catch: toTaskBoardError,
@@ -1843,13 +1855,14 @@ const tasksFromPrdCommand = Command.make(
     Effect.gen(function* () {
       const d = yield* Display;
       const cwd = process.cwd();
-      const content = yield* Effect.try({
-        try: () => readPrdFile(cwd, prdRef),
+      const validatedInput = yield* Effect.try({
+        try: () => mapFromPrdArgToFlowInput(cwd, prdRef),
         catch: (error) =>
           new TaskBoardError({
             message: error instanceof Error ? error.message : String(error),
           }),
       });
+      const content = validatedInput.content;
       const plan = draftPrdSlices(content, prdRef);
 
       if (plan.slices.length === 0) {
@@ -2069,6 +2082,13 @@ const flowOption = Options.text("flow").pipe(
   Options.withDescription(`Hub flow id (${getHubFlowIds()})`),
 );
 
+const flowInputOption = Options.text("input").pipe(
+  Options.withDescription(
+    "Flow-specific input value (PRD path for prd-decomposition; optional task query for triage)",
+  ),
+  Options.optional,
+);
+
 const toHubAgentConfigError = (error: unknown): HubAgentConfigError =>
   error instanceof HubAgentConfigError
     ? error
@@ -2208,8 +2228,9 @@ const runCommand = Command.make(
       ),
     ),
     flow: flowOption,
+    input: flowInputOption,
   },
-  ({ project, flow }) =>
+  ({ project, flow, input }) =>
     Effect.gen(function* () {
       const d = yield* Display;
       const projectDir = project.trim().length > 0 ? project : ".";
@@ -2226,6 +2247,38 @@ const runCommand = Command.make(
         try: () => resolveGitRepoRoot(projectDir),
         catch: toHubFlowError,
       });
+
+      const rawInput = optionalTextValue(input);
+      if (rawInput && !flowDefinition.input) {
+        return yield* Effect.fail(
+          new HubFlowError({
+            message: `Hub flow "${flow}" does not accept --input.`,
+          }),
+        );
+      }
+
+      if (flowDefinition.input) {
+        const validatedInput = yield* Effect.try({
+          try: () =>
+            validateHubFlowInput(flowDefinition.id, {
+              cwd: repoRoot,
+              rawInput,
+            }),
+          catch: toHubFlowError,
+        });
+        yield* d.status(
+          formatValidatedHubFlowInputSummary(validatedInput),
+          "info",
+        );
+
+        if (flowDefinition.kind === "proposal") {
+          yield* d.status(
+            `Validated "${flowDefinition.id}" flow input. Proposal flow execution via sandcastle run is not available yet; use the matching sandcastle tasks shortcut.`,
+            "info",
+          );
+          return;
+        }
+      }
 
       const result = yield* Effect.tryPromise({
         try: () =>
