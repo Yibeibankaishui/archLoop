@@ -33,14 +33,16 @@ export const isHubTriageSourceStatus = (
 ): value is HubTriageSourceStatus =>
   (HUB_TRIAGE_SOURCE_STATUSES as readonly string[]).includes(value);
 
-const OUTCOME_LABELS: Readonly<Record<HubTriageOutcome, string>> = {
+export const HUB_TRIAGE_OUTCOME_LABELS: Readonly<
+  Record<HubTriageOutcome, string>
+> = {
   needs_info: "needs-info",
   ready_for_agent: "ready-for-agent",
   ready_for_human: "ready-for-human",
   wontfix: "wontfix",
 };
 
-const TRIAGE_LABELS_TO_CLEAR = [
+export const HUB_TRIAGE_LABELS_TO_CLEAR = [
   "needs-triage",
   "needs-info",
   "ready-for-agent",
@@ -229,14 +231,24 @@ const applyHubTaskTriageOutcome = (
   }
 
   const args = ["update", taskId, "--set-metadata", JSON.stringify(metadata)];
-  for (const label of TRIAGE_LABELS_TO_CLEAR) {
+  for (const label of HUB_TRIAGE_LABELS_TO_CLEAR) {
     args.push("--remove-labels", label);
   }
 
   if (outcome === "wontfix") {
-    args.push("--status", "closed", "--add-labels", OUTCOME_LABELS.wontfix);
+    args.push(
+      "--status",
+      "closed",
+      "--add-labels",
+      HUB_TRIAGE_OUTCOME_LABELS.wontfix,
+    );
   } else {
-    args.push("--status", "open", "--add-labels", OUTCOME_LABELS[outcome]);
+    args.push(
+      "--status",
+      "open",
+      "--add-labels",
+      HUB_TRIAGE_OUTCOME_LABELS[outcome],
+    );
   }
 
   runBdText(cwd, args, `tasks triage ${taskId}`, env);

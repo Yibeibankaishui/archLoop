@@ -5,10 +5,10 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { HubFlowError } from "./errors.js";
 import { Output } from "./Output.js";
 import {
-  HUB_TRIAGE_SOURCE_STATUSES,
+  HUB_TRIAGE_LABELS_TO_CLEAR,
+  HUB_TRIAGE_OUTCOME_LABELS,
   formatHubTriageComment,
   type HubTriageOutcome,
-  type HubTriageSourceStatus,
 } from "./hubTriage.js";
 import {
   appendHubTaskComment,
@@ -76,19 +76,10 @@ const TRIAGE_OUTCOMES = [
 
 const TRIAGE_CONFIDENCE_LEVELS = ["high", "medium", "low"] as const;
 
-const OUTCOME_LABELS: Readonly<Record<HubTriageOutcome, string>> = {
-  needs_info: "needs-info",
-  ready_for_agent: "ready-for-agent",
-  ready_for_human: "ready-for-human",
-  wontfix: "wontfix",
-};
-
-const TRIAGE_LABELS_TO_CLEAR = [
-  "needs-triage",
-  "needs-info",
-  "ready-for-agent",
-  "ready-for-human",
-] as const;
+const SAFE_TRIAGE_OUTCOMES_FOR_YES = new Set<HubTriageOutcome>([
+  "needs_info",
+  "ready_for_agent",
+]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -250,11 +241,12 @@ export const selectTasksForTriageQuery = (
   board: HubTaskBoard,
   query: string,
 ): readonly HubTaskProjection[] => {
-  const statuses = query
-    .split(",")
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0) as HubTriageSourceStatus[];
-  const statusSet = new Set<string>(statuses);
+  const statusSet = new Set(
+    query
+      .split(",")
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0),
+  );
   return board.tasks.filter((task) => statusSet.has(task.hubStatus));
 };
 
@@ -317,28 +309,10 @@ export const recommendationHasDependencyChanges = (
 
 export const isSafeTriageDecisionForYes = (
   recommendation: TriageTaskRecommendation,
-): boolean => {
-  if (recommendation.confidence !== "high") {
-    return false;
-  }
-  if (recommendation.outcome === "wontfix") {
-    return false;
-  }
-  if (recommendation.outcome === "ready_for_human") {
-    return false;
-  }
-  if (recommendationHasDependencyChanges(recommendation)) {
-    return false;
-  }
-  return (
-    recommendation.outcome === "needs_info" ||
-    recommendation.outcome === "ready_for_agent"
-  );
-};
-
-export const requiresExplicitTriageConfirmation = (
-  recommendation: TriageTaskRecommendation,
-): boolean => !isSafeTriageDecisionForYes(recommendation);
+): boolean =>
+  recommendation.confidence === "high" &&
+  SAFE_TRIAGE_OUTCOMES_FOR_YES.has(recommendation.outcome) &&
+  !recommendationHasDependencyChanges(recommendation);
 
 export const partitionTriageRecommendations = (
   recommendations: readonly TriageTaskRecommendation[],
@@ -360,32 +334,6 @@ export const partitionTriageRecommendations = (
   return { safe, requiresConfirmation };
 };
 
-export const filterTriageProposalForYes = (
-  proposal: TriageProposal,
-): {
-  readonly proposal: TriageProposal;
-  readonly blocked: readonly {
-    readonly taskId: string;
-    readonly reason: string;
-  }[];
-} => {
-  const { safe, requiresConfirmation } = partitionTriageRecommendations(
-    proposal.recommendations,
-  );
-  const blocked = requiresConfirmation.map((recommendation) => ({
-    taskId: recommendation.taskId,
-    reason: formatBlockedTriageReason(recommendation),
-  }));
-
-  return {
-    proposal: {
-      ...proposal,
-      recommendations: safe,
-    },
-    blocked,
-  };
-};
-
 export const formatBlockedTriageReason = (
   recommendation: TriageTaskRecommendation,
 ): string => {
@@ -405,6 +353,45 @@ export const formatBlockedTriageReason = (
     return "ready_for_human requires explicit confirmation";
   }
   return "triage decision requires explicit confirmation";
+};
+
+const blockedTriageRecommendations = (
+  recommendations: readonly TriageTaskRecommendation[],
+): {
+  readonly safe: readonly TriageTaskRecommendation[];
+  readonly blocked: readonly { taskId: string; reason: string }[];
+} => {
+  const { safe, requiresConfirmation } =
+    partitionTriageRecommendations(recommendations);
+  return {
+    safe,
+    blocked: requiresConfirmation.map((recommendation) => ({
+      taskId: recommendation.taskId,
+      reason: formatBlockedTriageReason(recommendation),
+    })),
+  };
+};
+
+export const filterTriageProposalForYes = (
+  proposal: TriageProposal,
+): {
+  readonly proposal: TriageProposal;
+  readonly blocked: readonly {
+    readonly taskId: string;
+    readonly reason: string;
+  }[];
+} => {
+  const { safe, blocked } = blockedTriageRecommendations(
+    proposal.recommendations,
+  );
+
+  return {
+    proposal: {
+      ...proposal,
+      recommendations: safe,
+    },
+    blocked,
+  };
 };
 
 const runBdText = (
@@ -451,12 +438,12 @@ const applyTriageOutcomeUpdate = (
   }
 
   const args = ["update", taskId, "--set-metadata", JSON.stringify(metadata)];
-  for (const label of TRIAGE_LABELS_TO_CLEAR) {
+  for (const label of HUB_TRIAGE_LABELS_TO_CLEAR) {
     args.push("--remove-labels", label);
   }
 
   const labelsToAdd = new Set<string>([
-    OUTCOME_LABELS[outcome],
+    HUB_TRIAGE_OUTCOME_LABELS[outcome],
     ...additionalLabels.filter((label) => label.trim().length > 0),
   ]);
   for (const label of labelsToAdd) {
@@ -531,19 +518,10 @@ export const applyTriageProposal = (
   let recommendations = input.proposal.recommendations;
   const blocked: { taskId: string; reason: string }[] = [];
 
-  if (input.yesMode) {
-    const filtered = filterTriageProposalForYes(input.proposal);
-    recommendations = filtered.proposal.recommendations;
-    blocked.push(...filtered.blocked);
-  } else if (!input.allowRiskyDecisions) {
-    const partitioned = partitionTriageRecommendations(recommendations);
+  if (input.yesMode || !input.allowRiskyDecisions) {
+    const partitioned = blockedTriageRecommendations(recommendations);
     recommendations = partitioned.safe;
-    blocked.push(
-      ...partitioned.requiresConfirmation.map((recommendation) => ({
-        taskId: recommendation.taskId,
-        reason: formatBlockedTriageReason(recommendation),
-      })),
-    );
+    blocked.push(...partitioned.blocked);
   }
 
   const applied: ApplyTriageRecommendationResult[] = [];
@@ -551,8 +529,8 @@ export const applyTriageProposal = (
     const task = loadHubTask(input.cwd, recommendation.taskId, env);
     const additionalLabels = (recommendation.labels ?? []).filter(
       (label) =>
-        !(TRIAGE_LABELS_TO_CLEAR as readonly string[]).includes(label) &&
-        label !== OUTCOME_LABELS[recommendation.outcome],
+        !(HUB_TRIAGE_LABELS_TO_CLEAR as readonly string[]).includes(label) &&
+        label !== HUB_TRIAGE_OUTCOME_LABELS[recommendation.outcome],
     );
 
     applyTriageOutcomeUpdate(
@@ -600,14 +578,3 @@ export const injectPreparedContextIntoPrompt = (
     "{{PREPARED_CONTEXT}}",
     formatTriagePreparedContextForPrompt(context),
   );
-
-export const assertTriageSourceStatuses = (query: string): void => {
-  const statuses = query.split(",").map((value) => value.trim());
-  for (const status of statuses) {
-    if (!(HUB_TRIAGE_SOURCE_STATUSES as readonly string[]).includes(status)) {
-      throw new HubFlowError({
-        message: `Unsupported triage task query status "${status}".`,
-      });
-    }
-  }
-};

@@ -18,21 +18,24 @@ import { noSandbox } from "./sandboxes/no-sandbox.js";
 const resolveHubAgentProvider = (entry: HubAgentRoleEntry): AgentProvider => {
   const options = entry.options ?? {};
   switch (entry.provider) {
-    case "cursor":
-      return cursor(entry.model, {
-        ...(options.mode === "plan" || options.mode === "ask"
-          ? { mode: options.mode }
-          : {}),
-      });
-    case "codex":
-      return codex(entry.model, {
-        ...(options.effort === "low" ||
-        options.effort === "medium" ||
-        options.effort === "high" ||
-        options.effort === "xhigh"
-          ? { effort: options.effort }
-          : {}),
-      });
+    case "cursor": {
+      if (options.mode === "plan" || options.mode === "ask") {
+        return cursor(entry.model, { mode: options.mode });
+      }
+      return cursor(entry.model);
+    }
+    case "codex": {
+      const effort = options.effort;
+      if (
+        effort === "low" ||
+        effort === "medium" ||
+        effort === "high" ||
+        effort === "xhigh"
+      ) {
+        return codex(entry.model, { effort });
+      }
+      return codex(entry.model);
+    }
     case "claude-code":
       return claudeCode(entry.model);
     case "opencode":
