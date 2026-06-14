@@ -86,7 +86,6 @@ import { getHubFlowDefinition, listHubFlows } from "./hubFlows.js";
 import {
   formatValidatedHubFlowInputSummary,
   mapFromPrdArgToFlowInput,
-  mapTriageToFlowInput,
   validateHubFlowInput,
 } from "./hubFlowInput.js";
 import {
@@ -1706,7 +1705,7 @@ const tasksTriageCommand = Command.make("triage", {}, () =>
     const d = yield* Display;
     const cwd = process.cwd();
     yield* Effect.try({
-      try: () => mapTriageToFlowInput(cwd),
+      try: () => validateHubFlowInput("triage", { cwd }),
       catch: (error) =>
         new TaskBoardError({
           message: error instanceof Error ? error.message : String(error),

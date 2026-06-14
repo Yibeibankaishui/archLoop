@@ -1,15 +1,12 @@
 import { readPrdFile, resolvePrdPath } from "./prdDecomposition.js";
 import { HubFlowError } from "./errors.js";
-import { HUB_TRIAGE_SOURCE_STATUSES } from "./hubTriage.js";
-import type { HubTaskStatus } from "./taskBoard.js";
+import {
+  HUB_TRIAGE_DEFAULT_TASK_QUERY,
+  isHubTriageSourceStatus,
+} from "./hubTriage.js";
 import { getHubFlowDefinition, type HubFlowInputKind } from "./hubFlows.js";
 
-export const HUB_TRIAGE_DEFAULT_TASK_QUERY =
-  HUB_TRIAGE_SOURCE_STATUSES.join(",");
-
-const HUB_TRIAGE_QUERY_STATUS_SET = new Set<HubTaskStatus>(
-  HUB_TRIAGE_SOURCE_STATUSES,
-);
+export { HUB_TRIAGE_DEFAULT_TASK_QUERY } from "./hubTriage.js";
 
 export type ValidatedPrdFileFlowInput = {
   readonly flowId: "prd-decomposition";
@@ -37,13 +34,13 @@ export const resolveHubFlowRawInput = (
   rawInput?: string,
 ): string | undefined => {
   const trimmed = rawInput?.trim();
-  if (trimmed && trimmed.length > 0) {
+  if (trimmed) {
     return trimmed;
   }
 
-  const flow = getHubFlowDefinition(flowId);
-  const defaultValue = flow?.input?.defaultValue?.trim();
-  return defaultValue && defaultValue.length > 0 ? defaultValue : undefined;
+  const defaultValue =
+    getHubFlowDefinition(flowId)?.input?.defaultValue?.trim();
+  return defaultValue || undefined;
 };
 
 const normalizeTaskQuery = (rawQuery: string): string => {
@@ -59,7 +56,7 @@ const normalizeTaskQuery = (rawQuery: string): string => {
   }
 
   for (const status of statuses) {
-    if (!HUB_TRIAGE_QUERY_STATUS_SET.has(status as HubTaskStatus)) {
+    if (!isHubTriageSourceStatus(status)) {
       throw toHubFlowInputError(
         `Unsupported Hub task query status "${status}". Use comma-separated inbox and needs_info statuses.`,
       );
@@ -138,20 +135,32 @@ export const validateHubFlowInput = (
 export const mapFromPrdArgToFlowInput = (
   cwd: string,
   prdRef: string,
-): ValidatedPrdFileFlowInput =>
-  validateHubFlowInput("prd-decomposition", {
+): ValidatedPrdFileFlowInput => {
+  const validated = validateHubFlowInput("prd-decomposition", {
     cwd,
     rawInput: prdRef,
-  }) as ValidatedPrdFileFlowInput;
+  });
+  if (validated.kind !== "prd-file") {
+    throw toHubFlowInputError(
+      'Expected prd-file input for flow "prd-decomposition".',
+    );
+  }
+  return validated;
+};
 
 export const mapTriageToFlowInput = (
   cwd: string,
   rawInput?: string,
-): ValidatedTaskQueryFlowInput =>
-  validateHubFlowInput("triage", {
+): ValidatedTaskQueryFlowInput => {
+  const validated = validateHubFlowInput("triage", {
     cwd,
     rawInput,
-  }) as ValidatedTaskQueryFlowInput;
+  });
+  if (validated.kind !== "task-query") {
+    throw toHubFlowInputError('Expected task-query input for flow "triage".');
+  }
+  return validated;
+};
 
 export const formatValidatedHubFlowInputSummary = (
   validated: ValidatedHubFlowInput,
@@ -161,5 +170,11 @@ export const formatValidatedHubFlowInputSummary = (
       return `PRD input: ${validated.ref}`;
     case "task-query":
       return `Task query: ${validated.query}`;
+    default: {
+      const unsupportedKind: never = validated;
+      throw toHubFlowInputError(
+        `Unsupported validated Hub flow input kind "${unsupportedKind}".`,
+      );
+    }
   }
 };

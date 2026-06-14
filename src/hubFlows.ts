@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { HUB_TRIAGE_DEFAULT_TASK_QUERY } from "./hubTriage.js";
+
 export type HubFlowKind = "task-board" | "proposal";
 
 export type HubFlowInputKind = "prd-file" | "task-query";
@@ -64,7 +66,7 @@ export const HUB_FLOW_DEFINITIONS: readonly HubFlowDefinition[] = [
       kind: "task-query",
       label: "Hub task query",
       required: false,
-      defaultValue: "inbox,needs_info",
+      defaultValue: HUB_TRIAGE_DEFAULT_TASK_QUERY,
     },
   },
 ] as const;

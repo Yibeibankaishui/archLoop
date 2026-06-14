@@ -19,9 +19,19 @@ export type HubTriageOutcome =
 
 export const HUB_TRIAGE_SOURCE_STATUSES = ["inbox", "needs_info"] as const;
 
+export type HubTriageSourceStatus = (typeof HUB_TRIAGE_SOURCE_STATUSES)[number];
+
+export const HUB_TRIAGE_DEFAULT_TASK_QUERY =
+  HUB_TRIAGE_SOURCE_STATUSES.join(",");
+
 const HUB_TRIAGE_SOURCE_STATUS_SET = new Set<HubTaskStatus>(
   HUB_TRIAGE_SOURCE_STATUSES,
 );
+
+export const isHubTriageSourceStatus = (
+  value: string,
+): value is HubTriageSourceStatus =>
+  (HUB_TRIAGE_SOURCE_STATUSES as readonly string[]).includes(value);
 
 const OUTCOME_LABELS: Readonly<Record<HubTriageOutcome, string>> = {
   needs_info: "needs-info",
