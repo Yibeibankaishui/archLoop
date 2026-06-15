@@ -71,6 +71,11 @@ Replace `<TARGET_REPO>` with the project being developed.
 | `parallel-planner`             | Plan → parallel branches → merge                  |
 | `parallel-planner-with-review` | Parallel implement + per-branch review → merge    |
 
+With GitHub Issues, planner templates only list the current `ready-for-agent`
+queue (`Sandcastle` + `ready-for-agent` when label creation is enabled) and the
+generated TypeScript fails fast if a planner returns an issue outside that
+allowed queue.
+
 ## Project profiles
 
 `--project-profile` affects the Dockerfile tool layers, `bootstrap.sh`, and stack-specific verification guidance in generated workflow prompts. Choices: `generic` (default), `node`, `python`, `cpp`. v1 does not auto-detect — pick the closest. Non-blank templates run `.sandcastle/bootstrap.sh` from `sandbox.onSandboxReady`.

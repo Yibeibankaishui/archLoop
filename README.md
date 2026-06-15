@@ -648,6 +648,8 @@ console.log(result.output.score); // typed as number
 
 `parallel-planner-with-review` runs review and merge when an issue branch already has commits ahead of your current branch, even if the latest implementer run made no new commits (for example after a prior review failure). Prompts document the implement → review → merge → close lifecycle (only the merge phase closes issues), and the template stops repeated empty implement loops with actionable recovery steps. Re-run `sandcastle init` in an existing project to pick up template updates.
 
+For GitHub Issues backlogs, scaffolded planner templates list only issues in the current `ready-for-agent` queue (plus the `Sandcastle` label when label creation is enabled) and fail fast if the planner returns an issue outside that allowed queue.
+
 Select a template during `sandcastle init` when prompted, or re-run init in a fresh repo to try a different one.
 
 For all templates except `blank`, `.sandcastle/bootstrap.sh` is the repository bootstrap contract. `sandcastle init` scaffolds this user-editable script from your Project profile; non-blank templates run it from `sandbox.onSandboxReady` after the worktree is mounted and before the agent runs. Templates do not generate or repair bootstrap at run time. See [Project profiles](#project-profiles) under `sandcastle init` for the full model.

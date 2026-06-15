@@ -675,7 +675,7 @@ const BACKLOG_MANAGER_REGISTRY: BacklogManagerEntry[] = [
     name: "github-issues",
     label: "GitHub Issues",
     templateArgs: {
-      LIST_TASKS_COMMAND: `gh issue list --state open -l Sandcastle --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
+      LIST_TASKS_COMMAND: `gh issue list --state open -l Sandcastle -l ready-for-agent --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
       VIEW_TASK_COMMAND: "gh issue view <ID>",
       CLOSE_TASK_COMMAND: `gh issue close <ID> --comment "Completed by Sandcastle"`,
       BACKLOG_MANAGER_TOOLS: GITHUB_CLI_TOOLS,
@@ -1386,9 +1386,8 @@ const rewriteMainCopyToWorktreeForPresets = (
 
 /**
  * When the user opted out of the Sandcastle label, strip ` --label Sandcastle`
- * and ` -l Sandcastle`
- * from all `.md` files in the scaffolded config directory so that `gh issue list`
- * commands work without a label filter.
+ * and ` -l Sandcastle` from scaffolded text files so that `gh issue list`
+ * commands work without a Sandcastle label filter.
  */
 const rewritePromptFiles = (
   configDir: string,
@@ -1398,9 +1397,9 @@ const rewritePromptFiles = (
     const files = yield* fs
       .readDirectory(configDir)
       .pipe(Effect.mapError((e) => new Error(e.message)));
-    const mdFiles = files.filter((f) => f.endsWith(".md"));
+    const textFiles = files.filter(isTextFile);
     yield* Effect.all(
-      mdFiles.map((f) =>
+      textFiles.map((f) =>
         Effect.gen(function* () {
           const filePath = join(configDir, f);
           const content = yield* fs
@@ -1424,6 +1423,8 @@ const rewritePromptFiles = (
 const TEXT_FILE_EXTENSIONS = new Set([
   ".md",
   ".txt",
+  ".mts",
+  ".ts",
   ".env",
   ".example",
   // Dockerfile / Containerfile have no extension — handled by name check below

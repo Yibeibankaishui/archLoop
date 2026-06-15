@@ -1562,6 +1562,19 @@ describe("InitService scaffold", () => {
     expect(prompt).toContain("gh issue list");
   });
 
+  it("parallel-planner main.mts strips only the Sandcastle label when createLabel is false", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      templateName: "parallel-planner",
+      createLabel: false,
+    });
+
+    const main = await readFile(join(dir, ".sandcastle", "main.mts"), "utf-8");
+    expect(main).toContain("gh issue list");
+    expect(main).not.toContain("-l Sandcastle");
+    expect(main).toContain("-l ready-for-agent");
+  });
+
   it("sequential-reviewer implement-prompt.md strips -l Sandcastle when createLabel is false", async () => {
     const dir = await makeDir();
     await runScaffold(dir, {
@@ -2099,6 +2112,12 @@ describe("InitService scaffold", () => {
       expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
         "gh issue list",
       );
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+        "-l Sandcastle",
+      );
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+        "-l ready-for-agent",
+      );
       expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain("labels");
       expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain("comments");
       expect(manager!.templateArgs.VIEW_TASK_COMMAND).toContain(
@@ -2344,10 +2363,35 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "plan-prompt.md"),
         "utf-8",
       );
-      expect(planPrompt).toContain("gh issue list");
-      expect(planPrompt).toContain("labels");
-      expect(planPrompt).toContain("comments");
+      expect(planPrompt).toContain("{{ISSUES_JSON}}");
+      expect(planPrompt).toContain(
+        "You may only choose issues from the provided `<issues-json>` list",
+      );
+      expect(planPrompt).toContain("If `<issues-json>` is an empty array");
+      expect(planPrompt).not.toContain("!`gh issue list");
       expect(planPrompt).not.toContain("{{LIST_TASKS_COMMAND}}");
+    });
+
+    it("parallel-planner main.mts lists and validates the ready queue before implementation", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner",
+        backlogManager: getBacklogManager("github-issues"),
+      });
+
+      const main = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(main).toContain("-l Sandcastle -l ready-for-agent");
+      expect(main).toContain(
+        "const readyIssuesJson = await listReadyIssuesJson()",
+      );
+      expect(main).toContain("extractAllowedIssueIds");
+      expect(main).toContain("assertPlanUsesAllowedIssues");
+      expect(main).toContain("ISSUES_JSON: readyIssuesJson");
+      expect(main).toContain("outside this run's ready queue");
+      expect(main).not.toContain("{{LIST_TASKS_COMMAND}}");
     });
 
     it("parallel-planner with beads produces plan-prompt with bd commands", async () => {
@@ -2361,8 +2405,11 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "plan-prompt.md"),
         "utf-8",
       );
-      expect(planPrompt).toContain("bd ready --json");
-      expect(planPrompt).not.toContain("gh issue");
+      expect(planPrompt).toContain("{{ISSUES_JSON}}");
+      expect(planPrompt).toContain(
+        "You may only choose issues from the provided `<issues-json>` list",
+      );
+      expect(planPrompt).not.toContain("!`bd ready --json");
       expect(planPrompt).not.toContain("{{LIST_TASKS_COMMAND}}");
     });
 
@@ -2497,10 +2544,35 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "plan-prompt.md"),
         "utf-8",
       );
-      expect(planPrompt).toContain("gh issue list");
-      expect(planPrompt).toContain("labels");
-      expect(planPrompt).toContain("comments");
+      expect(planPrompt).toContain("{{ISSUES_JSON}}");
+      expect(planPrompt).toContain(
+        "You may only choose issues from the provided `<issues-json>` list",
+      );
+      expect(planPrompt).toContain("If `<issues-json>` is an empty array");
+      expect(planPrompt).not.toContain("!`gh issue list");
       expect(planPrompt).not.toContain("{{LIST_TASKS_COMMAND}}");
+    });
+
+    it("parallel-planner-with-review main.mts lists and validates the ready queue before implementation", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner-with-review",
+        backlogManager: getBacklogManager("github-issues"),
+      });
+
+      const main = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(main).toContain("-l Sandcastle -l ready-for-agent");
+      expect(main).toContain(
+        "const readyIssuesJson = await listReadyIssuesJson()",
+      );
+      expect(main).toContain("extractAllowedIssueIds");
+      expect(main).toContain("assertPlanUsesAllowedIssues");
+      expect(main).toContain("ISSUES_JSON: readyIssuesJson");
+      expect(main).toContain("outside this run's ready queue");
+      expect(main).not.toContain("{{LIST_TASKS_COMMAND}}");
     });
 
     it("parallel-planner-with-review with beads produces plan-prompt with bd commands", async () => {
@@ -2514,8 +2586,11 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "plan-prompt.md"),
         "utf-8",
       );
-      expect(planPrompt).toContain("bd ready --json");
-      expect(planPrompt).not.toContain("gh issue");
+      expect(planPrompt).toContain("{{ISSUES_JSON}}");
+      expect(planPrompt).toContain(
+        "You may only choose issues from the provided `<issues-json>` list",
+      );
+      expect(planPrompt).not.toContain("!`bd ready --json");
       expect(planPrompt).not.toContain("{{LIST_TASKS_COMMAND}}");
     });
 
