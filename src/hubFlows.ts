@@ -51,6 +51,10 @@ export const HUB_FLOW_DEFINITIONS: readonly HubFlowDefinition[] = [
     description:
       "Read a PRD, propose vertical slices with AFK/HITL classification, and create Beads tasks after approval",
     kind: "proposal",
+    prompts: {
+      draft: "draft-prompt.md",
+      finalization: "finalization-prompt.md",
+    },
     input: {
       kind: "prd-file",
       label: "PRD file path",

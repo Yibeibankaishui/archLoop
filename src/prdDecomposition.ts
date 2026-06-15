@@ -11,6 +11,11 @@ export type SliceType = "AFK" | "HITL";
 
 export type PrdHubStatus = "inbox" | "ready_for_agent" | "ready_for_human";
 
+export const mapSliceTypeToReadyHubStatus = (
+  sliceType: SliceType,
+): "ready_for_agent" | "ready_for_human" =>
+  sliceType === "AFK" ? "ready_for_agent" : "ready_for_human";
+
 export interface PrdDraftSlice {
   readonly key: string;
   readonly title: string;
@@ -37,7 +42,7 @@ const DELIVERABLES_SECTION_PATTERN = /^##\s+Deliverables\b/im;
 const USER_STORIES_SECTION_PATTERN = /^##\s+User Stories\b/im;
 const NEXT_SECTION_PATTERN = /^#{1,3}\s+/m;
 
-const extractPrdTitle = (content: string): string => {
+export const extractPrdTitle = (content: string): string => {
   const prdMatch = content.match(/^#\s+PRD:\s*(.+)$/m);
   if (prdMatch?.[1]) {
     return prdMatch[1].trim();

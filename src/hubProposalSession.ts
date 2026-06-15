@@ -226,6 +226,13 @@ const proposalEventBase = (state: ProposalSessionState) => ({
   createdAt: new Date().toISOString(),
 });
 
+export const writeProposalSessionApplyResult = (
+  runDir: string,
+  value: Record<string, unknown>,
+): void => {
+  writeJson(resolveProposalSessionArtifactPaths(runDir).applyResultPath, value);
+};
+
 export const resolveProposalSessionArtifactPaths = (
   runDir: string,
 ): ProposalSessionArtifactPaths => {

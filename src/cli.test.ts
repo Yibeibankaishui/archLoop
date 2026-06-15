@@ -1112,10 +1112,88 @@ process.exit(1);
 `,
     );
 
+    const dataHome = await mkdtemp(join(tmpdir(), "cli-xdg-data-"));
+    await mkdir(join(dataHome, "sandcastle", "hub"), { recursive: true });
+    await writeFile(
+      join(dataHome, "sandcastle", "hub", "agent-roles.json"),
+      `${JSON.stringify(
+        {
+          roles: {
+            planning: { provider: "codex", model: "gpt-5.4-mini" },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
     const binDir = join(hostDir, "bin");
     await mkdir(binDir, { recursive: true });
     const gitPath = (await execAsync("command -v git")).stdout.trim();
     await symlink(gitPath, join(binDir, "git"));
+
+    const proposal = {
+      prdRef: "docs/prd/feature.md",
+      prdTitle: "Feature Slice",
+      summary: "Three tracer-bullet slices.",
+      slices: [
+        {
+          tempId: "slice-1",
+          title: "Implement feature core path",
+          description: "Deliver the end-to-end core feature path.",
+          sliceType: "AFK",
+          acceptanceCriteria: ["Core path works"],
+          rationale: "Tracer bullet.",
+        },
+        {
+          tempId: "slice-2",
+          title: "Confirm rollout checklist with maintainer",
+          description: "Review rollout risks.",
+          sliceType: "HITL",
+          acceptanceCriteria: ["Maintainer confirms rollout checklist"],
+          rationale: "Human checkpoint.",
+        },
+        {
+          tempId: "slice-3",
+          title: "Add verification coverage for feature core path",
+          description: "Expand verification.",
+          sliceType: "AFK",
+          acceptanceCriteria: ["Regression tests cover the core path"],
+          rationale: "Hardens the first slice.",
+        },
+      ],
+      dependencies: [
+        { dependentTempId: "slice-2", blockerTempId: "slice-1" },
+        { dependentTempId: "slice-3", blockerTempId: "slice-2" },
+      ],
+      warnings: [],
+    };
+
+    const fakeCodexPath = join(binDir, "codex");
+    await writeFile(
+      fakeCodexPath,
+      `#!/usr/bin/env node
+const proposal = ${JSON.stringify(proposal)};
+let stdin = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  stdin += chunk;
+});
+process.stdin.on("end", () => {
+  const isFinal = stdin.includes("prd-decomposition-proposal");
+  const text = isFinal
+    ? \`Approved.\\n<prd-decomposition-proposal>\${JSON.stringify(proposal)}</prd-decomposition-proposal>\`
+    : "Draft proposal";
+  process.stdout.write(
+    JSON.stringify({
+      type: "item.completed",
+      item: { type: "agent_message", text },
+    }) + "\\n",
+  );
+});
+`,
+    );
+    await chmod(fakeCodexPath, 0o755);
 
     const createArgsFile = join(hostDir, "create-args.txt");
     const depArgsFile = join(hostDir, "dep-args.txt");
@@ -1124,6 +1202,10 @@ process.exit(1);
     await writeFile(
       bdPath,
       `#!/bin/sh
+if [ "$1" = "list" ]; then
+  printf '[]\\n'
+  exit 0
+fi
 if [ "$1" = "create" ]; then
   n=0
   if [ -f "${createCountFile}" ]; then
@@ -1150,6 +1232,7 @@ exit 1
       {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        XDG_DATA_HOME: dataHome,
       },
     );
 
