@@ -51,6 +51,8 @@ export interface ProposalFlowMutationReport {
   readonly taskStoreMutations: readonly ProposalFlowTaskStoreMutation[];
 }
 
+const GIT_EXEC_MAX_BUFFER = 10 * 1024 * 1024;
+
 const runGitText = (
   cwd: string,
   args: readonly string[],
@@ -60,6 +62,7 @@ const runGitText = (
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
+    maxBuffer: GIT_EXEC_MAX_BUFFER,
     env,
   }).trim();
 
@@ -254,11 +257,9 @@ export const captureProposalFlowStateSnapshot = (input: {
   readonly env?: NodeJS.ProcessEnv;
 }): ProposalFlowStateSnapshot => {
   const env = input.env ?? process.env;
-  const statusOutput = runGitText(
-    input.cwd,
-    ["status", "--porcelain=v1", "-uall"],
-    env,
-  );
+  // Avoid `-uall`: it expands every nested untracked file (e.g. node_modules) and
+  // can exceed spawnSync buffers. Top-level porcelain entries are enough for mutation detection.
+  const statusOutput = runGitText(input.cwd, ["status", "--porcelain=v1"], env);
   const statusLines = statusOutput
     .split("\n")
     .map((line) => line.trimEnd())

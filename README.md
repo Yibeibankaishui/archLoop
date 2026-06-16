@@ -858,6 +858,26 @@ Alias for `sandcastle agent-config init`.
 
 Persists provider, model, and optional provider options for a supported Hub agent role. In an interactive terminal, omit `--provider` and `--model` to configure the role via prompts. In non-interactive mode, both flags are required. Pass `--options` with comma-separated `key=value` pairs for provider-specific settings such as `effort=medium` or `mode=plan`. Role config stores provider/model/options only and rejects credential-like fields.
 
+### `sandcastle env path`
+
+Prints the Hub-wide env file path under the Sandcastle user data directory. Hub flows load credentials from this file so you do not need `sandcastle init` in every target repository.
+
+### `sandcastle env show`
+
+Displays configured Hub env keys with masked values. `process.env` overrides file values at runtime.
+
+### `sandcastle env init`
+
+Runs an interactive wizard to configure shared Hub credentials such as `CURSOR_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_KEY`, `OPENCODE_API_KEY`, and `GH_TOKEN`. The wizard prioritizes env keys required by your configured Hub agent roles.
+
+### `sandcastle env configure`
+
+Alias for `sandcastle env init`.
+
+### `sandcastle env set <key> [value]`
+
+Persists one Hub env value. In an interactive terminal, omit `value` to enter it securely at a prompt. In non-interactive mode, `value` is required.
+
 ### `sandcastle tasks list`
 
 Shows the Hub task board grouped by canonical Hub task status from Beads data in the current git repository. Use it to inspect inbox, ready, blocked, implementation, review, merge, done, failure, and sync-conflict buckets. Each displayed task includes a 1-based list number that can be used as a task selector in follow-up commands.

@@ -139,6 +139,27 @@ describe("captureProposalFlowStateSnapshot", () => {
     expect(snapshot.repo.statusLines).toContain("?? dirty.txt");
   });
 
+  it("captures status without enumerating every nested untracked file", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "proposal-mutation-untracked-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const nestedDir = join(repoDir, "node_modules", "pkg");
+    await mkdir(nestedDir, { recursive: true });
+    for (let index = 0; index < 50; index += 1) {
+      await writeFile(
+        join(nestedDir, `file-${index}.js`),
+        `export const v = ${index};`,
+      );
+    }
+
+    const snapshot = captureProposalFlowStateSnapshot({ cwd: repoDir });
+
+    expect(snapshot.repo.statusLines).toEqual(["?? node_modules/"]);
+  });
+
   it("captures local task store state from Beads", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "proposal-mutation-beads-"));
     await initRepo(repoDir);

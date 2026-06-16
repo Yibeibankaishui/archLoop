@@ -51,6 +51,7 @@ import {
   ConfigDirError,
   HubFlowError,
   HubAgentConfigError,
+  HubEnvError,
   InitError,
   ProjectStatusError,
   TaskBoardError,
@@ -123,6 +124,13 @@ import {
   promptHubAgentRoleSetup,
   promptInitHubAgentConfig,
 } from "./hubAgentConfigPrompt.js";
+import {
+  formatHubEnvShowLines,
+  isHubEnvKnownKey,
+  resolveHubEnvPath,
+  upsertHubEnvKey,
+} from "./hubEnv.js";
+import { promptInitHubEnv } from "./hubEnvPrompt.js";
 import { isBdAvailable } from "./resolveBdExecutable.js";
 
 const require = createRequire(import.meta.url);
@@ -2245,6 +2253,134 @@ const agentConfigCommand = Command.make("agent-config", {}, () =>
   ]),
 );
 
+const toHubEnvError = (error: unknown): HubEnvError =>
+  error instanceof HubEnvError
+    ? error
+    : new HubEnvError({
+        message: error instanceof Error ? error.message : String(error),
+      });
+
+const envPathCommand = Command.make("path", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.text(resolveHubEnvPath());
+  }),
+);
+
+const envShowCommand = Command.make("show", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    for (const line of formatHubEnvShowLines()) {
+      yield* d.text(line);
+    }
+  }),
+);
+
+const runEnvInit = () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      return yield* Effect.fail(
+        new HubEnvError({
+          message:
+            "Interactive Hub env setup requires a TTY. Use `sandcastle env set <key> <value>` in scripts.",
+        }),
+      );
+    }
+
+    yield* Effect.tryPromise({
+      try: () => promptInitHubEnv(),
+      catch: toHubEnvError,
+    });
+    yield* d.status("Hub environment configured.", "success");
+  });
+
+const envInitCommand = Command.make("init", {}, runEnvInit);
+
+const envConfigureCommand = Command.make("configure", {}, runEnvInit);
+
+const envSetKeyArg = Args.text({ name: "key" }).pipe(
+  Args.withDescription(
+    "Environment variable name (for example CURSOR_API_KEY)",
+  ),
+);
+
+const envSetValueArg = Args.text({ name: "value" }).pipe(
+  Args.withDescription("Environment variable value"),
+  Args.optional,
+);
+
+const envSetCommand = Command.make(
+  "set",
+  {
+    key: envSetKeyArg,
+    value: envSetValueArg,
+  },
+  ({ key, value }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const envKey = key.trim();
+      if (!isHubEnvKnownKey(envKey)) {
+        return yield* Effect.fail(
+          new HubEnvError({
+            message: `Unknown Hub env key "${envKey}". Known keys: CURSOR_API_KEY, ANTHROPIC_API_KEY, OPENAI_KEY, OPENCODE_API_KEY, GH_TOKEN.`,
+          }),
+        );
+      }
+
+      let envValue = optionalTextValue(value)?.trim() ?? "";
+      if (envValue.length === 0) {
+        if (!process.stdin.isTTY || !process.stdout.isTTY) {
+          return yield* Effect.fail(
+            new HubEnvError({
+              message: `sandcastle env set ${envKey} <value> requires a value in non-interactive mode.`,
+            }),
+          );
+        }
+
+        const prompted = yield* Effect.promise(() =>
+          clack.password({
+            message: `${envKey} value`,
+            validate: (input) => {
+              const trimmed = input?.trim() ?? "";
+              return trimmed.length === 0 ? "Value is required" : undefined;
+            },
+          }),
+        );
+        if (clack.isCancel(prompted)) {
+          return yield* Effect.fail(
+            new HubEnvError({ message: "Hub env setup cancelled." }),
+          );
+        }
+        envValue = String(prompted).trim();
+      }
+
+      const savedPath = yield* Effect.try({
+        try: () => upsertHubEnvKey(envKey, envValue),
+        catch: toHubEnvError,
+      });
+      yield* d.summary(`Saved ${envKey}`, { Path: savedPath });
+    }),
+);
+
+const envCommand = Command.make("env", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.status(
+      "Hub-wide environment variables for Sandcastle flows. Use --help to see available subcommands.",
+      "info",
+    );
+  }),
+).pipe(
+  Command.withSubcommands([
+    envPathCommand,
+    envShowCommand,
+    envInitCommand,
+    envConfigureCommand,
+    envSetCommand,
+  ]),
+);
+
 const toHubFlowError = (error: unknown): HubFlowError =>
   error instanceof HubFlowError
     ? error
@@ -2450,6 +2586,7 @@ export const sandcastle = rootCommand.pipe(
     tasksCommand,
     projectCommand,
     agentConfigCommand,
+    envCommand,
     dockerCommand,
     podmanCommand,
   ]),

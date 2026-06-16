@@ -93,6 +93,11 @@ export class HubAgentConfigError extends Data.TaggedError(
   readonly message: string;
 }> {}
 
+/** Hub env file operation failed */
+export class HubEnvError extends Data.TaggedError("HubEnvError")<{
+  readonly message: string;
+}> {}
+
 /** Run exceeded the configured agent idle timeout */
 export class AgentIdleTimeoutError extends Data.TaggedError(
   "AgentIdleTimeoutError",
@@ -242,6 +247,7 @@ export type SandboxError =
   | TaskBoardError
   | HubFlowError
   | HubAgentConfigError
+  | HubEnvError
   | AgentIdleTimeoutError
   | WorktreeTimeoutError
   | ContainerStartTimeoutError

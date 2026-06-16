@@ -201,10 +201,7 @@ describe("resolveEnv", () => {
   it("unescapes \\n in double-quoted values", async () => {
     const dir = await makeDir();
     await mkdir(join(dir, ".sandcastle"));
-    await writeFile(
-      join(dir, ".sandcastle", ".env"),
-      'KEY="line1\\nline2"\n',
-    );
+    await writeFile(join(dir, ".sandcastle", ".env"), 'KEY="line1\\nline2"\n');
 
     const env = await runResolveEnv(dir);
     expect(env["KEY"]).toBe("line1\nline2");
@@ -213,10 +210,7 @@ describe("resolveEnv", () => {
   it("does not unescape \\n in single-quoted values", async () => {
     const dir = await makeDir();
     await mkdir(join(dir, ".sandcastle"));
-    await writeFile(
-      join(dir, ".sandcastle", ".env"),
-      "KEY='line1\\nline2'\n",
-    );
+    await writeFile(join(dir, ".sandcastle", ".env"), "KEY='line1\\nline2'\n");
 
     const env = await runResolveEnv(dir);
     expect(env["KEY"]).toBe("line1\\nline2");
@@ -225,10 +219,7 @@ describe("resolveEnv", () => {
   it("preserves internal whitespace in double-quoted values", async () => {
     const dir = await makeDir();
     await mkdir(join(dir, ".sandcastle"));
-    await writeFile(
-      join(dir, ".sandcastle", ".env"),
-      'KEY="  spaced  "\n',
-    );
+    await writeFile(join(dir, ".sandcastle", ".env"), 'KEY="  spaced  "\n');
 
     const env = await runResolveEnv(dir);
     expect(env["KEY"]).toBe("  spaced  ");
@@ -251,10 +242,7 @@ describe("resolveEnv", () => {
   it("handles escaped backslash before n in double-quoted values", async () => {
     const dir = await makeDir();
     await mkdir(join(dir, ".sandcastle"));
-    await writeFile(
-      join(dir, ".sandcastle", ".env"),
-      'KEY="a\\\\nb"\n',
-    );
+    await writeFile(join(dir, ".sandcastle", ".env"), 'KEY="a\\\\nb"\n');
 
     const env = await runResolveEnv(dir);
     // \\n in the file → literal backslash + literal n (not a newline)
@@ -268,5 +256,28 @@ describe("resolveEnv", () => {
 
     const env = await runResolveEnv(dir);
     expect(env["KEY"]).toBe("plain");
+  });
+
+  it("loads Hub env values when the project has no .sandcastle/.env", async () => {
+    const dir = await makeDir();
+    const dataDir = join(dir, "xdg-data");
+    await mkdir(join(dataDir, "sandcastle"), { recursive: true });
+    await writeFile(
+      join(dataDir, "sandcastle", ".env"),
+      "CURSOR_API_KEY=hub-cursor\n",
+    );
+
+    const orig = process.env.XDG_DATA_HOME;
+    try {
+      process.env.XDG_DATA_HOME = dataDir;
+      const env = await runResolveEnv(dir);
+      expect(env).toEqual({ CURSOR_API_KEY: "hub-cursor" });
+    } finally {
+      if (orig === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = orig;
+      }
+    }
   });
 });

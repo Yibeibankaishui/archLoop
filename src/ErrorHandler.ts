@@ -40,6 +40,8 @@ export const formatErrorMessage = (error: SandboxError): string => {
       return `${error.message}`;
     case "HubAgentConfigError":
       return `${error.message}`;
+    case "HubEnvError":
+      return `${error.message}`;
     case "AgentIdleTimeoutError":
     case "WorktreeTimeoutError":
     case "ContainerStartTimeoutError":

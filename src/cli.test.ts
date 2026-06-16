@@ -182,6 +182,52 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("agent-config set-role");
   });
 
+  it("root help exposes the env namespace", async () => {
+    const { stdout } = await runCli("--help", process.cwd());
+    expect(stdout).toContain("env");
+    expect(stdout).toContain("env path");
+    expect(stdout).toContain("env show");
+    expect(stdout).toContain("env init");
+    expect(stdout).toContain("env set");
+  });
+
+  it("env path prints the Hub env file path", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-hub-env-"));
+    const dataDir = join(hostDir, "xdg-data");
+    const { stdout } = await runCli("env path", hostDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    expect(stdout).toContain(join(dataDir, "sandcastle", ".env"));
+  });
+
+  it("env show reports missing Hub env file guidance", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-hub-env-"));
+    const dataDir = join(hostDir, "xdg-data");
+    const { stdout } = await runCli("env show", hostDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    expect(stdout).toContain("CURSOR_API_KEY");
+    expect(stdout).toContain("sandcastle env init");
+  });
+
+  it("env set persists a Hub env value", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-hub-env-"));
+    const dataDir = join(hostDir, "xdg-data");
+    const env = { ...process.env, XDG_DATA_HOME: dataDir };
+    const { stdout } = await runCli(
+      "env set CURSOR_API_KEY test-cursor-key",
+      hostDir,
+      env,
+    );
+    expect(stdout).toContain("Saved CURSOR_API_KEY");
+
+    const show = await runCli("env show", hostDir, env);
+    expect(show.stdout).toContain("CURSOR_API_KEY");
+    expect(show.stdout).toContain("test");
+  });
+
   it("agent-config path prints the Hub agent config file path", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-agent-config-"));
     const dataDir = join(hostDir, "xdg-data");

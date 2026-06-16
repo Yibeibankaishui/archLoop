@@ -119,6 +119,11 @@ Key APIs: `run()`, `interactive()`, `createSandbox()`, `createWorktree()`; sandb
 | `sandcastle agent-config init`                   | Interactive Hub agent role setup     |
 | `sandcastle agent-config configure`              | Alias for `agent-config init`        |
 | `sandcastle agent-config set-role <role>`        | Save a Hub agent role provider/model |
+| `sandcastle env path`                            | Show Hub env file path               |
+| `sandcastle env show`                            | Show configured Hub env keys         |
+| `sandcastle env init`                            | Interactive Hub credential setup     |
+| `sandcastle env configure`                       | Alias for `env init`                 |
+| `sandcastle env set <key> [value]`               | Save one Hub env value               |
 | `sandcastle tasks list`                          | Group Beads tasks by status          |
 | `sandcastle tasks show <selector>`               | Show one Beads task                  |
 | `sandcastle run . --flow <id> [--input <value>]` | Run or validate a Hub flow input     |
@@ -136,6 +141,7 @@ Key APIs: `run()`, `interactive()`, `createSandbox()`, `createWorktree()`; sandb
 ## Troubleshooting (known failure modes)
 
 - **Missing Hub agent role config / non-interactive flow failure**: Hub flows need provider/model settings for roles such as planning, triage, implementation, review, merge, and recovery. Run `sandcastle agent-config init` (or `configure`) in a TTY for first-time setup, `sandcastle agent-config show` to inspect roles, or `sandcastle agent-config set-role <role> --provider <provider> --model <model>` in scripts/CI.
+- **Cursor auth / `CURSOR_API_KEY` required in Hub flows**: Hub proposal and task flows run `agent --print` headlessly. `agent login` is not enough for automation. Run `sandcastle env init` to store shared credentials in the Sandcastle user data directory (`sandcastle env path`), or `sandcastle env set CURSOR_API_KEY <value>`. `process.env` overrides file values at runtime.
 - **`gh ... 401 Bad credentials` / `PromptError` during planner prompt expansion**: The sandbox `gh` uses mounted `.sandcastle/auth/gh` (or `GH_TOKEN`), independent of the host keyring. Host `gh auth status` succeeding does NOT mean the sandbox is authed. Fix: `GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login --insecure-storage`, or set a valid `GH_TOKEN` in `.sandcastle/.env`. Verify with `GH_CONFIG_DIR=.sandcastle/auth/gh gh issue list -l <label> --limit 1`.
 - **`bash .sandcastle/bootstrap.sh: No such file or directory` (exit 127)**: The hook script referenced by `onSandboxReady` is missing from the worktree. Restore it (`sandcastle init` for the profile, or recover from a stash). Often caused by a merge agent running `git stash push -u`, which sweeps untracked `.sandcastle/` files — recover with `git stash pop`.
 - **Long-lived loop keeps using stale config**: `main.ts` hooks are read once at process start. After editing `.sandcastle/main.ts`, restart the `main.ts` process; it does not hot-reload.
