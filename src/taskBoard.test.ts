@@ -57,6 +57,17 @@ if (command === "list") {
   process.exit(0);
 }
 
+if (command === "show") {
+  const taskId = args[1];
+  const task = readState().find((entry) => entry.id === taskId);
+  if (!task) {
+    process.stderr.write("task " + taskId + " not found");
+    process.exit(1);
+  }
+  process.stdout.write(JSON.stringify([task]));
+  process.exit(0);
+}
+
 if (command === "delete") {
   fs.appendFileSync(deleteArgsFile, args.join(" ") + "\\n");
   const force = args.includes("--force");
@@ -321,6 +332,72 @@ describe("deleteHubTasks", () => {
     expect(deleteArgs).toContain("bd-1");
     expect(deleteArgs).toContain("--force");
     expect(await readFile(stateFile, "utf-8")).not.toContain("bd-1");
+  });
+
+  it("fails when Beads reports delete success but the task still exists", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "taskboard-delete-false-success-"),
+    );
+    await initRepo(repoDir);
+
+    const binDir = join(repoDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await execAsync(`ln -sf "${gitPath}" "${join(binDir, "git")}"`);
+
+    const stateFile = join(repoDir, "bd-state.json");
+    await writeFile(
+      stateFile,
+      JSON.stringify([{ id: "bd-1", title: "Ghost task", status: "open" }]),
+    );
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = ${JSON.stringify(stateFile)};
+const args = process.argv.slice(2);
+const readState = () => JSON.parse(fs.readFileSync(stateFile, "utf8"));
+
+if (args[0] === "list") {
+  process.stdout.write(JSON.stringify(readState()));
+  process.exit(0);
+}
+
+if (args[0] === "show") {
+  const task = readState().find((entry) => entry.id === args[1]);
+  if (!task) {
+    process.stderr.write("task " + args[1] + " not found");
+    process.exit(1);
+  }
+  process.stdout.write(JSON.stringify([task]));
+  process.exit(0);
+}
+
+if (args[0] === "delete" && args.includes("--force")) {
+  process.stdout.write("Deleted " + args[1]);
+  process.exit(0);
+}
+
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const env = {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+    };
+
+    expect(() =>
+      deleteHubTasks({
+        cwd: repoDir,
+        taskIds: ["bd-1"],
+        force: true,
+        env,
+      }),
+    ).toThrow(/reported success, but Beads still has: bd-1/);
   });
 });
 

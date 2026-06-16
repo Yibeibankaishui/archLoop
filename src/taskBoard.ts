@@ -885,6 +885,40 @@ export interface DeleteHubTasksInput {
   readonly env?: NodeJS.ProcessEnv;
 }
 
+const hubBeadsTaskExists = (
+  cwd: string,
+  taskId: string,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean => {
+  const [task] = tryRunBdJson(
+    cwd,
+    ["show", taskId, "--json"],
+    `tasks delete verify ${taskId}`,
+    env,
+  ) as BeadsTaskRecord[];
+  return task !== undefined;
+};
+
+const verifyHubTasksDeleted = (
+  cwd: string,
+  taskIds: readonly string[],
+  env: NodeJS.ProcessEnv = process.env,
+): void => {
+  const stillPresent = taskIds.filter((taskId) =>
+    hubBeadsTaskExists(cwd, taskId, env),
+  );
+  if (stillPresent.length === 0) {
+    return;
+  }
+
+  throw new TaskBoardError({
+    message: [
+      `sandcastle tasks delete reported success, but Beads still has: ${stillPresent.join(", ")}.`,
+      `Retry with: bd delete ${stillPresent.join(" ")} --force`,
+    ].join(" "),
+  });
+};
+
 export const deleteHubTasks = (input: DeleteHubTasksInput): string => {
   if (input.taskIds.length === 0) {
     throw new TaskBoardError({
@@ -904,12 +938,18 @@ export const deleteHubTasks = (input: DeleteHubTasksInput): string => {
     args.push("--force");
   }
 
-  return runBdText(
+  const output = runBdText(
     input.cwd,
     args,
     `tasks delete ${input.taskIds.join(" ")}`,
     input.env,
   );
+
+  if (!input.dryRun && input.force) {
+    verifyHubTasksDeleted(input.cwd, input.taskIds, input.env);
+  }
+
+  return output;
 };
 
 export const claimHubTask = (input: ClaimHubTaskInput): ClaimHubTaskResult => {
