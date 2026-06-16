@@ -82,6 +82,7 @@ process.exit(1);
     env: {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      SANDCASTLE_BD_PATH: bdPath,
       BD_STATE_FILE: stateFile,
     },
     stateFile,

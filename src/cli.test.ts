@@ -85,6 +85,16 @@ const cliFailureOutput = (err: unknown): string => {
   throw err;
 };
 
+const withBdEnv = (
+  bdPath: string,
+  env: NodeJS.ProcessEnv = {},
+): NodeJS.ProcessEnv => ({
+  ...process.env,
+  ...env,
+  PATH: `${dirname(bdPath)}:${process.env.PATH ?? ""}`,
+  SANDCASTLE_BD_PATH: bdPath,
+});
+
 describe("sandcastle CLI", () => {
   it("shows help with --help flag", async () => {
     const { stdout } = await runCli("--help", process.cwd());
@@ -434,10 +444,7 @@ exit 1
     );
     await chmod(bdPath, 0o755);
 
-    const { stdout } = await runCli("tasks list", hostDir, {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH ?? ""}`,
-    });
+    const { stdout } = await runCli("tasks list", hostDir, withBdEnv(bdPath));
 
     expect(stdout).toContain("Hub task board");
     expect(stdout).toContain("Total tasks: 3");
@@ -510,10 +517,11 @@ exit 1
     );
     await chmod(bdPath, 0o755);
 
-    const { stdout } = await runCli("tasks show bd-3", hostDir, {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH ?? ""}`,
-    });
+    const { stdout } = await runCli(
+      "tasks show bd-3",
+      hostDir,
+      withBdEnv(bdPath),
+    );
 
     expect(stdout).toContain("Beads task bd-3");
     expect(stdout).toContain("Hub status");
@@ -588,16 +596,18 @@ exit 1
     );
     await chmod(bdPath, 0o755);
 
-    const titleResult = await runCli('tasks show "Write docs"', hostDir, {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH ?? ""}`,
-    });
+    const titleResult = await runCli(
+      'tasks show "Write docs"',
+      hostDir,
+      withBdEnv(bdPath),
+    );
     expect(titleResult.stdout).toContain("Beads task bd-2");
 
-    const indexResult = await runCli("tasks show 2", hostDir, {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH ?? ""}`,
-    });
+    const indexResult = await runCli(
+      "tasks show 2",
+      hostDir,
+      withBdEnv(bdPath),
+    );
     expect(indexResult.stdout).toContain("Beads task bd-2");
 
     const showArgs = await readFile(showArgsFile, "utf-8");
@@ -670,10 +680,11 @@ exit 1
     );
     await chmod(bdPath, 0o755);
 
-    const { stdout } = await runCli('tasks show "Write docs"', hostDir, {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH ?? ""}`,
-    });
+    const { stdout } = await runCli(
+      'tasks show "Write docs"',
+      hostDir,
+      withBdEnv(bdPath),
+    );
 
     expect(stdout).toContain("Beads task bd-2");
     expect(stdout).toContain("Primary details");
@@ -712,10 +723,7 @@ exit 1
     await chmod(bdPath, 0o755);
 
     try {
-      await runCli('tasks show "Duplicate task"', hostDir, {
-        ...process.env,
-        PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      });
+      await runCli('tasks show "Duplicate task"', hostDir, withBdEnv(bdPath));
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       const output = cliFailureOutput(err);
@@ -758,10 +766,7 @@ exit 1
     await chmod(bdPath, 0o755);
 
     try {
-      await runCli("tasks show 3", hostDir, {
-        ...process.env,
-        PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      });
+      await runCli("tasks show 3", hostDir, withBdEnv(bdPath));
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       const output = cliFailureOutput(err);
@@ -805,10 +810,7 @@ exit 1
     const { stdout } = await runCli(
       'tasks create "Manual task" --description "Track local work"',
       hostDir,
-      {
-        ...process.env,
-        PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      },
+      withBdEnv(bdPath),
     );
 
     const args = await readFile(argsFile, "utf-8");
@@ -864,10 +866,7 @@ exit 1
     await runCli(
       'tasks create "Feedback task" --origin user-feedback --kind enhancement',
       hostDir,
-      {
-        ...process.env,
-        PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      },
+      withBdEnv(bdPath),
     );
 
     const args = await readFile(argsFile, "utf-8");
@@ -911,10 +910,7 @@ exit 1
     await runCli(
       'tasks create "Categorized task" --category enhancement',
       hostDir,
-      {
-        ...process.env,
-        PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      },
+      withBdEnv(bdPath),
     );
 
     const args = await readFile(argsFile, "utf-8");
@@ -970,10 +966,7 @@ exit 1
     );
     await chmod(bdPath, 0o755);
 
-    const { stdout } = await runCli("tasks triage", hostDir, {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH ?? ""}`,
-    });
+    const { stdout } = await runCli("tasks triage", hostDir, withBdEnv(bdPath));
 
     const updateArgs = await readFile(updateArgsFile, "utf-8");
     const commentArgs = await readFile(commentArgsFile, "utf-8");
@@ -1081,11 +1074,11 @@ process.exit(1);
     );
     await chmod(bdPath, 0o755);
 
-    const { stdout } = await runCli("tasks sync", hostDir, {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      BD_STATE_FILE: stateFile,
-    });
+    const { stdout } = await runCli(
+      "tasks sync",
+      hostDir,
+      withBdEnv(bdPath, { BD_STATE_FILE: stateFile }),
+    );
 
     expect(stdout).toContain("Synced Hub tasks with GitHub Issues");
     expect(stdout).toContain("1 created");
@@ -1229,11 +1222,7 @@ exit 1
     const { stdout } = await runCli(
       'tasks from-prd docs/prd/feature.md --yes --deps "2:1,3:2"',
       hostDir,
-      {
-        ...process.env,
-        PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        XDG_DATA_HOME: dataHome,
-      },
+      withBdEnv(bdPath, { XDG_DATA_HOME: dataHome }),
     );
 
     const createArgs = await readFile(createArgsFile, "utf-8");
@@ -1294,10 +1283,7 @@ exit 1
     const { stdout } = await runCli(
       'tasks comment bd-99 --body "Still needs a clear acceptance test"',
       hostDir,
-      {
-        ...process.env,
-        PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      },
+      withBdEnv(bdPath),
     );
 
     const args = await readFile(argsFile, "utf-8");
@@ -1351,10 +1337,7 @@ exit 1
     const titleResult = await runCli(
       'tasks comment "Write docs" --body "Comment from title"',
       hostDir,
-      {
-        ...process.env,
-        PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      },
+      withBdEnv(bdPath),
     );
     expect(titleResult.stdout).toContain(
       "Appended a comment to Beads task bd-2.",
@@ -1363,10 +1346,7 @@ exit 1
     const indexResult = await runCli(
       'tasks comment 2 --body "Comment from index"',
       hostDir,
-      {
-        ...process.env,
-        PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      },
+      withBdEnv(bdPath),
     );
     expect(indexResult.stdout).toContain(
       "Appended a comment to Beads task bd-2.",
@@ -1437,22 +1417,25 @@ exit 1
     }
   });
 
-  it("init --sandbox no-sandbox --backlog beads requires bd on the host", async () => {
+  it("init --sandbox no-sandbox --backlog beads succeeds when bundled bd is available", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
+    await seedSandcastlePackage(hostDir);
 
-    try {
-      await runCli(
-        "init --sandbox no-sandbox --backlog beads --template blank --project-profile generic --preset-agents none --build-image false --agent claude-code",
-        hostDir,
-        { ...process.env, PATH: dirname(process.execPath) },
-      );
-      expect.fail("Expected command to fail");
-    } catch (err: unknown) {
-      const output = cliFailureOutput(err);
-      expect(output).toContain("requires `bd` on the host");
-      expect(output).toContain("Install Beads locally or choose docker");
-    }
+    const { stdout } = await runCli(
+      "init --sandbox no-sandbox --backlog beads --template blank --project-profile generic --preset-agents none --build-image false --agent claude-code",
+      hostDir,
+      { ...process.env, PATH: dirname(process.execPath) },
+    );
+
+    const mainTs = await readFile(
+      join(hostDir, ".sandcastle", "main.mts"),
+      "utf-8",
+    );
+
+    expect(mainTs).toContain("noSandbox()");
+    expect(stdout).toContain("bundled @beads/bd install");
+    expect(stdout).toContain("no-sandbox + beads");
   });
 
   it("init --sandbox no-sandbox --backlog beads succeeds when bd exists on the host and explains the host requirement", async () => {
@@ -1481,7 +1464,8 @@ exit 1
     );
 
     expect(mainTs).toContain("noSandbox()");
-    expect(stdout).toContain("`bd` available on your host PATH");
+    expect(stdout).toContain("bundled @beads/bd install");
+    expect(stdout).toContain("SANDCASTLE_BD_PATH");
     expect(stdout).toContain("no-sandbox + beads");
   });
 
@@ -1508,6 +1492,7 @@ exit 1
   it("init with --agent and omitted runtimes installs the selected agent runtime", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
+    await seedSandcastlePackage(hostDir);
 
     await runNonInteractiveInit(hostDir, "--agent cursor");
 
@@ -1528,6 +1513,7 @@ exit 1
   it("init --installed-runtimes scaffolds a Dockerfile with selected runtimes", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
+    await seedSandcastlePackage(hostDir);
 
     await runNonInteractiveInit(
       hostDir,
@@ -1552,6 +1538,7 @@ exit 1
   it("init --runtimes scaffolds a Dockerfile with selected runtimes", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
+    await seedSandcastlePackage(hostDir);
 
     await runNonInteractiveInit(
       hostDir,
@@ -1601,6 +1588,7 @@ exit 1
   it("init --project-profile generic scaffolds bootstrap.sh", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
+    await seedSandcastlePackage(hostDir);
 
     await runNonInteractiveInit(
       hostDir,
@@ -1618,6 +1606,7 @@ exit 1
   it("init --project-profile node scaffolds lockfile-aware bootstrap.sh", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
+    await seedSandcastlePackage(hostDir);
 
     await runNonInteractiveInit(
       hostDir,
@@ -1636,6 +1625,7 @@ exit 1
   it("init --project-profile python scaffolds Python bootstrap and image tools", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
+    await seedSandcastlePackage(hostDir);
 
     await runNonInteractiveInit(
       hostDir,

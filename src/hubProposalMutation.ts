@@ -1,5 +1,7 @@
 import { execFileSync } from "node:child_process";
 
+import { resolveBdExecutable } from "./resolveBdExecutable.js";
+
 const TASK_STORE_JSON_KEYS = [
   "tasks",
   "issues",
@@ -96,7 +98,7 @@ const tryRunBdJson = (
   env: NodeJS.ProcessEnv = process.env,
 ): unknown[] => {
   try {
-    const stdout = execFileSync("bd", ["list", "--json"], {
+    const stdout = execFileSync(resolveBdExecutable(env), ["list", "--json"], {
       cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],

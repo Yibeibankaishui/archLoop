@@ -2142,6 +2142,18 @@ describe("InitService scaffold", () => {
       expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain("beads");
       expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain("libicu72");
       expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain(
+        "gastownhall/beads",
+      );
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain(
+        "beads_1.0.4_linux_amd64.tar.gz",
+      );
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).not.toContain(
+        "steveyegge/beads",
+      );
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).not.toContain(
+        "scripts/install.sh",
+      );
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain(
         "corepack enable",
       );
       expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).not.toContain("gh");
@@ -2743,9 +2755,13 @@ describe("InitService scaffold", () => {
       );
       expect(dockerfile).toContain("beads");
       expect(dockerfile).toContain("libicu72");
+      expect(dockerfile).toContain("gastownhall/beads");
+      expect(dockerfile).toContain("beads_1.0.4_linux_amd64.tar.gz");
       expect(dockerfile).toContain("corepack enable");
       expect(dockerfile).not.toContain("GitHub CLI");
       expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
+      expect(dockerfile).not.toContain("steveyegge/beads");
+      expect(dockerfile).not.toContain("scripts/install.sh");
       expect(dockerfile).not.toContain("x86_64-linux-gnu");
       expect(dockerfile).toContain("dpkg-architecture -qDEB_HOST_MULTIARCH");
     });
@@ -2764,8 +2780,12 @@ describe("InitService scaffold", () => {
       );
       expect(containerfile).toContain("beads");
       expect(containerfile).toContain("libicu72");
+      expect(containerfile).toContain("gastownhall/beads");
+      expect(containerfile).toContain("beads_1.0.4_linux_amd64.tar.gz");
       expect(containerfile).not.toContain("GitHub CLI");
       expect(containerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
+      expect(containerfile).not.toContain("steveyegge/beads");
+      expect(containerfile).not.toContain("scripts/install.sh");
       expect(containerfile).not.toContain("x86_64-linux-gnu");
       expect(containerfile).toContain("dpkg-architecture -qDEB_HOST_MULTIARCH");
     });

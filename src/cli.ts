@@ -115,6 +115,7 @@ import {
   resolveHubAgentConfigPath,
   setHubAgentRole,
 } from "./hubAgentConfig.js";
+import { isBdAvailable } from "./resolveBdExecutable.js";
 
 const require = createRequire(import.meta.url);
 const VERSION = (require("../package.json") as { version: string }).version;
@@ -523,20 +524,6 @@ const buildAuthSetupNextStepLines = (options: {
   return lines;
 };
 
-const hostHasCommand = (command: string): boolean => {
-  const checkCommand =
-    process.platform === "win32" ? `where ${command}` : `command -v ${command}`;
-  try {
-    execSync(checkCommand, {
-      stdio: "ignore",
-      env: process.env,
-    });
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 const validateHostRequirementsForInit = (options: {
   readonly sandboxProvider: SandboxProviderEntry;
   readonly backlogManager: BacklogManagerEntry;
@@ -544,12 +531,12 @@ const validateHostRequirementsForInit = (options: {
   if (
     options.sandboxProvider.name === "no-sandbox" &&
     options.backlogManager.name === "beads" &&
-    !hostHasCommand("bd")
+    !isBdAvailable()
   ) {
     return Effect.fail(
       new InitError({
         message:
-          "Using --sandbox no-sandbox with backlog manager beads requires `bd` on the host PATH because backlog commands run on the host in this mode. Install Beads locally or choose docker.",
+          "Using --sandbox no-sandbox with backlog manager beads requires `bd` to be available from the bundled @beads/bd dependency, SANDCASTLE_BD_PATH, or the host PATH because backlog commands run on the host in this mode. Install dependencies, set SANDCASTLE_BD_PATH, install Beads locally, or choose docker.",
       }),
     );
   }
@@ -570,7 +557,7 @@ const buildHostRequirementNextStepLines = (options: {
   if (options.sandboxProvider.name === "no-sandbox") {
     if (options.backlogManager.name === "beads") {
       lines.push(
-        "Keep `bd` available on your host PATH when using no-sandbox + beads. Prompt shell expressions run on the host in this mode, not in a container.",
+        "Keep `bd` available via the bundled @beads/bd install, `SANDCASTLE_BD_PATH`, or your host PATH when using no-sandbox + beads. Prompt shell expressions run on the host in this mode, not in a container.",
       );
     }
 

@@ -264,6 +264,7 @@ process.exit(1);
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        SANDCASTLE_BD_PATH: join(binDir, "bd"),
         BD_STATE_FILE: stateFile,
         BD_CREATE_ARGS_FILE: createArgsFile,
         BD_UPDATE_ARGS_FILE: join(repoDir, "bd-update-args.txt"),
@@ -360,6 +361,7 @@ process.exit(1);
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        SANDCASTLE_BD_PATH: join(binDir, "bd"),
         BD_STATE_FILE: stateFile,
         BD_UPDATE_ARGS_FILE: updateArgsFile,
       },
@@ -424,6 +426,7 @@ process.exit(1);
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        SANDCASTLE_BD_PATH: join(binDir, "bd"),
         BD_STATE_FILE: stateFile,
         BD_UPDATE_ARGS_FILE: updateArgsFile,
       },
@@ -483,6 +486,7 @@ process.exit(1);
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        SANDCASTLE_BD_PATH: join(binDir, "bd"),
         BD_STATE_FILE: stateFile,
         BD_UPDATE_ARGS_FILE: updateArgsFile,
       },

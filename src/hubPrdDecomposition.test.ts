@@ -197,7 +197,9 @@ exit 1
     await chmod(bdPath, 0o755);
 
     const previousPath = process.env.PATH;
+    const previousBdPath = process.env.SANDCASTLE_BD_PATH;
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
+    process.env.SANDCASTLE_BD_PATH = bdPath;
 
     try {
       const result = applyPrdDecompositionProposal({
@@ -223,6 +225,7 @@ exit 1
       expect(createArgs).toContain("Acceptance criteria");
     } finally {
       process.env.PATH = previousPath;
+      process.env.SANDCASTLE_BD_PATH = previousBdPath;
     }
   });
 
@@ -254,7 +257,9 @@ exit 1
     await chmod(bdPath, 0o755);
 
     const previousPath = process.env.PATH;
+    const previousBdPath = process.env.SANDCASTLE_BD_PATH;
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
+    process.env.SANDCASTLE_BD_PATH = bdPath;
 
     try {
       const proposal: PrdDecompositionProposal = {
@@ -282,6 +287,7 @@ exit 1
       expect(createArgs).toContain("User stories: US-1, US-2");
     } finally {
       process.env.PATH = previousPath;
+      process.env.SANDCASTLE_BD_PATH = previousBdPath;
     }
   });
 
@@ -316,7 +322,9 @@ exit 1
     await chmod(bdPath, 0o755);
 
     const previousPath = process.env.PATH;
+    const previousBdPath = process.env.SANDCASTLE_BD_PATH;
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
+    process.env.SANDCASTLE_BD_PATH = bdPath;
 
     try {
       applyPrdDecompositionProposal({
@@ -335,6 +343,7 @@ exit 1
       expect(createArgs).toContain("ready-for-human");
     } finally {
       process.env.PATH = previousPath;
+      process.env.SANDCASTLE_BD_PATH = previousBdPath;
     }
   });
 });
@@ -387,7 +396,9 @@ describe("prd decomposition helpers", () => {
     };
 
     const previousPath = process.env.PATH;
+    const previousBdPath = process.env.SANDCASTLE_BD_PATH;
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
+    process.env.SANDCASTLE_BD_PATH = bdPath;
 
     try {
       const context = preparePrdDecompositionContext(validatedInput, hostDir);
@@ -401,6 +412,7 @@ describe("prd decomposition helpers", () => {
       });
     } finally {
       process.env.PATH = previousPath;
+      process.env.SANDCASTLE_BD_PATH = previousBdPath;
     }
   });
 
@@ -495,7 +507,9 @@ exit 1
     await chmod(bdPath, 0o755);
 
     const previousPath = process.env.PATH;
+    const previousBdPath = process.env.SANDCASTLE_BD_PATH;
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
+    process.env.SANDCASTLE_BD_PATH = bdPath;
 
     try {
       const result = await runPrdDecompositionFlow({
@@ -518,6 +532,7 @@ exit 1
       expect(result.hubStatusMode).toBe("inbox");
     } finally {
       process.env.PATH = previousPath;
+      process.env.SANDCASTLE_BD_PATH = previousBdPath;
     }
   });
 
@@ -570,7 +585,9 @@ exit 1
     };
 
     const previousPath = process.env.PATH;
+    const previousBdPath = process.env.SANDCASTLE_BD_PATH;
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
+    process.env.SANDCASTLE_BD_PATH = bdPath;
 
     try {
       await runPrdDecompositionFlow({
@@ -590,6 +607,7 @@ exit 1
       expect(calls[0]?.prompt).not.toContain("{{PRD_CONTENT}}");
     } finally {
       process.env.PATH = previousPath;
+      process.env.SANDCASTLE_BD_PATH = previousBdPath;
     }
   });
 });

@@ -103,7 +103,9 @@ exit 1
 
     const plan = draftPrdSlices(samplePrd, "docs/prd/sample.md");
     const previousPath = process.env.PATH;
+    const previousBdPath = process.env.SANDCASTLE_BD_PATH;
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
+    process.env.SANDCASTLE_BD_PATH = bdPath;
 
     try {
       const result = publishPrdDraftPlan({
@@ -125,6 +127,7 @@ exit 1
       ]);
     } finally {
       process.env.PATH = previousPath;
+      process.env.SANDCASTLE_BD_PATH = previousBdPath;
     }
   });
 });

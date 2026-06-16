@@ -39,6 +39,7 @@ import {
   DEFAULT_PROJECT_PROFILE,
   type ProjectProfileEntry,
 } from "./projectProfiles.js";
+import { PINNED_BEADS_VERSION } from "./resolveBdExecutable.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import { SCAFFOLD_TEMPLATES } from "./initTemplates.js";
 
@@ -666,7 +667,11 @@ RUN apt-get update && apt-get install -y \\
        ln -s "$lib" "\${lib%.72}.74"; \\
      done
 
-RUN curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
+RUN curl -fsSL -o /tmp/beads.tar.gz \\
+  "https://github.com/gastownhall/beads/releases/download/v${PINNED_BEADS_VERSION}/beads_${PINNED_BEADS_VERSION}_linux_amd64.tar.gz" \\
+  && tar -xzf /tmp/beads.tar.gz -C /tmp bd \\
+  && install -m 0755 /tmp/bd /usr/local/bin/bd \\
+  && rm -f /tmp/beads.tar.gz /tmp/bd
 
 RUN corepack enable`;
 

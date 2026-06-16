@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 
 import { TaskBoardError } from "./errors.js";
+import { resolveBdExecutable } from "./resolveBdExecutable.js";
 import {
   appendHubTaskComment,
   loadHubTaskBoard,
@@ -81,7 +82,7 @@ const runBdText = (
   env: NodeJS.ProcessEnv = process.env,
 ): string => {
   try {
-    return execFileSync("bd", [...args], {
+    return execFileSync(resolveBdExecutable(env), [...args], {
       cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],

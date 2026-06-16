@@ -49,6 +49,9 @@ Replace `<TARGET_REPO>` with the project being developed.
        --project-profile node --build-image true
      ```
    - `init` **refuses to overwrite** an existing `.sandcastle/`. Back up and delete manually to redo.
+   - Sandcastle bundles Beads via `@beads/bd@1.0.4`. For `no-sandbox + beads`,
+     `bd` can come from the bundled install, `SANDCASTLE_BD_PATH`, or host
+     `PATH`.
 3. **Env**: `cp .sandcastle/.env.example .sandcastle/.env`, then fill tokens (see table below). Sandcastle skips empty values, so a blank `KEY=` is treated as unset.
 4. **Build image** (sandboxed providers): `npx sandcastle docker build-image` (or `podman`). Re-run after editing the Dockerfile/Containerfile.
 5. **Run the entry script with npx**:

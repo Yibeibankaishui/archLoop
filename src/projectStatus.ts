@@ -1,9 +1,10 @@
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { isBdAvailable, resolveBdExecutable } from "./resolveBdExecutable.js";
 import {
   loadHubTaskBoard,
   type HubFailureReason,
@@ -438,7 +439,9 @@ const collectRunDirectories = (
 const appendTaskCountLines = (lines: string[], status: HubProjectStatus) => {
   lines.push("Task counts by Hub status");
   if (!status.beadsAvailable) {
-    lines.push("  Beads unavailable — install bd to load the task board.");
+    lines.push(
+      "  Beads unavailable — install dependencies, set SANDCASTLE_BD_PATH, or add bd to PATH to load the task board.",
+    );
     return;
   }
 
@@ -640,23 +643,9 @@ const parseJsonCount = (output: string): number => {
   return 0;
 };
 
-const commandExists = (command: string): boolean => {
-  const checkCommand =
-    process.platform === "win32" ? `where ${command}` : `command -v ${command}`;
-  try {
-    execSync(checkCommand, {
-      stdio: "ignore",
-      env: process.env,
-    });
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 const countBdJsonResult = (args: readonly string[], cwd: string): number => {
   try {
-    const stdout = execFileSync("bd", [...args], {
+    const stdout = execFileSync(resolveBdExecutable(), [...args], {
       cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
@@ -675,7 +664,7 @@ const registerHubProjectDir = (hubProjectDir: string): boolean => {
 
 const resolveBeadsAvailable = (
   detectBeadsAvailable: HubProjectStatusOptions["detectBeadsAvailable"],
-): boolean => (detectBeadsAvailable ?? (() => commandExists("bd")))();
+): boolean => (detectBeadsAvailable ?? (() => isBdAvailable()))();
 
 const resolveTaskCounts = (
   repoRoot: string,

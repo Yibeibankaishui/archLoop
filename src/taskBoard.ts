@@ -10,6 +10,7 @@ import {
   type HubTaskClaimMetadata,
 } from "./hubExecution.js";
 import { TaskBoardError } from "./errors.js";
+import { resolveBdExecutable } from "./resolveBdExecutable.js";
 
 export const HUB_TASK_STATUSES = [
   "inbox",
@@ -450,7 +451,7 @@ const runBdText = (
   env: NodeJS.ProcessEnv = process.env,
 ): string => {
   try {
-    return execFileSync("bd", [...args], {
+    return execFileSync(resolveBdExecutable(env), [...args], {
       cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],

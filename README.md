@@ -33,6 +33,10 @@ Sandcastle is provider-agnostic — it ships with built-in providers for Docker,
 npm install --save-dev @ai-hero/sandcastle
 ```
 
+Sandcastle bundles a pinned Beads runtime via `@beads/bd@1.0.4`, so Hub and
+Beads-backed commands can use the packaged `bd` binary without a separate
+system install. Set `SANDCASTLE_BD_PATH` to override the binary path if needed.
+
 2. Run `sandcastle init`. This scaffolds a `.sandcastle` directory with all the files needed.
 
 ```bash
@@ -747,7 +751,11 @@ Think of the init agent choices as two layers:
 
 `main.mts`/`main.ts` remains the orchestration surface after init. If you install multiple runtimes, edit that file to import and call the providers you want for each `run()` or `createSandbox()` flow. For scripted init, omit `--runtimes` to install the selected `--agent` runtime, or pass a comma-separated list.
 
-When you pair `--sandbox no-sandbox` with `--backlog beads`, init validates that `bd` is already available on your host `PATH`. In no-sandbox mode, prompt shell expressions run on the host instead of inside a container, so Beads must be installed locally before the generated workflow can run.
+When you pair `--sandbox no-sandbox` with `--backlog beads`, init validates that
+`bd` is available from the bundled `@beads/bd` dependency, `SANDCASTLE_BD_PATH`,
+or your host `PATH`. In no-sandbox mode, prompt shell expressions run on the
+host instead of inside a container, so Beads still needs to be reachable from
+the host environment before the generated workflow can run.
 
 With `--sandbox no-sandbox` and `--project-profile python`, bootstrap runs on the host rather than in the Python profile image. Install `python3-venv` and/or `uv` on the host (Debian/Ubuntu: `apt install python3-venv`) so `.sandcastle/bootstrap.sh` can create a working virtualenv, or use the `docker` sandbox provider so the generated image supplies those tools.
 
