@@ -1,7 +1,13 @@
 import * as clack from "@clack/prompts";
 
 import { getAgent, listAgents } from "./InitService.js";
-import type { HubAgentRole, HubAgentRoleEntry } from "./hubAgentConfig.js";
+import {
+  initHubAgentConfig,
+  type HubAgentConfig,
+  type HubAgentConfigStoreOptions,
+  type HubAgentRole,
+  type HubAgentRoleEntry,
+} from "./hubAgentConfig.js";
 
 export const promptHubAgentRoleSetup = async (
   role: HubAgentRole,
@@ -41,4 +47,30 @@ export const promptHubAgentRoleSetup = async (
     provider: String(provider),
     model: String(model).trim(),
   };
+};
+
+export const promptInitHubAgentConfig = async (
+  options: HubAgentConfigStoreOptions = {},
+): Promise<HubAgentConfig> => {
+  clack.intro("Configure Hub agent roles");
+
+  const config = await initHubAgentConfig({
+    env: options.env,
+    homeDir: options.homeDir,
+    confirmApplyToAll: async () => {
+      const applyToAll = await clack.confirm({
+        message: "Apply the same provider and model to all Hub agent roles?",
+        initialValue: true,
+      });
+      if (clack.isCancel(applyToAll)) {
+        clack.cancel("Hub agent role setup cancelled.");
+        process.exit(0);
+      }
+      return Boolean(applyToAll);
+    },
+    configureRole: promptHubAgentRoleSetup,
+  });
+
+  clack.outro("Hub agent roles configured.");
+  return config;
 };

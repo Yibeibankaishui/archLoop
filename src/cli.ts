@@ -96,11 +96,13 @@ import {
   formatHubTaskBoardLines,
   appendHubTaskComment,
   createHubTask,
+  deleteHubTasks,
   formatHubTaskCommentLines,
   formatHubTaskDetailsRows,
   loadHubTask,
   loadHubTaskBoard,
   resolveHubTaskSelector,
+  resolveHubTaskSelectors,
 } from "./taskBoard.js";
 import { triageHubTasks, type HubTriageOutcome } from "./hubTriage.js";
 import {
@@ -111,10 +113,16 @@ import { formatHubRecoveryComment, recoverHubTask } from "./hubTaskRecover.js";
 import {
   formatHubAgentConfigShowLines,
   formatHubAgentRoleOptions,
+  HUB_AGENT_ROLES,
   readHubAgentConfig,
   resolveHubAgentConfigPath,
+  resolveHubAgentRoleEntry,
   setHubAgentRole,
 } from "./hubAgentConfig.js";
+import {
+  promptHubAgentRoleSetup,
+  promptInitHubAgentConfig,
+} from "./hubAgentConfigPrompt.js";
 import { isBdAvailable } from "./resolveBdExecutable.js";
 
 const require = createRequire(import.meta.url);
@@ -1588,6 +1596,32 @@ const prdDepsOption = Options.text("deps").pipe(
   ),
   Options.optional,
 );
+const taskDeleteYesOption = Options.boolean("yes").pipe(
+  Options.withDescription(
+    "Confirm destructive local delete without interactive prompts.",
+  ),
+  Options.withDefault(false),
+);
+const taskDeleteDryRunOption = Options.boolean("dry-run").pipe(
+  Options.withDescription(
+    "Preview what Beads would delete without making changes.",
+  ),
+  Options.withDefault(false),
+);
+const taskDeleteCascadeOption = Options.boolean("cascade").pipe(
+  Options.withDescription(
+    "Passthrough to Beads: recursively delete dependent tasks.",
+  ),
+  Options.withDefault(false),
+);
+const taskSelectorsArg = Args.atLeast(
+  Args.text({ name: "task-selector" }).pipe(
+    Args.withDescription(
+      "Beads id, exact task title, or 1-based number from tasks list.",
+    ),
+  ),
+  1,
+);
 
 const normalizeTaskOrigin = (
   value: string,
@@ -1885,6 +1919,107 @@ const tasksRecoverCommand = Command.make(
     }),
 );
 
+const tasksDeleteCommand = Command.make(
+  "delete",
+  {
+    selectors: taskSelectorsArg,
+    yes: taskDeleteYesOption,
+    dryRun: taskDeleteDryRunOption,
+    cascade: taskDeleteCascadeOption,
+  },
+  ({ selectors, yes, dryRun, cascade }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      const tasks = yield* Effect.try({
+        try: () => resolveHubTaskSelectors(cwd, selectors),
+        catch: toTaskBoardError,
+      });
+      const taskIds = tasks.map((task) => task.id);
+      const isTTY = process.stdin.isTTY === true;
+
+      if (!dryRun && !yes && !isTTY) {
+        return yield* Effect.fail(
+          new TaskBoardError({
+            message:
+              "sandcastle tasks delete is destructive. Re-run with --yes in non-interactive mode, or use --dry-run to preview.",
+          }),
+        );
+      }
+
+      if (!dryRun && !yes && isTTY) {
+        const preview = yield* Effect.try({
+          try: () =>
+            deleteHubTasks({
+              cwd,
+              taskIds,
+              dryRun: true,
+              cascade,
+            }),
+          catch: toTaskBoardError,
+        });
+        if (preview.trim().length > 0) {
+          yield* d.text(preview.trim());
+        }
+
+        const approved = yield* Effect.tryPromise({
+          try: async () => {
+            const result = await clack.confirm({
+              message: `Permanently delete local Beads task(s) ${taskIds.join(", ")}? This does not delete remote GitHub issues.`,
+              initialValue: false,
+            });
+            if (clack.isCancel(result)) {
+              throw new TaskBoardError({
+                message: "Task delete cancelled.",
+              });
+            }
+            return result === true;
+          },
+          catch: toTaskBoardError,
+        });
+
+        if (!approved) {
+          return yield* Effect.fail(
+            new TaskBoardError({
+              message: "Task delete cancelled.",
+            }),
+          );
+        }
+      }
+
+      const output = yield* Effect.try({
+        try: () =>
+          deleteHubTasks({
+            cwd,
+            taskIds,
+            dryRun,
+            cascade,
+            force: !dryRun,
+          }),
+        catch: toTaskBoardError,
+      });
+
+      if (dryRun) {
+        if (output.trim().length > 0) {
+          yield* d.text(output.trim());
+        }
+        yield* d.status(
+          `Dry run for local Beads task delete (${taskIds.join(", ")}).`,
+          "info",
+        );
+        return;
+      }
+
+      if (output.trim().length > 0) {
+        yield* d.text(output.trim());
+      }
+      yield* d.status(
+        `Deleted local Beads tasks ${taskIds.join(", ")}.`,
+        "success",
+      );
+    }),
+);
+
 const tasksCommand = Command.make("tasks", {}, () =>
   Effect.gen(function* () {
     const d = yield* Display;
@@ -1903,6 +2038,7 @@ const tasksCommand = Command.make("tasks", {}, () =>
     tasksSyncCommand,
     tasksCommentCommand,
     tasksRecoverCommand,
+    tasksDeleteCommand,
   ]),
 );
 
@@ -2009,10 +2145,12 @@ const agentConfigProviderOption = Options.text("provider").pipe(
   Options.withDescription(
     "Agent provider (claude-code, pi, codex, cursor, opencode)",
   ),
+  Options.optional,
 );
 
 const agentConfigModelOption = Options.text("model").pipe(
   Options.withDescription("Agent model"),
+  Options.optional,
 );
 
 const agentConfigOptionsOption = Options.text("options").pipe(
@@ -2020,6 +2158,30 @@ const agentConfigOptionsOption = Options.text("options").pipe(
     "Comma-separated provider options as key=value pairs (e.g. effort=medium,mode=plan)",
   ),
   Options.optional,
+);
+
+const runAgentConfigInit = () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const config = yield* Effect.tryPromise({
+      try: () => promptInitHubAgentConfig(),
+      catch: toHubAgentConfigError,
+    });
+    const configuredRoleCount = HUB_AGENT_ROLES.filter(
+      (role) => config.roles[role] !== undefined,
+    ).length;
+    yield* d.summary("Configured Hub agent roles", {
+      Roles: String(configuredRoleCount),
+      Config: resolveHubAgentConfigPath(),
+    });
+  });
+
+const agentConfigInitCommand = Command.make("init", {}, runAgentConfigInit);
+
+const agentConfigConfigureCommand = Command.make(
+  "configure",
+  {},
+  runAgentConfigInit,
 );
 
 const agentConfigSetRoleCommand = Command.make(
@@ -2041,13 +2203,20 @@ const agentConfigSetRoleCommand = Command.make(
         try: () => parseHubAgentRoleOptions(optionalTextValue(options)),
         catch: toHubAgentConfigError,
       });
-      const saved = yield* Effect.try({
+      const entry = yield* Effect.tryPromise({
         try: () =>
-          setHubAgentRole(role, {
-            provider,
-            model,
+          resolveHubAgentRoleEntry({
+            role,
+            provider: optionalTextValue(provider),
+            model: optionalTextValue(model),
             options: parsedOptions,
+            isTTY: process.stdin.isTTY,
+            configureRole: promptHubAgentRoleSetup,
           }),
+        catch: toHubAgentConfigError,
+      });
+      const saved = yield* Effect.try({
+        try: () => setHubAgentRole(role, entry),
         catch: toHubAgentConfigError,
       });
       yield* d.summary(`Saved Hub agent role ${saved.role}`, {
@@ -2070,6 +2239,8 @@ const agentConfigCommand = Command.make("agent-config", {}, () =>
   Command.withSubcommands([
     agentConfigPathCommand,
     agentConfigShowCommand,
+    agentConfigInitCommand,
+    agentConfigConfigureCommand,
     agentConfigSetRoleCommand,
   ]),
 );

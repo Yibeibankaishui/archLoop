@@ -178,6 +178,7 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("agent-config");
     expect(stdout).toContain("agent-config path");
     expect(stdout).toContain("agent-config show");
+    expect(stdout).toContain("agent-config init");
     expect(stdout).toContain("agent-config set-role");
   });
 
@@ -236,6 +237,24 @@ describe("sandcastle CLI", () => {
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       expect(cliFailureOutput(err)).toMatch(/Unknown Hub agent role/i);
+    }
+  });
+
+  it("agent-config set-role fails clearly without flags in non-interactive mode", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-agent-config-"));
+    const dataDir = join(hostDir, "xdg-data");
+    try {
+      await runCli("agent-config set-role planning", hostDir, {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      });
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toMatch(/non-interactive/i);
+      expect(output).toMatch(
+        /sandcastle agent-config set-role planning --provider/i,
+      );
     }
   });
 
@@ -300,6 +319,7 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("tasks from-prd");
     expect(stdout).toContain("tasks sync");
     expect(stdout).toContain("tasks comment");
+    expect(stdout).toContain("tasks delete");
   });
 
   it("project --help shows the status subcommand", async () => {
@@ -316,6 +336,7 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("from-prd");
     expect(stdout).toContain("sync");
     expect(stdout).toContain("comment");
+    expect(stdout).toContain("delete");
   });
 
   it("init --help no longer advertises podman as a sandbox option", async () => {
@@ -1355,6 +1376,227 @@ exit 1
     const commentArgs = await readFile(commentArgsFile, "utf-8");
     expect(commentArgs).toContain("comments add bd-2 Comment from title");
     expect(commentArgs).toContain("comments add bd-2 Comment from index");
+  });
+
+  it("tasks delete removes local Beads tasks with --yes", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const stateFile = join(hostDir, "bd-state.json");
+    const deleteArgsFile = join(hostDir, "bd-delete-args.txt");
+    const initialTasks = [
+      { id: "bd-1", title: "Delete me", status: "open" },
+      { id: "bd-2", title: "Keep me", status: "open" },
+    ];
+    await writeFile(stateFile, JSON.stringify(initialTasks, null, 2));
+    await writeFile(deleteArgsFile, "");
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = ${JSON.stringify(stateFile)};
+const deleteArgsFile = ${JSON.stringify(deleteArgsFile)};
+const args = process.argv.slice(2);
+const command = args[0];
+const readState = () => JSON.parse(fs.readFileSync(stateFile, "utf8"));
+const writeState = (state) =>
+  fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+
+if (command === "list") {
+  process.stdout.write(JSON.stringify(readState()));
+  process.exit(0);
+}
+
+if (command === "delete") {
+  fs.appendFileSync(deleteArgsFile, args.join(" ") + "\\n");
+  const force = args.includes("--force");
+  const dryRun = args.includes("--dry-run");
+  const taskIds = args.slice(1).filter((arg) => !arg.startsWith("--"));
+  if (dryRun) {
+    process.stdout.write("Dry run: would delete " + taskIds.join(", "));
+    process.exit(0);
+  }
+  if (!force) {
+    process.stdout.write("Preview: would delete " + taskIds.join(", "));
+    process.exit(0);
+  }
+  const state = readState();
+  writeState(state.filter((task) => !taskIds.includes(task.id)));
+  process.stdout.write("Deleted " + taskIds.join(", "));
+  process.exit(0);
+}
+
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const { stdout } = await runCli("tasks delete bd-1 bd-2 --yes", hostDir, {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+    });
+
+    const deleteArgs = await readFile(deleteArgsFile, "utf-8");
+    expect(deleteArgs).toContain("delete bd-1 bd-2 --force");
+    expect(stdout).toContain("Deleted local Beads tasks bd-1, bd-2");
+    expect(JSON.parse(await readFile(stateFile, "utf-8"))).toEqual([]);
+  });
+
+  it("tasks delete requires --yes in non-interactive mode", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const stateFile = join(hostDir, "bd-state.json");
+    await writeFile(
+      stateFile,
+      JSON.stringify([{ id: "bd-1", title: "Delete me", status: "open" }]),
+    );
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = ${JSON.stringify(stateFile)};
+const args = process.argv.slice(2);
+if (args[0] === "list") {
+  process.stdout.write(fs.readFileSync(stateFile, "utf8"));
+  process.exit(0);
+}
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    try {
+      await runCli("tasks delete bd-1", hostDir, {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      });
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      expect(cliFailureOutput(err)).toContain("--yes");
+      expect(cliFailureOutput(err)).toContain("--dry-run");
+    }
+  });
+
+  it("tasks delete --dry-run previews without deleting", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const stateFile = join(hostDir, "bd-state.json");
+    const deleteArgsFile = join(hostDir, "bd-delete-args.txt");
+    const initialTasks = [{ id: "bd-1", title: "Delete me", status: "open" }];
+    await writeFile(stateFile, JSON.stringify(initialTasks, null, 2));
+    await writeFile(deleteArgsFile, "");
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = ${JSON.stringify(stateFile)};
+const deleteArgsFile = ${JSON.stringify(deleteArgsFile)};
+const args = process.argv.slice(2);
+const command = args[0];
+if (command === "list") {
+  process.stdout.write(fs.readFileSync(stateFile, "utf8"));
+  process.exit(0);
+}
+if (command === "delete") {
+  fs.appendFileSync(deleteArgsFile, args.join(" ") + "\\n");
+  process.stdout.write("Dry run: would delete bd-1");
+  process.exit(0);
+}
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const { stdout } = await runCli("tasks delete bd-1 --dry-run", hostDir, {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+    });
+
+    const deleteArgs = await readFile(deleteArgsFile, "utf-8");
+    expect(deleteArgs).toContain("delete bd-1 --dry-run");
+    expect(deleteArgs).not.toContain("--force");
+    expect(stdout).toContain("Dry run for local Beads task delete (bd-1)");
+    expect(JSON.parse(await readFile(stateFile, "utf-8"))).toEqual(
+      initialTasks,
+    );
+  });
+
+  it("tasks delete surfaces Beads dependency failures", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const stateFile = join(hostDir, "bd-state.json");
+    await writeFile(
+      stateFile,
+      JSON.stringify([
+        { id: "bd-1", title: "Blocker", status: "open" },
+        { id: "bd-2", title: "Dependent", status: "open" },
+      ]),
+    );
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = ${JSON.stringify(stateFile)};
+const args = process.argv.slice(2);
+if (args[0] === "list") {
+  process.stdout.write(fs.readFileSync(stateFile, "utf8"));
+  process.exit(0);
+}
+if (args[0] === "delete" && args.includes("--force")) {
+  process.stderr.write(
+    "Error: bd-1 has dependents not in deletion set: bd-2",
+  );
+  process.exit(1);
+}
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    try {
+      await runCli("tasks delete bd-1 --yes", hostDir, {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      });
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      expect(cliFailureOutput(err)).toContain("dependents not in deletion set");
+    }
   });
 
   it("--help shows podman namespace", async () => {

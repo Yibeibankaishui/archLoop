@@ -1,12 +1,102 @@
+import { exec } from "node:child_process";
+import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import {
+  deleteHubTasks,
   formatHubTaskBoardLines,
   formatHubTaskCommentLines,
   formatHubTaskDetailsRows,
   isCanonicalHubTaskStatus,
+  loadHubTaskBoard,
   projectHubTask,
   projectHubTaskBoard,
+  resolveHubTaskSelectors,
 } from "./taskBoard.js";
+
+const execAsync = promisify(exec);
+
+const initRepo = async (dir: string) => {
+  await execAsync("git init -b main", { cwd: dir });
+  await execAsync('git config user.email "test@test.com"', { cwd: dir });
+  await execAsync('git config user.name "Test"', { cwd: dir });
+};
+
+const writeMockBdDelete = async (
+  repoDir: string,
+  initialTasks: { id: string; title: string; status: string }[],
+) => {
+  const binDir = join(repoDir, "bin");
+  await mkdir(binDir, { recursive: true });
+  const gitPath = (await execAsync("command -v git")).stdout.trim();
+  await execAsync(`ln -sf "${gitPath}" "${join(binDir, "git")}"`);
+
+  const stateFile = join(repoDir, "bd-state.json");
+  await writeFile(stateFile, JSON.stringify(initialTasks, null, 2));
+
+  const deleteArgsFile = join(repoDir, "bd-delete-args.txt");
+  await writeFile(deleteArgsFile, "");
+
+  const bdPath = join(binDir, "bd");
+  await writeFile(
+    bdPath,
+    `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = ${JSON.stringify(stateFile)};
+const deleteArgsFile = ${JSON.stringify(deleteArgsFile)};
+const args = process.argv.slice(2);
+const command = args[0];
+const readState = () => JSON.parse(fs.readFileSync(stateFile, "utf8"));
+const writeState = (state) =>
+  fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+
+if (command === "list") {
+  process.stdout.write(JSON.stringify(readState()));
+  process.exit(0);
+}
+
+if (command === "delete") {
+  fs.appendFileSync(deleteArgsFile, args.join(" ") + "\\n");
+  const force = args.includes("--force");
+  const dryRun = args.includes("--dry-run");
+  const taskIds = args.slice(1).filter((arg) => !arg.startsWith("--"));
+  if (dryRun) {
+    process.stdout.write("Dry run: would delete " + taskIds.join(", "));
+    process.exit(0);
+  }
+  if (!force) {
+    process.stdout.write("Preview: would delete " + taskIds.join(", "));
+    process.exit(0);
+  }
+  const state = readState();
+  const missing = taskIds.filter(
+    (taskId) => !state.some((task) => task.id === taskId),
+  );
+  if (missing.length > 0) {
+    process.stderr.write("task " + missing[0] + " not found");
+    process.exit(1);
+  }
+  writeState(state.filter((task) => !taskIds.includes(task.id)));
+  process.stdout.write("Deleted " + taskIds.join(", "));
+  process.exit(0);
+}
+
+process.exit(1);
+`,
+  );
+  await chmod(bdPath, 0o755);
+
+  return {
+    env: {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+    },
+    deleteArgsFile,
+    stateFile,
+  };
+};
 
 describe("task status projection", () => {
   it("maps representative Beads task shapes into canonical Hub statuses", () => {
@@ -201,5 +291,131 @@ describe("task status projection", () => {
     expect(lines).toContain("ready_for_agent (1)");
     expect(lines).toContain("  1. bd-1: Inbox task");
     expect(lines).toContain("  2. bd-2: Ready task");
+  });
+});
+
+describe("deleteHubTasks", () => {
+  it("deletes a single local Beads task via bd delete --force", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "taskboard-delete-"));
+    await initRepo(repoDir);
+    const { env, deleteArgsFile, stateFile } = await writeMockBdDelete(
+      repoDir,
+      [
+        { id: "bd-1", title: "Obsolete task", status: "open" },
+        { id: "bd-2", title: "Keep task", status: "open" },
+      ],
+    );
+
+    const output = deleteHubTasks({
+      cwd: repoDir,
+      taskIds: ["bd-1"],
+      force: true,
+      env,
+    });
+
+    expect(output).toContain("Deleted bd-1");
+    const board = loadHubTaskBoard(repoDir, env);
+    expect(board.tasks.map((task) => task.id)).toEqual(["bd-2"]);
+    const deleteArgs = await readFile(deleteArgsFile, "utf-8");
+    expect(deleteArgs).toContain("delete");
+    expect(deleteArgs).toContain("bd-1");
+    expect(deleteArgs).toContain("--force");
+    expect(await readFile(stateFile, "utf-8")).not.toContain("bd-1");
+  });
+});
+
+describe("resolveHubTaskSelectors", () => {
+  it("resolves multiple selectors to distinct Beads task ids", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "taskboard-selectors-"));
+    await initRepo(repoDir);
+    const { env } = await writeMockBdDelete(repoDir, [
+      { id: "bd-1", title: "First task", status: "open" },
+      { id: "bd-2", title: "Second task", status: "open" },
+      { id: "bd-3", title: "Third task", status: "closed" },
+    ]);
+
+    const tasks = resolveHubTaskSelectors(
+      repoDir,
+      ["bd-1", "Second task", "3"],
+      env,
+    );
+    expect(tasks.map((task) => task.id)).toEqual(["bd-1", "bd-2", "bd-3"]);
+  });
+
+  it("deduplicates selectors that resolve to the same task", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "taskboard-dedupe-"));
+    await initRepo(repoDir);
+    const { env } = await writeMockBdDelete(repoDir, [
+      { id: "bd-1", title: "Only task", status: "open" },
+    ]);
+
+    const tasks = resolveHubTaskSelectors(
+      repoDir,
+      ["bd-1", "Only task", "1"],
+      env,
+    );
+    expect(tasks.map((task) => task.id)).toEqual(["bd-1"]);
+  });
+});
+
+describe("deleteHubTasks dependency failures", () => {
+  it("surfaces Beads dependency errors from bd delete", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "taskboard-delete-deps-"));
+    await initRepo(repoDir);
+
+    const binDir = join(repoDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await execAsync(`ln -sf "${gitPath}" "${join(binDir, "git")}"`);
+
+    const stateFile = join(repoDir, "bd-state.json");
+    await writeFile(
+      stateFile,
+      JSON.stringify([
+        { id: "bd-1", title: "Blocker", status: "open" },
+        { id: "bd-2", title: "Dependent", status: "open" },
+      ]),
+    );
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = ${JSON.stringify(stateFile)};
+const args = process.argv.slice(2);
+if (args[0] === "list") {
+  process.stdout.write(fs.readFileSync(stateFile, "utf8"));
+  process.exit(0);
+}
+if (args[0] === "delete" && args.includes("--force")) {
+  const taskIds = args.slice(1).filter((arg) => !arg.startsWith("--"));
+  if (taskIds.includes("bd-1") && !args.includes("--cascade")) {
+    process.stderr.write(
+      "Error: bd-1 has dependents not in deletion set: bd-2",
+    );
+    process.exit(1);
+  }
+  process.stdout.write("Deleted " + taskIds.join(", "));
+  process.exit(0);
+}
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const env = {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+    };
+
+    expect(() =>
+      deleteHubTasks({
+        cwd: repoDir,
+        taskIds: ["bd-1"],
+        force: true,
+        env,
+      }),
+    ).toThrow(/dependents not in deletion set/);
   });
 });

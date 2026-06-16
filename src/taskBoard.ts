@@ -599,6 +599,30 @@ export const resolveHubTaskSelector = (
   });
 };
 
+export const resolveHubTaskSelectors = (
+  cwd: string,
+  selectors: readonly string[],
+  env: NodeJS.ProcessEnv = process.env,
+): HubTaskProjection[] => {
+  if (selectors.length === 0) {
+    throw new TaskBoardError({
+      message: "sandcastle tasks delete requires at least one task selector.",
+    });
+  }
+
+  const seen = new Set<string>();
+  const resolved: HubTaskProjection[] = [];
+  for (const selector of selectors) {
+    const task = resolveHubTaskSelector(cwd, selector, env);
+    if (seen.has(task.id)) {
+      continue;
+    }
+    seen.add(task.id);
+    resolved.push(task);
+  }
+  return resolved;
+};
+
 export const loadHubTask = (
   cwd: string,
   selector: string,
@@ -850,6 +874,42 @@ export const closeHubTask = (input: CloseHubTaskInput): HubTaskProjection => {
   runBdText(input.cwd, args, `tasks close ${input.taskId}`, input.env);
 
   return loadHubTask(input.cwd, input.taskId, input.env);
+};
+
+export interface DeleteHubTasksInput {
+  readonly cwd: string;
+  readonly taskIds: readonly string[];
+  readonly dryRun?: boolean;
+  readonly cascade?: boolean;
+  readonly force?: boolean;
+  readonly env?: NodeJS.ProcessEnv;
+}
+
+export const deleteHubTasks = (input: DeleteHubTasksInput): string => {
+  if (input.taskIds.length === 0) {
+    throw new TaskBoardError({
+      message:
+        "sandcastle tasks delete requires at least one resolved Beads task id.",
+    });
+  }
+
+  const args = ["delete", ...input.taskIds];
+  if (input.dryRun) {
+    args.push("--dry-run");
+  }
+  if (input.cascade) {
+    args.push("--cascade");
+  }
+  if (input.force && !input.dryRun) {
+    args.push("--force");
+  }
+
+  return runBdText(
+    input.cwd,
+    args,
+    `tasks delete ${input.taskIds.join(" ")}`,
+    input.env,
+  );
 };
 
 export const claimHubTask = (input: ClaimHubTaskInput): ClaimHubTaskResult => {

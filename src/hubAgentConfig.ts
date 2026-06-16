@@ -206,6 +206,68 @@ export const validateHubAgentRoleEntry = (
   return role;
 };
 
+export const assertHubAgentRole = (role: string): HubAgentRole => {
+  if (!isHubAgentRole(role)) {
+    throw new Error(
+      `Unknown Hub agent role "${role}". Supported roles: ${HUB_AGENT_ROLES.join(", ")}`,
+    );
+  }
+  return role;
+};
+
+export const formatSetHubAgentRoleMissingFlagsMessage = (
+  role: string,
+): string =>
+  [
+    `Hub agent role "${role}" requires --provider and --model in non-interactive mode.`,
+    `Run: sandcastle agent-config set-role ${role} --provider <provider> --model <model>`,
+    "Or run the same command in an interactive terminal to configure via prompts.",
+  ].join("\n");
+
+export interface ResolveHubAgentRoleEntryInput {
+  readonly role: string;
+  readonly provider?: string;
+  readonly model?: string;
+  readonly options?: HubAgentRoleEntry["options"];
+  readonly isTTY?: boolean;
+  readonly configureRole?: HubAgentRoleConfigurator;
+}
+
+export const resolveHubAgentRoleEntry = async (
+  input: ResolveHubAgentRoleEntryInput,
+): Promise<HubAgentRoleEntry> => {
+  const validatedRole = assertHubAgentRole(input.role);
+  const provider = input.provider?.trim();
+  const model = input.model?.trim();
+  const hasProvider = provider !== undefined && provider.length > 0;
+  const hasModel = model !== undefined && model.length > 0;
+
+  if (hasProvider && hasModel) {
+    const entry: HubAgentRoleEntry = {
+      provider: provider!,
+      model: model!,
+    };
+    if (input.options) {
+      return { ...entry, options: input.options };
+    }
+    return entry;
+  }
+
+  if (hasProvider !== hasModel) {
+    throw new Error(
+      `Hub agent role "${validatedRole}" requires both --provider and --model when setting flags explicitly.`,
+    );
+  }
+
+  const interactive = input.isTTY ?? process.stdin.isTTY ?? false;
+  const configureRole = input.configureRole;
+  if (!interactive || configureRole === undefined) {
+    throw new Error(formatSetHubAgentRoleMissingFlagsMessage(validatedRole));
+  }
+
+  return configureRole(validatedRole);
+};
+
 export interface SetHubAgentRoleResult {
   readonly config: HubAgentConfig;
   readonly role: HubAgentRole;
@@ -230,6 +292,45 @@ export const setHubAgentRole = (
   return { config: nextConfig, role: validatedRole, entry: normalizedEntry };
 };
 
+export const applyHubAgentRoleEntryToAllRoles = (
+  entry: HubAgentRoleEntry,
+  options: HubAgentConfigStoreOptions = {},
+  roles: readonly HubAgentRole[] = HUB_AGENT_ROLES,
+): HubAgentConfig => {
+  let config = readHubAgentConfig(options);
+  for (const role of roles) {
+    config = setHubAgentRole(role, entry, options).config;
+  }
+  return config;
+};
+
+export interface InitHubAgentConfigInput {
+  readonly env?: NodeJS.ProcessEnv;
+  readonly homeDir?: string;
+  readonly roles?: readonly HubAgentRole[];
+  readonly confirmApplyToAll: () => Promise<boolean>;
+  readonly configureRole: HubAgentRoleConfigurator;
+}
+
+export const initHubAgentConfig = async (
+  input: InitHubAgentConfigInput,
+): Promise<HubAgentConfig> => {
+  const storeOptions = { env: input.env, homeDir: input.homeDir };
+  const roles = input.roles ?? HUB_AGENT_ROLES;
+
+  if (await input.confirmApplyToAll()) {
+    const entry = await input.configureRole(roles[0] ?? "planning");
+    return applyHubAgentRoleEntryToAllRoles(entry, storeOptions, roles);
+  }
+
+  let config = readHubAgentConfig(storeOptions);
+  for (const role of roles) {
+    const entry = await input.configureRole(role);
+    config = setHubAgentRole(role, entry, storeOptions).config;
+  }
+  return config;
+};
+
 export const listMissingHubAgentRoles = (
   config: HubAgentConfig,
   requiredRoles: readonly HubAgentRole[] = HUB_AGENT_ROLES,
@@ -249,6 +350,7 @@ export const formatMissingHubAgentRolesMessage = (
   return [
     `Missing Hub agent role config: ${missingRoles.join(", ")}`,
     "Configure the required roles before running this flow:",
+    "Run `sandcastle agent-config init` for an interactive setup wizard, or configure roles individually:",
     examples,
     "Run `sandcastle agent-config show` to inspect current Hub agent roles.",
   ].join("\n");
@@ -281,7 +383,7 @@ export const formatHubAgentConfigShowLines = (
   if (missingRoles.length > 0) {
     lines.push("", `Missing roles: ${missingRoles.join(", ")}`);
     lines.push(
-      "Configure a role with `sandcastle agent-config set-role <role> --provider <provider> --model <model>`.",
+      "Run `sandcastle agent-config init` for an interactive setup wizard, or configure a role with `sandcastle agent-config set-role <role> --provider <provider> --model <model>`.",
     );
   }
 

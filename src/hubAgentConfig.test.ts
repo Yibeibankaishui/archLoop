@@ -4,13 +4,16 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  applyHubAgentRoleEntryToAllRoles,
   ensureHubAgentRolesConfigured,
   formatHubAgentConfigShowLines,
   formatMissingHubAgentRolesMessage,
   HUB_AGENT_ROLES,
+  initHubAgentConfig,
   listMissingHubAgentRoles,
   readHubAgentConfig,
   resolveHubAgentConfigPath,
+  resolveHubAgentRoleEntry,
   setHubAgentRole,
   validateHubAgentRoleEntry,
 } from "./hubAgentConfig.js";
@@ -101,6 +104,115 @@ describe("hub agent config store", () => {
     expect(listMissingHubAgentRoles({ roles: {} }, HUB_AGENT_ROLES)).toEqual([
       ...HUB_AGENT_ROLES,
     ]);
+  });
+
+  it("applies one provider/model entry to every Hub agent role", async () => {
+    const { env } = await tempHome();
+    const entry = { provider: "codex", model: "gpt-5.4-mini" };
+
+    const config = applyHubAgentRoleEntryToAllRoles(entry, { env });
+
+    for (const role of HUB_AGENT_ROLES) {
+      expect(config.roles[role]).toEqual(entry);
+    }
+    expect(readHubAgentConfig({ env })).toEqual(config);
+  });
+
+  it("init wizard applies one entry to all roles when confirmed", async () => {
+    const { env } = await tempHome();
+    const configured: string[] = [];
+
+    const config = await initHubAgentConfig({
+      env,
+      confirmApplyToAll: async () => true,
+      configureRole: async (role) => {
+        configured.push(role);
+        return { provider: "cursor", model: "auto" };
+      },
+    });
+
+    expect(configured).toEqual(["planning"]);
+    for (const role of HUB_AGENT_ROLES) {
+      expect(config.roles[role]).toEqual({
+        provider: "cursor",
+        model: "auto",
+      });
+    }
+  });
+
+  it("init wizard walks each role when apply-to-all is declined", async () => {
+    const { env } = await tempHome();
+    const configured: string[] = [];
+
+    const config = await initHubAgentConfig({
+      env,
+      confirmApplyToAll: async () => false,
+      configureRole: async (role) => {
+        configured.push(role);
+        return { provider: "codex", model: `model-for-${role}` };
+      },
+    });
+
+    expect(configured).toEqual([...HUB_AGENT_ROLES]);
+    for (const role of HUB_AGENT_ROLES) {
+      expect(config.roles[role]).toEqual({
+        provider: "codex",
+        model: `model-for-${role}`,
+      });
+    }
+  });
+
+  it("resolveHubAgentRoleEntry uses explicit provider and model flags", async () => {
+    const entry = await resolveHubAgentRoleEntry({
+      role: "planning",
+      provider: "codex",
+      model: "gpt-5.4-mini",
+      isTTY: false,
+    });
+
+    expect(entry).toEqual({
+      provider: "codex",
+      model: "gpt-5.4-mini",
+    });
+  });
+
+  it("resolveHubAgentRoleEntry prompts when flags are omitted in a TTY", async () => {
+    const entry = await resolveHubAgentRoleEntry({
+      role: "review",
+      isTTY: true,
+      configureRole: async (role) => {
+        expect(role).toBe("review");
+        return { provider: "cursor", model: "auto" };
+      },
+    });
+
+    expect(entry).toEqual({ provider: "cursor", model: "auto" });
+  });
+
+  it("resolveHubAgentRoleEntry fails clearly when flags are omitted non-interactively", async () => {
+    await expect(
+      resolveHubAgentRoleEntry({
+        role: "merge",
+        isTTY: false,
+      }),
+    ).rejects.toThrow(/non-interactive/i);
+
+    await expect(
+      resolveHubAgentRoleEntry({
+        role: "merge",
+        isTTY: false,
+      }),
+    ).rejects.toThrow(/sandcastle agent-config set-role merge/i);
+  });
+
+  it("resolveHubAgentRoleEntry rejects partial provider/model flags", async () => {
+    await expect(
+      resolveHubAgentRoleEntry({
+        role: "planning",
+        provider: "codex",
+        isTTY: false,
+      }),
+    ).rejects.toThrow(/both --provider and --model/i);
   });
 
   it("fails non-interactive startup with an actionable missing-role message", async () => {
