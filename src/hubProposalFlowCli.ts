@@ -4,6 +4,7 @@ import { Effect } from "effect";
 import { Display } from "./Display.js";
 import { TaskBoardError } from "./errors.js";
 import { promptHubAgentRoleSetup } from "./hubAgentConfigPrompt.js";
+import type { ValidatedHubFlowInput } from "./hubFlowInput.js";
 import {
   displayPrdProposalWarnings,
   displayProposalAgentPhase,
@@ -23,6 +24,22 @@ import {
   formatPrdWarningListSuffix,
   summarizePrdWarnings,
 } from "./hubPrdWarning.js";
+import {
+  displayTriageProposalFlowResult,
+  runTriageProposalFlowFromCli,
+  type TriageProposalFlowDisplayOutcome,
+} from "./hubTriageProposalCli.js";
+import type { RunTriageProposalFlowResult } from "./hubTriageProposal.js";
+
+export type HubProposalFlowExecutionResult =
+  | {
+      readonly flowId: "prd-decomposition";
+      readonly result: RunPrdDecompositionFlowResult;
+    }
+  | {
+      readonly flowId: "triage";
+      readonly result: RunTriageProposalFlowResult;
+    };
 
 export type PrdDecompositionFlowDisplayOutcome =
   | { readonly kind: "cancelled"; readonly reason: string }
@@ -172,4 +189,88 @@ export const runPrdDecompositionProposalFlowFromCli = async (input: {
       await displayPrdProposalWarnings(proposal);
     },
   });
+};
+
+export { runTriageProposalFlowFromCli } from "./hubTriageProposalCli.js";
+
+export const handlePrdDecompositionFlowDisplay = <E>(
+  result: RunPrdDecompositionFlowResult,
+  fail: (message: string) => E,
+): Effect.Effect<void, E, Display> =>
+  Effect.gen(function* () {
+    const displayOutcome = yield* displayPrdDecompositionFlowResult(result);
+    if (displayOutcome.kind === "cancelled") {
+      return yield* Effect.fail(fail(displayOutcome.reason));
+    }
+    if (displayOutcome.kind === "failed") {
+      return yield* Effect.fail(fail(displayOutcome.reason));
+    }
+  });
+
+export const handleTriageProposalFlowDisplay = <E>(
+  result: RunTriageProposalFlowResult,
+  fail: (message: string) => E,
+): Effect.Effect<void, E, Display> =>
+  Effect.gen(function* () {
+    const displayOutcome: TriageProposalFlowDisplayOutcome =
+      yield* displayTriageProposalFlowResult(result);
+    if (displayOutcome.kind === "cancelled") {
+      return yield* Effect.fail(fail(displayOutcome.reason));
+    }
+    if (displayOutcome.kind === "failed") {
+      return yield* Effect.fail(fail(displayOutcome.reason));
+    }
+  });
+
+export const runHubProposalFlowFromCli = async (input: {
+  readonly cwd: string;
+  readonly validatedInput: ValidatedHubFlowInput;
+  readonly yes: boolean;
+  readonly isTTY?: boolean;
+  readonly hubStatusMode?: PrdHubStatusMode;
+  readonly dependencyOverride?: string;
+}): Promise<HubProposalFlowExecutionResult> => {
+  const flowId = input.validatedInput.flowId;
+  switch (flowId) {
+    case "prd-decomposition":
+      return {
+        flowId: "prd-decomposition",
+        result: await runPrdDecompositionProposalFlowFromCli({
+          cwd: input.cwd,
+          prdRef: input.validatedInput.ref,
+          yes: input.yes,
+          hubStatusMode: input.hubStatusMode,
+          dependencyOverride: input.dependencyOverride,
+          isTTY: input.isTTY,
+        }),
+      };
+    case "triage": {
+      const triageInput = input.validatedInput;
+      const taskIds =
+        triageInput.selection.type === "task-id"
+          ? [triageInput.selection.taskId]
+          : undefined;
+      const query =
+        triageInput.selection.type === "statuses"
+          ? triageInput.query
+          : undefined;
+
+      return {
+        flowId: "triage",
+        result: await runTriageProposalFlowFromCli({
+          cwd: input.cwd,
+          taskIds,
+          query,
+          yes: input.yes,
+          isTTY: input.isTTY,
+        }),
+      };
+    }
+    default: {
+      const unsupportedFlowId: never = flowId;
+      throw new TaskBoardError({
+        message: `Unsupported proposal flow "${unsupportedFlowId}".`,
+      });
+    }
+  }
 };

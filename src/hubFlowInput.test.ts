@@ -26,6 +26,10 @@ describe("hub flow input schemas", () => {
       required: true,
     });
     expect(triageFlow?.kind).toBe("proposal");
+    expect(triageFlow?.prompts).toEqual({
+      draft: "draft-prompt.md",
+      finalization: "finalization-prompt.md",
+    });
     expect(triageFlow?.input).toEqual({
       kind: "task-query",
       label: "Hub task query",

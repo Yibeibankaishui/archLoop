@@ -89,14 +89,13 @@ import {
   validateHubFlowInput,
 } from "./hubFlowInput.js";
 import {
-  displayPrdDecompositionFlowResult,
+  handlePrdDecompositionFlowDisplay,
+  handleTriageProposalFlowDisplay,
+  runHubProposalFlowFromCli,
   runPrdDecompositionProposalFlowFromCli,
-} from "./hubProposalFlowCli.js";
-import {
-  displayTriageProposalFlowResult,
-  promptTriageTaskSelection,
   runTriageProposalFlowFromCli,
-} from "./hubTriageProposalCli.js";
+} from "./hubProposalFlowCli.js";
+import { promptTriageTaskSelection } from "./hubTriageProposalCli.js";
 import type {
   PrdHubStatusMode,
   PrdWarningSeverity,
@@ -128,6 +127,8 @@ import {
   resolveHubAgentConfigPath,
   resolveHubAgentRoleEntry,
   setHubAgentRole,
+  type HubAgentRole,
+  type HubAgentRoleEntry,
 } from "./hubAgentConfig.js";
 import {
   promptHubAgentRoleSetup,
@@ -1597,7 +1598,7 @@ const taskKindOption = Options.text("kind").pipe(
 const prdRefArg = Args.text({ name: "prd-ref" });
 const prdApproveOption = Options.boolean("yes").pipe(
   Options.withDescription(
-    "Approve the drafted PRD slices without interactive confirmation.",
+    "Run a one-shot PRD decomposition proposal and create inbox tasks without interactive prompts.",
   ),
   Options.withDefault(false),
 );
@@ -1861,21 +1862,10 @@ const tasksTriageCommand = Command.make(
         catch: toTaskBoardError,
       });
 
-      const displayOutcome = yield* displayTriageProposalFlowResult(result);
-      if (displayOutcome.kind === "cancelled") {
-        return yield* Effect.fail(
-          new TaskBoardError({
-            message: displayOutcome.reason,
-          }),
-        );
-      }
-      if (displayOutcome.kind === "failed") {
-        return yield* Effect.fail(
-          new TaskBoardError({
-            message: displayOutcome.reason,
-          }),
-        );
-      }
+      yield* handleTriageProposalFlowDisplay(
+        result,
+        (message) => new TaskBoardError({ message }),
+      );
     }),
 );
 
@@ -1883,9 +1873,17 @@ const normalizePrdHubStatusMode = (
   value: string,
 ): PrdHubStatusMode | undefined => {
   const normalized = value.trim().toLowerCase();
-  return normalized === "inbox" || normalized === "classified_ready"
-    ? normalized
-    : undefined;
+  if (normalized === "inbox") {
+    return "inbox";
+  }
+  if (
+    normalized === "ready_for_agent" ||
+    normalized === "ready_for_human" ||
+    normalized === "classified_ready"
+  ) {
+    return "classified_ready";
+  }
+  return undefined;
 };
 
 const resolvePrdHubStatusMode = (
@@ -1941,21 +1939,10 @@ const tasksFromPrdCommand = Command.make(
         catch: toTaskBoardError,
       });
 
-      const displayOutcome = yield* displayPrdDecompositionFlowResult(result);
-      if (displayOutcome.kind === "cancelled") {
-        return yield* Effect.fail(
-          new TaskBoardError({
-            message: displayOutcome.reason,
-          }),
-        );
-      }
-      if (displayOutcome.kind === "failed") {
-        return yield* Effect.fail(
-          new TaskBoardError({
-            message: displayOutcome.reason,
-          }),
-        );
-      }
+      yield* handlePrdDecompositionFlowDisplay(
+        result,
+        (message) => new TaskBoardError({ message }),
+      );
     }),
 );
 
@@ -2213,6 +2200,13 @@ const flowInputOption = Options.text("input").pipe(
     "Flow-specific input value (PRD path for prd-decomposition; optional task query for triage)",
   ),
   Options.optional,
+);
+
+const flowYesOption = Options.boolean("yes").pipe(
+  Options.withDescription(
+    "Run proposal flows in one-shot mode without interactive prompts.",
+  ),
+  Options.withDefault(false),
 );
 
 const toHubAgentConfigError = (error: unknown): HubAgentConfigError =>
@@ -2518,8 +2512,9 @@ const runCommand = Command.make(
     ),
     flow: flowOption,
     input: flowInputOption,
+    yes: flowYesOption,
   },
-  ({ project, flow, input }) =>
+  ({ project, flow, input, yes }) =>
     Effect.gen(function* () {
       const d = yield* Display;
       const projectDir = project.trim().length > 0 ? project : ".";
@@ -2561,68 +2556,30 @@ const runCommand = Command.make(
         );
 
         if (flowDefinition.kind === "proposal") {
-          if (validatedInput.flowId === "prd-decomposition") {
-            const result = yield* Effect.tryPromise({
-              try: () =>
-                runPrdDecompositionProposalFlowFromCli({
-                  cwd: repoRoot,
-                  prdRef: validatedInput.ref,
-                  yes: false,
-                  isTTY: process.stdin.isTTY,
-                }),
-              catch: toHubFlowError,
-            });
-            const displayOutcome =
-              yield* displayPrdDecompositionFlowResult(result);
-            if (displayOutcome.kind === "cancelled") {
-              return yield* Effect.fail(
-                new HubFlowError({ message: displayOutcome.reason }),
-              );
-            }
-            if (displayOutcome.kind === "failed") {
-              return yield* Effect.fail(
-                new HubFlowError({ message: displayOutcome.reason }),
-              );
-            }
+          const execution = yield* Effect.tryPromise({
+            try: () =>
+              runHubProposalFlowFromCli({
+                cwd: repoRoot,
+                validatedInput,
+                yes,
+                isTTY: process.stdin.isTTY,
+              }),
+            catch: toHubFlowError,
+          });
+
+          if (execution.flowId === "prd-decomposition") {
+            yield* handlePrdDecompositionFlowDisplay(
+              execution.result,
+              (message) => new HubFlowError({ message }),
+            );
             return;
           }
 
-          if (validatedInput.flowId === "triage") {
-            const triageInput = validatedInput;
-            const taskIds =
-              triageInput.selection.type === "task-id"
-                ? [triageInput.selection.taskId]
-                : undefined;
-            const query =
-              triageInput.selection.type === "statuses"
-                ? triageInput.query
-                : undefined;
-
-            const result = yield* Effect.tryPromise({
-              try: () =>
-                runTriageProposalFlowFromCli({
-                  cwd: repoRoot,
-                  taskIds,
-                  query,
-                  yes: false,
-                  isTTY: process.stdin.isTTY,
-                }),
-              catch: toHubFlowError,
-            });
-            const displayOutcome =
-              yield* displayTriageProposalFlowResult(result);
-            if (displayOutcome.kind === "cancelled") {
-              return yield* Effect.fail(
-                new HubFlowError({ message: displayOutcome.reason }),
-              );
-            }
-            if (displayOutcome.kind === "failed") {
-              return yield* Effect.fail(
-                new HubFlowError({ message: displayOutcome.reason }),
-              );
-            }
-            return;
-          }
+          yield* handleTriageProposalFlowDisplay(
+            execution.result,
+            (message) => new HubFlowError({ message }),
+          );
+          return;
         }
       }
 
