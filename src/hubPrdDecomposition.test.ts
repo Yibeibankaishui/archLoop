@@ -160,7 +160,7 @@ describe("validatePrdDecompositionProposal", () => {
       validatePrdDecompositionProposal(proposal, {
         unattendedReadyStates: true,
       }),
-    ).toThrow(/high-severity PRD warnings/i);
+    ).toThrow(/High-severity warnings block unattended ready-state creation/i);
   });
 });
 
@@ -342,6 +342,84 @@ exit 1
       expect(createArgs).toContain('"slice_type":"HITL"');
       expect(createArgs).toContain("ready-for-agent");
       expect(createArgs).toContain("ready-for-human");
+    } finally {
+      process.env.PATH = previousPath;
+      process.env.SANDCASTLE_BD_PATH = previousBdPath;
+    }
+  });
+
+  it("persists PRD warning metadata, description section, and label on warned slices", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "prd-proposal-warnings-"));
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+
+    const createArgsFile = join(hostDir, "create-args.txt");
+    const createCountFile = join(hostDir, "create-count.txt");
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "create" ]; then
+  n=0
+  if [ -f "${createCountFile}" ]; then
+    n=$(cat "${createCountFile}")
+  fi
+  n=$((n + 1))
+  printf '%s' "$n" > "${createCountFile}"
+  printf '%s\\n' "$@" >> "${createArgsFile}"
+  printf '[{"id":"bd-%s","title":"%s"}]\\n' "$n" "$2"
+  exit 0
+fi
+if [ "$1" = "dep" ] && [ "$2" = "add" ]; then
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const previousPath = process.env.PATH;
+    const previousBdPath = process.env.SANDCASTLE_BD_PATH;
+    process.env.PATH = `${binDir}:${previousPath ?? ""}`;
+    process.env.SANDCASTLE_BD_PATH = bdPath;
+
+    try {
+      const proposal: PrdDecompositionProposal = {
+        ...sampleProposal(),
+        warnings: [
+          {
+            tempId: "slice-2",
+            severity: "medium",
+            message: "Rollout criteria are unclear.",
+          },
+        ],
+      };
+
+      const result = applyPrdDecompositionProposal({
+        cwd: hostDir,
+        proposal,
+        hubStatusMode: "inbox",
+        proposalRunId: "run-proposal-warnings",
+      });
+
+      const createArgs = await import("node:fs/promises").then((fs) =>
+        fs.readFile(createArgsFile, "utf8"),
+      );
+      expect(createArgs).toContain('"slice_temp_id":"slice-2"');
+      expect(createArgs).toContain('"warning_severity":"medium"');
+      expect(createArgs).toContain(
+        '"warning_message":"Rollout criteria are unclear."',
+      );
+      expect(createArgs).toContain("## PRD warning");
+      expect(createArgs).toContain(
+        "**[medium]** Rollout criteria are unclear.",
+      );
+      expect(createArgs).toContain("prd-warning-medium");
+      expect(result.tasks[1]?.prdWarning).toEqual({
+        sliceTempId: "slice-2",
+        severity: "medium",
+        message: "Rollout criteria are unclear.",
+      });
     } finally {
       process.env.PATH = previousPath;
       process.env.SANDCASTLE_BD_PATH = previousBdPath;

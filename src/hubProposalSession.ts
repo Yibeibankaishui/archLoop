@@ -45,7 +45,7 @@ export type ProposalAgentInvoker = (
   input: ProposalAgentInvokeInput,
 ) => Promise<ProposalAgentInvokeResult>;
 
-export interface ProposalSessionInteraction {
+export interface ProposalSessionInteraction<T = unknown> {
   readonly onAssistantMessage?: (input: {
     readonly phase: ProposalSessionPhase;
     readonly message: string;
@@ -54,7 +54,7 @@ export interface ProposalSessionInteraction {
     readonly runDir: string;
   }) => void | Promise<void>;
   readonly requestRefinement?: () => Promise<string | null>;
-  readonly requestApproval?: () => Promise<boolean>;
+  readonly requestApproval?: (proposal: T) => Promise<boolean>;
 }
 
 export interface RunProposalSessionInput<T> {
@@ -68,7 +68,7 @@ export interface RunProposalSessionInput<T> {
   readonly finalizationPrompt: string;
   readonly output: OutputObjectDefinition<T>;
   readonly agentInvoker: ProposalAgentInvoker;
-  readonly interaction?: ProposalSessionInteraction;
+  readonly interaction?: ProposalSessionInteraction<T>;
   readonly refinements?: readonly string[];
   readonly approve?: boolean;
   readonly oneShot?: boolean;
@@ -335,8 +335,8 @@ const invokeProposalAgent = (
     runDir: state.runDir,
   });
 
-const notifyAssistantMessage = async (
-  input: ProposalSessionInteraction | undefined,
+const notifyAssistantMessage = async <T>(
+  input: ProposalSessionInteraction<T> | undefined,
   state: ProposalSessionState,
   phase: ProposalSessionPhase,
   message: string,
@@ -353,8 +353,8 @@ const notifyAssistantMessage = async (
   });
 };
 
-const requestNextRefinement = async (input: {
-  readonly interaction?: ProposalSessionInteraction;
+const requestNextRefinement = async <T>(input: {
+  readonly interaction?: ProposalSessionInteraction<T>;
   readonly refinements?: readonly string[];
   readonly refinementIndex: number;
 }): Promise<string | null> => {
@@ -369,16 +369,17 @@ const requestNextRefinement = async (input: {
   return null;
 };
 
-const requestApprovalDecision = async (input: {
-  readonly interaction?: ProposalSessionInteraction;
+const requestApprovalDecision = async <T>(input: {
+  readonly interaction?: ProposalSessionInteraction<T>;
   readonly approve?: boolean;
+  readonly proposal: T;
 }): Promise<boolean> => {
   if (input.approve !== undefined) {
     return input.approve;
   }
 
   if (input.interaction?.requestApproval) {
-    return input.interaction.requestApproval();
+    return input.interaction.requestApproval(input.proposal);
   }
 
   return false;
@@ -585,25 +586,6 @@ export const runProposalSession = async <T>(
     }
   }
 
-  const approved = await requestApprovalDecision({
-    interaction: input.interaction,
-    approve: input.approve,
-  });
-  if (!approved) {
-    appendProposalEvent(state.runDir, {
-      type: "session_cancelled",
-      ...proposalEventBase(state),
-      phase: "approval",
-    });
-    return {
-      outcome: "cancelled",
-      flowId: state.flowId,
-      runId: state.runId,
-      runDir: state.runDir,
-      phase: "approval",
-    };
-  }
-
   appendProposalEvent(state.runDir, {
     type: "finalization_started",
     ...proposalEventBase(state),
@@ -658,6 +640,26 @@ export const runProposalSession = async <T>(
   });
   if (mutationFailure) {
     return mutationFailure;
+  }
+
+  const approved = await requestApprovalDecision({
+    interaction: input.interaction,
+    approve: input.approve,
+    proposal: finalProposal,
+  });
+  if (!approved) {
+    appendProposalEvent(state.runDir, {
+      type: "session_cancelled",
+      ...proposalEventBase(state),
+      phase: "approval",
+    });
+    return {
+      outcome: "cancelled",
+      flowId: state.flowId,
+      runId: state.runId,
+      runDir: state.runDir,
+      phase: "approval",
+    };
   }
 
   writeJson(state.paths.applyResultPath, { status: "pending" });

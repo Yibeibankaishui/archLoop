@@ -18,6 +18,12 @@ import {
   type RunProposalSessionResult,
 } from "./hubProposalSession.js";
 import {
+  formatHighSeverityValidationMessage,
+  formatPrdWarningDescriptionSection,
+  indexWarningsByTempId,
+  prdWarningLabelForSeverity,
+} from "./hubPrdWarning.js";
+import {
   addHubTaskDependency,
   createHubTask,
   loadHubTaskBoard,
@@ -213,9 +219,7 @@ export const validatePrdDecompositionProposal = (
     options.unattendedReadyStates &&
     hasHighSeverityWarnings(proposal.warnings)
   ) {
-    throw new Error(
-      "High-severity PRD warnings block unattended ready-state creation.",
-    );
+    throw new Error(formatHighSeverityValidationMessage(proposal.warnings));
   }
 };
 
@@ -273,25 +277,40 @@ export const applyPrdDecompositionProposal = (
     unattendedReadyStates: input.hubStatusMode === "classified_ready",
   });
 
-  const tasks = input.proposal.slices.map((slice) =>
-    createHubTask(
+  const warningsByTempId = indexWarningsByTempId(input.proposal.warnings);
+
+  const tasks = input.proposal.slices.map((slice) => {
+    const warning = warningsByTempId.get(slice.tempId);
+    let description = formatPrdSliceDescription({
+      slice,
+      proposal: input.proposal,
+      proposalRunId: input.proposalRunId,
+    });
+    if (warning) {
+      description = `${description}\n\n${formatPrdWarningDescriptionSection(warning)}`;
+    }
+
+    return createHubTask(
       input.cwd,
       {
         title: slice.title,
-        description: formatPrdSliceDescription({
-          slice,
-          proposal: input.proposal,
-          proposalRunId: input.proposalRunId,
-        }),
+        description,
         origin: "prd-decomposition",
         sliceType: slice.sliceType,
         prdRef: input.proposal.prdRef,
         proposalRunId: input.proposalRunId,
         hubStatus: resolveSliceHubStatus(slice, input.hubStatusMode),
+        sliceTempId: slice.tempId,
+        prdWarning: warning
+          ? { severity: warning.severity, message: warning.message }
+          : undefined,
+        extraLabels: warning
+          ? [prdWarningLabelForSeverity(warning.severity)]
+          : undefined,
       },
       input.env,
-    ),
-  );
+    );
+  });
 
   const tempIdToTaskId = new Map<string, string>();
   for (const [index, slice] of input.proposal.slices.entries()) {
@@ -694,12 +713,15 @@ export interface RunPrdDecompositionFlowInput {
   readonly resolveHubStatusMode?: () => Promise<PrdHubStatusMode>;
   readonly dependencyOverride?: string;
   readonly agentInvoker?: ProposalAgentInvoker;
-  readonly interaction?: ProposalSessionInteraction;
+  readonly interaction?: ProposalSessionInteraction<PrdDecompositionProposal>;
   readonly refinements?: readonly string[];
   readonly approve?: boolean;
   readonly hubAgentConfig?: HubAgentConfig;
   readonly configureHubAgentRole?: HubAgentRoleConfigurator;
   readonly isTTY?: boolean;
+  readonly onProposalReady?: (
+    proposal: PrdDecompositionProposal,
+  ) => Promise<void>;
 }
 
 const determineHubStatusMode = async (
@@ -823,11 +845,12 @@ export const runPrdDecompositionFlow = async (
     return toFailedFlowResult(session, session.reason);
   }
 
-  const hubStatusMode = await determineHubStatusMode(input);
   const proposal = resolveProposalDependencies(
     session.finalProposal,
     input.dependencyOverride,
   );
+  await input.onProposalReady?.(proposal);
+  const hubStatusMode = await determineHubStatusMode(input);
 
   try {
     validatePrdDecompositionProposal(proposal, {

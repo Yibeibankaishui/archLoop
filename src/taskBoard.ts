@@ -1,5 +1,14 @@
 import { execFileSync } from "node:child_process";
 
+import type { PrdWarningSeverity } from "./hubPrdDecomposition.js";
+import {
+  formatPrdWarningDetailsRow,
+  formatPrdWarningListSuffix,
+  formatPrdWarningSummaryLine,
+  matchesPrdWarningFilter,
+  readPrdWarningFromTask,
+  summarizeTasksPrdWarnings,
+} from "./hubPrdWarning.js";
 import {
   appendHubTaskEvent,
   createHubRunContext,
@@ -1043,6 +1052,11 @@ export const claimHubTask = (input: ClaimHubTaskInput): ClaimHubTaskResult => {
   };
 };
 
+export interface CreateHubTaskPrdWarning {
+  readonly severity: "low" | "medium" | "high";
+  readonly message: string;
+}
+
 export interface CreateHubTaskInput {
   readonly title: string;
   readonly description?: string;
@@ -1052,11 +1066,17 @@ export interface CreateHubTaskInput {
   readonly prdRef?: string;
   readonly proposalRunId?: string;
   readonly hubStatus?: "inbox" | "ready_for_agent" | "ready_for_human";
+  readonly sliceTempId?: string;
+  readonly prdWarning?: CreateHubTaskPrdWarning;
+  readonly extraLabels?: readonly string[];
 }
 
 export interface CreateHubTaskResult {
   readonly id: string;
   readonly title: string;
+  readonly prdWarning?: CreateHubTaskPrdWarning & {
+    readonly sliceTempId: string;
+  };
 }
 
 const CREATE_HUB_STATUS_LABELS: Readonly<
@@ -1087,20 +1107,24 @@ export const createHubTask = (
   if (input.proposalRunId) {
     metadata.proposal_run_id = input.proposalRunId;
   }
+  if (input.sliceTempId) {
+    metadata.slice_temp_id = input.sliceTempId;
+  }
+  if (input.prdWarning) {
+    metadata.warning_severity = input.prdWarning.severity;
+    metadata.warning_message = input.prdWarning.message;
+  }
 
   const args = ["create", input.title];
   if (input.description) {
     args.push("--description", input.description);
   }
-  args.push(
-    "--type",
-    "task",
-    "-l",
-    CREATE_HUB_STATUS_LABELS[input.hubStatus ?? "inbox"],
-    "--metadata",
-    JSON.stringify(metadata),
-    "--json",
-  );
+  args.push("--type", "task");
+  args.push("-l", CREATE_HUB_STATUS_LABELS[input.hubStatus ?? "inbox"]);
+  for (const label of input.extraLabels ?? []) {
+    args.push("-l", label);
+  }
+  args.push("--metadata", JSON.stringify(metadata), "--json");
 
   const output = runBdText(cwd, args, "tasks create", env);
   const parsed = parseBdJsonOutput(output);
@@ -1110,10 +1134,23 @@ export const createHubTask = (
       ? (created as Record<string, unknown>)
       : {};
 
-  return {
+  const result: CreateHubTaskResult = {
     id: String(record.id ?? record.issue_id ?? record.key ?? "unknown"),
     title: String(record.title ?? input.title),
   };
+
+  if (input.prdWarning && input.sliceTempId) {
+    return {
+      ...result,
+      prdWarning: {
+        sliceTempId: input.sliceTempId,
+        severity: input.prdWarning.severity,
+        message: input.prdWarning.message,
+      },
+    };
+  }
+
+  return result;
 };
 
 export const appendHubTaskComment = (
@@ -1163,8 +1200,19 @@ const formatComment = (comment: BeadsTaskComment): string => {
   return `${prefix}${comment.body ?? ""}`.trim();
 };
 
+export const filterHubTasksByPrdWarning = (
+  tasks: readonly HubTaskProjection[],
+  filter: PrdWarningSeverity,
+): readonly HubTaskProjection[] =>
+  tasks.filter((task) => matchesPrdWarningFilter(task, filter));
+
+export interface FormatHubTaskBoardLinesOptions {
+  readonly warningFilter?: PrdWarningSeverity;
+}
+
 export const formatHubTaskBoardLines = (
   board: HubTaskBoard,
+  options?: FormatHubTaskBoardLinesOptions,
 ): readonly string[] => {
   const lines: string[] = ["Hub task board"];
   if (board.tasks.length === 0) {
@@ -1172,20 +1220,43 @@ export const formatHubTaskBoardLines = (
     return lines;
   }
 
-  lines.push(`Total tasks: ${board.tasks.length}`);
+  const visibleTasks = options?.warningFilter
+    ? filterHubTasksByPrdWarning(board.tasks, options.warningFilter)
+    : board.tasks;
+  const visibleGroups = groupHubTasks(visibleTasks);
+  const warningSummaryLine = formatPrdWarningSummaryLine(
+    summarizeTasksPrdWarnings(visibleTasks),
+  );
 
-  const displayTasks = getHubTaskBoardDisplayTasks(board);
+  lines.push(`Total tasks: ${visibleTasks.length}`);
+  if (warningSummaryLine) {
+    lines.push(warningSummaryLine);
+  }
+
+  if (visibleTasks.length === 0) {
+    lines.push("No tasks match the current PRD warning filter.");
+    return lines;
+  }
+
   const displayIndexById = new Map<string, number>();
-  displayTasks.forEach((task, index) => {
-    displayIndexById.set(task.id, index + 1);
-  });
+  visibleGroups
+    .flatMap((group) => group.tasks)
+    .forEach((task, index) => {
+      displayIndexById.set(task.id, index + 1);
+    });
 
-  for (const group of board.groups) {
+  for (const group of visibleGroups) {
     lines.push("");
     lines.push(`${group.status} (${group.tasks.length})`);
     for (const task of group.tasks) {
       const displayIndex = displayIndexById.get(task.id);
-      lines.push(`  ${displayIndex ?? "?"}. ${task.id}: ${task.title}`);
+      const warning = readPrdWarningFromTask(task);
+      const warningSuffix = warning
+        ? ` ${formatPrdWarningListSuffix(warning.severity)}`
+        : "";
+      lines.push(
+        `  ${displayIndex ?? "?"}. ${task.id}: ${task.title}${warningSuffix}`,
+      );
     }
   }
 
@@ -1228,6 +1299,15 @@ export const formatHubTaskDetailsRows = (
   }
   if (task.comments.length > 0) {
     rows.Comments = String(task.comments.length);
+  }
+
+  const warning = readPrdWarningFromTask(task);
+  if (warning) {
+    const proposalRunId =
+      typeof task.metadata.proposal_run_id === "string"
+        ? task.metadata.proposal_run_id
+        : undefined;
+    rows["PRD warning"] = formatPrdWarningDetailsRow(warning, proposalRunId);
   }
 
   return rows;

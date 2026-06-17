@@ -280,7 +280,7 @@ describe("runProposalSession", () => {
       agentInvoker: invoker,
       interaction: {
         requestRefinement: async () => null,
-        requestApproval: async () => true,
+        requestApproval: async (_proposal) => true,
       },
     });
 
@@ -383,6 +383,10 @@ describe("runProposalSession", () => {
 
     const { invoker, calls } = createFakeInvoker({
       draft: { assistantMessage: "Draft proposal" },
+      finalization: {
+        assistantMessage:
+          '<task-proposal>{"title":"Slice one"}</task-proposal>',
+      },
     });
 
     const result = await runProposalSession({
@@ -402,10 +406,12 @@ describe("runProposalSession", () => {
     });
 
     expect(result.outcome).toBe("cancelled");
-    expect(calls).toHaveLength(1);
-    await expect(
-      readFile(join(result.runDir, "artifacts", "final-proposal.json"), "utf8"),
-    ).rejects.toThrow();
+    expect(calls.map((call) => call.phase)).toEqual(["draft", "finalization"]);
+    const finalProposal = await readFile(
+      join(result.runDir, "artifacts", "final-proposal.json"),
+      "utf8",
+    );
+    expect(finalProposal).toContain("Slice one");
 
     const events = await readJsonl(
       join(result.runDir, "events", "proposal.jsonl"),

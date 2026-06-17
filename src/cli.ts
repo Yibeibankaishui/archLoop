@@ -92,7 +92,10 @@ import {
   displayPrdDecompositionFlowResult,
   runPrdDecompositionProposalFlowFromCli,
 } from "./hubProposalFlowCli.js";
-import type { PrdHubStatusMode } from "./hubPrdDecomposition.js";
+import type {
+  PrdHubStatusMode,
+  PrdWarningSeverity,
+} from "./hubPrdDecomposition.js";
 import {
   formatHubTaskBoardLines,
   appendHubTaskComment,
@@ -1622,6 +1625,12 @@ const taskDeleteCascadeOption = Options.boolean("cascade").pipe(
   ),
   Options.withDefault(false),
 );
+const taskWarningOption = Options.text("warning").pipe(
+  Options.withDescription(
+    "Filter tasks by PRD warning severity (high, medium, or low).",
+  ),
+  Options.optional,
+);
 const taskSelectorsArg = Args.atLeast(
   Args.text({ name: "task-selector" }).pipe(
     Args.withDescription(
@@ -1659,19 +1668,46 @@ const resolveTaskOrigin = (
   );
 };
 
-const tasksListCommand = Command.make("list", {}, () =>
-  Effect.gen(function* () {
-    const d = yield* Display;
-    const cwd = process.cwd();
-    const board = yield* Effect.try({
-      try: () => loadHubTaskBoard(cwd),
-      catch: toTaskBoardError,
-    });
+const resolvePrdWarningFilter = (
+  warning: OptionalTextFlag,
+): Effect.Effect<PrdWarningSeverity | undefined, TaskBoardError, never> => {
+  if (warning._tag !== "Some") {
+    return Effect.succeed(undefined);
+  }
 
-    for (const line of formatHubTaskBoardLines(board)) {
-      yield* d.text(line);
-    }
-  }),
+  const normalized = warning.value.trim().toLowerCase();
+  if (
+    normalized === "high" ||
+    normalized === "medium" ||
+    normalized === "low"
+  ) {
+    return Effect.succeed(normalized);
+  }
+
+  return Effect.fail(
+    new TaskBoardError({
+      message: 'Invalid task warning filter. Use "high", "medium", or "low".',
+    }),
+  );
+};
+
+const tasksListCommand = Command.make(
+  "list",
+  { warning: taskWarningOption },
+  ({ warning }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      const warningFilter = yield* resolvePrdWarningFilter(warning);
+      const board = yield* Effect.try({
+        try: () => loadHubTaskBoard(cwd),
+        catch: toTaskBoardError,
+      });
+
+      for (const line of formatHubTaskBoardLines(board, { warningFilter })) {
+        yield* d.text(line);
+      }
+    }),
 );
 
 const tasksCreateCommand = Command.make(

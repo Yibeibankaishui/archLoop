@@ -523,6 +523,63 @@ exit 1
     expect(stdout).toContain("  3. bd-3: Done task");
   });
 
+  it("tasks list --warning filters tasks by PRD warning severity", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const boardJson = JSON.stringify([
+      {
+        id: "bd-1",
+        title: "High warning task",
+        status: "open",
+        metadata: {
+          slice_temp_id: "slice-1",
+          warning_severity: "high",
+          warning_message: "Scope unclear",
+        },
+      },
+      {
+        id: "bd-2",
+        title: "Medium warning task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {
+          slice_temp_id: "slice-2",
+          warning_severity: "medium",
+          warning_message: "Missing deps",
+        },
+      },
+    ]);
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "list" ]; then
+  printf '%s\\n' '${boardJson}'
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const { stdout } = await runCli(
+      "tasks list --warning high",
+      hostDir,
+      withBdEnv(bdPath),
+    );
+
+    expect(stdout).toContain("PRD warnings: 1 high · 0 medium · 0 low");
+    expect(stdout).toContain("  1. bd-1: High warning task [high]");
+    expect(stdout).not.toContain("bd-2");
+  });
+
   it("tasks show renders Beads details, comments, remote refs, and run refs", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
@@ -1289,7 +1346,10 @@ exit 1
     const { stdout } = await runCli(
       'tasks from-prd docs/prd/feature.md --yes --deps "2:1,3:2"',
       hostDir,
-      withBdEnv(bdPath, { XDG_DATA_HOME: dataHome }),
+      withBdEnv(bdPath, {
+        XDG_DATA_HOME: dataHome,
+        OPENAI_KEY: "test-key",
+      }),
     );
 
     const createArgs = await readFile(createArgsFile, "utf-8");

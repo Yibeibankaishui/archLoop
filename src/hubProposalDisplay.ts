@@ -2,6 +2,11 @@ import * as clack from "@clack/prompts";
 import { join } from "node:path";
 
 import { TaskBoardError } from "./errors.js";
+import type { PrdDecompositionProposal } from "./hubPrdDecomposition.js";
+import {
+  formatProposalWarningsDisplay,
+  summarizePrdWarnings,
+} from "./hubPrdWarning.js";
 import type { ProposalSessionPhase } from "./hubProposalSession.js";
 
 const PROPOSAL_DISPLAY_MAX_CHARS = 4_000;
@@ -82,9 +87,57 @@ export const promptPrdDecompositionRefinement = async (): Promise<
   return value;
 };
 
-export const promptPrdDecompositionApproval = async (): Promise<boolean> => {
+export const formatPrdDecompositionApprovalHint = (
+  proposal: PrdDecompositionProposal,
+): string | undefined => {
+  const summary = summarizePrdWarnings(proposal.warnings);
+  if (summary.total === 0) {
+    return undefined;
+  }
+
+  return `${summary.high} high · ${summary.medium} medium · ${summary.low} low PRD warning(s)`;
+};
+
+export const formatPrdProposalWarningsNote = (
+  proposal: PrdDecompositionProposal,
+): string => {
+  const sliceTitleByTempId = new Map(
+    proposal.slices.map((slice) => [slice.tempId, slice.title] as const),
+  );
+
+  return formatProposalWarningsDisplay({
+    warnings: proposal.warnings,
+    sliceTitleByTempId,
+  }).join("\n");
+};
+
+export const displayPrdProposalWarnings = async (
+  proposal: PrdDecompositionProposal,
+): Promise<void> => {
+  if (proposal.warnings.length === 0) {
+    return;
+  }
+
+  clack.note(formatPrdProposalWarningsNote(proposal), "PRD warnings");
+
+  const summary = summarizePrdWarnings(proposal.warnings);
+  if (summary.high > 0) {
+    clack.log.warn(
+      "High-severity warnings block classified_ready. Use inbox or refine the decomposition.",
+    );
+  }
+};
+
+export const promptPrdDecompositionApproval = async (
+  proposal?: PrdDecompositionProposal,
+): Promise<boolean> => {
+  const hint = proposal
+    ? formatPrdDecompositionApprovalHint(proposal)
+    : undefined;
   const result = await clack.confirm({
-    message: "Approve this PRD decomposition and create Beads tasks?",
+    message: hint
+      ? `Approve this PRD decomposition and create Beads tasks?\n(${hint})`
+      : "Approve this PRD decomposition and create Beads tasks?",
     initialValue: true,
   });
   if (clack.isCancel(result)) {
@@ -94,6 +147,10 @@ export const promptPrdDecompositionApproval = async (): Promise<boolean> => {
   }
   return result;
 };
+
+export const promptPrdDecompositionApprovalWithProposal = (
+  proposal: PrdDecompositionProposal,
+): Promise<boolean> => promptPrdDecompositionApproval(proposal);
 
 export const prdDecompositionCancelledMessage = (
   phase: "approval" | "refinement",

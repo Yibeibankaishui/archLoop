@@ -303,6 +303,82 @@ describe("task status projection", () => {
     expect(lines).toContain("  1. bd-1: Inbox task");
     expect(lines).toContain("  2. bd-2: Ready task");
   });
+
+  it("shows PRD warning details when task metadata includes warning fields", () => {
+    const task = projectHubTask({
+      id: "bd-99",
+      title: "Warned task",
+      status: "open",
+      labels: ["prd-warning-high"],
+      metadata: {
+        slice_temp_id: "slice-1",
+        warning_severity: "high",
+        warning_message: "Missing acceptance criteria",
+        proposal_run_id: "run-abc",
+      },
+    });
+
+    expect(formatHubTaskDetailsRows(task)).toMatchObject({
+      "PRD warning":
+        "[high] · Missing acceptance criteria · Slice: slice-1 · Proposal run: run-abc",
+    });
+  });
+
+  it("shows PRD warning summary and severity suffix on task board lines", () => {
+    const lines = formatHubTaskBoardLines(
+      projectHubTaskBoard([
+        { id: "bd-1", title: "Clean task", status: "open" },
+        {
+          id: "bd-2",
+          title: "Warned task",
+          status: "open",
+          labels: ["prd-warning-high"],
+          metadata: {
+            slice_temp_id: "slice-2",
+            warning_severity: "high",
+            warning_message: "Scope unclear",
+          },
+        },
+      ]),
+    );
+
+    expect(lines).toContain("PRD warnings: 1 high · 0 medium · 0 low");
+    expect(lines).toContain("  1. bd-1: Clean task");
+    expect(lines).toContain("  2. bd-2: Warned task [high]");
+  });
+
+  it("filters task board lines by PRD warning severity", () => {
+    const board = projectHubTaskBoard([
+      {
+        id: "bd-1",
+        title: "High warning",
+        status: "open",
+        metadata: {
+          slice_temp_id: "slice-1",
+          warning_severity: "high",
+          warning_message: "High issue",
+        },
+      },
+      {
+        id: "bd-2",
+        title: "Medium warning",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {
+          slice_temp_id: "slice-2",
+          warning_severity: "medium",
+          warning_message: "Medium issue",
+        },
+      },
+    ]);
+
+    const lines = formatHubTaskBoardLines(board, { warningFilter: "high" });
+
+    expect(lines).toContain("Total tasks: 1");
+    expect(lines).toContain("PRD warnings: 1 high · 0 medium · 0 low");
+    expect(lines).toContain("  1. bd-1: High warning [high]");
+    expect(lines.some((line) => line.includes("bd-2"))).toBe(false);
+  });
 });
 
 describe("deleteHubTasks", () => {
