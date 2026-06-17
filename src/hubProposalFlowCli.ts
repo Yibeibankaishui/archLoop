@@ -5,6 +5,12 @@ import { Display } from "./Display.js";
 import { TaskBoardError } from "./errors.js";
 import { promptHubAgentRoleSetup } from "./hubAgentConfigPrompt.js";
 import {
+  displayProposalAgentPhase,
+  prdDecompositionCancelledMessage,
+  promptPrdDecompositionApproval,
+  promptPrdDecompositionRefinement,
+} from "./hubProposalDisplay.js";
+import {
   formatPrdDecompositionProposalLines,
   runPrdDecompositionFlow,
   type PrdHubStatusMode,
@@ -12,7 +18,7 @@ import {
 } from "./hubPrdDecomposition.js";
 
 export type PrdDecompositionFlowDisplayOutcome =
-  | { readonly kind: "cancelled" }
+  | { readonly kind: "cancelled"; readonly reason: string }
   | { readonly kind: "failed"; readonly reason: string }
   | { readonly kind: "displayed" };
 
@@ -23,7 +29,10 @@ export const displayPrdDecompositionFlowResult = (
     const d = yield* Display;
 
     if (result.outcome === "cancelled") {
-      return { kind: "cancelled" };
+      return {
+        kind: "cancelled",
+        reason: prdDecompositionCancelledMessage(result.phase),
+      };
     }
 
     if (result.outcome === "failed") {
@@ -80,36 +89,13 @@ const promptPrdHubStatusMode = async (): Promise<PrdHubStatusMode> => {
 };
 
 const createPrdDecompositionInteraction = (): {
-  readonly requestRefinement: () => Promise<string | null>;
-  readonly requestApproval: () => Promise<boolean>;
+  readonly onAssistantMessage: typeof displayProposalAgentPhase;
+  readonly requestRefinement: typeof promptPrdDecompositionRefinement;
+  readonly requestApproval: typeof promptPrdDecompositionApproval;
 } => ({
-  requestRefinement: async () => {
-    const result = await clack.text({
-      message: "Refine the PRD decomposition (leave empty to stop refining):",
-      placeholder:
-        "Split slice 2, reorder dependencies, reclassify AFK/HITL...",
-      defaultValue: "",
-    });
-    if (clack.isCancel(result)) {
-      throw new TaskBoardError({
-        message: "PRD task creation cancelled.",
-      });
-    }
-    const value = String(result).trim();
-    return value.length > 0 ? value : null;
-  },
-  requestApproval: async () => {
-    const result = await clack.confirm({
-      message: "Approve this PRD decomposition and create Beads tasks?",
-      initialValue: true,
-    });
-    if (clack.isCancel(result)) {
-      throw new TaskBoardError({
-        message: "PRD task creation cancelled.",
-      });
-    }
-    return result;
-  },
+  onAssistantMessage: displayProposalAgentPhase,
+  requestRefinement: promptPrdDecompositionRefinement,
+  requestApproval: promptPrdDecompositionApproval,
 });
 
 export const runPrdDecompositionProposalFlowFromCli = async (input: {

@@ -46,6 +46,13 @@ export type ProposalAgentInvoker = (
 ) => Promise<ProposalAgentInvokeResult>;
 
 export interface ProposalSessionInteraction {
+  readonly onAssistantMessage?: (input: {
+    readonly phase: ProposalSessionPhase;
+    readonly message: string;
+    readonly flowId: string;
+    readonly runId: string;
+    readonly runDir: string;
+  }) => void | Promise<void>;
   readonly requestRefinement?: () => Promise<string | null>;
   readonly requestApproval?: () => Promise<boolean>;
 }
@@ -328,6 +335,24 @@ const invokeProposalAgent = (
     runDir: state.runDir,
   });
 
+const notifyAssistantMessage = async (
+  input: ProposalSessionInteraction | undefined,
+  state: ProposalSessionState,
+  phase: ProposalSessionPhase,
+  message: string,
+): Promise<void> => {
+  if (!input?.onAssistantMessage) {
+    return;
+  }
+  await input.onAssistantMessage({
+    phase,
+    message,
+    flowId: state.flowId,
+    runId: state.runId,
+    runDir: state.runDir,
+  });
+};
+
 const requestNextRefinement = async (input: {
   readonly interaction?: ProposalSessionInteraction;
   readonly refinements?: readonly string[];
@@ -493,6 +518,12 @@ export const runProposalSession = async <T>(
     ...proposalEventBase(state),
     assistantMessage: draftResult.assistantMessage,
   });
+  await notifyAssistantMessage(
+    input.interaction,
+    state,
+    "draft",
+    draftResult.assistantMessage,
+  );
 
   if (!input.oneShot) {
     let refinementIndex = 0;
@@ -545,6 +576,12 @@ export const runProposalSession = async <T>(
         ...proposalEventBase(state),
         assistantMessage: refinementResult.assistantMessage,
       });
+      await notifyAssistantMessage(
+        input.interaction,
+        state,
+        "refinement",
+        refinementResult.assistantMessage,
+      );
     }
   }
 

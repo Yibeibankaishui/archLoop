@@ -744,6 +744,18 @@ const toFailedFlowResult = (
   reason,
 });
 
+export const resolveProposalSessionApproval = (
+  input: Pick<RunPrdDecompositionFlowInput, "approve" | "yes">,
+): boolean | undefined => {
+  if (input.approve !== undefined) {
+    return input.approve;
+  }
+  if (input.yes) {
+    return true;
+  }
+  return undefined;
+};
+
 export const runPrdDecompositionFlow = async (
   input: RunPrdDecompositionFlowInput,
 ): Promise<RunPrdDecompositionFlowResult> => {
@@ -794,7 +806,7 @@ export const runPrdDecompositionFlow = async (
     agentInvoker,
     interaction: input.interaction,
     refinements: input.refinements,
-    approve: input.approve ?? input.yes,
+    approve: resolveProposalSessionApproval(input),
     oneShot: input.yes,
   });
 

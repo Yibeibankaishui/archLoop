@@ -1825,7 +1825,7 @@ const tasksFromPrdCommand = Command.make(
       if (displayOutcome.kind === "cancelled") {
         return yield* Effect.fail(
           new TaskBoardError({
-            message: "PRD task creation cancelled.",
+            message: displayOutcome.reason,
           }),
         );
       }

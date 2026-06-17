@@ -207,6 +207,87 @@ describe("runProposalSession", () => {
     ]);
   });
 
+  it("notifies interaction hooks after draft and refinement turns", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "proposal-session-notify-"));
+    await initRepo(repoDir);
+    const hubProjectDir = await createHubProjectDir(
+      "proposal-session-notify-hub-",
+    );
+    const notifications: string[] = [];
+
+    const { invoker } = createFakeInvoker({
+      draft: { assistantMessage: "Initial draft" },
+      refinement: { assistantMessage: "Refined draft" },
+      finalization: {
+        assistantMessage:
+          '<task-proposal>{"title":"Slice one"}</task-proposal>',
+      },
+    });
+
+    await runProposalSession({
+      flowId: "prd-decomposition",
+      cwd: repoDir,
+      hubProjectDir,
+      preparedContext: { prdRef: "docs/prd.md" },
+      draftPrompt: "Draft a PRD decomposition proposal.",
+      finalizationPrompt: "Emit the final task proposal.",
+      output: Output.object({
+        tag: "task-proposal",
+        schema: testProposalSchema(),
+      }),
+      agentInvoker: invoker,
+      refinements: ["Split slice two"],
+      interaction: {
+        onAssistantMessage: async (input) => {
+          notifications.push(`${input.phase}:${input.message}`);
+        },
+      },
+      approve: true,
+    });
+
+    expect(notifications).toEqual([
+      "draft:Initial draft",
+      "refinement:Refined draft",
+    ]);
+  });
+
+  it("continues to approval when refinement is skipped", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "proposal-session-skip-"));
+    await initRepo(repoDir);
+    const hubProjectDir = await createHubProjectDir(
+      "proposal-session-skip-hub-",
+    );
+
+    const { invoker, calls } = createFakeInvoker({
+      draft: { assistantMessage: "Initial draft" },
+      finalization: {
+        assistantMessage:
+          '<task-proposal>{"title":"Slice one"}</task-proposal>',
+      },
+    });
+
+    const result = await runProposalSession({
+      flowId: "prd-decomposition",
+      cwd: repoDir,
+      hubProjectDir,
+      preparedContext: { prdRef: "docs/prd.md" },
+      draftPrompt: "Draft a PRD decomposition proposal.",
+      finalizationPrompt: "Emit the final task proposal.",
+      output: Output.object({
+        tag: "task-proposal",
+        schema: testProposalSchema(),
+      }),
+      agentInvoker: invoker,
+      interaction: {
+        requestRefinement: async () => null,
+        requestApproval: async () => true,
+      },
+    });
+
+    expect(result.outcome).toBe("completed");
+    expect(calls.map((call) => call.phase)).toEqual(["draft", "finalization"]);
+  });
+
   it("fails when final structured output is missing or invalid", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "proposal-session-invalid-"));
     await initRepo(repoDir);

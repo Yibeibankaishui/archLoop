@@ -10,6 +10,7 @@ import {
   preparePrdDecompositionContext,
   prdDecompositionProposalOutput,
   runPrdDecompositionFlow,
+  resolveProposalSessionApproval,
   substitutePrdDecompositionDraftPrompt,
   validatePrdDecompositionProposal,
   type PrdDecompositionProposal,
@@ -609,5 +610,18 @@ exit 1
       process.env.PATH = previousPath;
       process.env.SANDCASTLE_BD_PATH = previousBdPath;
     }
+  });
+});
+
+describe("resolveProposalSessionApproval", () => {
+  it("leaves approval interactive when yes is false", () => {
+    expect(resolveProposalSessionApproval({ yes: false })).toBeUndefined();
+  });
+
+  it("auto-approves only when yes is true", () => {
+    expect(resolveProposalSessionApproval({ yes: true })).toBe(true);
+    expect(resolveProposalSessionApproval({ yes: true, approve: false })).toBe(
+      false,
+    );
   });
 });
