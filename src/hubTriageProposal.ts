@@ -74,6 +74,11 @@ export interface TriagePreparedContext {
     readonly inboxCount: number;
     readonly needsInfoCount: number;
   };
+  readonly boardTaskCatalog: readonly {
+    readonly id: string;
+    readonly title: string;
+    readonly hubStatus: string;
+  }[];
   readonly taskDetails: string;
   readonly tasksUnderTriage: readonly HubTaskProjection[];
 }
@@ -348,6 +353,86 @@ const detectDependencyCycles = (
   return cycles;
 };
 
+export type SkippedTriageDependencyReason =
+  | "unknown_dependent"
+  | "unknown_blocker"
+  | "self_edge";
+
+export interface SanitizeTriageProposalResult {
+  readonly proposal: TriageProposal;
+  readonly skippedDependencies: readonly {
+    readonly dependentTaskId: string;
+    readonly blockerTaskId: string;
+    readonly reason: SkippedTriageDependencyReason;
+  }[];
+}
+
+const toBoardTaskIdSet = (
+  boardTaskIds: ReadonlySet<string> | readonly string[],
+): ReadonlySet<string> =>
+  boardTaskIds instanceof Set ? boardTaskIds : new Set(boardTaskIds);
+
+export const sanitizeTriageProposalDependencies = (
+  proposal: TriageProposal,
+  boardTaskIds: ReadonlySet<string> | readonly string[],
+): SanitizeTriageProposalResult => {
+  const boardIds = toBoardTaskIdSet(boardTaskIds);
+  const skippedDependencies: SanitizeTriageProposalResult["skippedDependencies"][number][] =
+    [];
+
+  const decisions = proposal.decisions.map((decision) => {
+    if (
+      !decision.dependencySuggestions ||
+      decision.dependencySuggestions.length === 0
+    ) {
+      return decision;
+    }
+
+    const keptSuggestions: TriageDependencySuggestion[] = [];
+    for (const edge of decision.dependencySuggestions) {
+      if (edge.dependentTaskId === edge.blockerTaskId) {
+        skippedDependencies.push({
+          dependentTaskId: edge.dependentTaskId,
+          blockerTaskId: edge.blockerTaskId,
+          reason: "self_edge",
+        });
+        continue;
+      }
+      if (!boardIds.has(edge.dependentTaskId)) {
+        skippedDependencies.push({
+          dependentTaskId: edge.dependentTaskId,
+          blockerTaskId: edge.blockerTaskId,
+          reason: "unknown_dependent",
+        });
+        continue;
+      }
+      if (!boardIds.has(edge.blockerTaskId)) {
+        skippedDependencies.push({
+          dependentTaskId: edge.dependentTaskId,
+          blockerTaskId: edge.blockerTaskId,
+          reason: "unknown_blocker",
+        });
+        continue;
+      }
+      keptSuggestions.push(edge);
+    }
+
+    return {
+      ...decision,
+      dependencySuggestions:
+        keptSuggestions.length > 0 ? keptSuggestions : undefined,
+    };
+  });
+
+  return {
+    proposal: {
+      ...proposal,
+      decisions,
+    },
+    skippedDependencies,
+  };
+};
+
 export const validateTriageProposal = (
   proposal: TriageProposal,
   options: ValidateTriageProposalOptions,
@@ -357,7 +442,6 @@ export const validateTriageProposal = (
   }
 
   const knownTaskIds = toKnownTaskIdSet(options.knownTaskIds);
-  const boardTaskIds = new Set(options.boardTaskIds ?? [...knownTaskIds]);
 
   const duplicateTaskIds = collectDuplicateTaskIds(proposal.decisions);
   if (duplicateTaskIds.length > 0) {
@@ -375,24 +459,6 @@ export const validateTriageProposal = (
   }
 
   const edges = collectProposalDependencyEdges(proposal);
-  for (const edge of edges) {
-    if (edge.dependentTaskId === edge.blockerTaskId) {
-      throw new Error(
-        `Triage proposal contains a self-edge dependency on "${edge.dependentTaskId}".`,
-      );
-    }
-    if (!boardTaskIds.has(edge.dependentTaskId)) {
-      throw new Error(
-        `Triage proposal dependency references unknown dependent task id "${edge.dependentTaskId}".`,
-      );
-    }
-    if (!boardTaskIds.has(edge.blockerTaskId)) {
-      throw new Error(
-        `Triage proposal dependency references unknown blocker task id "${edge.blockerTaskId}".`,
-      );
-    }
-  }
-
   const cycles = detectDependencyCycles(edges);
   if (cycles.length > 0) {
     throw new Error(
@@ -423,6 +489,13 @@ const formatHubTaskSummaryText = (
     `Inbox: ${summary.inboxCount}`,
     `Needs info: ${summary.needsInfoCount}`,
   ].join("\n");
+
+export const formatBoardTaskCatalogText = (
+  catalog: TriagePreparedContext["boardTaskCatalog"],
+): string =>
+  catalog
+    .map((entry) => `- ${entry.id}: ${entry.title} (${entry.hubStatus})`)
+    .join("\n");
 
 const readMetadataText = (
   metadata: Readonly<Record<string, unknown>>,
@@ -581,6 +654,13 @@ export const prepareTriageContext = (input: {
       inboxCount,
       needsInfoCount,
     },
+    boardTaskCatalog: [...board.tasks]
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((task) => ({
+        id: task.id,
+        title: task.title,
+        hubStatus: task.hubStatus,
+      })),
     taskDetails: tasks.map(formatTaskDetailBlock).join("\n\n"),
     tasksUnderTriage: tasks,
   };
@@ -596,6 +676,10 @@ export const substituteTriageDraftPrompt = (
     .replaceAll(
       "{{HUB_TASK_SUMMARY}}",
       formatHubTaskSummaryText(context.hubTaskSummary),
+    )
+    .replaceAll(
+      "{{BOARD_TASK_CATALOG}}",
+      formatBoardTaskCatalogText(context.boardTaskCatalog),
     )
     .replaceAll("{{TASK_DETAILS}}", context.taskDetails);
 
@@ -864,6 +948,11 @@ export type RunTriageProposalFlowResult =
         readonly dependentId: string;
         readonly blockerId: string;
       }[];
+      readonly skippedDependencies: readonly {
+        readonly dependentTaskId: string;
+        readonly blockerTaskId: string;
+        readonly reason: SkippedTriageDependencyReason;
+      }[];
     }
   | {
       readonly outcome: "cancelled";
@@ -1038,11 +1127,14 @@ export const runTriageProposalFlow = async (
     preparedContext.tasksUnderTriage.map((task) => task.id),
   );
   const board = loadHubTaskBoard(input.cwd, env);
+  const boardTaskIds = board.tasks.map((task) => task.id);
+  const { proposal: sanitized, skippedDependencies } =
+    sanitizeTriageProposalDependencies(proposal, boardTaskIds);
 
   try {
-    validateTriageProposal(proposal, {
+    validateTriageProposal(sanitized, {
       knownTaskIds,
-      boardTaskIds: board.tasks.map((task) => task.id),
+      boardTaskIds,
       requiredTaskIds: knownTaskIds,
     });
   } catch (error) {
@@ -1056,13 +1148,13 @@ export const runTriageProposalFlow = async (
   }
 
   const { decisionsToApply, skippedDecisions } = await resolveDecisionsToApply(
-    proposal,
+    sanitized,
     input,
   );
 
   const applied = applyTriageProposal({
     cwd: input.cwd,
-    proposal,
+    proposal: sanitized,
     decisionsToApply,
     proposalRunId: session.runId,
     env: input.env,
@@ -1079,9 +1171,10 @@ export const runTriageProposalFlow = async (
     outcome: "applied",
     runId: session.runId,
     runDir: session.runDir,
-    proposal,
+    proposal: sanitized,
     appliedDecisions: applied.appliedDecisions,
     skippedDecisions,
+    skippedDependencies,
     dependencies: applied.dependencies,
   };
 };

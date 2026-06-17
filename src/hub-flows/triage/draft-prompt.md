@@ -110,6 +110,9 @@ Total tasks under triage: {{TASK_COUNT}}
 Hub task-board snapshot:
 {{HUB_TASK_SUMMARY}}
 
+Live Hub board catalog (authoritative for dependency ids — use ONLY these ids, never ids from `.beads/issues.jsonl` unless they appear here):
+{{BOARD_TASK_CATALOG}}
+
 Tasks under triage:
 {{TASK_DETAILS}}
 </prepared-context>

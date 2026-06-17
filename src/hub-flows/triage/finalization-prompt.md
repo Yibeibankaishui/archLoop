@@ -35,8 +35,8 @@ applies it after you emit it.
   reporter must answer.
 - `dependencySuggestions` is optional. Each entry expresses a
   "blocked by" edge: `dependentTaskId` is blocked by `blockerTaskId`. Both
-  ids MUST refer to tasks that exist in the local Beads store (either in the
-  prepared context or already known on the board). Do not create cycles or
+  ids MUST appear in the live Hub board catalog from the prepared context
+  (not stale ids from `.beads/issues.jsonl` alone). Do not create cycles or
   self-edges. Include a short `rationale` per edge.
 - `summary` is required and gives a one-paragraph overview of the batch.
 

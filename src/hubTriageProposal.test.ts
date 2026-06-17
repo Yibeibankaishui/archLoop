@@ -8,8 +8,10 @@ import {
   applyTriageProposal,
   classifyTriageDecisionAutoApply,
   formatTriageProposalLines,
+  formatBoardTaskCatalogText,
   prepareTriageContext,
   runTriageProposalFlow,
+  sanitizeTriageProposalDependencies,
   substituteTriageDraftPrompt,
   triageDecisionConfirmationReason,
   triageProposalOutput,
@@ -122,28 +124,6 @@ describe("validateTriageProposal", () => {
     ).toThrow(/duplicate decision task ids/i);
   });
 
-  it("rejects self-edge dependency suggestions", () => {
-    expect(() =>
-      validateTriageProposal(
-        {
-          ...sampleProposal(),
-          decisions: [
-            sampleDecision({
-              dependencySuggestions: [
-                {
-                  dependentTaskId: "bd-1",
-                  blockerTaskId: "bd-1",
-                  rationale: "Self edge",
-                },
-              ],
-            }),
-          ],
-        },
-        { knownTaskIds: ["bd-1"], boardTaskIds: ["bd-1"] },
-      ),
-    ).toThrow(/self-edge/i);
-  });
-
   it("rejects dependency cycles within proposed edges", () => {
     expect(() =>
       validateTriageProposal(
@@ -175,6 +155,154 @@ describe("validateTriageProposal", () => {
         { knownTaskIds: ["bd-1", "bd-2"], boardTaskIds: ["bd-1", "bd-2"] },
       ),
     ).toThrow(/cycle/i);
+  });
+
+  it("accepts a proposal with unknown blocker after sanitize", () => {
+    const raw = {
+      summary: "Ghost blocker edge",
+      decisions: [
+        sampleDecision({
+          taskId: "g9z",
+          dependencySuggestions: [
+            {
+              dependentTaskId: "g9z",
+              blockerTaskId: "todo-list-demo-lt2",
+              rationale: "Stale beads id",
+            },
+          ],
+        }),
+      ],
+    };
+    const { proposal: sanitized } = sanitizeTriageProposalDependencies(raw, [
+      "g9z",
+      "r05",
+    ]);
+    expect(() =>
+      validateTriageProposal(sanitized, {
+        knownTaskIds: ["g9z"],
+        boardTaskIds: ["g9z", "r05"],
+      }),
+    ).not.toThrow();
+  });
+});
+
+describe("sanitizeTriageProposalDependencies", () => {
+  it("keeps a valid dependency edge", () => {
+    const proposal = {
+      summary: "Valid edge",
+      decisions: [
+        sampleDecision({
+          taskId: "bd-1",
+          dependencySuggestions: [
+            {
+              dependentTaskId: "bd-1",
+              blockerTaskId: "bd-9",
+              rationale: "Depends on blocker",
+            },
+          ],
+        }),
+      ],
+    };
+
+    const { proposal: sanitized, skippedDependencies } =
+      sanitizeTriageProposalDependencies(proposal, ["bd-1", "bd-9"]);
+
+    expect(sanitized.decisions[0]?.dependencySuggestions).toEqual([
+      {
+        dependentTaskId: "bd-1",
+        blockerTaskId: "bd-9",
+        rationale: "Depends on blocker",
+      },
+    ]);
+    expect(skippedDependencies).toEqual([]);
+  });
+
+  it("removes unknown blocker edges (lt2 scenario)", () => {
+    const proposal = {
+      summary: "Ghost blocker",
+      decisions: [
+        sampleDecision({
+          taskId: "g9z",
+          dependencySuggestions: [
+            {
+              dependentTaskId: "g9z",
+              blockerTaskId: "todo-list-demo-lt2",
+              rationale: "Stale beads id",
+            },
+          ],
+        }),
+      ],
+    };
+
+    const { proposal: sanitized, skippedDependencies } =
+      sanitizeTriageProposalDependencies(proposal, ["g9z", "r05"]);
+
+    expect(sanitized.decisions[0]?.dependencySuggestions).toBeUndefined();
+    expect(skippedDependencies).toEqual([
+      {
+        dependentTaskId: "g9z",
+        blockerTaskId: "todo-list-demo-lt2",
+        reason: "unknown_blocker",
+      },
+    ]);
+  });
+
+  it("removes unknown dependent edges", () => {
+    const proposal = {
+      summary: "Ghost dependent",
+      decisions: [
+        sampleDecision({
+          dependencySuggestions: [
+            {
+              dependentTaskId: "ghost-dep",
+              blockerTaskId: "bd-9",
+              rationale: "Dependent not on board",
+            },
+          ],
+        }),
+      ],
+    };
+
+    const { proposal: sanitized, skippedDependencies } =
+      sanitizeTriageProposalDependencies(proposal, ["bd-1", "bd-9"]);
+
+    expect(sanitized.decisions[0]?.dependencySuggestions).toBeUndefined();
+    expect(skippedDependencies).toEqual([
+      {
+        dependentTaskId: "ghost-dep",
+        blockerTaskId: "bd-9",
+        reason: "unknown_dependent",
+      },
+    ]);
+  });
+
+  it("removes self-edge dependency suggestions", () => {
+    const proposal = {
+      summary: "Self edge",
+      decisions: [
+        sampleDecision({
+          dependencySuggestions: [
+            {
+              dependentTaskId: "bd-1",
+              blockerTaskId: "bd-1",
+              rationale: "Self edge",
+            },
+          ],
+        }),
+      ],
+    };
+
+    const { proposal: sanitized, skippedDependencies } =
+      sanitizeTriageProposalDependencies(proposal, ["bd-1"]);
+
+    expect(sanitized.decisions[0]?.dependencySuggestions).toBeUndefined();
+    expect(skippedDependencies).toEqual([
+      {
+        dependentTaskId: "bd-1",
+        blockerTaskId: "bd-1",
+        reason: "self_edge",
+      },
+    ]);
   });
 });
 
@@ -844,9 +972,256 @@ describe("runTriageProposalFlow", () => {
       delete process.env.BD_STATE_FILE;
     }
   });
+
+  it("applies triage when agent proposes valid and ghost blocker dependencies", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "triage-proposal-ghost-dep-"));
+    await initRepo(hostDir);
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const stateFile = join(hostDir, "bd-state.json");
+    const updateArgsFile = join(hostDir, "bd-update-args.txt");
+    const commentArgsFile = join(hostDir, "bd-comment-args.txt");
+    const depArgsFile = join(hostDir, "bd-dep-args.txt");
+
+    await writeFile(
+      stateFile,
+      JSON.stringify(
+        [
+          {
+            id: "g9z",
+            title: "Todo list demo task",
+            status: "open",
+            labels: ["needs-triage"],
+            metadata: { hubStatus: "inbox" },
+            description: "Needs triage with mixed dependency suggestions.",
+          },
+          {
+            id: "r05",
+            title: "Existing blocker",
+            status: "open",
+            labels: ["ready-for-agent"],
+            metadata: { hubStatus: "ready_for_agent" },
+            description: "Valid blocker on board.",
+          },
+        ],
+        null,
+        2,
+      ),
+    );
+    await writeFile(updateArgsFile, "");
+    await writeFile(commentArgsFile, "");
+    await writeFile(depArgsFile, "");
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      createBdScript({
+        stateFile,
+        updateArgsFile,
+        commentArgsFile,
+        depArgsFile,
+      }),
+    );
+    await chmod(bdPath, 0o755);
+
+    const proposal: TriageProposal = {
+      summary: "One inbox task with valid and ghost blocker edges.",
+      decisions: [
+        sampleDecision({
+          taskId: "g9z",
+          outcome: "ready_for_agent",
+          confidence: "high",
+          comment: "Ready after blocker lands.",
+          dependencySuggestions: [
+            {
+              dependentTaskId: "g9z",
+              blockerTaskId: "r05",
+              rationale: "Valid blocker on board.",
+            },
+            {
+              dependentTaskId: "g9z",
+              blockerTaskId: "todo-list-demo-lt2",
+              rationale: "Stale beads id from issues.jsonl.",
+            },
+          ],
+        }),
+      ],
+    };
+
+    const previousPath = process.env.PATH;
+    const previousBdPath = process.env.SANDCASTLE_BD_PATH;
+    process.env.PATH = `${binDir}:${previousPath ?? ""}`;
+    process.env.SANDCASTLE_BD_PATH = bdPath;
+    process.env.BD_STATE_FILE = stateFile;
+    process.env.BD_UPDATE_ARGS_FILE = updateArgsFile;
+    process.env.BD_COMMENT_ARGS_FILE = commentArgsFile;
+    process.env.BD_DEP_ARGS_FILE = depArgsFile;
+
+    try {
+      const result = await runTriageProposalFlow({
+        cwd: hostDir,
+        taskIds: ["g9z"],
+        yes: true,
+        applyConfirmation: async () => true,
+        agentInvoker: createFakeInvoker(proposal),
+        hubAgentConfig: {
+          roles: {
+            triage: { provider: "cursor", model: "auto" },
+          },
+        },
+      });
+
+      expect(result.outcome).toBe("applied");
+      if (result.outcome !== "applied") {
+        throw new Error("expected applied triage flow");
+      }
+      expect(result.appliedDecisions).toEqual(["g9z"]);
+      expect(result.dependencies).toEqual([
+        { dependentId: "g9z", blockerId: "r05" },
+      ]);
+      expect(result.skippedDependencies).toEqual([
+        {
+          dependentTaskId: "g9z",
+          blockerTaskId: "todo-list-demo-lt2",
+          reason: "unknown_blocker",
+        },
+      ]);
+
+      const depArgs = await import("node:fs/promises").then((fs) =>
+        fs.readFile(depArgsFile, "utf8"),
+      );
+      expect(depArgs).toContain("g9z");
+      expect(depArgs).toContain("r05");
+      expect(depArgs).not.toContain("todo-list-demo-lt2");
+    } finally {
+      process.env.PATH = previousPath;
+      process.env.SANDCASTLE_BD_PATH = previousBdPath;
+      delete process.env.BD_STATE_FILE;
+      delete process.env.BD_UPDATE_ARGS_FILE;
+      delete process.env.BD_COMMENT_ARGS_FILE;
+      delete process.env.BD_DEP_ARGS_FILE;
+    }
+  });
 });
 
 describe("triage proposal helpers", () => {
+  it("substitutes board task catalog placeholder in draft prompt", () => {
+    const context = {
+      taskQuery: "bd-1",
+      taskCount: 1,
+      hubTaskSummary: { totalTasks: 2, inboxCount: 1, needsInfoCount: 1 },
+      boardTaskCatalog: [
+        { id: "bd-1", title: "Inbox task", hubStatus: "inbox" },
+        { id: "bd-2", title: "Needs info task", hubStatus: "needs_info" },
+      ],
+      taskDetails: "### bd-1: Inbox task",
+      tasksUnderTriage: [],
+    };
+
+    const prompt = substituteTriageDraftPrompt(
+      "Catalog:\n{{BOARD_TASK_CATALOG}}\nEnd.",
+      context,
+    );
+
+    expect(prompt).toContain("- bd-1: Inbox task (inbox)");
+    expect(prompt).toContain("- bd-2: Needs info task (needs_info)");
+    expect(prompt).not.toContain("{{BOARD_TASK_CATALOG}}");
+  });
+
+  it("formats board task catalog as prompt-friendly lines", () => {
+    const text = formatBoardTaskCatalogText([
+      { id: "bd-1", title: "Inbox task", hubStatus: "inbox" },
+      {
+        id: "bd-2",
+        title: "Needs info task",
+        hubStatus: "needs_info",
+      },
+    ]);
+
+    expect(text).toBe(
+      [
+        "- bd-1: Inbox task (inbox)",
+        "- bd-2: Needs info task (needs_info)",
+      ].join("\n"),
+    );
+  });
+
+  it("includes boardTaskCatalog with every hub board task sorted by id", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "triage-proposal-catalog-"));
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const stateFile = join(hostDir, "bd-state.json");
+    await writeFile(
+      stateFile,
+      JSON.stringify(
+        [
+          {
+            id: "bd-2",
+            title: "Needs info task",
+            status: "open",
+            labels: ["needs-info"],
+            metadata: { hubStatus: "needs_info" },
+            description: "Waiting on reporter.",
+          },
+          {
+            id: "bd-1",
+            title: "Inbox task",
+            status: "open",
+            labels: ["needs-triage"],
+            metadata: { hubStatus: "inbox" },
+            description: "Ready for triage.",
+          },
+          {
+            id: "bd-9",
+            title: "Ready blocker",
+            status: "open",
+            labels: ["ready-for-agent"],
+            metadata: { hubStatus: "ready_for_agent" },
+            description: "Already triaged.",
+          },
+        ],
+        null,
+        2,
+      ),
+    );
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      createBdScript({
+        stateFile,
+        updateArgsFile: join(hostDir, "update.txt"),
+        commentArgsFile: join(hostDir, "comment.txt"),
+        depArgsFile: join(hostDir, "dep.txt"),
+      }),
+    );
+    await chmod(bdPath, 0o755);
+
+    const previousPath = process.env.PATH;
+    const previousBdPath = process.env.SANDCASTLE_BD_PATH;
+    process.env.PATH = `${binDir}:${previousPath ?? ""}`;
+    process.env.SANDCASTLE_BD_PATH = bdPath;
+    process.env.BD_STATE_FILE = stateFile;
+
+    try {
+      const context = prepareTriageContext({
+        cwd: hostDir,
+        taskIds: ["bd-1"],
+      });
+
+      expect(context.boardTaskCatalog).toEqual([
+        { id: "bd-1", title: "Inbox task", hubStatus: "inbox" },
+        { id: "bd-2", title: "Needs info task", hubStatus: "needs_info" },
+        { id: "bd-9", title: "Ready blocker", hubStatus: "ready_for_agent" },
+      ]);
+    } finally {
+      process.env.PATH = previousPath;
+      process.env.SANDCASTLE_BD_PATH = previousBdPath;
+      delete process.env.BD_STATE_FILE;
+    }
+  });
+
   it("prepares context and substitutes draft prompt placeholders", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "triage-proposal-context-"));
     const binDir = join(hostDir, "bin");

@@ -206,6 +206,11 @@ export const displayTriageProposalFlowResult = (
         `  ${dependency.dependentId} depends on ${dependency.blockerId}`,
       );
     }
+    for (const skipped of result.skippedDependencies) {
+      yield* d.text(
+        `Skipped dependency: ${skipped.dependentTaskId} blocked by ${skipped.blockerTaskId} (${skipped.reason})`,
+      );
+    }
 
     return { kind: "displayed" };
   });

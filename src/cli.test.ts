@@ -365,6 +365,7 @@ describe("sandcastle CLI", () => {
       },
       appliedDecisions: ["bd-42"],
       skippedDecisions: [],
+      skippedDependencies: [],
       dependencies: [],
     });
 
