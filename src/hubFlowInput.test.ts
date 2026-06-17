@@ -84,6 +84,10 @@ describe("hub flow input schemas", () => {
     expect(validated).toEqual({
       flowId: "triage",
       kind: "task-query",
+      selection: {
+        type: "statuses",
+        statuses: ["inbox", "needs_info"],
+      },
       query: HUB_TRIAGE_DEFAULT_TASK_QUERY,
     });
     expect(resolveHubFlowRawInput("triage", undefined)).toBe(
@@ -102,8 +106,29 @@ describe("hub flow input schemas", () => {
     expect(validated).toMatchObject({
       flowId: "triage",
       kind: "task-query",
+      selection: {
+        type: "statuses",
+        statuses: ["inbox", "needs_info"],
+      },
       query: "inbox,needs_info",
     });
+  });
+
+  it("accepts a Beads task id as triage input", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "hub-flow-input-"));
+
+    const validated = validateHubFlowInput("triage", {
+      cwd,
+      rawInput: "bd-42",
+    });
+
+    expect(validated).toEqual({
+      flowId: "triage",
+      kind: "task-query",
+      selection: { type: "task-id", taskId: "bd-42" },
+      query: "bd-42",
+    });
+    expect(formatValidatedHubFlowInputSummary(validated)).toContain("bd-42");
   });
 
   it("rejects unsupported task query statuses", async () => {

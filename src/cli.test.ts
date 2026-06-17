@@ -11,7 +11,11 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
+import { NodeContext } from "@effect/platform-node";
+import { Effect, Ref } from "effect";
 import { describe, expect, it, vi } from "vitest";
+
+import { SilentDisplay, type DisplayEntry } from "./Display.js";
 
 const execAsync = promisify(exec);
 vi.setConfig({ testTimeout: 60_000 });
@@ -313,14 +317,17 @@ describe("sandcastle CLI", () => {
       "# PRD: Feature\n\n## Tasks\n\n- [ ] Build it\n",
     );
 
-    const { stdout } = await runCli(
-      "run . --flow prd-decomposition --input docs/feature.md",
-      hostDir,
-    );
-    expect(stdout).toContain("PRD input: docs/feature.md");
-    expect(stdout).toContain(
-      "Proposal flow execution via sandcastle run is not available yet",
-    );
+    try {
+      await runCli(
+        "run . --flow prd-decomposition --input docs/feature.md",
+        hostDir,
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      expect(cliFailureOutput(err)).toMatch(
+        /PRD input: docs\/feature.md|Missing Hub agent role config: planning/i,
+      );
+    }
   });
 
   it("run --flow prd-decomposition rejects missing required input", async () => {
@@ -335,12 +342,108 @@ describe("sandcastle CLI", () => {
     }
   });
 
+  it("run --flow triage --input bd-42 dispatches with task id selection", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-run-flow-triage-id-"));
+    await initRepo(hostDir);
+
+    const runTriage = vi.fn().mockResolvedValue({
+      outcome: "applied",
+      runId: "run-triage-42",
+      runDir: join(hostDir, ".sandcastle", "runs", "run-triage-42"),
+      proposal: {
+        summary: "Single task triage.",
+        decisions: [
+          {
+            taskId: "bd-42",
+            outcome: "ready_for_agent",
+            category: "enhancement",
+            confidence: "high",
+            rationale: "Fully specified AFK-safe work.",
+            comment: "Ready for implementation.",
+          },
+        ],
+      },
+      appliedDecisions: ["bd-42"],
+      skippedDecisions: [],
+      dependencies: [],
+    });
+
+    vi.resetModules();
+    vi.doMock("./hubTriageProposalCli.js", async (importOriginal) => {
+      const actual = (await importOriginal()) as Record<string, unknown>;
+      return {
+        ...actual,
+        runTriageProposalFlowFromCli: runTriage,
+      };
+    });
+
+    const { cli } = await import("./cli.js");
+
+    const previousCwd = process.cwd();
+    process.chdir(hostDir);
+    try {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const ref = yield* Ref.make([] as ReadonlyArray<DisplayEntry>);
+          yield* cli([
+            "node",
+            "sandcastle",
+            "run",
+            ".",
+            "--flow",
+            "triage",
+            "--input",
+            "bd-42",
+          ]).pipe(
+            Effect.provide(SilentDisplay.layer(ref)),
+            Effect.provide(NodeContext.layer),
+          );
+        }),
+      );
+    } finally {
+      process.chdir(previousCwd);
+      vi.doUnmock("./hubTriageProposalCli.js");
+      vi.resetModules();
+    }
+
+    expect(runTriage).toHaveBeenCalledOnce();
+    expect(runTriage.mock.calls[0]?.[0]).toMatchObject({
+      taskIds: ["bd-42"],
+      query: undefined,
+      yes: false,
+    });
+    expect(runTriage.mock.calls[0]?.[0].cwd).toContain(
+      "cli-run-flow-triage-id-",
+    );
+  });
+
   it("run --flow triage defaults task query to inbox and needs_info", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-run-flow-input-"));
     await initRepo(hostDir);
 
-    const { stdout } = await runCli("run . --flow triage", hostDir);
-    expect(stdout).toContain("Task query: inbox,needs_info");
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "list" ]; then
+  printf '[]\\n'
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    try {
+      await runCli("run . --flow triage", hostDir, withBdEnv(bdPath));
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      expect(cliFailureOutput(err)).toMatch(
+        /Task query: inbox,needs_info|Missing Hub agent role config: triage|No tasks matched triage selection/i,
+      );
+    }
   });
 
   it("run --flow no-review rejects unsupported --input values", async () => {
@@ -1041,15 +1144,78 @@ exit 1
     expect(args).toContain('"kind":"enhancement"');
   });
 
-  it("tasks triage classifies inbox and needs_info tasks into collaboration states", async () => {
+  it("tasks triage runs the proposal flow and applies high-confidence decisions under --yes", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const dataHome = await mkdtemp(join(tmpdir(), "cli-xdg-data-"));
+    await mkdir(join(dataHome, "sandcastle", "hub"), { recursive: true });
+    await writeFile(
+      join(dataHome, "sandcastle", "hub", "agent-roles.json"),
+      `${JSON.stringify(
+        {
+          roles: {
+            triage: { provider: "codex", model: "gpt-5.4-mini" },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
 
     const binDir = join(hostDir, "bin");
     await mkdir(binDir, { recursive: true });
     const gitPath = (await execAsync("command -v git")).stdout.trim();
     await symlink(gitPath, join(binDir, "git"));
+
+    const proposal = {
+      summary: "One ready task.",
+      decisions: [
+        {
+          taskId: "bd-1",
+          outcome: "ready_for_agent",
+          category: "enhancement",
+          confidence: "high",
+          rationale: "Fully specified AFK-safe work.",
+          comment: "Add retry with backoff around sync-out.",
+        },
+        {
+          taskId: "bd-2",
+          outcome: "needs_info",
+          category: "question",
+          confidence: "medium",
+          rationale: "Still missing reproduction details.",
+          comment: "Which auth provider failed?",
+        },
+      ],
+    };
+
+    const fakeCodexPath = join(binDir, "codex");
+    await writeFile(
+      fakeCodexPath,
+      `#!/usr/bin/env node
+const proposal = ${JSON.stringify(proposal)};
+let stdin = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  stdin += chunk;
+});
+process.stdin.on("end", () => {
+  const isFinal = stdin.includes("triage-proposal");
+  const text = isFinal
+    ? \`Approved.\\n<triage-proposal>\${JSON.stringify(proposal)}</triage-proposal>\`
+    : "Draft triage recommendations";
+  process.stdout.write(
+    JSON.stringify({
+      type: "item.completed",
+      item: { type: "agent_message", text },
+    }) + "\\n",
+  );
+});
+`,
+    );
+    await chmod(fakeCodexPath, 0o755);
 
     const boardJson = JSON.stringify([
       {
@@ -1057,6 +1223,7 @@ exit 1
         title: "Add retry to sync",
         status: "open",
         labels: ["needs-triage"],
+        metadata: { hubStatus: "inbox" },
         description:
           "When sync-out fails with ECONNRESET, retry up to three times before surfacing an error.",
       },
@@ -1065,6 +1232,8 @@ exit 1
         title: "Need details",
         status: "open",
         labels: ["needs-info"],
+        metadata: { hubStatus: "needs_info" },
+        description: "Need more details.",
       },
     ]);
     const updateArgsFile = join(hostDir, "triage-update-args.txt");
@@ -1075,6 +1244,24 @@ exit 1
       `#!/bin/sh
 if [ "$1" = "list" ]; then
   printf '%s\n' '${boardJson}'
+  exit 0
+fi
+if [ "$1" = "show" ]; then
+  case "$2" in
+    bd-1)
+      cat <<'JSON'
+[{"id":"bd-1","title":"Add retry to sync","status":"open","labels":["needs-triage"],"metadata":{"hubStatus":"inbox"},"description":"When sync-out fails with ECONNRESET, retry up to three times before surfacing an error."}]
+JSON
+      ;;
+    bd-2)
+      cat <<'JSON'
+[{"id":"bd-2","title":"Need details","status":"open","labels":["needs-info"],"metadata":{"hubStatus":"needs_info"},"description":"Need more details."}]
+JSON
+      ;;
+    *)
+      exit 1
+      ;;
+  esac
   exit 0
 fi
 if [ "$1" = "update" ]; then
@@ -1090,21 +1277,24 @@ exit 1
     );
     await chmod(bdPath, 0o755);
 
-    const { stdout } = await runCli("tasks triage", hostDir, withBdEnv(bdPath));
+    const { stdout } = await runCli(
+      "tasks triage --yes --query inbox,needs_info",
+      hostDir,
+      withBdEnv(bdPath, {
+        XDG_DATA_HOME: dataHome,
+        OPENAI_KEY: "test-key",
+      }),
+    );
 
     const updateArgs = await readFile(updateArgsFile, "utf-8");
     const commentArgs = await readFile(commentArgsFile, "utf-8");
 
-    expect(stdout).toContain("Triaged Hub tasks");
-    expect(stdout).toContain("bd-1");
-    expect(stdout).toContain("ready for agent");
-    expect(stdout).toContain("bd-2");
-    expect(stdout).toContain("needs info");
+    expect(stdout).toContain("Applied triage decisions");
+    expect(stdout).toContain("applied: bd-1");
+    expect(stdout).toContain("skipped bd-2: unconfirmed");
     expect(updateArgs).toContain("bd-1");
-    expect(updateArgs).toContain("--add-labels");
     expect(updateArgs).toContain("ready-for-agent");
-    expect(updateArgs).toContain("bd-2");
-    expect(updateArgs).toContain("needs-info");
+    expect(updateArgs).not.toContain("bd-2");
     expect(commentArgs).toContain("This was generated by AI during triage");
   });
 

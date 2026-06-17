@@ -66,6 +66,10 @@ export const HUB_FLOW_DEFINITIONS: readonly HubFlowDefinition[] = [
     description:
       "Review inbox and needs-info tasks, propose collaboration-state updates, and apply approved changes locally",
     kind: "proposal",
+    prompts: {
+      draft: "draft-prompt.md",
+      finalization: "finalization-prompt.md",
+    },
     input: {
       kind: "task-query",
       label: "Hub task query",

@@ -4,6 +4,7 @@ import {
   HUB_TRIAGE_DEFAULT_TASK_QUERY,
   isHubTriageSourceStatus,
 } from "./hubTriage.js";
+import { isTriageTaskIdInput } from "./hubTriageProposal.js";
 import { getHubFlowDefinition, type HubFlowInputKind } from "./hubFlows.js";
 
 export { HUB_TRIAGE_DEFAULT_TASK_QUERY } from "./hubTriage.js";
@@ -19,6 +20,9 @@ export type ValidatedPrdFileFlowInput = {
 export type ValidatedTaskQueryFlowInput = {
   readonly flowId: "triage";
   readonly kind: "task-query";
+  readonly selection:
+    | { readonly type: "statuses"; readonly statuses: readonly string[] }
+    | { readonly type: "task-id"; readonly taskId: string };
   readonly query: string;
 };
 
@@ -43,27 +47,49 @@ export const resolveHubFlowRawInput = (
   return defaultValue || undefined;
 };
 
-const normalizeTaskQuery = (rawQuery: string): string => {
-  const statuses = rawQuery
+const normalizeTaskQuerySelection = (
+  rawQuery: string,
+): ValidatedTaskQueryFlowInput["selection"] => {
+  const trimmed = rawQuery.trim();
+  if (isTriageTaskIdInput(trimmed)) {
+    return {
+      type: "task-id",
+      taskId: trimmed.toLowerCase(),
+    };
+  }
+
+  const statuses = trimmed
     .split(",")
     .map((value) => value.trim())
     .filter((value) => value.length > 0);
 
   if (statuses.length === 0) {
     throw toHubFlowInputError(
-      "Hub task query input must include at least one Hub status.",
+      "Hub task query input must include at least one Hub status or a Beads task id.",
     );
   }
 
   for (const status of statuses) {
     if (!isHubTriageSourceStatus(status)) {
       throw toHubFlowInputError(
-        `Unsupported Hub task query status "${status}". Use comma-separated inbox and needs_info statuses.`,
+        `Unsupported Hub task query status "${status}". Use comma-separated inbox and needs_info statuses, or a Beads task id such as bd-42.`,
       );
     }
   }
 
-  return statuses.join(",");
+  return {
+    type: "statuses",
+    statuses,
+  };
+};
+
+const formatTaskQuerySelection = (
+  selection: ValidatedTaskQueryFlowInput["selection"],
+): string => {
+  if (selection.type === "task-id") {
+    return selection.taskId;
+  }
+  return selection.statuses.join(",");
 };
 
 const validateInputKind = (
@@ -90,13 +116,14 @@ const validateInputKind = (
       };
     }
     case "task-query": {
-      const query = normalizeTaskQuery(
+      const selection = normalizeTaskQuerySelection(
         rawInput ?? HUB_TRIAGE_DEFAULT_TASK_QUERY,
       );
       return {
         flowId: "triage",
         kind: "task-query",
-        query,
+        selection,
+        query: formatTaskQuerySelection(selection),
       };
     }
     default: {
@@ -169,6 +196,9 @@ export const formatValidatedHubFlowInputSummary = (
     case "prd-file":
       return `PRD input: ${validated.ref}`;
     case "task-query":
+      if (validated.selection.type === "task-id") {
+        return `Task input: ${validated.selection.taskId}`;
+      }
       return `Task query: ${validated.query}`;
     default: {
       const unsupportedKind: never = validated;

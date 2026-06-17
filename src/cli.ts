@@ -92,6 +92,11 @@ import {
   displayPrdDecompositionFlowResult,
   runPrdDecompositionProposalFlowFromCli,
 } from "./hubProposalFlowCli.js";
+import {
+  displayTriageProposalFlowResult,
+  promptTriageTaskSelection,
+  runTriageProposalFlowFromCli,
+} from "./hubTriageProposalCli.js";
 import type {
   PrdHubStatusMode,
   PrdWarningSeverity,
@@ -108,7 +113,8 @@ import {
   resolveHubTaskSelector,
   resolveHubTaskSelectors,
 } from "./taskBoard.js";
-import { triageHubTasks, type HubTriageOutcome } from "./hubTriage.js";
+import { HUB_TRIAGE_DEFAULT_TASK_QUERY } from "./hubTriage.js";
+import { isTriageTaskIdInput } from "./hubTriageProposal.js";
 import {
   formatHubTaskSyncSummaryLines,
   syncHubTasksWithGithub,
@@ -1760,39 +1766,117 @@ const tasksShowCommand = Command.make("show", { id: taskIdArg }, ({ id }) =>
   }),
 );
 
-const formatTriageOutcomeLabel = (outcome: HubTriageOutcome): string =>
-  outcome.replaceAll("_", " ");
+const triageTaskIdArg = Args.text({ name: "task-id" }).pipe(Args.optional);
+const triageQueryOption = Options.text("query").pipe(
+  Options.withDescription(
+    "Comma-separated Hub statuses to triage (inbox, needs_info).",
+  ),
+  Options.optional,
+);
+const triageApproveOption = Options.boolean("yes").pipe(
+  Options.withDescription(
+    "Approve and apply high-confidence triage decisions without interactive confirmation.",
+  ),
+  Options.withAlias("approve"),
+  Options.withDefault(false),
+);
 
-const tasksTriageCommand = Command.make("triage", {}, () =>
-  Effect.gen(function* () {
-    const d = yield* Display;
-    const cwd = process.cwd();
-    yield* Effect.try({
-      try: () => validateHubFlowInput("triage", { cwd }),
-      catch: (error) =>
-        new TaskBoardError({
-          message: error instanceof Error ? error.message : String(error),
-        }),
-    });
-    const result = yield* Effect.try({
-      try: () => triageHubTasks({ cwd }),
-      catch: toTaskBoardError,
-    });
+const tasksTriageCommand = Command.make(
+  "triage",
+  {
+    taskId: triageTaskIdArg,
+    query: triageQueryOption,
+    approve: triageApproveOption,
+  },
+  ({ taskId, query, approve }) =>
+    Effect.gen(function* () {
+      const cwd = process.cwd();
+      const explicitTaskId = optionalTextValue(taskId)?.trim();
+      const explicitQuery = optionalTextValue(query)?.trim();
+      const yes = approve;
 
-    if (result.triaged.length === 0) {
-      yield* d.status("No inbox or needs_info tasks required triage.", "info");
-      return;
-    }
+      if (explicitTaskId && explicitQuery) {
+        return yield* Effect.fail(
+          new TaskBoardError({
+            message:
+              "Use either a task id argument or --query, not both. Example: sandcastle tasks triage bd-42",
+          }),
+        );
+      }
 
-    yield* d.summary("Triaged Hub tasks", {
-      Total: String(result.triaged.length),
-    });
-    for (const entry of result.triaged) {
-      yield* d.text(
-        `  ${entry.taskId}: ${entry.priorStatus} -> ${formatTriageOutcomeLabel(entry.outcome)}`,
-      );
-    }
-  }),
+      let resolvedTaskIds: string[] | undefined;
+      let resolvedQuery: string | undefined;
+
+      if (explicitTaskId) {
+        if (!isTriageTaskIdInput(explicitTaskId)) {
+          return yield* Effect.fail(
+            new TaskBoardError({
+              message: `Invalid triage task id "${explicitTaskId}". Use a Beads task id such as bd-42.`,
+            }),
+          );
+        }
+        resolvedTaskIds = [explicitTaskId.toLowerCase()];
+      } else if (explicitQuery) {
+        yield* Effect.try({
+          try: () =>
+            validateHubFlowInput("triage", {
+              cwd,
+              rawInput: explicitQuery,
+            }),
+          catch: (error) =>
+            new TaskBoardError({
+              message: error instanceof Error ? error.message : String(error),
+            }),
+        });
+        resolvedQuery = explicitQuery;
+      } else if (process.stdin.isTTY) {
+        const board = yield* Effect.try({
+          try: () => loadHubTaskBoard(cwd),
+          catch: toTaskBoardError,
+        });
+        resolvedTaskIds = yield* Effect.tryPromise({
+          try: () => promptTriageTaskSelection({ board }),
+          catch: toTaskBoardError,
+        });
+      } else if (yes) {
+        resolvedQuery = HUB_TRIAGE_DEFAULT_TASK_QUERY;
+      } else {
+        return yield* Effect.fail(
+          new TaskBoardError({
+            message:
+              "Non-interactive triage requires a task id, --query, or --yes. Example: sandcastle tasks triage bd-42, sandcastle tasks triage --query inbox,needs_info, or sandcastle tasks triage --yes",
+          }),
+        );
+      }
+
+      const result = yield* Effect.tryPromise({
+        try: () =>
+          runTriageProposalFlowFromCli({
+            cwd,
+            taskIds: resolvedTaskIds,
+            query: resolvedQuery,
+            yes,
+            isTTY: process.stdin.isTTY,
+          }),
+        catch: toTaskBoardError,
+      });
+
+      const displayOutcome = yield* displayTriageProposalFlowResult(result);
+      if (displayOutcome.kind === "cancelled") {
+        return yield* Effect.fail(
+          new TaskBoardError({
+            message: displayOutcome.reason,
+          }),
+        );
+      }
+      if (displayOutcome.kind === "failed") {
+        return yield* Effect.fail(
+          new TaskBoardError({
+            message: displayOutcome.reason,
+          }),
+        );
+      }
+    }),
 );
 
 const normalizePrdHubStatusMode = (
@@ -2477,11 +2561,68 @@ const runCommand = Command.make(
         );
 
         if (flowDefinition.kind === "proposal") {
-          yield* d.status(
-            `Validated "${flowDefinition.id}" flow input. Proposal flow execution via sandcastle run is not available yet; use the matching sandcastle tasks shortcut.`,
-            "info",
-          );
-          return;
+          if (validatedInput.flowId === "prd-decomposition") {
+            const result = yield* Effect.tryPromise({
+              try: () =>
+                runPrdDecompositionProposalFlowFromCli({
+                  cwd: repoRoot,
+                  prdRef: validatedInput.ref,
+                  yes: false,
+                  isTTY: process.stdin.isTTY,
+                }),
+              catch: toHubFlowError,
+            });
+            const displayOutcome =
+              yield* displayPrdDecompositionFlowResult(result);
+            if (displayOutcome.kind === "cancelled") {
+              return yield* Effect.fail(
+                new HubFlowError({ message: displayOutcome.reason }),
+              );
+            }
+            if (displayOutcome.kind === "failed") {
+              return yield* Effect.fail(
+                new HubFlowError({ message: displayOutcome.reason }),
+              );
+            }
+            return;
+          }
+
+          if (validatedInput.flowId === "triage") {
+            const triageInput = validatedInput;
+            const taskIds =
+              triageInput.selection.type === "task-id"
+                ? [triageInput.selection.taskId]
+                : undefined;
+            const query =
+              triageInput.selection.type === "statuses"
+                ? triageInput.query
+                : undefined;
+
+            const result = yield* Effect.tryPromise({
+              try: () =>
+                runTriageProposalFlowFromCli({
+                  cwd: repoRoot,
+                  taskIds,
+                  query,
+                  yes: false,
+                  isTTY: process.stdin.isTTY,
+                }),
+              catch: toHubFlowError,
+            });
+            const displayOutcome =
+              yield* displayTriageProposalFlowResult(result);
+            if (displayOutcome.kind === "cancelled") {
+              return yield* Effect.fail(
+                new HubFlowError({ message: displayOutcome.reason }),
+              );
+            }
+            if (displayOutcome.kind === "failed") {
+              return yield* Effect.fail(
+                new HubFlowError({ message: displayOutcome.reason }),
+              );
+            }
+            return;
+          }
         }
       }
 
