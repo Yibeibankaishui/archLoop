@@ -18,7 +18,11 @@ import {
   resolveHubTaskClaimState,
   type HubTaskClaimMetadata,
 } from "./hubExecution.js";
-import { appendBdAddLabelArgs, appendBdRemoveLabelArgs } from "./bdCliArgs.js";
+import {
+  appendBdAddLabelArgs,
+  appendBdMetadataArg,
+  appendBdRemoveLabelArgs,
+} from "./bdCliArgs.js";
 import { TaskBoardError } from "./errors.js";
 import { resolveBdExecutable } from "./resolveBdExecutable.js";
 
@@ -840,7 +844,7 @@ export const updateHubTaskStatus = (
     appendBdRemoveLabelArgs(args, labelsToRemove);
   }
 
-  args.push("--set-metadata", JSON.stringify(metadata));
+  appendBdMetadataArg(args, metadata);
   runBdText(input.cwd, args, `tasks update ${input.taskId}`, input.env);
 
   return loadHubTask(input.cwd, input.taskId, input.env);
@@ -867,14 +871,8 @@ export const closeHubTask = (input: CloseHubTaskInput): HubTaskProjection => {
   const labelsToRemove = task.labels.filter((existingLabel) =>
     EXECUTION_STATUS_LABELS.has(existingLabel),
   );
-  const args = [
-    "update",
-    input.taskId,
-    "--status",
-    "closed",
-    "--set-metadata",
-    JSON.stringify(metadata),
-  ];
+  const args = ["update", input.taskId, "--status", "closed"];
+  appendBdMetadataArg(args, metadata);
   appendBdAddLabelArgs(args, "done");
   if (labelsToRemove.length > 0) {
     appendBdRemoveLabelArgs(args, labelsToRemove);
@@ -1013,14 +1011,8 @@ export const claimHubTask = (input: ClaimHubTaskInput): ClaimHubTaskResult => {
     claim: claim.raw,
   };
 
-  const claimArgs = [
-    "update",
-    input.taskId,
-    "--status",
-    "in_progress",
-    "--set-metadata",
-    JSON.stringify(metadata),
-  ];
+  const claimArgs = ["update", input.taskId, "--status", "in_progress"];
+  appendBdMetadataArg(claimArgs, metadata);
   appendBdAddLabelArgs(claimArgs, "implementing");
   runBdText(input.cwd, claimArgs, `tasks claim ${input.taskId}`, input.env);
 

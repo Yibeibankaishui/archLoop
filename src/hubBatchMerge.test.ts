@@ -115,7 +115,7 @@ if (command === "update" && id) {
       task.labels = task.labels.filter((entry) => entry !== label);
     }
   }
-  const metadataIndex = args.indexOf("--set-metadata");
+  const metadataIndex = args.indexOf("--metadata");
   if (metadataIndex >= 0) {
     task.metadata = JSON.parse(args[metadataIndex + 1]);
   }

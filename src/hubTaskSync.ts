@@ -1,6 +1,10 @@
 import { execFileSync } from "node:child_process";
 
-import { appendBdAddLabelArgs, appendBdRemoveLabelArgs } from "./bdCliArgs.js";
+import {
+  appendBdAddLabelArgs,
+  appendBdMetadataArg,
+  appendBdRemoveLabelArgs,
+} from "./bdCliArgs.js";
 import { TaskBoardError } from "./errors.js";
 import { resolveBdExecutable } from "./resolveBdExecutable.js";
 import {
@@ -267,19 +271,12 @@ const setHubTaskSyncMetadata = (
   metadataPatch: Record<string, unknown>,
   env: NodeJS.ProcessEnv,
 ): void => {
-  updateHubTaskRecord(
-    cwd,
-    task.id,
-    [
-      "--set-metadata",
-      JSON.stringify({
-        ...task.metadata,
-        ...metadataPatch,
-      }),
-    ],
-    `tasks sync ${task.id}`,
-    env,
-  );
+  const metadataArgs: string[] = [];
+  appendBdMetadataArg(metadataArgs, {
+    ...task.metadata,
+    ...metadataPatch,
+  });
+  updateHubTaskRecord(cwd, task.id, metadataArgs, `tasks sync ${task.id}`, env);
 };
 
 const markHubTaskSyncConflict = (
@@ -308,12 +305,8 @@ const markHubTaskSyncConflict = (
     sync_conflict_reason: reason,
   };
 
-  const args = [
-    "--status",
-    "blocked",
-    "--set-metadata",
-    JSON.stringify(metadata),
-  ];
+  const args = ["--status", "blocked"];
+  appendBdMetadataArg(args, metadata);
   appendBdAddLabelArgs(args, "sync-conflict");
 
   for (const label of REMOTE_COLLABORATION_LABELS_TO_CLEAR) {
@@ -408,14 +401,12 @@ const refreshLinkedGithubIssue = (
     (task.description ?? "") !== (issue.body ?? "") && issue.body !== undefined;
 
   if (titleChanged || descriptionChanged) {
-    const args = [
-      "--set-metadata",
-      JSON.stringify({
-        ...task.metadata,
-        ...metadataPatch,
-        sync_state: "synced",
-      }),
-    ];
+    const args: string[] = [];
+    appendBdMetadataArg(args, {
+      ...task.metadata,
+      ...metadataPatch,
+      sync_state: "synced",
+    });
     if (titleChanged) {
       args.unshift("--title", issue.title);
     }

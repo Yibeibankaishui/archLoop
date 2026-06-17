@@ -196,7 +196,7 @@ if (command === "update") {
   if (descriptionIndex >= 0) {
     task.description = args[descriptionIndex + 1];
   }
-  const metadataIndex = args.indexOf("--set-metadata");
+  const metadataIndex = args.indexOf("--metadata");
   if (metadataIndex >= 0) {
     task.metadata = JSON.parse(args[metadataIndex + 1]);
     if (task.metadata.remote_refs) {

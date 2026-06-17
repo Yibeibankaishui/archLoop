@@ -25,3 +25,10 @@ export const appendBdRemoveLabelArgs = (
     args.push("--remove-label", label);
   }
 };
+
+export const appendBdMetadataArg = (
+  args: string[],
+  metadata: Record<string, unknown>,
+): void => {
+  args.push("--metadata", JSON.stringify(metadata));
+};

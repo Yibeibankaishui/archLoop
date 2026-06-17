@@ -123,7 +123,7 @@ if (command === "show" && id === "bd-69") {
 }
 if (command === "update" && id === "bd-69") {
   fs.writeFileSync(argsFile, args.join("\\n"));
-  const metadataIndex = args.indexOf("--set-metadata");
+  const metadataIndex = args.indexOf("--metadata");
   const statusIndex = args.indexOf("--status");
   const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
   state[0].status = args[statusIndex + 1];
@@ -163,7 +163,7 @@ process.exit(1);
     expect(args).toContain("bd-69");
     expect(args).toContain("--status");
     expect(args).toContain("in_progress");
-    expect(args).toContain("--set-metadata");
+    expect(args).toContain("--metadata");
     expect(result.outcome).toBe("claimed");
     expect(result.task.hubStatus).toBe("implementing");
     expect(result.task.claimState).toBe("active");

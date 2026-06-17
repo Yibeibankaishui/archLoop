@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   appendBdAddLabelArgs,
+  appendBdMetadataArg,
   appendBdRemoveLabelArgs,
   normalizeBdLabels,
 } from "./bdCliArgs.js";
@@ -29,6 +30,21 @@ describe("bdCliArgs", () => {
       "needs-info",
       "--remove-label",
       "blocked",
+    ]);
+  });
+
+  it("appends bd metadata as JSON", () => {
+    const args: string[] = ["update", "task-1"];
+    appendBdMetadataArg(args, {
+      origin: "prd-decomposition",
+      hubStatus: "ready_for_agent",
+    });
+
+    expect(args).toEqual([
+      "update",
+      "task-1",
+      "--metadata",
+      '{"origin":"prd-decomposition","hubStatus":"ready_for_agent"}',
     ]);
   });
 });

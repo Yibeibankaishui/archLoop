@@ -1,6 +1,10 @@
 import { execFileSync } from "node:child_process";
 
-import { appendBdAddLabelArgs, appendBdRemoveLabelArgs } from "./bdCliArgs.js";
+import {
+  appendBdAddLabelArgs,
+  appendBdMetadataArg,
+  appendBdRemoveLabelArgs,
+} from "./bdCliArgs.js";
 import { TaskBoardError } from "./errors.js";
 import { resolveBdExecutable } from "./resolveBdExecutable.js";
 import {
@@ -230,7 +234,8 @@ const applyHubTaskTriageOutcome = (
     delete metadata.wontfix;
   }
 
-  const args = ["update", taskId, "--set-metadata", JSON.stringify(metadata)];
+  const args = ["update", taskId];
+  appendBdMetadataArg(args, metadata);
   appendBdRemoveLabelArgs(args, TRIAGE_LABELS_TO_CLEAR);
 
   if (outcome === "wontfix") {
