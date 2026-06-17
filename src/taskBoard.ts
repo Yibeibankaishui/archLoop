@@ -18,6 +18,7 @@ import {
   resolveHubTaskClaimState,
   type HubTaskClaimMetadata,
 } from "./hubExecution.js";
+import { appendBdAddLabelArgs, appendBdRemoveLabelArgs } from "./bdCliArgs.js";
 import { TaskBoardError } from "./errors.js";
 import { resolveBdExecutable } from "./resolveBdExecutable.js";
 
@@ -827,7 +828,7 @@ export const updateHubTaskStatus = (
     args.push("--status", beadsStatus);
   }
   if (label) {
-    args.push("--add-labels", label);
+    appendBdAddLabelArgs(args, label);
   }
 
   const labelsToRemove = task.labels.filter(
@@ -836,7 +837,7 @@ export const updateHubTaskStatus = (
       normalizeKey(existingLabel) !== labelKey,
   );
   if (labelsToRemove.length > 0) {
-    args.push("--remove-labels", labelsToRemove.join(","));
+    appendBdRemoveLabelArgs(args, labelsToRemove);
   }
 
   args.push("--set-metadata", JSON.stringify(metadata));
@@ -871,13 +872,12 @@ export const closeHubTask = (input: CloseHubTaskInput): HubTaskProjection => {
     input.taskId,
     "--status",
     "closed",
-    "--add-labels",
-    "done",
     "--set-metadata",
     JSON.stringify(metadata),
   ];
+  appendBdAddLabelArgs(args, "done");
   if (labelsToRemove.length > 0) {
-    args.push("--remove-labels", labelsToRemove.join(","));
+    appendBdRemoveLabelArgs(args, labelsToRemove);
   }
 
   runBdText(input.cwd, args, `tasks close ${input.taskId}`, input.env);
@@ -1013,21 +1013,16 @@ export const claimHubTask = (input: ClaimHubTaskInput): ClaimHubTaskResult => {
     claim: claim.raw,
   };
 
-  runBdText(
-    input.cwd,
-    [
-      "update",
-      input.taskId,
-      "--status",
-      "in_progress",
-      "--add-labels",
-      "implementing",
-      "--set-metadata",
-      JSON.stringify(metadata),
-    ],
-    `tasks claim ${input.taskId}`,
-    input.env,
-  );
+  const claimArgs = [
+    "update",
+    input.taskId,
+    "--status",
+    "in_progress",
+    "--set-metadata",
+    JSON.stringify(metadata),
+  ];
+  appendBdAddLabelArgs(claimArgs, "implementing");
+  runBdText(input.cwd, claimArgs, `tasks claim ${input.taskId}`, input.env);
 
   const updatedTask = loadHubTask(input.cwd, input.taskId, input.env);
   appendHubTaskEvent(context.runDir, {

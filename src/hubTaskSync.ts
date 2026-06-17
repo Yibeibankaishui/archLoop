@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 
+import { appendBdAddLabelArgs, appendBdRemoveLabelArgs } from "./bdCliArgs.js";
 import { TaskBoardError } from "./errors.js";
 import { resolveBdExecutable } from "./resolveBdExecutable.js";
 import {
@@ -310,15 +311,14 @@ const markHubTaskSyncConflict = (
   const args = [
     "--status",
     "blocked",
-    "--add-labels",
-    "sync-conflict",
     "--set-metadata",
     JSON.stringify(metadata),
   ];
+  appendBdAddLabelArgs(args, "sync-conflict");
 
   for (const label of REMOTE_COLLABORATION_LABELS_TO_CLEAR) {
     if (task.labels.includes(label)) {
-      args.push("--remove-labels", label);
+      appendBdRemoveLabelArgs(args, label);
     }
   }
 

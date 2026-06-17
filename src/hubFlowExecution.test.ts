@@ -116,17 +116,15 @@ if (command === "update" && id) {
   if (statusIndex >= 0) {
     task.status = args[statusIndex + 1];
   }
-  const addLabelsIndex = args.indexOf("--add-labels");
-  if (addLabelsIndex >= 0) {
-    const labels = args[addLabelsIndex + 1].split(",");
-    for (const label of labels) {
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--add-label") {
+      const label = args[index + 1];
       if (!task.labels.includes(label)) task.labels.push(label);
     }
-  }
-  const removeLabelsIndex = args.indexOf("--remove-labels");
-  if (removeLabelsIndex >= 0) {
-    const labels = args[removeLabelsIndex + 1].split(",");
-    task.labels = task.labels.filter((label) => !labels.includes(label));
+    if (args[index] === "--remove-label") {
+      const label = args[index + 1];
+      task.labels = task.labels.filter((entry) => entry !== label);
+    }
   }
   const metadataIndex = args.indexOf("--set-metadata");
   if (metadataIndex >= 0) {

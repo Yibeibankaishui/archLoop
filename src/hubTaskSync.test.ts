@@ -204,15 +204,13 @@ if (command === "update") {
     }
   }
   for (let index = 0; index < args.length; index += 1) {
-    if (args[index] === "--add-labels") {
+    if (args[index] === "--add-label") {
       const label = args[index + 1];
       task.labels = [...new Set([...(task.labels ?? []), label])];
     }
-    if (args[index] === "--remove-labels") {
-      const labels = args[index + 1].split(",");
-      task.labels = (task.labels ?? []).filter(
-        (entry) => !labels.includes(entry),
-      );
+    if (args[index] === "--remove-label") {
+      const label = args[index + 1];
+      task.labels = (task.labels ?? []).filter((entry) => entry !== label);
     }
   }
   fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));

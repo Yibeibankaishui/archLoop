@@ -252,11 +252,11 @@ if (command === "update") {
     task.metadata = JSON.parse(args[metadataIndex + 1]);
   }
   for (let index = 0; index < args.length; index += 1) {
-    if (args[index] === "--add-labels") {
+    if (args[index] === "--add-label") {
       const label = args[index + 1];
       task.labels = [...new Set([...(task.labels ?? []), label])];
     }
-    if (args[index] === "--remove-labels") {
+    if (args[index] === "--remove-label") {
       const label = args[index + 1];
       task.labels = (task.labels ?? []).filter((entry) => entry !== label);
     }
@@ -323,11 +323,11 @@ process.exit(1);
 
     const updateArgs = await readFile(updateArgsFile, "utf-8");
     expect(updateArgs).toContain("bd-inbox");
-    expect(updateArgs).toContain("--add-labels ready-for-agent");
+    expect(updateArgs).toContain("--add-label ready-for-agent");
     expect(updateArgs).toContain("bd-needs-info");
     expect(updateArgs).toContain("bd-wontfix");
     expect(updateArgs).toContain("--status closed");
-    expect(updateArgs).toContain("--add-labels wontfix");
+    expect(updateArgs).toContain("--add-label wontfix");
 
     const commentArgs = await readFile(commentArgsFile, "utf-8");
     expect(commentArgs).toContain(HUB_TRIAGE_COMMENT_PREFIX);

@@ -23,6 +23,7 @@ import {
   type ProposalSessionInteraction,
   type RunProposalSessionResult,
 } from "./hubProposalSession.js";
+import { appendBdAddLabelArgs, appendBdRemoveLabelArgs } from "./bdCliArgs.js";
 import { resolveBdExecutable } from "./resolveBdExecutable.js";
 import { TaskBoardError } from "./errors.js";
 import {
@@ -631,12 +632,9 @@ const addHubTaskLabels = (
     return;
   }
 
-  runBdText(
-    cwd,
-    ["update", taskId, "--add-labels", normalized.join(",")],
-    `tasks triage ${taskId}`,
-    env,
-  );
+  const args = ["update", taskId];
+  appendBdAddLabelArgs(args, normalized);
+  runBdText(cwd, args, `tasks triage ${taskId}`, env);
 };
 
 const applyWontfixOutcome = (
@@ -657,10 +655,8 @@ const applyWontfixOutcome = (
   });
 
   const args = ["update", task.id];
-  for (const label of TRIAGE_LABELS_TO_CLEAR) {
-    args.push("--remove-labels", label);
-  }
-  args.push("--add-labels", "wontfix");
+  appendBdRemoveLabelArgs(args, TRIAGE_LABELS_TO_CLEAR);
+  appendBdAddLabelArgs(args, "wontfix");
   runBdText(cwd, args, `tasks triage ${task.id}`, env);
 };
 
@@ -688,12 +684,9 @@ const applyNonWontfixOutcome = (
     (label) => label !== metadataLabelForOutcome(outcome),
   );
   if (labelsToRemove.length > 0) {
-    runBdText(
-      cwd,
-      ["update", task.id, "--remove-labels", labelsToRemove.join(",")],
-      `tasks triage ${task.id}`,
-      env,
-    );
+    const args = ["update", task.id];
+    appendBdRemoveLabelArgs(args, labelsToRemove);
+    runBdText(cwd, args, `tasks triage ${task.id}`, env);
   }
 };
 

@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 
+import { appendBdAddLabelArgs, appendBdRemoveLabelArgs } from "./bdCliArgs.js";
 import { TaskBoardError } from "./errors.js";
 import { resolveBdExecutable } from "./resolveBdExecutable.js";
 import {
@@ -230,14 +231,14 @@ const applyHubTaskTriageOutcome = (
   }
 
   const args = ["update", taskId, "--set-metadata", JSON.stringify(metadata)];
-  for (const label of TRIAGE_LABELS_TO_CLEAR) {
-    args.push("--remove-labels", label);
-  }
+  appendBdRemoveLabelArgs(args, TRIAGE_LABELS_TO_CLEAR);
 
   if (outcome === "wontfix") {
-    args.push("--status", "closed", "--add-labels", OUTCOME_LABELS.wontfix);
+    args.push("--status", "closed");
+    appendBdAddLabelArgs(args, OUTCOME_LABELS.wontfix);
   } else {
-    args.push("--status", "open", "--add-labels", OUTCOME_LABELS[outcome]);
+    args.push("--status", "open");
+    appendBdAddLabelArgs(args, OUTCOME_LABELS[outcome]);
   }
 
   runBdText(cwd, args, `tasks triage ${taskId}`, env);
