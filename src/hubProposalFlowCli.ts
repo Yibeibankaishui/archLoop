@@ -3,8 +3,10 @@ import { Effect } from "effect";
 
 import { Display } from "./Display.js";
 import { TaskBoardError } from "./errors.js";
-import { promptHubAgentRoleSetup } from "./hubAgentConfigPrompt.js";
-import type { HubAgentRole, HubAgentRoleEntry } from "./hubAgentConfig.js";
+import {
+  promptHubAgentRoleEntry,
+  promptHubAgentRoleSetup,
+} from "./hubAgentConfigPrompt.js";
 import type { ValidatedHubFlowInput } from "./hubFlowInput.js";
 import {
   formatPrdDecompositionProposalLines,
@@ -17,7 +19,6 @@ import {
   type RunTriageProposalFlowResult,
 } from "./hubTriageProposalFlow.js";
 import { formatHubTriageOutcomeDisplayLabel } from "./hubTriage.js";
-import { listAgents } from "./InitService.js";
 
 export type HubProposalFlowExecutionResult =
   | {
@@ -28,39 +29,6 @@ export type HubProposalFlowExecutionResult =
       readonly flowId: "triage";
       readonly result: RunTriageProposalFlowResult;
     };
-
-const promptHubAgentRoleEntry = async (
-  role: HubAgentRole,
-): Promise<HubAgentRoleEntry> => {
-  const providers = listAgents();
-  const providerSelection = await clack.select({
-    message: `Select agent provider for ${role} role:`,
-    options: providers.map((provider) => ({
-      value: provider.name,
-      label: provider.label,
-    })),
-  });
-  if (clack.isCancel(providerSelection)) {
-    throw new TaskBoardError({
-      message: "Hub agent role setup cancelled.",
-    });
-  }
-
-  const model = await clack.text({
-    message: `Model for ${role} role:`,
-    defaultValue: "auto",
-  });
-  if (clack.isCancel(model)) {
-    throw new TaskBoardError({
-      message: "Hub agent role setup cancelled.",
-    });
-  }
-
-  return {
-    provider: String(providerSelection),
-    model: String(model),
-  };
-};
 
 const promptPrdHubStatusMode = async (): Promise<PrdHubStatusMode> => {
   const selected = await clack.select({
@@ -147,21 +115,19 @@ const createTriageProposalInteraction = (): {
   },
 });
 
-const createTriageRiskyDecisionConfirmation = (): ((
+const confirmTriageRiskyDecisions = async (
   recommendations: readonly {
     readonly taskId: string;
   }[],
-) => Promise<boolean>) => {
-  return async (recommendations) => {
-    const approved = await clack.confirm({
-      message: `${recommendations.length} triage decision(s) require explicit confirmation. Apply them?`,
-      initialValue: false,
-    });
-    if (clack.isCancel(approved)) {
-      return false;
-    }
-    return approved;
-  };
+): Promise<boolean> => {
+  const approved = await clack.confirm({
+    message: `${recommendations.length} triage decision(s) require explicit confirmation. Apply them?`,
+    initialValue: false,
+  });
+  if (clack.isCancel(approved)) {
+    return false;
+  }
+  return approved;
 };
 
 export type TriageProposalFlowDisplayOutcome =
@@ -266,6 +232,31 @@ export const displayPrdDecompositionFlowResult = (
     return { kind: "displayed" };
   });
 
+export const handlePrdDecompositionFlowDisplay = <E>(
+  result: RunPrdDecompositionFlowResult,
+  fail: (message: string) => E,
+): Effect.Effect<void, E, Display> =>
+  Effect.gen(function* () {
+    const displayOutcome = yield* displayPrdDecompositionFlowResult(result);
+    if (displayOutcome.kind === "cancelled") {
+      return yield* Effect.fail(fail("PRD task creation cancelled."));
+    }
+    if (displayOutcome.kind === "failed") {
+      return yield* Effect.fail(fail(displayOutcome.reason));
+    }
+  });
+
+export const handleTriageProposalFlowDisplay = <E>(
+  result: RunTriageProposalFlowResult,
+  fail: (message: string) => E,
+): Effect.Effect<void, E, Display> =>
+  Effect.gen(function* () {
+    const displayOutcome = yield* displayTriageProposalFlowResult(result);
+    if (displayOutcome.kind === "failed") {
+      return yield* Effect.fail(fail(displayOutcome.reason));
+    }
+  });
+
 export const runPrdDecompositionProposalFlowFromCli = async (input: {
   readonly cwd: string;
   readonly prdRef: string;
@@ -301,9 +292,7 @@ export const runTriageProposalFlowFromCli = async (input: {
     isTTY: input.isTTY,
     configureRole: promptHubAgentRoleEntry,
     interaction: input.yes ? undefined : createTriageProposalInteraction(),
-    confirmRiskyDecisions: input.yes
-      ? undefined
-      : createTriageRiskyDecisionConfirmation(),
+    confirmRiskyDecisions: input.yes ? undefined : confirmTriageRiskyDecisions,
   });
 
 export const runHubProposalFlowFromCli = async (input: {

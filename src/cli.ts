@@ -100,8 +100,8 @@ import {
   resolveHubTaskSelector,
 } from "./taskBoard.js";
 import {
-  displayPrdDecompositionFlowResult,
-  displayTriageProposalFlowResult,
+  handlePrdDecompositionFlowDisplay,
+  handleTriageProposalFlowDisplay,
   runHubProposalFlowFromCli,
   runPrdDecompositionProposalFlowFromCli,
   runTriageProposalFlowFromCli,
@@ -1731,14 +1731,10 @@ const tasksTriageCommand = Command.make(
         catch: toTaskBoardError,
       });
 
-      const displayOutcome = yield* displayTriageProposalFlowResult(result);
-      if (displayOutcome.kind === "failed") {
-        return yield* Effect.fail(
-          new TaskBoardError({
-            message: displayOutcome.reason,
-          }),
-        );
-      }
+      yield* handleTriageProposalFlowDisplay(
+        result,
+        (message) => new TaskBoardError({ message }),
+      );
     }),
 );
 
@@ -1812,21 +1808,10 @@ const tasksFromPrdCommand = Command.make(
         catch: toTaskBoardError,
       });
 
-      const displayOutcome = yield* displayPrdDecompositionFlowResult(result);
-      if (displayOutcome.kind === "cancelled") {
-        return yield* Effect.fail(
-          new TaskBoardError({
-            message: "PRD task creation cancelled.",
-          }),
-        );
-      }
-      if (displayOutcome.kind === "failed") {
-        return yield* Effect.fail(
-          new TaskBoardError({
-            message: displayOutcome.reason,
-          }),
-        );
-      }
+      yield* handlePrdDecompositionFlowDisplay(
+        result,
+        (message) => new TaskBoardError({ message }),
+      );
     }),
 );
 
@@ -2187,36 +2172,17 @@ const runCommand = Command.make(
           });
 
           if (execution.flowId === "prd-decomposition") {
-            const displayOutcome = yield* displayPrdDecompositionFlowResult(
+            yield* handlePrdDecompositionFlowDisplay(
               execution.result,
+              (message) => new HubFlowError({ message }),
             );
-            if (displayOutcome.kind === "cancelled") {
-              return yield* Effect.fail(
-                new HubFlowError({
-                  message: "PRD task creation cancelled.",
-                }),
-              );
-            }
-            if (displayOutcome.kind === "failed") {
-              return yield* Effect.fail(
-                new HubFlowError({
-                  message: displayOutcome.reason,
-                }),
-              );
-            }
             return;
           }
 
-          const displayOutcome = yield* displayTriageProposalFlowResult(
+          yield* handleTriageProposalFlowDisplay(
             execution.result,
+            (message) => new HubFlowError({ message }),
           );
-          if (displayOutcome.kind === "failed") {
-            return yield* Effect.fail(
-              new HubFlowError({
-                message: displayOutcome.reason,
-              }),
-            );
-          }
           return;
         }
       }

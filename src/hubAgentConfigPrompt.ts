@@ -1,7 +1,41 @@
 import * as clack from "@clack/prompts";
 
+import { TaskBoardError } from "./errors.js";
 import { getAgent, listAgents } from "./InitService.js";
 import type { HubAgentRole, HubAgentRoleEntry } from "./hubAgentConfig.js";
+
+export const promptHubAgentRoleEntry = async (
+  role: HubAgentRole,
+): Promise<HubAgentRoleEntry> => {
+  const providers = listAgents();
+  const providerSelection = await clack.select({
+    message: `Select agent provider for ${role} role:`,
+    options: providers.map((provider) => ({
+      value: provider.name,
+      label: provider.label,
+    })),
+  });
+  if (clack.isCancel(providerSelection)) {
+    throw new TaskBoardError({
+      message: "Hub agent role setup cancelled.",
+    });
+  }
+
+  const model = await clack.text({
+    message: `Model for ${role} role:`,
+    defaultValue: "auto",
+  });
+  if (clack.isCancel(model)) {
+    throw new TaskBoardError({
+      message: "Hub agent role setup cancelled.",
+    });
+  }
+
+  return {
+    provider: String(providerSelection),
+    model: String(model),
+  };
+};
 
 export const promptHubAgentRoleSetup = async (
   role: HubAgentRole,
