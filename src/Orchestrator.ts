@@ -16,6 +16,7 @@ import type {
   AgentProvider,
   IterationUsage,
 } from "./AgentProvider.js";
+import { enrichAgentFailureDetail } from "./agentAuthGuidance.js";
 import { TextDeltaBuffer } from "./TextDeltaBuffer.js";
 import {
   hostSessionStore,
@@ -153,13 +154,14 @@ const invokeAgent = (
           execResult.stdout,
           resultText,
         );
-        const errorDetail =
+        const rawDetail =
           provider.describeNonZeroExit?.(failure) ??
           formatNonZeroExitDetail(
             failure.stderr,
             failure.stdout,
             failure.resultText,
           );
+        const errorDetail = enrichAgentFailureDetail(provider.name, rawDetail);
 
         if (provider.acceptRecoverableExit?.(failure)) {
           const display = yield* Display;

@@ -13,6 +13,7 @@ import type {
   ProposalAgentInvokeResult,
   ProposalAgentInvoker,
 } from "./hubProposalSession.js";
+import { assertAgentCredentialsConfigured } from "./agentAuthGuidance.js";
 import { run } from "./run.js";
 import { noSandbox } from "./sandboxes/no-sandbox.js";
 
@@ -108,6 +109,12 @@ export const createHubProposalAgentInvoker = (
   return async (
     invokeInput: ProposalAgentInvokeInput,
   ): Promise<ProposalAgentInvokeResult> => {
+    await assertAgentCredentialsConfigured({
+      providerName: agent.name,
+      cwd: input.cwd,
+      env: input.env,
+    });
+
     const logDir = join(invokeInput.runDir, "logs");
     mkdirSync(logDir, { recursive: true });
 

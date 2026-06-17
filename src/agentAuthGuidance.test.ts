@@ -1,0 +1,181 @@
+import { NodeContext } from "@effect/platform-node";
+import { Effect } from "effect";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import {
+  assertAgentCredentialsConfigured,
+  detectAgentAuthFailure,
+  enrichAgentFailureDetail,
+  formatAgentAuthFailureMessage,
+  formatMissingAgentCredentialsMessage,
+} from "./agentAuthGuidance.js";
+
+describe("detectAgentAuthFailure", () => {
+  it("detects cursor auth failure from agent login message", () => {
+    const result = detectAgentAuthFailure(
+      "cursor",
+      "Please run `agent login` first, or set `CURSOR_API_KEY`",
+    );
+    expect(result).toEqual({
+      envKey: "CURSOR_API_KEY",
+      label: "Cursor",
+    });
+  });
+
+  it("does not misclassify cursor ECONNRESET as auth failure", () => {
+    expect(
+      detectAgentAuthFailure("cursor", "T: [aborted] read ECONNRESET"),
+    ).toBeUndefined();
+  });
+
+  it("does not misclassify cursor HTTP/2 keepalive as auth failure", () => {
+    expect(
+      detectAgentAuthFailure(
+        "cursor",
+        "T: [internal] HTTP/2 keepalive ping timed out after 5000ms",
+      ),
+    ).toBeUndefined();
+  });
+
+  it("detects codex invalid api key", () => {
+    const result = detectAgentAuthFailure(
+      "codex",
+      "Error: invalid api key provided",
+    );
+    expect(result).toEqual({ envKey: "OPENAI_KEY", label: "Codex" });
+  });
+
+  it("detects claude-code auth failure", () => {
+    const result = detectAgentAuthFailure(
+      "claude-code",
+      "Authentication error: ANTHROPIC_API_KEY is missing",
+    );
+    expect(result).toEqual({
+      envKey: "ANTHROPIC_API_KEY",
+      label: "Claude Code",
+    });
+  });
+
+  it("detects opencode auth failure", () => {
+    const result = detectAgentAuthFailure(
+      "opencode",
+      "OPENCODE_API_KEY is not set",
+    );
+    expect(result).toEqual({
+      envKey: "OPENCODE_API_KEY",
+      label: "OpenCode",
+    });
+  });
+});
+
+describe("formatAgentAuthFailureMessage", () => {
+  it("leads with sandcastle env commands and includes original error", () => {
+    const message = formatAgentAuthFailureMessage({
+      providerName: "cursor",
+      envKey: "CURSOR_API_KEY",
+      label: "Cursor",
+      originalDetail: "Please run `agent login` first",
+    });
+
+    expect(message).toContain("sandcastle env init");
+    expect(message).toContain("sandcastle env set CURSOR_API_KEY");
+    expect(message).toContain("sandcastle env show");
+    expect(message).toContain(".sandcastle/.env");
+    expect(message).toMatch(/not rely on agent login/i);
+    expect(message).toContain("Original error: Please run `agent login` first");
+  });
+
+  it("includes codex sandbox login guidance for codex provider", () => {
+    const message = formatAgentAuthFailureMessage({
+      providerName: "codex",
+      envKey: "OPENAI_KEY",
+      label: "Codex",
+      originalDetail: "not logged in",
+    });
+
+    expect(message).toContain("CODEX_HOME=.sandcastle/auth/codex codex login");
+    expect(message).toContain("Original error: not logged in");
+  });
+});
+
+describe("formatMissingAgentCredentialsMessage", () => {
+  it("omits original error line for preflight", () => {
+    const message = formatMissingAgentCredentialsMessage({
+      providerName: "cursor",
+      envKey: "CURSOR_API_KEY",
+      label: "Cursor",
+    });
+
+    expect(message).toContain("sandcastle env init");
+    expect(message).not.toContain("Original error:");
+  });
+});
+
+describe("enrichAgentFailureDetail", () => {
+  it("enriches cursor auth stderr with sandcastle guidance", () => {
+    const enriched = enrichAgentFailureDetail(
+      "cursor",
+      "Please run `agent login` first, or set `CURSOR_API_KEY`",
+    );
+    expect(enriched).toContain("sandcastle env init");
+    expect(enriched).toContain("Original error:");
+  });
+
+  it("passes through non-auth cursor transport errors unchanged", () => {
+    const detail = "T: [aborted] read ECONNRESET";
+    expect(enrichAgentFailureDetail("cursor", detail)).toBe(detail);
+  });
+});
+
+describe("assertAgentCredentialsConfigured", () => {
+  const makeDir = () => mkdtemp(join(tmpdir(), "agent-auth-preflight-"));
+
+  it("throws with sandcastle env guidance when credentials are missing", async () => {
+    const dir = await makeDir();
+
+    await expect(
+      assertAgentCredentialsConfigured({
+        providerName: "cursor",
+        cwd: dir,
+      }),
+    ).rejects.toThrow(/sandcastle env init/);
+  });
+
+  it("passes when hub env file has the required key", async () => {
+    const dir = await makeDir();
+    const dataDir = join(dir, "xdg-data");
+    await mkdir(join(dataDir, "sandcastle"), { recursive: true });
+    await writeFile(
+      join(dataDir, "sandcastle", ".env"),
+      "CURSOR_API_KEY=hub-key\n",
+    );
+
+    const orig = process.env.XDG_DATA_HOME;
+    try {
+      process.env.XDG_DATA_HOME = dataDir;
+      await assertAgentCredentialsConfigured({
+        providerName: "cursor",
+        cwd: dir,
+      });
+    } finally {
+      if (orig === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = orig;
+    }
+  });
+
+  it("passes when project .sandcastle/.env has the required key", async () => {
+    const dir = await makeDir();
+    await mkdir(join(dir, ".sandcastle"));
+    await writeFile(
+      join(dir, ".sandcastle", ".env"),
+      "CURSOR_API_KEY=project-key\n",
+    );
+
+    await assertAgentCredentialsConfigured({
+      providerName: "cursor",
+      cwd: dir,
+    });
+  });
+});

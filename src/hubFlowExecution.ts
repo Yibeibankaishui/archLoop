@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
+import { assertAgentCredentialsConfigured } from "./agentAuthGuidance.js";
 import {
   appendHubBatchEvent,
   appendHubTaskEvent,
@@ -192,7 +193,14 @@ const runHubAgent = async (input: {
   readonly runDir: string;
   readonly name: string;
   readonly logFileName: string;
+  readonly env?: NodeJS.ProcessEnv;
 }) => {
+  await assertAgentCredentialsConfigured({
+    providerName: "cursor",
+    cwd: input.cwd,
+    env: input.env,
+  });
+
   const { cursor } = await import("./AgentProvider.js");
   const { run } = await import("./run.js");
   const { noSandbox } = await import("./sandboxes/no-sandbox.js");

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import {
+  createHubFlowRunImplementer,
   formatHubFlowResultLines,
   runHubFlow,
   type HubFlowImplementer,
@@ -519,5 +520,23 @@ describe("with-review Hub flow execution", () => {
       hubStatus: "failed",
       failureReason: "agent_failed",
     });
+  });
+
+  it("createHubFlowRunImplementer fails fast when cursor credentials are missing", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "hub-flow-preflight-"));
+    const implementer = createHubFlowRunImplementer({ cwd });
+
+    const result = await implementer({
+      flowId: "no-review",
+      taskId: "bd-1",
+      title: "Test task",
+      branch: "sandcastle/bd-1-test-task",
+      promptFile: "/tmp/prompt.md",
+      cwd,
+      runDir: cwd,
+    });
+
+    expect(result.outcome).toBe("agent_failed");
+    expect(result.message).toContain("sandcastle env init");
   });
 });
