@@ -57,10 +57,12 @@ Hub v1 should provide CLI-first task board workflows. GUI can later consume the 
 
 Hub v1 supports two task creation paths:
 
-- `sandcastle tasks from-prd <prd-ref>` decomposes a PRD into vertical slices.
+- `sandcastle tasks from-prd <prd-ref>` runs the agent-driven `prd-decomposition` proposal flow and writes approved vertical slices to local Beads.
 - `sandcastle tasks create` creates a manual or user feedback task.
 
-PRD decomposition follows the tracer-bullet issue style:
+The original deterministic `from-prd` helper is superseded by the proposal flow user path. It may remain as a test fixture or explicit internal fallback, but product behavior is defined by agent-driven proposal sessions: Sandcastle prepares context, invokes the planning role, lets the user refine the proposal, validates final structured output, detects unexpected mutations, and applies only approved local Beads writes.
+
+PRD proposal sessions follow the tracer-bullet issue style:
 
 - Each slice must be independently verifiable.
 - Each slice is classified as AFK or HITL.
@@ -72,6 +74,8 @@ Default task creation states:
 - Manual or user feedback tasks enter `inbox`.
 - PRD-derived tasks enter `inbox` by default.
 - PRD-derived tasks may enter `ready_for_agent` or `ready_for_human` directly only after the user confirms slice granularity, dependencies, and AFK/HITL classification.
+
+Task triage follows the same proposal-flow model. The deterministic triage helper is superseded by the agent-driven `triage` proposal flow, which uses the triage role to recommend collaboration outcomes and applies approved status, label, dependency, and comment updates to local Beads only. Remote GitHub Issue changes remain the responsibility of task sync.
 
 ## Local And Remote Task Model
 
@@ -457,8 +461,8 @@ Command responsibilities:
 - `tasks list`: show the task board grouped by status.
 - `tasks show`: show Beads task details, comments, remote refs, run refs, and current status.
 - `tasks create`: create a manual or feedback task.
-- `tasks from-prd`: decompose a PRD into Beads tasks and dependencies.
-- `tasks triage`: process inbox and needs-info tasks through the triage workflow.
+- `tasks from-prd`: run the `prd-decomposition` proposal flow and apply approved Beads tasks and dependencies locally.
+- `tasks triage`: run the `triage` proposal flow and apply approved collaboration-state updates locally.
 - `tasks sync`: pull/push remote task source changes.
 - `tasks comment`: append a Beads comment.
 - `tasks recover`: repair failed or stale execution states and write a recovery comment.
@@ -471,5 +475,4 @@ Command responsibilities:
 - Which exact Beads label/custom metadata format should store Hub task status?
 - Should Hub use Beads GitHub sync directly, wrap it, or maintain its own sync adapter over Beads?
 - How should multiple remote task sources map to one local Beads task?
-- Should `tasks triage` apply labels directly, or always ask for maintainer confirmation first?
 - What is the first Hub flow that should implement the per-task merge event model?

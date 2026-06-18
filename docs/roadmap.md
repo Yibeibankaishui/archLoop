@@ -279,7 +279,7 @@ Goal: 提供 CLI-first 的 Sandcastle Hub 控制面，并在同一状态模型�
 
 - Sandcastle Hub 与现有 `sandcastle init` scaffold 路径的边界。
 - Hub project config、Hub project assets、Hub env file、Hub auth directory 和 Hub run directory。
-- Beads 本地任务表、远程任务源 pull/push sync、PRD 拆分任务、triage、任务评论和 recovery。
+- Beads 本地任务表、远程任务源 pull/push sync、agent-driven PRD/triage proposal flows、任务评论和 recovery。
 - Flow、flow batch、task/run/batch 状态机、per-task merge events 和 task board projection。
 - 后续 GUI 的核心用户路径、信息架构和运行入口。
 - GUI 与 Hub CLI / JS API 的边界、复用关系和数据来源。
@@ -312,6 +312,7 @@ Goal: 提供 CLI-first 的 Sandcastle Hub 控制面，并在同一状态模型�
 - [x] 实现 prd-decomposition proposal flow：Sandcastle-owned prompt、结构化 proposal schema、proposal session 编排、Beads apply 与 `sandcastle tasks from-prd` 接线（见 [#83](https://github.com/Yibeibankaishui/sandcastle/issues/83)、parent [#78](https://github.com/Yibeibankaishui/sandcastle/issues/78)）。
 - [x] 实现 triage proposal flow：Sandcastle-owned prompt、结构化 triage proposal schema、proposal session 编排、guarded `--yes` apply，并将 `sandcastle tasks triage` 接到 agent-driven proposal path（见 [#84](https://github.com/Yibeibankaishui/sandcastle/issues/84)、parent [#78](https://github.com/Yibeibankaishui/sandcastle/issues/78)）。
 - [x] 将 `sandcastle run --flow prd-decomposition/triage` 与 task shortcut 统一到 proposal flow 主路径，并将 deterministic PRD/triage helper 保留为测试或显式 fallback（见 [#85](https://github.com/Yibeibankaishui/sandcastle/issues/85)、parent [#78](https://github.com/Yibeibankaishui/sandcastle/issues/78)）。
+- [x] 完成 agent-driven task proposal flows 的文档与人工 QA 收尾：README、bundled usage skill、Hub task board PRD、QA 指标和 roadmap 均明确 proposal sessions、Hub-wide `agent-config`、`run --flow --input`、local-only Beads writes、task sync 边界、guarded `--yes` 行为和需要真实 agent 人工验收的场景（见 [#86](https://github.com/Yibeibankaishui/sandcastle/issues/86)、parent [#78](https://github.com/Yibeibankaishui/sandcastle/issues/78)）。
 - [ ] 定义 Sandcastle Hub 控制面的核心用户路径。
 - [ ] 设计 Hub project onboarding、credentials 和 flow run CLI。
 - [ ] 设计 run / sandbox / branch / logs / agent stream 的可视化模型。
