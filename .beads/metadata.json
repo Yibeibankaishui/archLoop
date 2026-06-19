@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "sandcastle",
+  "project_id": "820a748a-5bc6-4648-b0f1-5d58cbfc4963"
+}
