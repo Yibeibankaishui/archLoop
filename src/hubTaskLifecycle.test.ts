@@ -557,6 +557,57 @@ describe("Hub task lifecycle merge outcomes", () => {
     );
   });
 
+  it("records generic merge failure with unknown reason", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-lifecycle-merge-failed-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      waitingForMergeTask("bd-merge-fail", "Merge fail task", "batch-merge"),
+    ]);
+    const context = mergeLifecycleContext(repoDir);
+
+    const result = recordMergeFailure({
+      cwd: repoDir,
+      env,
+      context,
+      taskId: "bd-merge-fail",
+      branch: "sandcastle/bd-merge-fail-merge-fail-task",
+      metadata: waitingForMergeTask(
+        "bd-merge-fail",
+        "Merge fail task",
+        "batch-merge",
+      ).metadata,
+      claim: {
+        runId: "run-merge",
+        batchId: "batch-merge",
+        branch: "sandcastle/bd-merge-fail-merge-fail-task",
+        claimedAt: "2026-06-19T10:00:00Z",
+        raw: {},
+      },
+      failureReason: "unknown",
+      createdAt: "2026-06-19T10:02:30Z",
+    });
+
+    expect(result.hubStatus).toBe("failed");
+    expect(result.failureReason).toBe("unknown");
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(finalState[0]?.labels).toContain("failed");
+    expect(finalState[0]?.metadata.failureReason).toBe("unknown");
+
+    const taskEvents = await readJsonl(
+      join(context.runDir, "events", "task.jsonl"),
+    );
+    expect(taskEvents.map((event) => (event as { type: string }).type)).toEqual(
+      ["merge_failed", "task_status_advanced"],
+    );
+  });
+
   it("records verification failure", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-lifecycle-verify-fail-"));
     await initRepo(repoDir);
