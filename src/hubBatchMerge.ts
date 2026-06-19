@@ -29,9 +29,19 @@ export interface HubMergeTaskInput {
   readonly runDir: string;
 }
 
+export type HubMergeDiagnostics = Readonly<Record<string, unknown>> & {
+  readonly message?: string;
+  readonly stdout?: string;
+  readonly stderr?: string;
+  readonly exitCode?: number;
+  readonly signal?: string;
+  readonly details?: Readonly<Record<string, unknown>>;
+};
+
 export interface HubMergeTaskResult {
   readonly outcome: "success" | "merge_conflict" | "failed";
   readonly message?: string;
+  readonly diagnostics?: HubMergeDiagnostics;
 }
 
 export type HubFlowMerger = (
@@ -92,6 +102,8 @@ export interface HubBatchMergeTaskResult {
     | "skipped";
   readonly hubStatus: string;
   readonly failureReason?: HubFailureReason;
+  readonly diagnosticSummary?: string;
+  readonly diagnostics?: HubMergeDiagnostics;
 }
 
 export interface RunHubBatchMergeResult {
@@ -105,6 +117,117 @@ export interface RunHubBatchMergeResult {
 const resolveBranch = (task: HubTaskProjection): string =>
   task.claim?.branch ?? resolveHubTaskBranch(task.id, task.title);
 
+const readErrorProperty = (error: unknown, key: string): unknown | undefined =>
+  error && typeof error === "object"
+    ? (error as Record<string, unknown>)[key]
+    : undefined;
+
+const readStringProperty = (
+  error: unknown,
+  key: string,
+): string | undefined => {
+  const value = readErrorProperty(error, key);
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+};
+
+const readExitCode = (error: unknown): number | undefined => {
+  const code = readErrorProperty(error, "code");
+  return typeof code === "number" ? code : undefined;
+};
+
+const compactDiagnostics = (
+  diagnostics: HubMergeDiagnostics,
+): HubMergeDiagnostics | undefined => {
+  const compacted: HubMergeDiagnostics = {
+    ...(diagnostics.message ? { message: diagnostics.message } : {}),
+    ...(diagnostics.stdout ? { stdout: diagnostics.stdout } : {}),
+    ...(diagnostics.stderr ? { stderr: diagnostics.stderr } : {}),
+    ...(diagnostics.exitCode !== undefined
+      ? { exitCode: diagnostics.exitCode }
+      : {}),
+    ...(diagnostics.signal ? { signal: diagnostics.signal } : {}),
+    ...(diagnostics.details && Object.keys(diagnostics.details).length > 0
+      ? { details: diagnostics.details }
+      : {}),
+  };
+
+  return Object.keys(compacted).length > 0 ? compacted : undefined;
+};
+
+const buildMergeDiagnostics = (
+  result: HubMergeTaskResult,
+): HubMergeDiagnostics | undefined =>
+  compactDiagnostics({
+    ...result.diagnostics,
+    message: result.diagnostics?.message ?? result.message,
+  });
+
+const firstDiagnosticLine = (value: string | undefined): string | undefined =>
+  value
+    ?.split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+
+const formatMergeDiagnosticSummary = (
+  diagnostics: HubMergeDiagnostics | undefined,
+): string | undefined => {
+  if (!diagnostics) {
+    return undefined;
+  }
+
+  const prefixParts = [
+    diagnostics.message,
+    diagnostics.exitCode !== undefined ? `exit ${diagnostics.exitCode}` : "",
+    diagnostics.signal ? `signal ${diagnostics.signal}` : "",
+  ].filter(
+    (part): part is string => typeof part === "string" && part.length > 0,
+  );
+  const prefix =
+    prefixParts.length > 0
+      ? prefixParts.length === 1
+        ? prefixParts[0]
+        : `${prefixParts[0]} (${prefixParts.slice(1).join(", ")})`
+      : undefined;
+  const body =
+    firstDiagnosticLine(diagnostics.stderr) ??
+    firstDiagnosticLine(diagnostics.stdout);
+
+  if (prefix && body && body !== prefix) {
+    return `${prefix}: ${body}`;
+  }
+  return prefix ?? body;
+};
+
+const extractErrorDiagnostics = (error: unknown): HubMergeDiagnostics => {
+  const details: Record<string, unknown> = {};
+  const code = readErrorProperty(error, "code");
+  const command = readStringProperty(error, "cmd");
+  const path = readStringProperty(error, "path");
+  const syscall = readStringProperty(error, "syscall");
+
+  if (typeof code === "string" && code.length > 0) {
+    details.code = code;
+  }
+  if (command) {
+    details.command = command;
+  }
+  if (path) {
+    details.path = path;
+  }
+  if (syscall) {
+    details.syscall = syscall;
+  }
+
+  return {
+    message: error instanceof Error ? error.message : String(error),
+    stdout: readStringProperty(error, "stdout"),
+    stderr: readStringProperty(error, "stderr"),
+    exitCode: readExitCode(error),
+    signal: readStringProperty(error, "signal"),
+    details,
+  };
+};
+
 const recordTaskStatusAdvanced = (
   runDir: string,
   input: {
@@ -115,6 +238,8 @@ const recordTaskStatusAdvanced = (
     readonly createdAt: string;
     readonly status: string;
     readonly failureReason?: HubFailureReason;
+    readonly diagnosticSummary?: string;
+    readonly diagnostics?: HubMergeDiagnostics;
   },
 ): void => {
   appendHubTaskEvent(runDir, {
@@ -126,6 +251,8 @@ const recordTaskStatusAdvanced = (
     createdAt: input.createdAt,
     status: input.status,
     failureReason: input.failureReason,
+    diagnosticSummary: input.diagnosticSummary,
+    diagnostics: input.diagnostics,
   });
 };
 
@@ -138,6 +265,8 @@ const recordTaskFailure = (
   eventType: "merge_failed" | "verification_failed" | "task_close_failed",
   createdAt: string,
   outcome: HubBatchMergeTaskResult["outcome"],
+  diagnostics?: HubMergeDiagnostics,
+  diagnosticSummary?: string,
 ): HubBatchMergeTaskResult => {
   appendHubTaskEvent(input.runDir, {
     type: eventType,
@@ -148,6 +277,8 @@ const recordTaskFailure = (
     createdAt,
     status: "failed",
     failureReason,
+    diagnosticSummary,
+    diagnostics,
     claim,
   });
 
@@ -167,6 +298,8 @@ const recordTaskFailure = (
     createdAt,
     status: updatedTask.hubStatus,
     failureReason,
+    diagnosticSummary,
+    diagnostics,
   });
 
   return {
@@ -176,6 +309,8 @@ const recordTaskFailure = (
     outcome,
     hubStatus: updatedTask.hubStatus,
     failureReason,
+    diagnosticSummary,
+    diagnostics,
   };
 };
 
@@ -234,7 +369,11 @@ const processMergeTask = async (
 
   if (mergeResult.outcome !== "success") {
     const failureReason: HubFailureReason =
-      mergeResult.outcome === "merge_conflict" ? "merge_conflict" : "unknown";
+      mergeResult.outcome === "merge_conflict"
+        ? "merge_conflict"
+        : "merge_failed";
+    const diagnostics = buildMergeDiagnostics(mergeResult);
+    const diagnosticSummary = formatMergeDiagnosticSummary(diagnostics);
     return recordTaskFailure(
       input,
       task,
@@ -246,6 +385,8 @@ const processMergeTask = async (
       mergeResult.outcome === "merge_conflict"
         ? "merge_conflict"
         : "merge_failed",
+      diagnostics,
+      diagnosticSummary,
     );
   }
 
@@ -434,6 +575,12 @@ export const runHubBatchMerge = async (
         createdAt: new Date().toISOString(),
         taskIds: selectedTaskIds,
         batchStatus: "partial_failed",
+        failedTaskId: result.taskId,
+        failureReason: result.failureReason,
+        failureSummary: `${result.taskId} ${result.outcome}: ${
+          result.diagnosticSummary ?? result.failureReason ?? result.outcome
+        }`,
+        diagnostics: result.diagnostics,
       });
 
       return {
@@ -464,14 +611,20 @@ export const runHubBatchMerge = async (
   };
 };
 
-const isMergeConflict = (error: unknown): boolean => {
-  const message =
+const isMergeConflict = (
+  error: unknown,
+  diagnostics?: HubMergeDiagnostics,
+): boolean => {
+  const message = [
     error instanceof Error
       ? error.message
       : typeof error === "string"
         ? error
-        : "";
-  return /CONFLICT|conflict|merge failed/i.test(message);
+        : "",
+    diagnostics?.stdout,
+    diagnostics?.stderr,
+  ].join("\n");
+  return /CONFLICT|conflicts?/i.test(message);
 };
 
 export const createHubFlowRunMerger = (options: {
@@ -486,16 +639,19 @@ export const createHubFlowRunMerger = (options: {
       );
       return { outcome: "success" };
     } catch (error) {
-      if (isMergeConflict(error)) {
+      const diagnostics = compactDiagnostics(extractErrorDiagnostics(error));
+      if (isMergeConflict(error, diagnostics)) {
         return {
           outcome: "merge_conflict",
           message: error instanceof Error ? error.message : String(error),
+          diagnostics,
         };
       }
 
       return {
         outcome: "failed",
         message: error instanceof Error ? error.message : String(error),
+        diagnostics,
       };
     }
   };
@@ -537,8 +693,11 @@ export const formatHubBatchMergeResultLines = (
   }
 
   for (const taskResult of result.results) {
+    const diagnosticSuffix = taskResult.diagnosticSummary
+      ? `; ${taskResult.diagnosticSummary}`
+      : "";
     lines.push(
-      `  ${taskResult.taskId}: ${taskResult.outcome} -> ${taskResult.hubStatus}`,
+      `  ${taskResult.taskId}: ${taskResult.outcome} -> ${taskResult.hubStatus}${diagnosticSuffix}`,
     );
   }
 

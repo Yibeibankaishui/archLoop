@@ -78,6 +78,10 @@ export interface HubBatchMergeCompletedEvent {
   readonly createdAt: string;
   readonly taskIds: readonly string[];
   readonly batchStatus: "done" | "partial_failed";
+  readonly failedTaskId?: string;
+  readonly failureReason?: string;
+  readonly failureSummary?: string;
+  readonly diagnostics?: Readonly<Record<string, unknown>>;
 }
 
 export interface HubTaskEvent {
@@ -108,6 +112,8 @@ export interface HubTaskEvent {
   readonly status: string;
   readonly reason?: string;
   readonly failureReason?: string;
+  readonly diagnosticSummary?: string;
+  readonly diagnostics?: Readonly<Record<string, unknown>>;
   readonly commitCount?: number;
   readonly claim?: HubTaskClaimMetadata;
 }

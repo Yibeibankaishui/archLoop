@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createHubFlowRunImplementer,
   formatHubFlowResultLines,
@@ -285,6 +285,8 @@ describe("no-review Hub flow execution", () => {
     expect(finalState[0]?.status).toBe("in_progress");
     expect(finalState[0]?.labels).toContain("waiting-for-merge");
     expect(finalState[0]?.labels).not.toContain("implementing");
+    expect(finalState[0]?.labels).not.toContain("ready-for-agent");
+    expect(finalState[0]?.metadata.hubStatus).toBe("waiting_for_merge");
     expect(result.results[0]).toMatchObject({
       taskId: "bd-70",
       outcome: "implemented",
@@ -323,10 +325,19 @@ describe("no-review Hub flow execution", () => {
         metadata: {},
       },
     ]);
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "sandcastle",
+      "hub",
+      "projects",
+      "agent-fail",
+    );
 
     const result = await runHubFlow({
       flowId: "no-review",
       cwd: repoDir,
+      hubProjectDir,
       env,
       implementer: async () => ({
         outcome: "agent_failed",
@@ -364,10 +375,19 @@ describe("no-review Hub flow execution", () => {
         metadata: {},
       },
     ]);
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "sandcastle",
+      "hub",
+      "projects",
+      "sandbox-fail",
+    );
 
     const result = await runHubFlow({
       flowId: "no-review",
       cwd: repoDir,
+      hubProjectDir,
       env,
       implementer: async () => {
         throw new Error("sandbox start failed");
@@ -418,10 +438,19 @@ describe("with-review Hub flow execution", () => {
         completionSignal: "<promise>COMPLETE</promise>",
       };
     };
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "sandcastle",
+      "hub",
+      "projects",
+      "review-run",
+    );
 
     const result = await runHubFlow({
       flowId: "with-review",
       cwd: repoDir,
+      hubProjectDir,
       env,
       implementer,
       reviewer,
@@ -448,6 +477,8 @@ describe("with-review Hub flow execution", () => {
     expect(finalState[0]?.status).toBe("in_progress");
     expect(finalState[0]?.labels).toContain("waiting-for-merge");
     expect(finalState[0]?.labels).not.toContain("reviewing");
+    expect(finalState[0]?.labels).not.toContain("ready-for-agent");
+    expect(finalState[0]?.metadata.hubStatus).toBe("waiting_for_merge");
     expect(result.results[0]).toMatchObject({
       taskId: "bd-71",
       outcome: "reviewed",
@@ -489,10 +520,19 @@ describe("with-review Hub flow execution", () => {
         metadata: {},
       },
     ]);
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "sandcastle",
+      "hub",
+      "projects",
+      "review-fail",
+    );
 
     const result = await runHubFlow({
       flowId: "with-review",
       cwd: repoDir,
+      hubProjectDir,
       env,
       implementer: async () => ({
         outcome: "success",
@@ -524,17 +564,23 @@ describe("with-review Hub flow execution", () => {
     const cwd = await mkdtemp(join(tmpdir(), "hub-flow-preflight-"));
     const implementer = createHubFlowRunImplementer({ cwd });
 
-    const result = await implementer({
-      flowId: "no-review",
-      taskId: "bd-1",
-      title: "Test task",
-      branch: "sandcastle/bd-1-test-task",
-      promptFile: "/tmp/prompt.md",
-      cwd,
-      runDir: cwd,
-    });
+    vi.stubEnv("CURSOR_API_KEY", "");
+    vi.stubEnv("XDG_DATA_HOME", join(cwd, "xdg-data"));
+    try {
+      const result = await implementer({
+        flowId: "no-review",
+        taskId: "bd-1",
+        title: "Test task",
+        branch: "sandcastle/bd-1-test-task",
+        promptFile: "/tmp/prompt.md",
+        cwd,
+        runDir: cwd,
+      });
 
-    expect(result.outcome).toBe("agent_failed");
-    expect(result.message).toContain("sandcastle env init");
+      expect(result.outcome).toBe("agent_failed");
+      expect(result.message).toContain("sandcastle env init");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

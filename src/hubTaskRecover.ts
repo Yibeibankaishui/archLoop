@@ -86,6 +86,7 @@ const readFailureReason = (
     case "agent_failed":
     case "sandbox_failed":
     case "merge_conflict":
+    case "merge_failed":
     case "verification_failure":
     case "close_failed":
     case "unknown":

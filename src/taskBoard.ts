@@ -113,6 +113,15 @@ const IMPLEMENTING_LABEL_STATUSES = new Set([
   "ready_for_agent",
   "ready_for_human",
 ]);
+const LABEL_AUTHORITATIVE_STATUSES = new Set<HubTaskStatus>([
+  "implementing",
+  "reviewing",
+  "waiting_for_merge",
+  "merging",
+  "failed",
+  "done",
+  "wontfix",
+]);
 
 const STATUS_LABEL_TO_HUB_STATUS: Readonly<Record<string, HubTaskStatus>> = {
   needs_triage: "inbox",
@@ -334,21 +343,27 @@ const resolveStatusFromTaskShape = (
     return directStatus;
   }
 
-  const metadataStatus = resolveMetadataStatus(metadata);
-  if (metadataStatus) {
-    return metadataStatus;
-  }
-
-  const reasonStatus = resolveStatusFromMetadataReasons(metadata);
-  if (reasonStatus) {
-    return reasonStatus;
-  }
-
   const beadsLifecycle = normalizeBeadsLifecycle(
     readFirstString(task, BEADS_LIFECYCLE_KEYS),
   );
 
   const labelStatus = resolveStatusFromLabels(labels);
+  const metadataStatus = resolveMetadataStatus(metadata);
+  const reasonStatus = resolveStatusFromMetadataReasons(metadata);
+  if (reasonStatus) {
+    return reasonStatus;
+  }
+  if (
+    labelStatus &&
+    LABEL_AUTHORITATIVE_STATUSES.has(labelStatus) &&
+    metadataStatus !== labelStatus
+  ) {
+    return labelStatus;
+  }
+  if (metadataStatus) {
+    return metadataStatus;
+  }
+
   if (
     beadsLifecycle === "in_progress" &&
     labelStatus &&
@@ -700,6 +715,7 @@ export type HubFailureReason =
   | "agent_failed"
   | "sandbox_failed"
   | "merge_conflict"
+  | "merge_failed"
   | "verification_failure"
   | "close_failed"
   | "unknown";
@@ -783,13 +799,24 @@ const HUB_STATUS_BEADS_LIFECYCLE: Readonly<
   sync_conflict: "blocked",
 };
 
-const EXECUTION_STATUS_LABELS = new Set([
-  "implementing",
-  "reviewing",
-  "waiting-for-merge",
-  "merging",
-  "failed",
-]);
+const resolveHubStatusLabel = (label: string): HubTaskStatus | undefined =>
+  STATUS_LABEL_TO_HUB_STATUS[normalizeKey(label)];
+
+const labelsToRemoveForHubStatus = (
+  labels: readonly string[],
+  hubStatus: HubTaskStatus,
+): string[] => {
+  const canonicalLabel = HUB_STATUS_LABELS[hubStatus];
+  const canonicalLabelKey = normalizeKey(canonicalLabel ?? "");
+
+  return labels.filter((existingLabel) => {
+    const existingStatus = resolveHubStatusLabel(existingLabel);
+    if (!existingStatus) {
+      return false;
+    }
+    return normalizeKey(existingLabel) !== canonicalLabelKey;
+  });
+};
 
 export interface UpdateHubTaskStatusInput {
   readonly cwd: string;
@@ -835,11 +862,12 @@ export const updateHubTaskStatus = (
     appendBdAddLabelArgs(args, label);
   }
 
-  const labelsToRemove = task.labels.filter(
-    (existingLabel) =>
-      EXECUTION_STATUS_LABELS.has(existingLabel) &&
-      normalizeKey(existingLabel) !== labelKey,
-  );
+  const labelsToRemove = task.labels.filter((existingLabel) => {
+    const existingStatus = resolveHubStatusLabel(existingLabel);
+    return (
+      existingStatus !== undefined && normalizeKey(existingLabel) !== labelKey
+    );
+  });
   if (labelsToRemove.length > 0) {
     appendBdRemoveLabelArgs(args, labelsToRemove);
   }
@@ -868,9 +896,7 @@ export const closeHubTask = (input: CloseHubTaskInput): HubTaskProjection => {
   delete metadata.failureReason;
   delete metadata.failed;
 
-  const labelsToRemove = task.labels.filter((existingLabel) =>
-    EXECUTION_STATUS_LABELS.has(existingLabel),
-  );
+  const labelsToRemove = labelsToRemoveForHubStatus(task.labels, "done");
   const args = ["update", input.taskId, "--status", "closed"];
   appendBdMetadataArg(args, metadata);
   appendBdAddLabelArgs(args, "done");
@@ -1006,17 +1032,16 @@ export const claimHubTask = (input: ClaimHubTaskInput): ClaimHubTaskResult => {
     branch: input.branch,
     claimedAt,
   });
-  const metadata = {
-    ...task.metadata,
-    claim: claim.raw,
-  };
-
-  const claimArgs = ["update", input.taskId, "--status", "in_progress"];
-  appendBdMetadataArg(claimArgs, metadata);
-  appendBdAddLabelArgs(claimArgs, "implementing");
-  runBdText(input.cwd, claimArgs, `tasks claim ${input.taskId}`, input.env);
-
-  const updatedTask = loadHubTask(input.cwd, input.taskId, input.env);
+  const updatedTask = updateHubTaskStatus({
+    cwd: input.cwd,
+    taskId: input.taskId,
+    hubStatus: "implementing",
+    metadata: {
+      ...task.metadata,
+      claim: claim.raw,
+    },
+    env: input.env,
+  });
   appendHubTaskEvent(context.runDir, {
     type: "task_claimed",
     runId: context.runId,

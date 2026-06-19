@@ -457,6 +457,114 @@ describe("runHubBatchMerge", () => {
     ).toContain("merge_failed");
   });
 
+  it("preserves generic merge failure diagnostics in events and result output", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-merge-failed-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const batchId = "batch-merge-failed";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-failed",
+        title: "Failed task",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch: "sandcastle/bd-failed-failed-task",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
+    const merger: HubFlowMerger = async () => ({
+      outcome: "failed",
+      message: "git merge exited 128",
+      diagnostics: {
+        exitCode: 128,
+        stdout: "Auto-merging config.json",
+        stderr: "fatal: refusing to merge unrelated histories",
+        details: { command: "git merge branch-a" },
+      },
+    });
+
+    const result = await runHubBatchMerge({
+      flowId: "no-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger,
+      verifier: successVerifier,
+    });
+
+    expect(result.batchStatus).toBe("partial_failed");
+    expect(result.results[0]).toMatchObject({
+      taskId: "bd-failed",
+      outcome: "merge_failed",
+      failureReason: "merge_failed",
+      diagnosticSummary:
+        "git merge exited 128 (exit 128): fatal: refusing to merge unrelated histories",
+      diagnostics: {
+        exitCode: 128,
+        stdout: "Auto-merging config.json",
+        stderr: "fatal: refusing to merge unrelated histories",
+        details: { command: "git merge branch-a" },
+      },
+    });
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(finalState[0]?.metadata.failureReason).toBe("merge_failed");
+
+    const taskEvents = await readJsonl(
+      join(context.runDir, "events", "task.jsonl"),
+    );
+    const mergeFailedEvent = taskEvents.find(
+      (event) => (event as { type: string }).type === "merge_failed",
+    );
+    expect(mergeFailedEvent).toMatchObject({
+      type: "merge_failed",
+      taskId: "bd-failed",
+      failureReason: "merge_failed",
+      diagnosticSummary:
+        "git merge exited 128 (exit 128): fatal: refusing to merge unrelated histories",
+      diagnostics: {
+        exitCode: 128,
+        stdout: "Auto-merging config.json",
+        stderr: "fatal: refusing to merge unrelated histories",
+        details: { command: "git merge branch-a" },
+      },
+    });
+
+    const batchEvents = await readJsonl(
+      join(context.runDir, "events", "batch.jsonl"),
+    );
+    expect(batchEvents.at(-1)).toMatchObject({
+      type: "batch_merge_completed",
+      batchStatus: "partial_failed",
+      failedTaskId: "bd-failed",
+      failureReason: "merge_failed",
+      failureSummary:
+        "bd-failed merge_failed: git merge exited 128 (exit 128): fatal: refusing to merge unrelated histories",
+    });
+    expect(formatHubBatchMergeResultLines(result).join("\n")).toContain(
+      "bd-failed: merge_failed -> failed; git merge exited 128 (exit 128): fatal: refusing to merge unrelated histories",
+    );
+  });
+
   it("marks close failures as failed and reverts remaining tasks", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-merge-close-"));
     await initRepo(repoDir);

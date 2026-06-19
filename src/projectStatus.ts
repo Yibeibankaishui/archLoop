@@ -162,6 +162,7 @@ const readFailureReason = (
     case "agent_failed":
     case "sandbox_failed":
     case "merge_conflict":
+    case "merge_failed":
     case "verification_failure":
     case "close_failed":
     case "unknown":
@@ -208,6 +209,8 @@ export const resolveFailedTaskNextAction = (
       return `${recoverCmd} to reset and retry agent work`;
     case "merge_conflict":
       return `${recoverCmd} or resolve the merge conflict manually`;
+    case "merge_failed":
+      return `${recoverCmd} to inspect and retry the merge`;
     case "verification_failure":
       return `${recoverCmd} or fix verification and recover`;
     case "close_failed":
