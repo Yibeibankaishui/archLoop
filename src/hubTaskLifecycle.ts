@@ -60,6 +60,22 @@ export interface RecordImplementationSuccessInput {
   readonly createdAt: string;
 }
 
+export interface RecordImplementationFailureInput {
+  readonly cwd: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly context: HubTaskLifecycleContext;
+  readonly taskId: string;
+  readonly branch: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  readonly claim: HubTaskClaimMetadata;
+  readonly failureReason: Extract<
+    HubFailureReason,
+    "agent_failed" | "sandbox_failed"
+  >;
+  readonly commitCount: number;
+  readonly createdAt: string;
+}
+
 export interface RecordImplementationOutcomeResult {
   readonly task: HubTaskProjection;
   readonly hubStatus: HubTaskStatus;
@@ -124,22 +140,6 @@ export interface RevertTaskToWaitingForMergeInput {
   readonly task: HubTaskProjection;
 }
 
-export interface RecordImplementationFailureInput {
-  readonly cwd: string;
-  readonly env?: NodeJS.ProcessEnv;
-  readonly context: HubTaskLifecycleContext;
-  readonly taskId: string;
-  readonly branch: string;
-  readonly metadata: Readonly<Record<string, unknown>>;
-  readonly claim: HubTaskClaimMetadata;
-  readonly failureReason: Extract<
-    HubFailureReason,
-    "agent_failed" | "sandbox_failed"
-  >;
-  readonly commitCount: number;
-  readonly createdAt: string;
-}
-
 type RecordImplementationOutcomeInput = Readonly<{
   cwd: string;
   env?: NodeJS.ProcessEnv;
@@ -202,6 +202,11 @@ const recordImplementationOutcome = (
   input: RecordImplementationOutcomeInput,
   outcome: ImplementationOutcomeEvent,
 ): RecordImplementationOutcomeResult => {
+  const failureReason =
+    outcome.type === "task_implementation_failed"
+      ? outcome.failureReason
+      : undefined;
+
   appendHubTaskEvent(input.context.runDir, {
     type: outcome.type,
     runId: input.context.runId,
@@ -210,10 +215,7 @@ const recordImplementationOutcome = (
     branch: input.branch,
     createdAt: input.createdAt,
     status: outcome.status,
-    failureReason:
-      outcome.type === "task_implementation_failed"
-        ? outcome.failureReason
-        : undefined,
+    failureReason,
     commitCount: input.commitCount,
     claim: input.claim,
   });
@@ -223,9 +225,7 @@ const recordImplementationOutcome = (
     taskId: input.taskId,
     hubStatus: outcome.hubStatus,
     metadata: input.metadata,
-    ...(outcome.type === "task_implementation_failed"
-      ? { failureReason: outcome.failureReason }
-      : {}),
+    ...(failureReason === undefined ? {} : { failureReason }),
     env: input.env,
   });
 
@@ -236,10 +236,7 @@ const recordImplementationOutcome = (
     branch: input.branch,
     createdAt: input.createdAt,
     status: updatedTask.hubStatus,
-    failureReason:
-      outcome.type === "task_implementation_failed"
-        ? outcome.failureReason
-        : undefined,
+    failureReason,
     commitCount: input.commitCount,
   });
 

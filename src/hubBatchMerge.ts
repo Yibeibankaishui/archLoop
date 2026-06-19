@@ -22,6 +22,7 @@ import {
   selectHubBatchMergeTasks,
   type HubFailureReason,
   type HubTaskProjection,
+  type HubTaskStatus,
 } from "./taskBoard.js";
 
 const execFileAsync = promisify(execFile);
@@ -87,7 +88,7 @@ export interface HubBatchMergeTaskResult {
     | "verification_failed"
     | "close_failed"
     | "skipped";
-  readonly hubStatus: string;
+  readonly hubStatus: HubTaskStatus;
   readonly failureReason?: HubFailureReason;
 }
 
@@ -142,7 +143,7 @@ const toBatchMergeTaskResult = (
   task: HubTaskProjection,
   branch: string,
   outcome: HubBatchMergeTaskResult["outcome"],
-  hubStatus: string,
+  hubStatus: HubTaskStatus,
   failureReason?: HubFailureReason,
 ): HubBatchMergeTaskResult => ({
   taskId: task.id,
@@ -379,13 +380,14 @@ export const runHubBatchMerge = async (
           env: input.env,
           task: skippedTask,
         });
-        results.push({
-          taskId: skippedTask.id,
-          title: skippedTask.title,
-          branch: resolveBranch(skippedTask),
-          outcome: "skipped",
-          hubStatus: "waiting_for_merge",
-        });
+        results.push(
+          toBatchMergeTaskResult(
+            skippedTask,
+            resolveBranch(skippedTask),
+            "skipped",
+            "waiting_for_merge",
+          ),
+        );
       }
 
       recordBatchMergeCompleted(input, selectedTaskIds, "partial_failed");
