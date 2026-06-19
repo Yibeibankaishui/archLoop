@@ -278,46 +278,27 @@ const reviewSelectedTask = async (
   }
 
   const finishedAt = new Date().toISOString();
-  const lifecycleContext = {
+  const commitCount = reviewResult.commits.length;
+  const lifecycleBase = {
     cwd,
     runDir: context.runDir,
     runId: context.runId,
     batchId: context.batchId,
     env: input.env,
-  };
-
-  if (isSuccessfulReview(reviewResult)) {
-    const lifecycleResult = recordHubTaskReviewSuccess({
-      ...lifecycleContext,
-      taskId: task.id,
-      branch,
-      taskMetadata,
-      claim,
-      commitCount: reviewResult.commits.length,
-      createdAt: finishedAt,
-    });
-
-    return {
-      taskId: task.id,
-      title: task.title,
-      branch,
-      outcome: lifecycleResult.outcome,
-      hubStatus: lifecycleResult.hubStatus,
-      commitCount: reviewResult.commits.length,
-    };
-  }
-
-  const failureReason = resolveFailureReason(reviewResult.outcome);
-  const lifecycleResult = recordHubTaskReviewFailure({
-    ...lifecycleContext,
     taskId: task.id,
     branch,
     taskMetadata,
     claim,
-    failureReason,
-    commitCount: reviewResult.commits.length,
+    commitCount,
     createdAt: finishedAt,
-  });
+  };
+
+  const lifecycleResult = isSuccessfulReview(reviewResult)
+    ? recordHubTaskReviewSuccess(lifecycleBase)
+    : recordHubTaskReviewFailure({
+        ...lifecycleBase,
+        failureReason: resolveFailureReason(reviewResult.outcome),
+      });
 
   return {
     taskId: task.id,
@@ -325,8 +306,10 @@ const reviewSelectedTask = async (
     branch,
     outcome: lifecycleResult.outcome,
     hubStatus: lifecycleResult.hubStatus,
-    failureReason: lifecycleResult.failureReason,
-    commitCount: reviewResult.commits.length,
+    commitCount,
+    ...("failureReason" in lifecycleResult
+      ? { failureReason: lifecycleResult.failureReason }
+      : {}),
   };
 };
 
