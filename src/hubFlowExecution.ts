@@ -26,6 +26,10 @@ import {
   resolveSandcastleUserDataDir,
 } from "./projectStatus.js";
 import {
+  recordHubTaskReviewFailure,
+  recordHubTaskReviewSuccess,
+} from "./hubTaskLifecycle.js";
+import {
   claimHubTask,
   loadHubTaskBoard,
   resolveHubTaskBranch,
@@ -375,91 +379,38 @@ const reviewSelectedTask = async (
   }
 
   const finishedAt = new Date().toISOString();
-
-  if (isSuccessfulReview(reviewResult)) {
-    appendHubTaskEvent(context.runDir, {
-      type: "task_review_succeeded",
-      runId: context.runId,
-      batchId: context.batchId,
-      taskId: task.id,
-      branch,
-      createdAt: finishedAt,
-      status: "waiting_for_merge",
-      commitCount: reviewResult.commits.length,
-      claim,
-    });
-
-    const updatedTask = updateHubTaskStatus({
-      cwd,
-      taskId: task.id,
-      hubStatus: "waiting_for_merge",
-      metadata: taskMetadata,
-      env: input.env,
-    });
-    recordTaskStatusAdvanced(context.runDir, {
-      runId: context.runId,
-      batchId: context.batchId,
-      taskId: task.id,
-      branch,
-      createdAt: finishedAt,
-      status: updatedTask.hubStatus,
-      commitCount: reviewResult.commits.length,
-    });
-
-    return {
-      taskId: task.id,
-      title: task.title,
-      branch,
-      outcome: "reviewed",
-      hubStatus: updatedTask.hubStatus,
-      commitCount: reviewResult.commits.length,
-    };
-  }
-
-  const failureReason = resolveFailureReason(reviewResult.outcome);
-  appendHubTaskEvent(context.runDir, {
-    type: "task_review_failed",
-    runId: context.runId,
-    batchId: context.batchId,
-    taskId: task.id,
-    branch,
-    createdAt: finishedAt,
-    status: "failed",
-    failureReason,
-    commitCount: reviewResult.commits.length,
-    claim,
-  });
-
-  const updatedTask = updateHubTaskStatus({
+  const commitCount = reviewResult.commits.length;
+  const lifecycleBase = {
     cwd,
-    taskId: task.id,
-    hubStatus: "failed",
-    metadata: taskMetadata,
-    failureReason,
-    env: input.env,
-  });
-  recordTaskStatusAdvanced(context.runDir, {
+    runDir: context.runDir,
     runId: context.runId,
     batchId: context.batchId,
+    env: input.env,
     taskId: task.id,
     branch,
+    taskMetadata,
+    claim,
+    commitCount,
     createdAt: finishedAt,
-    status: updatedTask.hubStatus,
-    failureReason,
-    commitCount: reviewResult.commits.length,
-  });
+  };
+
+  const lifecycleResult = isSuccessfulReview(reviewResult)
+    ? recordHubTaskReviewSuccess(lifecycleBase)
+    : recordHubTaskReviewFailure({
+        ...lifecycleBase,
+        failureReason: resolveFailureReason(reviewResult.outcome),
+      });
 
   return {
     taskId: task.id,
     title: task.title,
     branch,
-    outcome:
-      reviewResult.outcome === "sandbox_failed"
-        ? "sandbox_failed"
-        : "agent_failed",
-    hubStatus: updatedTask.hubStatus,
-    failureReason,
-    commitCount: reviewResult.commits.length,
+    outcome: lifecycleResult.outcome,
+    hubStatus: lifecycleResult.hubStatus,
+    commitCount,
+    ...("failureReason" in lifecycleResult
+      ? { failureReason: lifecycleResult.failureReason }
+      : {}),
   };
 };
 

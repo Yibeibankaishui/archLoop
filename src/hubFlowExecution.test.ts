@@ -974,17 +974,26 @@ describe("with-review Hub flow execution", () => {
       runMergePhase: false,
     });
 
-    const finalState = JSON.parse(
-      await readFile(stateFile, "utf-8"),
-    ) as MockBeadsTask[];
-    expect(finalState[0]?.status).toBe("open");
-    expect(finalState[0]?.labels).toContain("failed");
-    expect(finalState[0]?.metadata.failureReason).toBe("agent_failed");
     expect(result.results[0]).toMatchObject({
       outcome: "agent_failed",
       hubStatus: "failed",
       failureReason: "agent_failed",
     });
+
+    const taskEvents = await readJsonl(
+      join(result.runDir, "events", "task.jsonl"),
+    );
+    expect(taskEvents.map((event) => (event as { type: string }).type)).toEqual(
+      [
+        "task_claimed",
+        "task_implementation_started",
+        "task_implementation_succeeded",
+        "task_status_advanced",
+        "task_review_started",
+        "task_review_failed",
+        "task_status_advanced",
+      ],
+    );
   });
 
   it("createHubFlowRunImplementer fails fast when cursor credentials are missing", async () => {
