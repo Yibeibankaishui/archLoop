@@ -127,6 +127,31 @@ ensure_venv() {
   source "$activate"
 }
 
+# Detect a preferred extras name from [project.optional-dependencies] in
+# pyproject.toml. Picks the first of dev, test, tests that exists, and prints
+# just the bare extra name (e.g. "dev"). Prints nothing when no preferred extra
+# is present, when pyproject.toml has no optional-dependencies table, or when
+# the running Python is too old to parse TOML (pre-3.11, no tomllib).
+detect_optional_extra() {
+  [[ -f pyproject.toml ]] || return 0
+  python3 - <<'PY' 2>/dev/null || true
+try:
+    import tomllib
+except ImportError:
+    raise SystemExit(0)
+import pathlib
+try:
+    data = tomllib.loads(pathlib.Path("pyproject.toml").read_text())
+except Exception:
+    raise SystemExit(0)
+opt = data.get("project", {}).get("optional-dependencies", {})
+for name in ("dev", "test", "tests"):
+    if name in opt:
+        print(name)
+        break
+PY
+}
+
 if is_poetry_project; then
   echo "Sandcastle bootstrap: Poetry project detected."
   echo "Poetry is not installed in the default Python profile image."
@@ -137,12 +162,23 @@ fi
 if [[ -f uv.lock ]]; then
   echo "Sandcastle bootstrap: syncing dependencies with uv (uv.lock)"
   uv sync --frozen
+  extra="$(detect_optional_extra)"
+  if [[ -n "$extra" ]]; then
+    echo "Sandcastle bootstrap: installing [$extra] extras with uv"
+    uv sync --frozen --extra "$extra"
+  fi
   exit 0
 fi
 
 if [[ -f pyproject.toml ]] && command -v uv >/dev/null 2>&1; then
   echo "Sandcastle bootstrap: syncing dependencies with uv (pyproject.toml)"
-  uv sync
+  extra="$(detect_optional_extra)"
+  if [[ -n "$extra" ]]; then
+    echo "Sandcastle bootstrap: including [$extra] extras"
+    uv sync --extra "$extra"
+  else
+    uv sync
+  fi
   exit 0
 fi
 
@@ -155,8 +191,14 @@ fi
 
 if [[ -f pyproject.toml ]]; then
   ensure_venv
-  echo "Sandcastle bootstrap: installing pyproject.toml with pip"
-  python -m pip install -e .
+  extra="$(detect_optional_extra)"
+  if [[ -n "$extra" ]]; then
+    echo "Sandcastle bootstrap: installing pyproject.toml with pip (including [$extra] extras)"
+    python -m pip install -e ".[$extra]"
+  else
+    echo "Sandcastle bootstrap: installing pyproject.toml with pip"
+    python -m pip install -e .
+  fi
   exit 0
 fi
 
