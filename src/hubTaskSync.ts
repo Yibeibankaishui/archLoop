@@ -5,6 +5,8 @@ import { TaskBoardError } from "./errors.js";
 import { recordHubTaskSyncConflict } from "./hubTaskLifecycle.js";
 import { resolveBdExecutable } from "./resolveBdExecutable.js";
 import {
+  HUB_COLLABORATION_LABELS_TO_CLEAR,
+  isCompletedHubStatus,
   loadHubTaskBoard,
   loadHubTask,
   type HubTaskProjection,
@@ -45,16 +47,6 @@ const HUB_TO_REMOTE_COLLABORATION_LABEL: Readonly<
   wontfix: "wontfix",
   sync_conflict: "sync-conflict",
 };
-
-const REMOTE_COLLABORATION_LABELS_TO_CLEAR = [
-  "needs-triage",
-  "needs-info",
-  "ready-for-agent",
-  "ready-for-human",
-  "blocked",
-  "wontfix",
-  "sync-conflict",
-] as const;
 
 export type HubSyncState =
   | "local_only"
@@ -412,7 +404,7 @@ const pushHubTaskToGithub = (
   }
 
   try {
-    if (task.hubStatus === "done" || task.hubStatus === "wontfix") {
+    if (isCompletedHubStatus(task.hubStatus)) {
       if (task.hubStatus === "wontfix") {
         github.editIssue(issueNumber, { addLabels: ["wontfix"] });
       }
@@ -427,7 +419,7 @@ const pushHubTaskToGithub = (
       return "skipped";
     }
 
-    const removeLabels = REMOTE_COLLABORATION_LABELS_TO_CLEAR.filter((label) =>
+    const removeLabels = HUB_COLLABORATION_LABELS_TO_CLEAR.filter((label) =>
       (issue?.labels ?? task.labels).includes(label),
     ).filter((label) => label !== remoteLabel);
 

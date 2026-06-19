@@ -293,12 +293,22 @@ const reviewSelectedTask = async (
     createdAt: finishedAt,
   };
 
-  const lifecycleResult = isSuccessfulReview(reviewResult)
-    ? recordHubTaskReviewSuccess(lifecycleBase)
-    : recordHubTaskReviewFailure({
-        ...lifecycleBase,
-        failureReason: resolveFailureReason(reviewResult.outcome),
-      });
+  if (isSuccessfulReview(reviewResult)) {
+    const lifecycleResult = recordHubTaskReviewSuccess(lifecycleBase);
+    return {
+      taskId: task.id,
+      title: task.title,
+      branch,
+      outcome: lifecycleResult.outcome,
+      hubStatus: lifecycleResult.hubStatus,
+      commitCount,
+    };
+  }
+
+  const lifecycleResult = recordHubTaskReviewFailure({
+    ...lifecycleBase,
+    failureReason: resolveFailureReason(reviewResult.outcome),
+  });
 
   return {
     taskId: task.id,
@@ -306,10 +316,8 @@ const reviewSelectedTask = async (
     branch,
     outcome: lifecycleResult.outcome,
     hubStatus: lifecycleResult.hubStatus,
+    failureReason: lifecycleResult.failureReason,
     commitCount,
-    ...("failureReason" in lifecycleResult
-      ? { failureReason: lifecycleResult.failureReason }
-      : {}),
   };
 };
 

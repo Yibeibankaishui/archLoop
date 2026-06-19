@@ -44,6 +44,19 @@ export const HUB_TASK_STATUSES = [
 
 export type HubTaskStatus = (typeof HUB_TASK_STATUSES)[number];
 
+export const HUB_COLLABORATION_LABELS_TO_CLEAR = [
+  "needs-triage",
+  "needs-info",
+  "ready-for-agent",
+  "ready-for-human",
+  "blocked",
+  "wontfix",
+  "sync-conflict",
+] as const;
+
+export const isCompletedHubStatus = (status: HubTaskStatus): boolean =>
+  status === "done" || status === "wontfix";
+
 const HUB_TASK_STATUS_SET = new Set<string>(HUB_TASK_STATUSES);
 const BEADS_LIFECYCLE_STATUSES = new Set([
   "open",

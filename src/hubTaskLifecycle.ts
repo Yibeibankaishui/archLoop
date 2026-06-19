@@ -3,21 +3,13 @@ import {
   type HubTaskClaimMetadata,
 } from "./hubExecution.js";
 import {
+  HUB_COLLABORATION_LABELS_TO_CLEAR,
+  isCompletedHubStatus,
   loadHubTask,
   updateHubTaskStatus,
   type HubFailureReason,
   type HubTaskProjection,
 } from "./taskBoard.js";
-
-const COLLABORATION_LABELS_TO_CLEAR_ON_SYNC_CONFLICT = [
-  "needs-triage",
-  "needs-info",
-  "ready-for-agent",
-  "ready-for-human",
-  "blocked",
-  "wontfix",
-  "sync-conflict",
-] as const;
 
 export interface RecordHubTaskSyncConflictInput {
   readonly cwd: string;
@@ -189,35 +181,21 @@ export const recordHubTaskSyncConflict = (
   input: RecordHubTaskSyncConflictInput,
 ): RecordHubTaskSyncConflictResult => {
   const task = loadHubTask(input.cwd, input.taskId, input.env);
-  const preservedCompletion =
-    task.hubStatus === "done" || task.hubStatus === "wontfix";
+  const preservedCompletion = isCompletedHubStatus(task.hubStatus);
   const metadata = {
     sync_state: "conflict" as const,
     sync_conflict_reason: input.reason,
   };
+  const labelsToRemove = preservedCompletion
+    ? undefined
+    : HUB_COLLABORATION_LABELS_TO_CLEAR.filter((label) =>
+        task.labels.includes(label),
+      );
 
-  if (preservedCompletion) {
-    const updatedTask = updateHubTaskStatus({
-      cwd: input.cwd,
-      taskId: input.taskId,
-      hubStatus: task.hubStatus,
-      metadata,
-      env: input.env,
-    });
-    return {
-      hubStatus: updatedTask.hubStatus,
-      preservedCompletion: true,
-      task: updatedTask,
-    };
-  }
-
-  const labelsToRemove = COLLABORATION_LABELS_TO_CLEAR_ON_SYNC_CONFLICT.filter(
-    (label) => task.labels.includes(label),
-  );
   const updatedTask = updateHubTaskStatus({
     cwd: input.cwd,
     taskId: input.taskId,
-    hubStatus: "sync_conflict",
+    hubStatus: preservedCompletion ? task.hubStatus : "sync_conflict",
     metadata,
     labelsToRemove,
     env: input.env,
@@ -225,7 +203,7 @@ export const recordHubTaskSyncConflict = (
 
   return {
     hubStatus: updatedTask.hubStatus,
-    preservedCompletion: false,
+    preservedCompletion,
     task: updatedTask,
   };
 };
