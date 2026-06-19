@@ -1,13 +1,12 @@
 import { execFileSync } from "node:child_process";
 
-import {
-  appendBdAddLabelArgs,
-  appendBdMetadataArg,
-  appendBdRemoveLabelArgs,
-} from "./bdCliArgs.js";
+import { appendBdMetadataArg } from "./bdCliArgs.js";
 import { TaskBoardError } from "./errors.js";
+import { recordHubTaskSyncConflict } from "./hubTaskLifecycle.js";
 import { resolveBdExecutable } from "./resolveBdExecutable.js";
 import {
+  HUB_COLLABORATION_LABELS_TO_CLEAR,
+  isCompletedHubStatus,
   loadHubTaskBoard,
   loadHubTask,
   type HubTaskProjection,
@@ -48,16 +47,6 @@ const HUB_TO_REMOTE_COLLABORATION_LABEL: Readonly<
   wontfix: "wontfix",
   sync_conflict: "sync-conflict",
 };
-
-const REMOTE_COLLABORATION_LABELS_TO_CLEAR = [
-  "needs-triage",
-  "needs-info",
-  "ready-for-agent",
-  "ready-for-human",
-  "blocked",
-  "wontfix",
-  "sync-conflict",
-] as const;
 
 export type HubSyncState =
   | "local_only"
@@ -279,45 +268,6 @@ const setHubTaskSyncMetadata = (
   updateHubTaskRecord(cwd, task.id, metadataArgs, `tasks sync ${task.id}`, env);
 };
 
-const markHubTaskSyncConflict = (
-  cwd: string,
-  task: HubTaskProjection,
-  reason: string,
-  env: NodeJS.ProcessEnv,
-): void => {
-  if (task.hubStatus === "done" || task.hubStatus === "wontfix") {
-    setHubTaskSyncMetadata(
-      cwd,
-      task,
-      {
-        sync_state: "conflict",
-        sync_conflict_reason: reason,
-      },
-      env,
-    );
-    return;
-  }
-
-  const metadata: Record<string, unknown> = {
-    ...task.metadata,
-    hubStatus: "sync_conflict",
-    sync_state: "conflict",
-    sync_conflict_reason: reason,
-  };
-
-  const args = ["--status", "blocked"];
-  appendBdMetadataArg(args, metadata);
-  appendBdAddLabelArgs(args, "sync-conflict");
-
-  for (const label of REMOTE_COLLABORATION_LABELS_TO_CLEAR) {
-    if (task.labels.includes(label)) {
-      appendBdRemoveLabelArgs(args, label);
-    }
-  }
-
-  updateHubTaskRecord(cwd, task.id, args, `tasks sync ${task.id}`, env);
-};
-
 const importGithubIssueToBeads = (
   cwd: string,
   issue: GithubIssueRecord,
@@ -392,7 +342,12 @@ const refreshLinkedGithubIssue = (
     issue.updatedAt !== undefined && issue.updatedAt !== remoteUpdatedAt;
 
   if (conflict && (remoteChanged || syncState === "synced")) {
-    markHubTaskSyncConflict(cwd, task, conflict, env);
+    recordHubTaskSyncConflict({
+      cwd,
+      taskId: task.id,
+      reason: conflict,
+      env,
+    });
     return "conflict";
   }
 
@@ -449,7 +404,7 @@ const pushHubTaskToGithub = (
   }
 
   try {
-    if (task.hubStatus === "done" || task.hubStatus === "wontfix") {
+    if (isCompletedHubStatus(task.hubStatus)) {
       if (task.hubStatus === "wontfix") {
         github.editIssue(issueNumber, { addLabels: ["wontfix"] });
       }
@@ -464,7 +419,7 @@ const pushHubTaskToGithub = (
       return "skipped";
     }
 
-    const removeLabels = REMOTE_COLLABORATION_LABELS_TO_CLEAR.filter((label) =>
+    const removeLabels = HUB_COLLABORATION_LABELS_TO_CLEAR.filter((label) =>
       (issue?.labels ?? task.labels).includes(label),
     ).filter((label) => label !== remoteLabel);
 

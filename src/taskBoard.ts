@@ -44,6 +44,19 @@ export const HUB_TASK_STATUSES = [
 
 export type HubTaskStatus = (typeof HUB_TASK_STATUSES)[number];
 
+export const HUB_COLLABORATION_LABELS_TO_CLEAR = [
+  "needs-triage",
+  "needs-info",
+  "ready-for-agent",
+  "ready-for-human",
+  "blocked",
+  "wontfix",
+  "sync-conflict",
+] as const;
+
+export const isCompletedHubStatus = (status: HubTaskStatus): boolean =>
+  status === "done" || status === "wontfix";
+
 const HUB_TASK_STATUS_SET = new Set<string>(HUB_TASK_STATUSES);
 const BEADS_LIFECYCLE_STATUSES = new Set([
   "open",
@@ -351,6 +364,13 @@ const resolveStatusFromTaskShape = (
   const metadataStatus = resolveMetadataStatus(metadata);
   const reasonStatus = resolveStatusFromMetadataReasons(metadata);
   if (reasonStatus) {
+    if (
+      reasonStatus === "sync_conflict" &&
+      metadataStatus !== undefined &&
+      isCompletedHubStatus(metadataStatus)
+    ) {
+      return metadataStatus;
+    }
     return reasonStatus;
   }
   if (
@@ -867,7 +887,7 @@ const clearStaleHubStatusMetadata = (
   if (hubStatus !== "needs_info") {
     deleteMetadataKeys(metadata, NEEDS_INFO_METADATA_KEYS);
   }
-  if (hubStatus !== "sync_conflict") {
+  if (hubStatus !== "sync_conflict" && metadata.sync_state !== "conflict") {
     deleteMetadataKeys(metadata, SYNC_CONFLICT_METADATA_KEYS);
   }
   if (hubStatus !== "wontfix") {
@@ -896,6 +916,7 @@ export interface UpdateHubTaskStatusInput {
   readonly metadata?: Readonly<Record<string, unknown>>;
   readonly failureReason?: HubFailureReason;
   readonly replaceMetadata?: boolean;
+  readonly labelsToRemove?: readonly string[];
   readonly env?: NodeJS.ProcessEnv;
 }
 
@@ -934,12 +955,20 @@ export const updateHubTaskStatus = (
     appendBdAddLabelArgs(args, label);
   }
 
-  const labelsToRemove = task.labels.filter((existingLabel) => {
+  const executionLabelsToRemove = task.labels.filter((existingLabel) => {
     const existingStatus = resolveHubStatusLabel(existingLabel);
-    return (
-      existingStatus !== undefined && normalizeKey(existingLabel) !== labelKey
-    );
+    if (existingStatus === undefined || isCompletedHubStatus(existingStatus)) {
+      return false;
+    }
+    return normalizeKey(existingLabel) !== labelKey;
   });
+  const labelsToRemove = [
+    ...executionLabelsToRemove,
+    ...(input.labelsToRemove ?? []).filter(
+      (label) =>
+        task.labels.includes(label) && !executionLabelsToRemove.includes(label),
+    ),
+  ];
   if (labelsToRemove.length > 0) {
     appendBdRemoveLabelArgs(args, labelsToRemove);
   }
