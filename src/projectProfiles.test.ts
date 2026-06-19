@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   DEFAULT_PROJECT_PROFILE,
   DEFAULT_PROJECT_PROFILE_NAME,
@@ -6,6 +10,52 @@ import {
   listProjectProfiles,
   NODE_PROJECT_PROFILE,
 } from "./projectProfiles.js";
+
+// Extract the embedded `python3 - <<'PY' ... PY` helper from the generated
+// Python bootstrap so behavioral tests can run it in isolation against
+// synthetic pyproject.toml files. The helper is intentionally self-contained
+// so it can be exercised end-to-end without spinning up a sandbox.
+const extractDetectExtraPython = (script: string): string => {
+  const match = script.match(/<<'PY'[^\n]*\n([\s\S]*?)\nPY\n/);
+  if (!match || match[1] === undefined) {
+    throw new Error(
+      "Could not extract embedded detect_optional_extra Python heredoc",
+    );
+  }
+  return match[1];
+};
+
+const probeTomllibAvailable = (): boolean => {
+  const result = spawnSync("python3", ["-c", "import tomllib"], {
+    stdio: "ignore",
+  });
+  return result.status === 0;
+};
+
+const runDetect = (
+  pyScript: string,
+  pyprojectContents: string | null,
+): string => {
+  const dir = mkdtempSync(join(tmpdir(), "sandcastle-extras-"));
+  try {
+    if (pyprojectContents !== null) {
+      writeFileSync(join(dir, "pyproject.toml"), pyprojectContents);
+    }
+    const result = spawnSync("python3", ["-c", pyScript], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    if (result.status !== 0) {
+      throw new Error(
+        `detect helper failed (status ${result.status}): ${result.stderr}`,
+      );
+    }
+    return result.stdout.trim();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+};
+
 
 describe("Project profile registry", () => {
   it("defaults to generic", () => {
@@ -93,6 +143,122 @@ describe("Project profile registry", () => {
       expect(script).toContain("pip install");
       expect(script).not.toContain("pytest");
       expect(script).not.toContain("poetry install");
+    });
+
+    it("bootstrap detects optional extras with tomllib and prefers dev > test > tests", () => {
+      const script = python().bootstrapScript;
+      // Helper exists and uses tomllib so detection works on Python 3.11+.
+      expect(script).toContain("detect_optional_extra");
+      expect(script).toContain("import tomllib");
+      // Priority order is dev, then test, then tests.
+      expect(script).toMatch(/for name in \("dev", "test", "tests"\)/);
+      // 3.10 fallback: tomllib import failure must not abort bootstrap.
+      expect(script).toContain("except ImportError");
+      // Pip path installs extras when present, falls back to bare install.
+      expect(script).toContain('python -m pip install -e ".[$extra]"');
+      expect(script).toContain("python -m pip install -e .");
+      // uv branches install extras with --extra <name>.
+      expect(script).toContain('uv sync --extra "$extra"');
+      expect(script).toContain('uv sync --frozen --extra "$extra"');
+    });
+
+    describe("detect_optional_extra (embedded Python helper)", () => {
+      const pyHelper = () =>
+        extractDetectExtraPython(python().bootstrapScript);
+      const tomllibAvailable = probeTomllibAvailable();
+      const itIfTomllib = tomllibAvailable ? it : it.skip;
+
+      itIfTomllib("picks 'dev' when only dev extras are declared", () => {
+        const toml = [
+          "[project]",
+          'name = "demo"',
+          'version = "0.0.0"',
+          "",
+          "[project.optional-dependencies]",
+          'dev = ["pytest"]',
+          "",
+        ].join("\n");
+        expect(runDetect(pyHelper(), toml)).toBe("dev");
+      });
+
+      itIfTomllib(
+        "picks 'test' when test extras are present but dev is not",
+        () => {
+          const toml = [
+            "[project]",
+            'name = "demo"',
+            'version = "0.0.0"',
+            "",
+            "[project.optional-dependencies]",
+            'test = ["pytest"]',
+            "",
+          ].join("\n");
+          expect(runDetect(pyHelper(), toml)).toBe("test");
+        },
+      );
+
+      itIfTomllib(
+        "prefers 'dev' over 'test' and 'tests' when multiple extras coexist",
+        () => {
+          const toml = [
+            "[project]",
+            'name = "demo"',
+            'version = "0.0.0"',
+            "",
+            "[project.optional-dependencies]",
+            'dev = ["pytest"]',
+            'test = ["pytest"]',
+            'tests = ["pytest"]',
+            "",
+          ].join("\n");
+          expect(runDetect(pyHelper(), toml)).toBe("dev");
+        },
+      );
+
+      itIfTomllib(
+        "prints nothing when no preferred extras are present",
+        () => {
+          const toml = [
+            "[project]",
+            'name = "demo"',
+            'version = "0.0.0"',
+            "",
+            "[project.optional-dependencies]",
+            'docs = ["sphinx"]',
+            "",
+          ].join("\n");
+          expect(runDetect(pyHelper(), toml)).toBe("");
+        },
+      );
+
+      itIfTomllib(
+        "prints nothing when no optional-dependencies table exists",
+        () => {
+          const toml = [
+            "[project]",
+            'name = "demo"',
+            'version = "0.0.0"',
+            "",
+          ].join("\n");
+          expect(runDetect(pyHelper(), toml)).toBe("");
+        },
+      );
+
+      it("prints nothing on tomllib ImportError (Python <3.11)", () => {
+        // Mask the stdlib tomllib import so the helper hits its fallback
+        // branch even when running under Python 3.11+.
+        const masked = `import sys\nsys.modules["tomllib"] = None\n${pyHelper()}`;
+        const toml = [
+          "[project]",
+          'name = "demo"',
+          'version = "0.0.0"',
+          "",
+          "[project.optional-dependencies]",
+          'dev = ["pytest"]',
+          "",
+        ].join("\n");
+        expect(runDetect(masked, toml)).toBe("");
+      });
     });
   });
 
