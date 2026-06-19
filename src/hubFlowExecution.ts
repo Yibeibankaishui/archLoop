@@ -26,16 +26,19 @@ import {
   resolveSandcastleUserDataDir,
 } from "./projectStatus.js";
 import {
+  claimHubTaskForImplementation,
+  recordImplementationFailure,
+  recordImplementationStarted,
+  recordImplementationSuccess,
   recordHubTaskReviewFailure,
   recordHubTaskReviewSuccess,
+  type HubTaskLifecycleContext,
 } from "./hubTaskLifecycle.js";
 import {
-  claimHubTask,
   loadHubTaskBoard,
   resolveHubTaskBranch,
   selectHubFlowTasks,
   loadHubReadyQueue,
-  updateHubTaskStatus,
   type HubFailureReason,
   type HubTaskProjection,
 } from "./taskBoard.js";
@@ -136,7 +139,7 @@ interface ResumableHubFlowBatch {
 
 const resolveFailureReason = (
   outcome: HubImplementTaskResult["outcome"],
-): HubFailureReason =>
+): Extract<HubFailureReason, "agent_failed" | "sandbox_failed"> =>
   outcome === "sandbox_failed" ? "sandbox_failed" : "agent_failed";
 
 const resolveImplementationWork = (
@@ -247,38 +250,6 @@ const getErrorTag = (error: unknown): string | undefined =>
 
 const isSandboxFailureTag = (tag: string | undefined): boolean =>
   tag !== undefined && SANDBOX_FAILURE_TAGS.has(tag);
-
-const recordTaskStatusAdvanced = (
-  runDir: string,
-  input: {
-    readonly runId: string;
-    readonly batchId: string;
-    readonly taskId: string;
-    readonly branch: string;
-    readonly createdAt: string;
-    readonly status: string;
-    readonly reason?: string;
-    readonly failureReason?: string;
-    readonly commitCount?: number;
-    readonly branchHasUnmergedWork?: boolean;
-    readonly implementationWork?: "new_commits" | "existing_unmerged_work";
-  },
-): void => {
-  appendHubTaskEvent(runDir, {
-    type: "task_status_advanced",
-    runId: input.runId,
-    batchId: input.batchId,
-    taskId: input.taskId,
-    branch: input.branch,
-    createdAt: input.createdAt,
-    status: input.status,
-    reason: input.reason,
-    failureReason: input.failureReason,
-    commitCount: input.commitCount,
-    branchHasUnmergedWork: input.branchHasUnmergedWork,
-    implementationWork: input.implementationWork,
-  });
-};
 
 const buildHubAgentPromptArgs = (
   input: Pick<HubImplementTaskInput, "taskId" | "title" | "branch">,
@@ -424,7 +395,7 @@ const implementSelectedTask = async (
 ): Promise<HubFlowTaskResult> => {
   const cwd = input.cwd ?? process.cwd();
   const branch = resolveHubTaskBranch(task.id, task.title);
-  const claimResult = claimHubTask({
+  const claimResult = claimHubTaskForImplementation({
     cwd,
     taskId: task.id,
     branch,
@@ -446,16 +417,26 @@ const implementSelectedTask = async (
     };
   }
 
+  const claim = claimResult.claim;
+  if (!claim) {
+    throw new Error(
+      `Hub task ${task.id} reached implementation without claim metadata`,
+    );
+  }
+
   const startedAt = (input.startedAt ?? new Date()).toISOString();
-  appendHubTaskEvent(context.runDir, {
-    type: "task_implementation_started",
+  const lifecycleContext: HubTaskLifecycleContext = {
     runId: context.runId,
     batchId: context.batchId,
+    runDir: context.runDir,
+  };
+  recordImplementationStarted({
+    context: lifecycleContext,
     taskId: task.id,
     branch,
+    hubStatus: claimResult.task.hubStatus,
+    claim,
     createdAt: startedAt,
-    status: claimResult.task.hubStatus,
-    claim: claimResult.claim,
   });
 
   let implementationResult: HubImplementTaskResult;
@@ -482,44 +463,21 @@ const implementSelectedTask = async (
   const finishedAt = new Date().toISOString();
 
   if (isSuccessfulImplementation(implementationResult)) {
-    const postImplementationStatus = hasReviewer
-      ? "reviewing"
-      : "waiting_for_merge";
     const implementationWork = resolveImplementationWork(implementationResult);
-
-    appendHubTaskEvent(context.runDir, {
-      type: "task_implementation_succeeded",
-      runId: context.runId,
-      batchId: context.batchId,
-      taskId: task.id,
-      branch,
-      createdAt: finishedAt,
-      status: postImplementationStatus,
-      commitCount: implementationResult.commits.length,
-      branchHasUnmergedWork:
-        implementationResult.branchHasUnmergedWork === true,
-      implementationWork,
-      claim: claimResult.claim,
-    });
-
-    const updatedTask = updateHubTaskStatus({
+    const { task: updatedTask } = recordImplementationSuccess({
       cwd,
-      taskId: task.id,
-      hubStatus: postImplementationStatus,
-      metadata: claimResult.task.metadata,
       env: input.env,
-    });
-    recordTaskStatusAdvanced(context.runDir, {
-      runId: context.runId,
-      batchId: context.batchId,
+      context: lifecycleContext,
       taskId: task.id,
       branch,
-      createdAt: finishedAt,
-      status: updatedTask.hubStatus,
+      metadata: claimResult.task.metadata,
+      claim,
       commitCount: implementationResult.commits.length,
+      hasReviewer,
       branchHasUnmergedWork:
         implementationResult.branchHasUnmergedWork === true,
       implementationWork,
+      createdAt: finishedAt,
     });
 
     if (hasReviewer) {
@@ -528,7 +486,7 @@ const implementSelectedTask = async (
         context,
         task,
         branch,
-        claimResult.claim!,
+        claim,
         claimResult.task.metadata,
         reviewPromptFile!,
         implementationResult.commits.length,
@@ -547,36 +505,17 @@ const implementSelectedTask = async (
   }
 
   const failureReason = resolveFailureReason(implementationResult.outcome);
-  appendHubTaskEvent(context.runDir, {
-    type: "task_implementation_failed",
-    runId: context.runId,
-    batchId: context.batchId,
-    taskId: task.id,
-    branch,
-    createdAt: finishedAt,
-    status: "failed",
-    failureReason,
-    commitCount: implementationResult.commits.length,
-    claim: claimResult.claim,
-  });
-
-  const updatedTask = updateHubTaskStatus({
+  const { task: updatedTask } = recordImplementationFailure({
     cwd,
-    taskId: task.id,
-    hubStatus: "failed",
-    metadata: claimResult.task.metadata,
-    failureReason,
     env: input.env,
-  });
-  recordTaskStatusAdvanced(context.runDir, {
-    runId: context.runId,
-    batchId: context.batchId,
+    context: lifecycleContext,
     taskId: task.id,
     branch,
-    createdAt: finishedAt,
-    status: updatedTask.hubStatus,
+    metadata: claimResult.task.metadata,
+    claim,
     failureReason,
     commitCount: implementationResult.commits.length,
+    createdAt: finishedAt,
   });
 
   return {

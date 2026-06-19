@@ -26,6 +26,11 @@ import {
 
 const execAsync = promisify(exec);
 
+const expectBundledHubFlowPrompt = (promptPath: string, segment: string) => {
+  expect(promptPath).toContain(segment);
+  expect(promptPath).toContain("src/hub-flows/");
+};
+
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
   await execAsync('git config user.email "test@test.com"', { cwd: dir });
@@ -158,20 +163,22 @@ process.exit(1);
 describe("Hub flow registry", () => {
   it("ships bundled no-review prompts outside repo-local .sandcastle/", () => {
     validateHubFlowRegistries();
-    const promptPath = resolveHubFlowPromptPath("no-review", "implement");
-    expect(promptPath).toContain("hub-flows/no-review/implement-prompt.md");
-    expect(promptPath).not.toContain(".sandcastle");
+    expectBundledHubFlowPrompt(
+      resolveHubFlowPromptPath("no-review", "implement"),
+      "hub-flows/no-review/implement-prompt.md",
+    );
   });
 
   it("ships bundled with-review prompts outside repo-local .sandcastle/", () => {
     validateHubFlowRegistries();
-    const implementPath = resolveHubFlowPromptPath("with-review", "implement");
-    const reviewPath = resolveHubFlowPromptPath("with-review", "review");
-    expect(implementPath).toContain(
+    expectBundledHubFlowPrompt(
+      resolveHubFlowPromptPath("with-review", "implement"),
       "hub-flows/with-review/implement-prompt.md",
     );
-    expect(reviewPath).toContain("hub-flows/with-review/review-prompt.md");
-    expect(reviewPath).not.toContain(".sandcastle");
+    expectBundledHubFlowPrompt(
+      resolveHubFlowPromptPath("with-review", "review"),
+      "hub-flows/with-review/review-prompt.md",
+    );
   });
 });
 
@@ -276,10 +283,10 @@ describe("no-review Hub flow execution", () => {
       branch: "sandcastle/bd-70-implement-me",
       flowId: "no-review",
     });
-    expect(invocations[0]?.promptFile).toContain(
+    expectBundledHubFlowPrompt(
+      invocations[0]!.promptFile,
       "hub-flows/no-review/implement-prompt.md",
     );
-    expect(invocations[0]?.promptFile).not.toContain(".sandcastle");
 
     const finalState = JSON.parse(
       await readFile(stateFile, "utf-8"),
