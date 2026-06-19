@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -27,6 +27,7 @@ import {
 } from "./projectStatus.js";
 import {
   claimHubTask,
+  loadHubTaskBoard,
   resolveHubTaskBranch,
   selectHubFlowTasks,
   loadHubReadyQueue,
@@ -115,9 +116,18 @@ export interface RunHubFlowResult {
   readonly runId: string;
   readonly batchId: string;
   readonly runDir: string;
+  readonly mode: "new_batch" | "resumed_batch" | "no_ready";
   readonly selectedTaskIds: readonly string[];
   readonly results: readonly HubFlowTaskResult[];
   readonly mergeResult?: RunHubBatchMergeResult;
+  readonly resumedBatchId?: string;
+  readonly unfinishedBatchIds: readonly string[];
+}
+
+interface ResumableHubFlowBatch {
+  readonly runId: string;
+  readonly batchId: string;
+  readonly createdAt: string | undefined;
 }
 
 const resolveFailureReason = (
@@ -141,6 +151,78 @@ const isSuccessfulImplementation = (result: HubImplementTaskResult): boolean =>
 
 const isSuccessfulReview = (result: HubReviewTaskResult): boolean =>
   result.outcome === "success" && result.completionSignal !== undefined;
+
+const readJsonlRecords = (path: string): readonly Record<string, unknown>[] => {
+  if (!existsSync(path)) {
+    return [];
+  }
+
+  return readFileSync(path, "utf8")
+    .split("\n")
+    .flatMap((line) => {
+      if (line.trim().length === 0) {
+        return [];
+      }
+      try {
+        const parsed = JSON.parse(line) as unknown;
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? [parsed as Record<string, unknown>]
+          : [];
+      } catch {
+        return [];
+      }
+    });
+};
+
+const findResumableHubFlowBatches = (input: {
+  readonly hubProjectDir: string;
+  readonly flowId: string;
+  readonly tasks: readonly HubTaskProjection[];
+}): readonly ResumableHubFlowBatch[] => {
+  const batches = new Map<string, ResumableHubFlowBatch>();
+
+  for (const task of input.tasks) {
+    if (task.hubStatus !== "waiting_for_merge") {
+      continue;
+    }
+    const runId = task.claim?.runId;
+    const batchId = task.claim?.batchId;
+    if (!runId || !batchId) {
+      continue;
+    }
+
+    const batchEventsPath = join(
+      input.hubProjectDir,
+      "runs",
+      runId,
+      "events",
+      "batch.jsonl",
+    );
+    const planned = readJsonlRecords(batchEventsPath).find(
+      (event) =>
+        event.type === "batch_planned" &&
+        event.batchId === batchId &&
+        event.flowId === input.flowId,
+    );
+    if (!planned) {
+      continue;
+    }
+
+    batches.set(`${runId}:${batchId}`, {
+      runId,
+      batchId,
+      createdAt:
+        typeof planned.createdAt === "string" ? planned.createdAt : undefined,
+    });
+  }
+
+  return [...batches.values()].sort((left, right) => {
+    if (left.createdAt && right.createdAt) {
+      return left.createdAt.localeCompare(right.createdAt);
+    }
+    return left.batchId.localeCompare(right.batchId);
+  });
+};
 
 const SANDBOX_FAILURE_TAGS = new Set([
   "DockerError",
@@ -588,16 +670,32 @@ export const runHubFlow = async (
     ? resolveHubFlowPromptPath(input.flowId, "review")
     : undefined;
 
+  const hubProjectDir =
+    input.hubProjectDir ??
+    resolveHubProjectDir(resolveSandcastleUserDataDir(input.env), repoRoot);
   const readyBoard = loadHubReadyQueue(repoRoot, input.env);
   const selectedTasks = selectHubFlowTasks(readyBoard);
   const selectedTaskIds = selectedTasks.map((task) => task.id);
+  const unfinishedBatches = findResumableHubFlowBatches({
+    hubProjectDir,
+    flowId: input.flowId,
+    tasks: loadHubTaskBoard(repoRoot, input.env).tasks,
+  });
+  const unfinishedBatchIds = unfinishedBatches.map((batch) => batch.batchId);
+  const resumedBatchId =
+    selectedTasks.length === 0 ? unfinishedBatches[0]?.batchId : undefined;
+  const mode =
+    selectedTasks.length > 0
+      ? "new_batch"
+      : resumedBatchId
+        ? "resumed_batch"
+        : "no_ready";
   const startedAt = input.startedAt ?? new Date();
   const context = createHubRunContext({
     cwd: repoRoot,
-    hubProjectDir:
-      input.hubProjectDir ??
-      resolveHubProjectDir(resolveSandcastleUserDataDir(input.env), repoRoot),
+    hubProjectDir,
     branch: `flow/${input.flowId}`,
+    batchId: resumedBatchId,
     startedAt,
     env: input.env,
   });
@@ -635,7 +733,7 @@ export const runHubFlow = async (
       cwd: repoRoot,
       runDir: context.runDir,
       runId: context.runId,
-      batchId: context.batchId,
+      batchId: resumedBatchId ?? context.batchId,
       env: input.env,
       merger: input.merger ?? createHubFlowRunMerger({ cwd: repoRoot }),
       verifier: input.verifier ?? createHubFlowRunVerifier({ cwd: repoRoot }),
@@ -647,9 +745,12 @@ export const runHubFlow = async (
     runId: context.runId,
     batchId: context.batchId,
     runDir: context.runDir,
+    mode,
     selectedTaskIds,
     results,
     mergeResult,
+    resumedBatchId,
+    unfinishedBatchIds,
   };
 };
 
@@ -661,26 +762,36 @@ export const formatHubFlowResultLines = (
     `Hub flow ${result.flowId}`,
     `Run id: ${result.runId}`,
     `Batch id: ${result.batchId}`,
+    `Mode: ${result.mode}`,
     `Selected tasks: ${selectedTaskCount}`,
   ];
+  if (result.resumedBatchId) {
+    lines.push(`Resumed batch id: ${result.resumedBatchId}`);
+  } else if (result.unfinishedBatchIds.length > 0) {
+    lines.push(
+      `Unfinished batches not resumed: ${result.unfinishedBatchIds.join(", ")}`,
+    );
+  }
 
   if (selectedTaskCount === 0) {
     lines.push("No ready tasks selected.");
-    return lines;
-  }
-
-  for (const taskResult of result.results) {
-    const workSuffix =
-      taskResult.implementationWork === "existing_unmerged_work"
-        ? " (existing unmerged work)"
-        : taskResult.implementationWork === "new_commits"
-          ? ` (${taskResult.commitCount} new ${
-              taskResult.commitCount === 1 ? "commit" : "commits"
-            })`
-          : "";
-    lines.push(
-      `  ${taskResult.taskId}: ${taskResult.outcome} -> ${taskResult.hubStatus}${workSuffix}`,
-    );
+    if (!result.resumedBatchId) {
+      lines.push(`No unfinished ${result.flowId} batch found to resume.`);
+    }
+  } else {
+    for (const taskResult of result.results) {
+      const workSuffix =
+        taskResult.implementationWork === "existing_unmerged_work"
+          ? " (existing unmerged work)"
+          : taskResult.implementationWork === "new_commits"
+            ? ` (${taskResult.commitCount} new ${
+                taskResult.commitCount === 1 ? "commit" : "commits"
+              })`
+            : "";
+      lines.push(
+        `  ${taskResult.taskId}: ${taskResult.outcome} -> ${taskResult.hubStatus}${workSuffix}`,
+      );
+    }
   }
 
   if (result.mergeResult) {

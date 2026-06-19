@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
+import { appendHubBatchEvent, createHubRunContext } from "./hubExecution.js";
 import {
   createHubFlowRunImplementer,
   formatHubFlowResultLines,
@@ -62,6 +63,7 @@ const writeMockBd = async (
   repoDir: string,
   stateFile: string,
   initialTasks: MockBeadsTask[],
+  options: { readonly argsFile?: string } = {},
 ) => {
   const binDir = join(repoDir, "bin");
   await mkdir(binDir, { recursive: true });
@@ -70,7 +72,7 @@ const writeMockBd = async (
 
   await writeFile(stateFile, JSON.stringify(initialTasks, null, 2));
 
-  const argsFile = join(repoDir, "bd-args.txt");
+  const argsFile = options.argsFile ?? join(repoDir, "bd-args.txt");
   await writeFile(argsFile, "");
   const bdPath = join(binDir, "bd");
   await writeFile(
@@ -473,6 +475,287 @@ describe("no-review Hub flow execution", () => {
 });
 
 describe("with-review Hub flow execution", () => {
+  it("reports a no-op when no ready tasks or resumable batches exist", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-noop-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-human",
+        title: "Needs a human",
+        status: "open",
+        labels: ["ready-for-human"],
+        metadata: { hubStatus: "ready_for_human" },
+      },
+    ]);
+    const hubProjectDir = await mkdtemp(join(tmpdir(), "hub-flow-noop-data-"));
+    let implementCalls = 0;
+    let reviewCalls = 0;
+
+    const result = await runHubFlow({
+      flowId: "with-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      implementer: async () => {
+        implementCalls += 1;
+        throw new Error("implementer should not run without ready tasks");
+      },
+      reviewer: async () => {
+        reviewCalls += 1;
+        throw new Error("reviewer should not run without ready tasks");
+      },
+      merger: async () => ({ outcome: "success" }),
+      verifier: async () => ({ outcome: "success" }),
+    });
+
+    expect(result.mode).toBe("no_ready");
+    expect(result.selectedTaskIds).toEqual([]);
+    expect(result.resumedBatchId).toBeUndefined();
+    expect(result.mergeResult).toMatchObject({
+      batchId: result.batchId,
+      selectedTaskIds: [],
+      batchStatus: "skipped",
+    });
+    expect(implementCalls).toBe(0);
+    expect(reviewCalls).toBe(0);
+
+    const summary = formatHubFlowResultLines(result).join("\n");
+    expect(summary).toContain("No ready tasks selected.");
+    expect(summary).toContain(
+      "No unfinished with-review batch found to resume.",
+    );
+  });
+
+  it("resumes an unfinished waiting_for_merge batch when no ready tasks are selected", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-resume-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const oldRunId = "run-old-resume";
+    const oldBatchId = "batch-old-resume";
+    const branch = "sandcastle/bd-resume-resume-old-work";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-resume",
+        title: "Resume old work",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: oldRunId,
+            batchId: oldBatchId,
+            branch,
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+    await execAsync("git add bin bd-state.json bd-args.txt", { cwd: repoDir });
+    await execAsync('git commit -m "add mock task store"', { cwd: repoDir });
+
+    const hubProjectDir = await mkdtemp(
+      join(tmpdir(), "hub-flow-resume-data-"),
+    );
+    const oldContext = createHubRunContext({
+      cwd: repoDir,
+      hubProjectDir,
+      branch: "flow/with-review",
+      runId: oldRunId,
+      batchId: oldBatchId,
+    });
+    appendHubBatchEvent(oldContext.runDir, {
+      type: "batch_planned",
+      runId: oldRunId,
+      batchId: oldBatchId,
+      flowId: "with-review",
+      createdAt: "2026-06-12T10:00:00Z",
+      taskIds: ["bd-resume"],
+    });
+
+    await execAsync(`git checkout -b ${branch}`, { cwd: repoDir });
+    await commitFile(repoDir, "resume.txt", "resume", "resume old work");
+    await execAsync("git checkout main", { cwd: repoDir });
+
+    const mergedTaskIds: string[] = [];
+    const result = await runHubFlow({
+      flowId: "with-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      implementer: async () => {
+        throw new Error("implementer should not run during resume");
+      },
+      reviewer: async () => {
+        throw new Error("reviewer should not run during resume");
+      },
+      merger: async (input) => {
+        mergedTaskIds.push(input.taskId);
+        return { outcome: "success" };
+      },
+      verifier: async () => ({ outcome: "success" }),
+    });
+
+    expect(result.selectedTaskIds).toEqual([]);
+    expect(result.batchId).toBe(oldBatchId);
+    expect(result.resumedBatchId).toBe(oldBatchId);
+    expect(result.mergeResult).toMatchObject({
+      batchId: oldBatchId,
+      selectedTaskIds: ["bd-resume"],
+      batchStatus: "done",
+    });
+    expect(mergedTaskIds).toEqual(["bd-resume"]);
+    expect(result.runDir).not.toBe(oldContext.runDir);
+
+    const batchEvents = await readJsonl(
+      join(result.runDir, "events", "batch.jsonl"),
+    );
+    expect(
+      new Set(
+        batchEvents
+          .map((event) => (event as { batchId?: string }).batchId)
+          .filter((batchId): batchId is string => batchId !== undefined),
+      ),
+    ).toEqual(new Set([oldBatchId]));
+    expect(batchEvents).toContainEqual(
+      expect.objectContaining({
+        type: "batch_merge_selection",
+        runId: result.runId,
+        batchId: oldBatchId,
+        selectedTaskIds: ["bd-resume"],
+      }),
+    );
+    expect(formatHubFlowResultLines(result).join("\n")).toContain(
+      `Resumed batch id: ${oldBatchId}`,
+    );
+  });
+
+  it("starts a new batch when ready tasks exist and reports unfinished batches that were not resumed", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-ready-conflict-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const oldRunId = "run-old-conflict";
+    const oldBatchId = "batch-old-conflict";
+    const oldBranch = "sandcastle/bd-old-conflict-old-ready-work";
+    await mkdir(join(repoDir, ".beads"), { recursive: true });
+    const stateFile = join(repoDir, ".beads", "issues.jsonl");
+    const { env } = await writeMockBd(
+      repoDir,
+      stateFile,
+      [
+        {
+          id: "bd-ready",
+          title: "Ready task",
+          status: "open",
+          labels: ["ready-for-agent"],
+          metadata: {},
+        },
+        {
+          id: "bd-old-conflict",
+          title: "Old ready work",
+          status: "in_progress",
+          labels: ["waiting-for-merge"],
+          metadata: {
+            hubStatus: "waiting_for_merge",
+            claim: {
+              runId: oldRunId,
+              batchId: oldBatchId,
+              branch: oldBranch,
+              claimedAt: "2026-06-12T10:00:00Z",
+            },
+          },
+        },
+      ],
+      { argsFile: join(repoDir, ".beads", "bd-args.txt") },
+    );
+    await execAsync("git add bin .beads", { cwd: repoDir });
+    await execAsync('git commit -m "add mock task store"', { cwd: repoDir });
+
+    const hubProjectDir = await mkdtemp(
+      join(tmpdir(), "hub-flow-conflict-data-"),
+    );
+    const oldContext = createHubRunContext({
+      cwd: repoDir,
+      hubProjectDir,
+      branch: "flow/with-review",
+      runId: oldRunId,
+      batchId: oldBatchId,
+    });
+    appendHubBatchEvent(oldContext.runDir, {
+      type: "batch_planned",
+      runId: oldRunId,
+      batchId: oldBatchId,
+      flowId: "with-review",
+      createdAt: "2026-06-12T10:00:00Z",
+      taskIds: ["bd-old-conflict"],
+    });
+
+    await execAsync(`git checkout -b ${oldBranch}`, { cwd: repoDir });
+    await commitFile(repoDir, "old-work.txt", "old", "old conflict work");
+    await execAsync("git checkout main", { cwd: repoDir });
+
+    const mergedTaskIds: string[] = [];
+    const result = await runHubFlow({
+      flowId: "with-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      implementer: async (input) => {
+        await execAsync(`git checkout -B ${input.branch} main`, {
+          cwd: repoDir,
+        });
+        await commitFile(repoDir, "ready-work.txt", "ready", "ready work");
+        await execAsync("git checkout main", { cwd: repoDir });
+        return {
+          outcome: "success",
+          commits: [{ sha: "abc123" }],
+          completionSignal: "<promise>COMPLETE</promise>",
+        };
+      },
+      reviewer: async () => ({
+        outcome: "success",
+        commits: [],
+        completionSignal: "<promise>COMPLETE</promise>",
+      }),
+      merger: async (input) => {
+        mergedTaskIds.push(input.taskId);
+        return { outcome: "success" };
+      },
+      verifier: async () => ({ outcome: "success" }),
+    });
+
+    expect(result.mode).toBe("new_batch");
+    expect(result.selectedTaskIds).toEqual(["bd-ready"]);
+    expect(result.resumedBatchId).toBeUndefined();
+    expect(result.unfinishedBatchIds).toEqual([oldBatchId]);
+    expect(result.mergeResult).toMatchObject({
+      batchId: result.batchId,
+      selectedTaskIds: ["bd-ready"],
+      batchStatus: "done",
+    });
+    expect(mergedTaskIds).toEqual(["bd-ready"]);
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(finalState.find((task) => task.id === "bd-ready")?.status).toBe(
+      "closed",
+    );
+    expect(
+      finalState.find((task) => task.id === "bd-old-conflict")?.metadata
+        .hubStatus,
+    ).toBe("waiting_for_merge");
+
+    const summary = formatHubFlowResultLines(result).join("\n");
+    expect(summary).toContain(`Unfinished batches not resumed: ${oldBatchId}`);
+    expect(summary).not.toContain(`Resumed batch id: ${oldBatchId}`);
+  });
+
   it("advances successful work through reviewing to waiting_for_merge", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-review-run-"));
     await initRepo(repoDir);

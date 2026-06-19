@@ -247,12 +247,10 @@ export const createHubRunContext = (
     options.hubProjectDir ??
     resolveHubProjectDir(resolveSandcastleUserDataDir(options.env), repoRoot);
   const identifiers = createHubRunIdentifiers();
-  const ids = options.runId
-    ? {
-        runId: options.runId,
-        batchId: options.batchId ?? identifiers.batchId,
-      }
-    : identifiers;
+  const ids = {
+    runId: options.runId ?? identifiers.runId,
+    batchId: options.batchId ?? identifiers.batchId,
+  };
   const runDir = resolveHubRunDirectory(hubProjectDir, ids.runId);
   const eventsDir = resolveHubRunEventsDirectory(runDir);
   const paths = resolveHubRunEventsPaths(runDir);
