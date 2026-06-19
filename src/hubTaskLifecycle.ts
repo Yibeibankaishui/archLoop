@@ -26,6 +26,7 @@ export interface HubTaskLifecycleContext {
 export interface HubTaskLifecycleResult {
   readonly task: HubTaskProjection;
   readonly hubStatus: HubTaskStatus;
+  readonly failureReason?: HubFailureReason;
 }
 
 const toHubTaskLifecycleResult = (
@@ -142,6 +143,60 @@ export interface RecordHubTaskReviewFailureResult {
   readonly hubStatus: HubTaskProjection["hubStatus"];
   readonly failureReason: HubFailureReason;
   readonly outcome: "agent_failed" | "sandbox_failed";
+  readonly task: HubTaskProjection;
+}
+export interface EnterMergePhaseInput {
+  readonly cwd: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly tasks: readonly HubTaskProjection[];
+}
+
+export interface RecordTaskMergeStartedInput {
+  readonly context: HubTaskLifecycleContext;
+  readonly taskId: string;
+  readonly branch: string;
+  readonly claim?: HubTaskClaimMetadata;
+  readonly createdAt: string;
+}
+
+export interface RecordMergePhaseFailureInput {
+  readonly cwd: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly context: HubTaskLifecycleContext;
+  readonly taskId: string;
+  readonly branch: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  readonly claim?: HubTaskClaimMetadata;
+  readonly createdAt: string;
+}
+
+export interface RecordMergeFailureInput extends RecordMergePhaseFailureInput {
+  readonly failureReason: Extract<
+    HubFailureReason,
+    "merge_conflict" | "merge_failed" | "unknown"
+  >;
+  readonly diagnosticSummary?: string;
+  readonly diagnostics?: Readonly<Record<string, unknown>>;
+}
+
+export interface CloseHubTaskInput {
+  readonly cwd: string;
+  readonly taskId: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  readonly env?: NodeJS.ProcessEnv;
+}
+
+export type HubTaskCloser = (
+  input: CloseHubTaskInput,
+) => Promise<HubTaskProjection>;
+
+export interface RecordTaskClosureInput extends RecordMergePhaseFailureInput {
+  readonly closer?: HubTaskCloser;
+}
+
+export interface RevertTaskToWaitingForMergeInput {
+  readonly cwd: string;
+  readonly env?: NodeJS.ProcessEnv;
   readonly task: HubTaskProjection;
 }
 
@@ -343,6 +398,186 @@ export const recordHubTaskReviewFailure = (
     task: updatedTask,
   };
 };
+
+type MergePhaseFailureEvent =
+  | {
+      readonly type: "merge_failed";
+      readonly failureReason: Extract<
+        HubFailureReason,
+        "merge_conflict" | "merge_failed" | "unknown"
+      >;
+    }
+  | {
+      readonly type: "verification_failed";
+      readonly failureReason: "verification_failure";
+    }
+  | {
+      readonly type: "task_close_failed";
+      readonly failureReason: "close_failed";
+    };
+
+const recordMergePhaseFailure = (
+  input: RecordMergePhaseFailureInput,
+  outcome: MergePhaseFailureEvent,
+  diagnostics?: {
+    readonly diagnosticSummary?: string;
+    readonly diagnostics?: Readonly<Record<string, unknown>>;
+  },
+): HubTaskLifecycleResult => {
+  appendHubTaskEvent(input.context.runDir, {
+    type: outcome.type,
+    runId: input.context.runId,
+    batchId: input.context.batchId,
+    taskId: input.taskId,
+    branch: input.branch,
+    createdAt: input.createdAt,
+    status: "failed",
+    failureReason: outcome.failureReason,
+    diagnosticSummary: diagnostics?.diagnosticSummary,
+    diagnostics: diagnostics?.diagnostics,
+    claim: input.claim,
+  });
+
+  const updatedTask = updateHubTaskStatus({
+    cwd: input.cwd,
+    taskId: input.taskId,
+    hubStatus: "failed",
+    metadata: input.metadata,
+    failureReason: outcome.failureReason,
+    env: input.env,
+  });
+
+  recordHubTaskStatusAdvanced(input.context.runDir, {
+    runId: input.context.runId,
+    batchId: input.context.batchId,
+    taskId: input.taskId,
+    branch: input.branch,
+    createdAt: input.createdAt,
+    status: updatedTask.hubStatus,
+    failureReason: outcome.failureReason,
+  });
+
+  return {
+    task: updatedTask,
+    hubStatus: updatedTask.hubStatus,
+    failureReason: outcome.failureReason,
+  };
+};
+
+export const enterMergePhase = (input: EnterMergePhaseInput): void => {
+  for (const task of input.tasks) {
+    updateHubTaskStatus({
+      cwd: input.cwd,
+      taskId: task.id,
+      hubStatus: "merging",
+      metadata: task.metadata,
+      env: input.env,
+    });
+  }
+};
+
+export const recordTaskMergeStarted = (
+  input: RecordTaskMergeStartedInput,
+): void => {
+  appendHubTaskEvent(input.context.runDir, {
+    type: "merge_started",
+    runId: input.context.runId,
+    batchId: input.context.batchId,
+    taskId: input.taskId,
+    branch: input.branch,
+    createdAt: input.createdAt,
+    status: "merging",
+    claim: input.claim,
+  });
+};
+
+export const recordMergeFailure = (
+  input: RecordMergeFailureInput,
+): HubTaskLifecycleResult =>
+  recordMergePhaseFailure(
+    input,
+    {
+      type: "merge_failed",
+      failureReason: input.failureReason,
+    },
+    {
+      diagnosticSummary: input.diagnosticSummary,
+      diagnostics: input.diagnostics,
+    },
+  );
+
+export const recordVerificationFailure = (
+  input: RecordMergePhaseFailureInput,
+): HubTaskLifecycleResult =>
+  recordMergePhaseFailure(input, {
+    type: "verification_failed",
+    failureReason: "verification_failure",
+  });
+
+export const recordCloseFailure = (
+  input: RecordMergePhaseFailureInput,
+): HubTaskLifecycleResult =>
+  recordMergePhaseFailure(input, {
+    type: "task_close_failed",
+    failureReason: "close_failed",
+  });
+
+const defaultCloseHubTask: HubTaskCloser = async (closeInput) =>
+  closeHubTask({
+    cwd: closeInput.cwd,
+    taskId: closeInput.taskId,
+    metadata: closeInput.metadata,
+    env: closeInput.env,
+  });
+
+export const recordTaskClosure = async (
+  input: RecordTaskClosureInput,
+): Promise<HubTaskLifecycleResult> => {
+  const closer = input.closer ?? defaultCloseHubTask;
+
+  const closedTask = await closer({
+    cwd: input.cwd,
+    taskId: input.taskId,
+    metadata: input.metadata,
+    env: input.env,
+  });
+
+  appendHubTaskEvent(input.context.runDir, {
+    type: "task_closed",
+    runId: input.context.runId,
+    batchId: input.context.batchId,
+    taskId: input.taskId,
+    branch: input.branch,
+    createdAt: input.createdAt,
+    status: closedTask.hubStatus,
+    claim: input.claim,
+  });
+
+  recordHubTaskStatusAdvanced(input.context.runDir, {
+    runId: input.context.runId,
+    batchId: input.context.batchId,
+    taskId: input.taskId,
+    branch: input.branch,
+    createdAt: input.createdAt,
+    status: closedTask.hubStatus,
+  });
+
+  return {
+    task: closedTask,
+    hubStatus: closedTask.hubStatus,
+  };
+};
+
+export const revertTaskToWaitingForMerge = (
+  input: RevertTaskToWaitingForMergeInput,
+): HubTaskProjection =>
+  updateHubTaskStatus({
+    cwd: input.cwd,
+    taskId: input.task.id,
+    hubStatus: "waiting_for_merge",
+    metadata: input.task.metadata,
+    env: input.env,
+  });
 
 export const recordHubTaskSyncConflict = (
   input: RecordHubTaskSyncConflictInput,
