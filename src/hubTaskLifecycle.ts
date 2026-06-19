@@ -1,6 +1,3 @@
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
-
 import {
   appendHubTaskEvent,
   type HubTaskClaimMetadata,
@@ -29,7 +26,7 @@ export interface RecordImplementationStartedInput {
   readonly context: HubTaskLifecycleContext;
   readonly taskId: string;
   readonly branch: string;
-  readonly hubStatus: string;
+  readonly hubStatus: HubTaskStatus;
   readonly claim: HubTaskClaimMetadata;
   readonly createdAt: string;
 }
@@ -83,6 +80,34 @@ export interface RecordImplementationFailureInput {
   readonly createdAt: string;
 }
 
+type RecordImplementationOutcomeInput = Readonly<{
+  cwd: string;
+  env?: NodeJS.ProcessEnv;
+  context: HubTaskLifecycleContext;
+  taskId: string;
+  branch: string;
+  metadata: Readonly<Record<string, unknown>>;
+  claim: HubTaskClaimMetadata;
+  commitCount: number;
+  createdAt: string;
+}>;
+
+type ImplementationOutcomeEvent =
+  | {
+      readonly type: "task_implementation_succeeded";
+      readonly status: HubTaskStatus;
+      readonly hubStatus: HubTaskStatus;
+    }
+  | {
+      readonly type: "task_implementation_failed";
+      readonly status: "failed";
+      readonly hubStatus: "failed";
+      readonly failureReason: Extract<
+        HubFailureReason,
+        "agent_failed" | "sandbox_failed"
+      >;
+    };
+
 const recordTaskStatusAdvanced = (
   runDir: string,
   input: {
@@ -109,93 +134,81 @@ const recordTaskStatusAdvanced = (
   });
 };
 
-const ensureLifecycleRunDir = (runDir: string): void => {
-  mkdirSync(join(runDir, "events"), { recursive: true });
+const resolvePostImplementationStatus = (
+  hasReviewer: boolean,
+): HubTaskStatus => (hasReviewer ? "reviewing" : "waiting_for_merge");
+
+const recordImplementationOutcome = (
+  input: RecordImplementationOutcomeInput,
+  outcome: ImplementationOutcomeEvent,
+): RecordImplementationOutcomeResult => {
+  appendHubTaskEvent(input.context.runDir, {
+    type: outcome.type,
+    runId: input.context.runId,
+    batchId: input.context.batchId,
+    taskId: input.taskId,
+    branch: input.branch,
+    createdAt: input.createdAt,
+    status: outcome.status,
+    failureReason:
+      outcome.type === "task_implementation_failed"
+        ? outcome.failureReason
+        : undefined,
+    commitCount: input.commitCount,
+    claim: input.claim,
+  });
+
+  const updatedTask = updateHubTaskStatus({
+    cwd: input.cwd,
+    taskId: input.taskId,
+    hubStatus: outcome.hubStatus,
+    metadata: input.metadata,
+    ...(outcome.type === "task_implementation_failed"
+      ? { failureReason: outcome.failureReason }
+      : {}),
+    env: input.env,
+  });
+
+  recordTaskStatusAdvanced(input.context.runDir, {
+    runId: input.context.runId,
+    batchId: input.context.batchId,
+    taskId: input.taskId,
+    branch: input.branch,
+    createdAt: input.createdAt,
+    status: updatedTask.hubStatus,
+    failureReason:
+      outcome.type === "task_implementation_failed"
+        ? outcome.failureReason
+        : undefined,
+    commitCount: input.commitCount,
+  });
+
+  return {
+    task: updatedTask,
+    hubStatus: updatedTask.hubStatus,
+  };
 };
 
 export const recordImplementationSuccess = (
   input: RecordImplementationSuccessInput,
 ): RecordImplementationOutcomeResult => {
-  const postImplementationStatus: HubTaskStatus = input.hasReviewer
-    ? "reviewing"
-    : "waiting_for_merge";
+  const postImplementationStatus = resolvePostImplementationStatus(
+    input.hasReviewer,
+  );
 
-  ensureLifecycleRunDir(input.context.runDir);
-
-  appendHubTaskEvent(input.context.runDir, {
+  return recordImplementationOutcome(input, {
     type: "task_implementation_succeeded",
-    runId: input.context.runId,
-    batchId: input.context.batchId,
-    taskId: input.taskId,
-    branch: input.branch,
-    createdAt: input.createdAt,
     status: postImplementationStatus,
-    commitCount: input.commitCount,
-    claim: input.claim,
-  });
-
-  const updatedTask = updateHubTaskStatus({
-    cwd: input.cwd,
-    taskId: input.taskId,
     hubStatus: postImplementationStatus,
-    metadata: input.metadata,
-    env: input.env,
   });
-  recordTaskStatusAdvanced(input.context.runDir, {
-    runId: input.context.runId,
-    batchId: input.context.batchId,
-    taskId: input.taskId,
-    branch: input.branch,
-    createdAt: input.createdAt,
-    status: updatedTask.hubStatus,
-    commitCount: input.commitCount,
-  });
-
-  return {
-    task: updatedTask,
-    hubStatus: updatedTask.hubStatus,
-  };
 };
 
 export const recordImplementationFailure = (
   input: RecordImplementationFailureInput,
-): RecordImplementationOutcomeResult => {
-  ensureLifecycleRunDir(input.context.runDir);
-
-  appendHubTaskEvent(input.context.runDir, {
+): RecordImplementationOutcomeResult =>
+  recordImplementationOutcome(input, {
     type: "task_implementation_failed",
-    runId: input.context.runId,
-    batchId: input.context.batchId,
-    taskId: input.taskId,
-    branch: input.branch,
-    createdAt: input.createdAt,
     status: "failed",
-    failureReason: input.failureReason,
-    commitCount: input.commitCount,
-    claim: input.claim,
-  });
-
-  const updatedTask = updateHubTaskStatus({
-    cwd: input.cwd,
-    taskId: input.taskId,
     hubStatus: "failed",
-    metadata: input.metadata,
     failureReason: input.failureReason,
-    env: input.env,
   });
-  recordTaskStatusAdvanced(input.context.runDir, {
-    runId: input.context.runId,
-    batchId: input.context.batchId,
-    taskId: input.taskId,
-    branch: input.branch,
-    createdAt: input.createdAt,
-    status: updatedTask.hubStatus,
-    failureReason: input.failureReason,
-    commitCount: input.commitCount,
-  });
-
-  return {
-    task: updatedTask,
-    hubStatus: updatedTask.hubStatus,
-  };
-};

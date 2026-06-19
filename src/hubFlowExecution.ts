@@ -399,6 +399,13 @@ const implementSelectedTask = async (
     };
   }
 
+  const claim = claimResult.claim;
+  if (!claim) {
+    throw new Error(
+      `Hub task ${task.id} reached implementation without claim metadata`,
+    );
+  }
+
   const startedAt = (input.startedAt ?? new Date()).toISOString();
   const lifecycleContext = {
     runId: context.runId,
@@ -410,7 +417,7 @@ const implementSelectedTask = async (
     taskId: task.id,
     branch,
     hubStatus: claimResult.task.hubStatus,
-    claim: claimResult.claim!,
+    claim,
     createdAt: startedAt,
   });
 
@@ -445,7 +452,7 @@ const implementSelectedTask = async (
       taskId: task.id,
       branch,
       metadata: claimResult.task.metadata,
-      claim: claimResult.claim!,
+      claim,
       commitCount: implementationResult.commits.length,
       hasReviewer,
       createdAt: finishedAt,
@@ -457,7 +464,7 @@ const implementSelectedTask = async (
         context,
         task,
         branch,
-        claimResult.claim!,
+        claim,
         claimResult.task.metadata,
         reviewPromptFile!,
         implementationResult.commits.length,
@@ -482,7 +489,7 @@ const implementSelectedTask = async (
     taskId: task.id,
     branch,
     metadata: claimResult.task.metadata,
-    claim: claimResult.claim!,
+    claim,
     failureReason,
     commitCount: implementationResult.commits.length,
     createdAt: finishedAt,
