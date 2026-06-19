@@ -1,5 +1,6 @@
 import {
   appendHubTaskEvent,
+  recordHubTaskStatusAdvanced,
   type HubTaskClaimMetadata,
 } from "./hubExecution.js";
 import {
@@ -108,32 +109,6 @@ type ImplementationOutcomeEvent =
       >;
     };
 
-const recordTaskStatusAdvanced = (
-  runDir: string,
-  input: {
-    readonly runId: string;
-    readonly batchId: string;
-    readonly taskId: string;
-    readonly branch: string;
-    readonly createdAt: string;
-    readonly status: string;
-    readonly failureReason?: string;
-    readonly commitCount?: number;
-  },
-): void => {
-  appendHubTaskEvent(runDir, {
-    type: "task_status_advanced",
-    runId: input.runId,
-    batchId: input.batchId,
-    taskId: input.taskId,
-    branch: input.branch,
-    createdAt: input.createdAt,
-    status: input.status,
-    failureReason: input.failureReason,
-    commitCount: input.commitCount,
-  });
-};
-
 const resolvePostImplementationStatus = (
   hasReviewer: boolean,
 ): HubTaskStatus => (hasReviewer ? "reviewing" : "waiting_for_merge");
@@ -142,6 +117,11 @@ const recordImplementationOutcome = (
   input: RecordImplementationOutcomeInput,
   outcome: ImplementationOutcomeEvent,
 ): RecordImplementationOutcomeResult => {
+  const failureReason =
+    outcome.type === "task_implementation_failed"
+      ? outcome.failureReason
+      : undefined;
+
   appendHubTaskEvent(input.context.runDir, {
     type: outcome.type,
     runId: input.context.runId,
@@ -150,10 +130,7 @@ const recordImplementationOutcome = (
     branch: input.branch,
     createdAt: input.createdAt,
     status: outcome.status,
-    failureReason:
-      outcome.type === "task_implementation_failed"
-        ? outcome.failureReason
-        : undefined,
+    failureReason,
     commitCount: input.commitCount,
     claim: input.claim,
   });
@@ -163,23 +140,18 @@ const recordImplementationOutcome = (
     taskId: input.taskId,
     hubStatus: outcome.hubStatus,
     metadata: input.metadata,
-    ...(outcome.type === "task_implementation_failed"
-      ? { failureReason: outcome.failureReason }
-      : {}),
+    ...(failureReason === undefined ? {} : { failureReason }),
     env: input.env,
   });
 
-  recordTaskStatusAdvanced(input.context.runDir, {
+  recordHubTaskStatusAdvanced(input.context.runDir, {
     runId: input.context.runId,
     batchId: input.context.batchId,
     taskId: input.taskId,
     branch: input.branch,
     createdAt: input.createdAt,
     status: updatedTask.hubStatus,
-    failureReason:
-      outcome.type === "task_implementation_failed"
-        ? outcome.failureReason
-        : undefined,
+    failureReason,
     commitCount: input.commitCount,
   });
 

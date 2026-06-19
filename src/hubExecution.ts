@@ -311,6 +311,36 @@ export const appendHubTaskEvent = (
   );
 };
 
+export interface RecordHubTaskStatusAdvancedInput {
+  readonly runId: string;
+  readonly batchId: string;
+  readonly taskId: string;
+  readonly branch: string;
+  readonly createdAt: string;
+  readonly status: string;
+  readonly reason?: string;
+  readonly failureReason?: string;
+  readonly commitCount?: number;
+}
+
+export const recordHubTaskStatusAdvanced = (
+  runDir: string,
+  input: RecordHubTaskStatusAdvancedInput,
+): void => {
+  appendHubTaskEvent(runDir, {
+    type: "task_status_advanced",
+    runId: input.runId,
+    batchId: input.batchId,
+    taskId: input.taskId,
+    branch: input.branch,
+    createdAt: input.createdAt,
+    status: input.status,
+    reason: input.reason,
+    failureReason: input.failureReason,
+    commitCount: input.commitCount,
+  });
+};
+
 export const readHubTaskClaim = (
   metadata: Readonly<Record<string, unknown>>,
 ): HubTaskClaimMetadata | undefined => {

@@ -6,6 +6,7 @@ import {
   appendHubBatchEvent,
   appendHubTaskEvent,
   createHubRunContext,
+  recordHubTaskStatusAdvanced,
   type HubTaskClaimMetadata,
 } from "./hubExecution.js";
 import {
@@ -28,6 +29,7 @@ import {
   recordImplementationFailure,
   recordImplementationStarted,
   recordImplementationSuccess,
+  type HubTaskLifecycleContext,
 } from "./hubTaskLifecycle.js";
 import {
   resolveHubTaskBranch,
@@ -152,34 +154,6 @@ const getErrorTag = (error: unknown): string | undefined =>
 const isSandboxFailureTag = (tag: string | undefined): boolean =>
   tag !== undefined && SANDBOX_FAILURE_TAGS.has(tag);
 
-const recordTaskStatusAdvanced = (
-  runDir: string,
-  input: {
-    readonly runId: string;
-    readonly batchId: string;
-    readonly taskId: string;
-    readonly branch: string;
-    readonly createdAt: string;
-    readonly status: string;
-    readonly reason?: string;
-    readonly failureReason?: string;
-    readonly commitCount?: number;
-  },
-): void => {
-  appendHubTaskEvent(runDir, {
-    type: "task_status_advanced",
-    runId: input.runId,
-    batchId: input.batchId,
-    taskId: input.taskId,
-    branch: input.branch,
-    createdAt: input.createdAt,
-    status: input.status,
-    reason: input.reason,
-    failureReason: input.failureReason,
-    commitCount: input.commitCount,
-  });
-};
-
 const buildHubAgentPromptArgs = (
   input: Pick<HubImplementTaskInput, "taskId" | "title" | "branch">,
 ): Readonly<Record<string, string>> => ({
@@ -300,7 +274,7 @@ const reviewSelectedTask = async (
       metadata: taskMetadata,
       env: input.env,
     });
-    recordTaskStatusAdvanced(context.runDir, {
+    recordHubTaskStatusAdvanced(context.runDir, {
       runId: context.runId,
       batchId: context.batchId,
       taskId: task.id,
@@ -342,7 +316,7 @@ const reviewSelectedTask = async (
     failureReason,
     env: input.env,
   });
-  recordTaskStatusAdvanced(context.runDir, {
+  recordHubTaskStatusAdvanced(context.runDir, {
     runId: context.runId,
     batchId: context.batchId,
     taskId: task.id,
@@ -407,7 +381,7 @@ const implementSelectedTask = async (
   }
 
   const startedAt = (input.startedAt ?? new Date()).toISOString();
-  const lifecycleContext = {
+  const lifecycleContext: HubTaskLifecycleContext = {
     runId: context.runId,
     batchId: context.batchId,
     runDir: context.runDir,
