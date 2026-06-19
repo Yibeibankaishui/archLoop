@@ -24,7 +24,12 @@ import {
   resolveSandcastleUserDataDir,
 } from "./projectStatus.js";
 import {
-  claimHubTask,
+  claimHubTaskForImplementation,
+  recordImplementationFailure,
+  recordImplementationStarted,
+  recordImplementationSuccess,
+} from "./hubTaskLifecycle.js";
+import {
   resolveHubTaskBranch,
   selectHubFlowTasks,
   loadHubReadyQueue,
@@ -116,7 +121,7 @@ export interface RunHubFlowResult {
 
 const resolveFailureReason = (
   outcome: HubImplementTaskResult["outcome"],
-): HubFailureReason =>
+): Extract<HubFailureReason, "agent_failed" | "sandbox_failed"> =>
   outcome === "sandbox_failed" ? "sandbox_failed" : "agent_failed";
 
 const isSuccessfulImplementation = (result: HubImplementTaskResult): boolean =>
@@ -372,7 +377,7 @@ const implementSelectedTask = async (
 ): Promise<HubFlowTaskResult> => {
   const cwd = input.cwd ?? process.cwd();
   const branch = resolveHubTaskBranch(task.id, task.title);
-  const claimResult = claimHubTask({
+  const claimResult = claimHubTaskForImplementation({
     cwd,
     taskId: task.id,
     branch,
@@ -395,15 +400,18 @@ const implementSelectedTask = async (
   }
 
   const startedAt = (input.startedAt ?? new Date()).toISOString();
-  appendHubTaskEvent(context.runDir, {
-    type: "task_implementation_started",
+  const lifecycleContext = {
     runId: context.runId,
     batchId: context.batchId,
+    runDir: context.runDir,
+  };
+  recordImplementationStarted({
+    context: lifecycleContext,
     taskId: task.id,
     branch,
+    hubStatus: claimResult.task.hubStatus,
+    claim: claimResult.claim!,
     createdAt: startedAt,
-    status: claimResult.task.hubStatus,
-    claim: claimResult.claim,
   });
 
   let implementationResult: HubImplementTaskResult;
@@ -430,37 +438,17 @@ const implementSelectedTask = async (
   const finishedAt = new Date().toISOString();
 
   if (isSuccessfulImplementation(implementationResult)) {
-    const postImplementationStatus = hasReviewer
-      ? "reviewing"
-      : "waiting_for_merge";
-
-    appendHubTaskEvent(context.runDir, {
-      type: "task_implementation_succeeded",
-      runId: context.runId,
-      batchId: context.batchId,
-      taskId: task.id,
-      branch,
-      createdAt: finishedAt,
-      status: postImplementationStatus,
-      commitCount: implementationResult.commits.length,
-      claim: claimResult.claim,
-    });
-
-    const updatedTask = updateHubTaskStatus({
+    const { task: updatedTask } = recordImplementationSuccess({
       cwd,
-      taskId: task.id,
-      hubStatus: postImplementationStatus,
-      metadata: claimResult.task.metadata,
       env: input.env,
-    });
-    recordTaskStatusAdvanced(context.runDir, {
-      runId: context.runId,
-      batchId: context.batchId,
+      context: lifecycleContext,
       taskId: task.id,
       branch,
-      createdAt: finishedAt,
-      status: updatedTask.hubStatus,
+      metadata: claimResult.task.metadata,
+      claim: claimResult.claim!,
       commitCount: implementationResult.commits.length,
+      hasReviewer,
+      createdAt: finishedAt,
     });
 
     if (hasReviewer) {
@@ -487,36 +475,17 @@ const implementSelectedTask = async (
   }
 
   const failureReason = resolveFailureReason(implementationResult.outcome);
-  appendHubTaskEvent(context.runDir, {
-    type: "task_implementation_failed",
-    runId: context.runId,
-    batchId: context.batchId,
-    taskId: task.id,
-    branch,
-    createdAt: finishedAt,
-    status: "failed",
-    failureReason,
-    commitCount: implementationResult.commits.length,
-    claim: claimResult.claim,
-  });
-
-  const updatedTask = updateHubTaskStatus({
+  const { task: updatedTask } = recordImplementationFailure({
     cwd,
-    taskId: task.id,
-    hubStatus: "failed",
-    metadata: claimResult.task.metadata,
-    failureReason,
     env: input.env,
-  });
-  recordTaskStatusAdvanced(context.runDir, {
-    runId: context.runId,
-    batchId: context.batchId,
+    context: lifecycleContext,
     taskId: task.id,
     branch,
-    createdAt: finishedAt,
-    status: updatedTask.hubStatus,
+    metadata: claimResult.task.metadata,
+    claim: claimResult.claim!,
     failureReason,
     commitCount: implementationResult.commits.length,
+    createdAt: finishedAt,
   });
 
   return {
