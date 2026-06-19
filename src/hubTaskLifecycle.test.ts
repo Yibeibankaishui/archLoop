@@ -449,8 +449,6 @@ describe("Hub task lifecycle", () => {
   });
 });
 
-});
-
 describe("Hub task lifecycle review outcomes", () => {
   it("records review success as waiting_for_merge with lifecycle events", async () => {
     const repoDir = await mkdtemp(
