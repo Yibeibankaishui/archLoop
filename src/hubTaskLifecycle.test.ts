@@ -11,6 +11,7 @@ import {
 import {
   recordHubTaskReviewFailure,
   recordHubTaskReviewSuccess,
+  recordHubTaskSyncConflict,
 } from "./hubTaskLifecycle.js";
 
 const execAsync = promisify(exec);
@@ -313,5 +314,136 @@ describe("Hub task lifecycle review outcomes", () => {
       await readFile(stateFile, "utf-8"),
     ) as MockBeadsTask[];
     expect(finalState[0]?.metadata.failureReason).toBe("sandbox_failed");
+  });
+});
+
+describe("Hub task lifecycle sync conflict outcomes", () => {
+  it("records sync_conflict for collaboration tasks and clears remote labels", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-lifecycle-sync-conflict-"),
+    );
+    await initRepo(repoDir);
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-ready",
+        title: "Ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {
+          hubStatus: "ready_for_agent",
+          sync_state: "synced",
+        },
+      },
+    ]);
+
+    const result = recordHubTaskSyncConflict({
+      cwd: repoDir,
+      taskId: "bd-ready",
+      reason: "local ready_for_agent disagrees with remote needs_info",
+      env,
+    });
+
+    expect(result).toMatchObject({
+      hubStatus: "sync_conflict",
+      preservedCompletion: false,
+    });
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(finalState[0]).toMatchObject({
+      status: "blocked",
+      labels: ["sync-conflict"],
+      metadata: {
+        hubStatus: "sync_conflict",
+        sync_state: "conflict",
+        sync_conflict_reason:
+          "local ready_for_agent disagrees with remote needs_info",
+      },
+    });
+    expect(finalState[0]?.labels).not.toContain("ready-for-agent");
+  });
+
+  it("preserves done and wontfix hub status while recording sync conflict metadata", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-lifecycle-sync-conflict-done-"),
+    );
+    await initRepo(repoDir);
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-done",
+        title: "Done task",
+        status: "closed",
+        labels: ["done"],
+        metadata: {
+          hubStatus: "done",
+          sync_state: "synced",
+        },
+      },
+      {
+        id: "bd-wontfix",
+        title: "Wontfix task",
+        status: "closed",
+        labels: ["wontfix"],
+        metadata: {
+          hubStatus: "wontfix",
+          wontfix: true,
+          sync_state: "synced",
+        },
+      },
+    ]);
+
+    const doneResult = recordHubTaskSyncConflict({
+      cwd: repoDir,
+      taskId: "bd-done",
+      reason: "local done disagrees with remote ready_for_agent",
+      env,
+    });
+    const wontfixResult = recordHubTaskSyncConflict({
+      cwd: repoDir,
+      taskId: "bd-wontfix",
+      reason: "local wontfix disagrees with remote inbox",
+      env,
+    });
+
+    expect(doneResult).toMatchObject({
+      hubStatus: "done",
+      preservedCompletion: true,
+    });
+    expect(wontfixResult).toMatchObject({
+      hubStatus: "wontfix",
+      preservedCompletion: true,
+    });
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    const doneTask = finalState.find((task) => task.id === "bd-done");
+    const wontfixTask = finalState.find((task) => task.id === "bd-wontfix");
+    expect(doneTask).toMatchObject({
+      status: "closed",
+      labels: ["done"],
+      metadata: {
+        hubStatus: "done",
+        sync_state: "conflict",
+        sync_conflict_reason:
+          "local done disagrees with remote ready_for_agent",
+      },
+    });
+    expect(wontfixTask).toMatchObject({
+      status: "closed",
+      labels: ["wontfix"],
+      metadata: {
+        hubStatus: "wontfix",
+        sync_state: "conflict",
+        sync_conflict_reason: "local wontfix disagrees with remote inbox",
+      },
+    });
+    expect(doneTask?.labels).not.toContain("sync-conflict");
+    expect(wontfixTask?.labels).not.toContain("sync-conflict");
   });
 });

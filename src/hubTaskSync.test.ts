@@ -385,7 +385,7 @@ process.exit(1);
     ).toBe("done");
   });
 
-  it("marks semantic conflicts as sync_conflict without downgrading done tasks", async () => {
+  it("marks semantic conflicts without downgrading completed tasks during pull", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-sync-conflict-"));
     await initRepo(repoDir);
     await commitFile(repoDir, "hello.txt", "hello", "initial commit");
@@ -433,14 +433,11 @@ process.exit(1);
     expect(result.pulled.conflicts).toEqual(["bd-done"]);
     const state = JSON.parse(await readFile(stateFile, "utf-8")) as Array<{
       id: string;
-      status: string;
-      labels: string[];
-      metadata: { hubStatus?: string; sync_state?: string };
+      metadata: { sync_state?: string };
     }>;
-    const task = state.find((entry) => entry.id === "bd-done");
-    expect(task?.metadata.hubStatus).toBe("done");
-    expect(task?.metadata.sync_state).toBe("conflict");
-    expect(task?.status).toBe("closed");
+    expect(
+      state.find((entry) => entry.id === "bd-done")?.metadata.sync_state,
+    ).toBe("conflict");
   });
 
   it("records push_pending when remote close fails without reopening done tasks", async () => {

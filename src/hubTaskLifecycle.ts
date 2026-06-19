@@ -3,10 +3,34 @@ import {
   type HubTaskClaimMetadata,
 } from "./hubExecution.js";
 import {
+  loadHubTask,
   updateHubTaskStatus,
   type HubFailureReason,
   type HubTaskProjection,
 } from "./taskBoard.js";
+
+const COLLABORATION_LABELS_TO_CLEAR_ON_SYNC_CONFLICT = [
+  "needs-triage",
+  "needs-info",
+  "ready-for-agent",
+  "ready-for-human",
+  "blocked",
+  "wontfix",
+  "sync-conflict",
+] as const;
+
+export interface RecordHubTaskSyncConflictInput {
+  readonly cwd: string;
+  readonly taskId: string;
+  readonly reason: string;
+  readonly env?: NodeJS.ProcessEnv;
+}
+
+export interface RecordHubTaskSyncConflictResult {
+  readonly hubStatus: HubTaskProjection["hubStatus"];
+  readonly preservedCompletion: boolean;
+  readonly task: HubTaskProjection;
+}
 
 export interface HubTaskLifecycleRunContext {
   readonly cwd: string;
@@ -157,6 +181,51 @@ export const recordHubTaskReviewFailure = (
     hubStatus: updatedTask.hubStatus,
     failureReason: input.failureReason,
     outcome: reviewFailureOutcome(input.failureReason),
+    task: updatedTask,
+  };
+};
+
+export const recordHubTaskSyncConflict = (
+  input: RecordHubTaskSyncConflictInput,
+): RecordHubTaskSyncConflictResult => {
+  const task = loadHubTask(input.cwd, input.taskId, input.env);
+  const preservedCompletion =
+    task.hubStatus === "done" || task.hubStatus === "wontfix";
+  const metadata = {
+    sync_state: "conflict" as const,
+    sync_conflict_reason: input.reason,
+  };
+
+  if (preservedCompletion) {
+    const updatedTask = updateHubTaskStatus({
+      cwd: input.cwd,
+      taskId: input.taskId,
+      hubStatus: task.hubStatus,
+      metadata,
+      env: input.env,
+    });
+    return {
+      hubStatus: updatedTask.hubStatus,
+      preservedCompletion: true,
+      task: updatedTask,
+    };
+  }
+
+  const labelsToRemove = COLLABORATION_LABELS_TO_CLEAR_ON_SYNC_CONFLICT.filter(
+    (label) => task.labels.includes(label),
+  );
+  const updatedTask = updateHubTaskStatus({
+    cwd: input.cwd,
+    taskId: input.taskId,
+    hubStatus: "sync_conflict",
+    metadata,
+    labelsToRemove,
+    env: input.env,
+  });
+
+  return {
+    hubStatus: updatedTask.hubStatus,
+    preservedCompletion: false,
     task: updatedTask,
   };
 };

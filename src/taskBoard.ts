@@ -798,6 +798,7 @@ export interface UpdateHubTaskStatusInput {
   readonly metadata?: Readonly<Record<string, unknown>>;
   readonly failureReason?: HubFailureReason;
   readonly replaceMetadata?: boolean;
+  readonly labelsToRemove?: readonly string[];
   readonly env?: NodeJS.ProcessEnv;
 }
 
@@ -835,11 +836,18 @@ export const updateHubTaskStatus = (
     appendBdAddLabelArgs(args, label);
   }
 
-  const labelsToRemove = task.labels.filter(
+  const executionLabelsToRemove = task.labels.filter(
     (existingLabel) =>
       EXECUTION_STATUS_LABELS.has(existingLabel) &&
       normalizeKey(existingLabel) !== labelKey,
   );
+  const labelsToRemove = [
+    ...executionLabelsToRemove,
+    ...(input.labelsToRemove ?? []).filter(
+      (label) =>
+        task.labels.includes(label) && !executionLabelsToRemove.includes(label),
+    ),
+  ];
   if (labelsToRemove.length > 0) {
     appendBdRemoveLabelArgs(args, labelsToRemove);
   }

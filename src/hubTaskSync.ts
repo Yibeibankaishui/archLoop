@@ -1,11 +1,8 @@
 import { execFileSync } from "node:child_process";
 
-import {
-  appendBdAddLabelArgs,
-  appendBdMetadataArg,
-  appendBdRemoveLabelArgs,
-} from "./bdCliArgs.js";
+import { appendBdMetadataArg } from "./bdCliArgs.js";
 import { TaskBoardError } from "./errors.js";
+import { recordHubTaskSyncConflict } from "./hubTaskLifecycle.js";
 import { resolveBdExecutable } from "./resolveBdExecutable.js";
 import {
   loadHubTaskBoard,
@@ -279,45 +276,6 @@ const setHubTaskSyncMetadata = (
   updateHubTaskRecord(cwd, task.id, metadataArgs, `tasks sync ${task.id}`, env);
 };
 
-const markHubTaskSyncConflict = (
-  cwd: string,
-  task: HubTaskProjection,
-  reason: string,
-  env: NodeJS.ProcessEnv,
-): void => {
-  if (task.hubStatus === "done" || task.hubStatus === "wontfix") {
-    setHubTaskSyncMetadata(
-      cwd,
-      task,
-      {
-        sync_state: "conflict",
-        sync_conflict_reason: reason,
-      },
-      env,
-    );
-    return;
-  }
-
-  const metadata: Record<string, unknown> = {
-    ...task.metadata,
-    hubStatus: "sync_conflict",
-    sync_state: "conflict",
-    sync_conflict_reason: reason,
-  };
-
-  const args = ["--status", "blocked"];
-  appendBdMetadataArg(args, metadata);
-  appendBdAddLabelArgs(args, "sync-conflict");
-
-  for (const label of REMOTE_COLLABORATION_LABELS_TO_CLEAR) {
-    if (task.labels.includes(label)) {
-      appendBdRemoveLabelArgs(args, label);
-    }
-  }
-
-  updateHubTaskRecord(cwd, task.id, args, `tasks sync ${task.id}`, env);
-};
-
 const importGithubIssueToBeads = (
   cwd: string,
   issue: GithubIssueRecord,
@@ -392,7 +350,12 @@ const refreshLinkedGithubIssue = (
     issue.updatedAt !== undefined && issue.updatedAt !== remoteUpdatedAt;
 
   if (conflict && (remoteChanged || syncState === "synced")) {
-    markHubTaskSyncConflict(cwd, task, conflict, env);
+    recordHubTaskSyncConflict({
+      cwd,
+      taskId: task.id,
+      reason: conflict,
+      env,
+    });
     return "conflict";
   }
 
