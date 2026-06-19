@@ -16,7 +16,9 @@ import {
 import {
   appendMiniprogramRuntimeDebugToPrompt,
   appendMiniprogramVerificationToPrompt,
+  appendPythonVenvNoteToPrompt,
   listTemplatePromptFiles,
+  shouldAppendPythonVenvNote,
   shouldAssembleMiniprogramPrompts,
   shouldAssembleMiniprogramRuntimeDebugPrompts,
 } from "./capabilityPromptAssembly.js";
@@ -1485,6 +1487,38 @@ const assembleMiniprogramCapabilityPrompts = (
     }
   });
 
+/**
+ * Append the Python venv disclosure (issue #96) to each template prompt file.
+ * No-op when the active project profile is not Python. Skips prompt files that
+ * are missing — templates without prompt files (e.g. capability-only flows)
+ * still need to scaffold without erroring here.
+ */
+const appendPythonVenvNoteToTemplatePrompts = (
+  configDir: string,
+  templateName: string,
+): Effect.Effect<void, Error, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    for (const promptFile of listTemplatePromptFiles(templateName)) {
+      const filePath = join(configDir, promptFile);
+      const exists = yield* fs
+        .exists(filePath)
+        .pipe(Effect.orElseSucceed(() => false));
+      if (!exists) {
+        continue;
+      }
+      const content = yield* fs
+        .readFileString(filePath)
+        .pipe(Effect.mapError((e) => new Error(e.message)));
+      const updated = appendPythonVenvNoteToPrompt(content);
+      if (updated !== content) {
+        yield* fs
+          .writeFileString(filePath, updated)
+          .pipe(Effect.mapError((e) => new Error(e.message)));
+      }
+    }
+  });
+
 const substituteTemplateArgs = (
   configDir: string,
   templateArgs: Record<string, string>,
@@ -1713,6 +1747,10 @@ export const scaffold = (
         templateName,
         capabilityInit,
       );
+    }
+
+    if (shouldAppendPythonVenvNote(projectProfile.name)) {
+      yield* appendPythonVenvNoteToTemplatePrompts(configDir, templateName);
     }
 
     let miniprogramSetupActions: readonly CapabilitySetupAction[] = [];

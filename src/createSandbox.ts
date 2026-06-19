@@ -11,6 +11,7 @@ import {
 } from "./Display.js";
 import { resolveEnv } from "./EnvResolver.js";
 import { mergeProviderEnv } from "./mergeProviderEnv.js";
+import { composeVenvPathEnv } from "./venvPathInjection.js";
 import { orchestrate, type IterationResult } from "./Orchestrator.js";
 import { defaultSessionPathsLayer } from "./SessionPaths.js";
 import {
@@ -565,19 +566,25 @@ export const createSandboxFromWorktree = async (
 
     const provider = options.sandbox;
 
+    const envWithVenv = composeVenvPathEnv({
+      worktreePath,
+      providerTag: provider.tag,
+      env,
+    });
+
     let startEffect;
     if (provider.tag === "isolated") {
       startEffect = startSandbox({
         provider,
         hostRepoDir: worktreePath,
-        env,
+        env: envWithVenv,
         copyPaths: options.copyToWorktree,
       });
     } else if (provider.tag === "none") {
       startEffect = startSandbox({
         provider,
         hostRepoDir,
-        env,
+        env: envWithVenv,
         worktreeOrRepoPath: worktreePath,
       });
     } else {
@@ -603,7 +610,7 @@ export const createSandboxFromWorktree = async (
           startSandbox({
             provider,
             hostRepoDir,
-            env,
+            env: envWithVenv,
             worktreeOrRepoPath: worktreePath,
             gitMounts,
             repoDir: SANDBOX_REPO_DIR,
@@ -758,19 +765,25 @@ export const createSandbox = async (
 
     const provider = options.sandbox;
 
+    const envWithVenv = composeVenvPathEnv({
+      worktreePath,
+      providerTag: provider.tag,
+      env,
+    });
+
     let startEffect;
     if (provider.tag === "isolated") {
       startEffect = startSandbox({
         provider,
         hostRepoDir: worktreePath,
-        env,
+        env: envWithVenv,
         copyPaths: options.copyToWorktree,
       });
     } else if (provider.tag === "none") {
       startEffect = startSandbox({
         provider,
         hostRepoDir,
-        env,
+        env: envWithVenv,
         worktreeOrRepoPath: worktreePath,
       });
     } else {
@@ -796,7 +809,7 @@ export const createSandbox = async (
           startSandbox({
             provider,
             hostRepoDir,
-            env,
+            env: envWithVenv,
             worktreeOrRepoPath: worktreePath,
             gitMounts,
             repoDir: SANDBOX_REPO_DIR,
