@@ -5,6 +5,7 @@ import {
 } from "./hubExecution.js";
 import {
   claimHubTask,
+  closeHubTask,
   HUB_COLLABORATION_LABELS_TO_CLEAR,
   isCompletedHubStatus,
   loadHubTask,
@@ -21,6 +22,23 @@ export interface HubTaskLifecycleContext {
   readonly batchId: string;
   readonly runDir: string;
 }
+
+export interface HubTaskLifecycleResult {
+  readonly task: HubTaskProjection;
+  readonly hubStatus: HubTaskStatus;
+}
+
+const toHubTaskLifecycleResult = (
+  task: HubTaskProjection,
+): HubTaskLifecycleResult => ({
+  task,
+  hubStatus: task.hubStatus,
+});
+
+type ImplementationFailureReason = Extract<
+  HubFailureReason,
+  "agent_failed" | "sandbox_failed"
+>;
 
 export const claimHubTaskForImplementation = (
   input: ClaimHubTaskInput,
@@ -65,11 +83,6 @@ export interface RecordImplementationSuccessInput {
   readonly createdAt: string;
 }
 
-export interface RecordImplementationOutcomeResult {
-  readonly task: HubTaskProjection;
-  readonly hubStatus: HubTaskStatus;
-}
-
 export interface RecordImplementationFailureInput {
   readonly cwd: string;
   readonly env?: NodeJS.ProcessEnv;
@@ -78,10 +91,7 @@ export interface RecordImplementationFailureInput {
   readonly branch: string;
   readonly metadata: Readonly<Record<string, unknown>>;
   readonly claim: HubTaskClaimMetadata;
-  readonly failureReason: Extract<
-    HubFailureReason,
-    "agent_failed" | "sandbox_failed"
-  >;
+  readonly failureReason: ImplementationFailureReason;
   readonly commitCount: number;
   readonly createdAt: string;
 }
@@ -152,17 +162,12 @@ type RecordImplementationOutcomeInput = Readonly<{
 type ImplementationOutcomeEvent =
   | {
       readonly type: "task_implementation_succeeded";
-      readonly status: HubTaskStatus;
       readonly hubStatus: HubTaskStatus;
     }
   | {
       readonly type: "task_implementation_failed";
-      readonly status: "failed";
       readonly hubStatus: "failed";
-      readonly failureReason: Extract<
-        HubFailureReason,
-        "agent_failed" | "sandbox_failed"
-      >;
+      readonly failureReason: ImplementationFailureReason;
     };
 
 const resolvePostImplementationStatus = (
@@ -181,7 +186,7 @@ const reviewFailureOutcome = (
 const recordImplementationOutcome = (
   input: RecordImplementationOutcomeInput,
   outcome: ImplementationOutcomeEvent,
-): RecordImplementationOutcomeResult => {
+): HubTaskLifecycleResult => {
   const failureReason =
     outcome.type === "task_implementation_failed"
       ? outcome.failureReason
@@ -194,7 +199,7 @@ const recordImplementationOutcome = (
     taskId: input.taskId,
     branch: input.branch,
     createdAt: input.createdAt,
-    status: outcome.status,
+    status: outcome.hubStatus,
     failureReason,
     commitCount: input.commitCount,
     ...(input.branchHasUnmergedWork === undefined
@@ -211,7 +216,7 @@ const recordImplementationOutcome = (
     taskId: input.taskId,
     hubStatus: outcome.hubStatus,
     metadata: input.metadata,
-    ...(failureReason === undefined ? {} : { failureReason }),
+    ...(failureReason ? { failureReason } : {}),
     env: input.env,
   });
 
@@ -232,32 +237,27 @@ const recordImplementationOutcome = (
       : { implementationWork: input.implementationWork }),
   });
 
-  return {
-    task: updatedTask,
-    hubStatus: updatedTask.hubStatus,
-  };
+  return toHubTaskLifecycleResult(updatedTask);
 };
 
 export const recordImplementationSuccess = (
   input: RecordImplementationSuccessInput,
-): RecordImplementationOutcomeResult => {
+): HubTaskLifecycleResult => {
   const postImplementationStatus = resolvePostImplementationStatus(
     input.hasReviewer,
   );
 
   return recordImplementationOutcome(input, {
     type: "task_implementation_succeeded",
-    status: postImplementationStatus,
     hubStatus: postImplementationStatus,
   });
 };
 
 export const recordImplementationFailure = (
   input: RecordImplementationFailureInput,
-): RecordImplementationOutcomeResult =>
+): HubTaskLifecycleResult =>
   recordImplementationOutcome(input, {
     type: "task_implementation_failed",
-    status: "failed",
     hubStatus: "failed",
     failureReason: input.failureReason,
   });
@@ -373,4 +373,89 @@ export const recordHubTaskSyncConflict = (
     preservedCompletion,
     task: updatedTask,
   };
+};
+
+const stripClaimMetadata = (
+  metadata: Readonly<Record<string, unknown>>,
+): Record<string, unknown> => {
+  const next = { ...metadata };
+  delete next.claim;
+  return next;
+};
+
+export interface ReleaseStaleHubTaskClaimInput {
+  readonly cwd: string;
+  readonly taskId: string;
+  readonly hubStatus: HubTaskStatus;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  readonly env?: NodeJS.ProcessEnv;
+}
+
+const persistHubTaskWithStrippedClaim = (input: {
+  readonly cwd: string;
+  readonly taskId: string;
+  readonly hubStatus: HubTaskStatus;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  readonly env?: NodeJS.ProcessEnv;
+}): HubTaskLifecycleResult => {
+  const updatedTask = updateHubTaskStatus({
+    cwd: input.cwd,
+    taskId: input.taskId,
+    hubStatus: input.hubStatus,
+    metadata: stripClaimMetadata(input.metadata),
+    replaceMetadata: true,
+    env: input.env,
+  });
+
+  return toHubTaskLifecycleResult(updatedTask);
+};
+
+export const releaseStaleHubTaskClaim = (
+  input: ReleaseStaleHubTaskClaimInput,
+): HubTaskLifecycleResult =>
+  persistHubTaskWithStrippedClaim({
+    cwd: input.cwd,
+    taskId: input.taskId,
+    hubStatus: input.hubStatus,
+    metadata: input.metadata,
+    env: input.env,
+  });
+
+export interface RecoverFailedHubTaskInput {
+  readonly cwd: string;
+  readonly taskId: string;
+  readonly targetStatus: HubTaskStatus;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  readonly env?: NodeJS.ProcessEnv;
+}
+
+export const recoverFailedHubTask = (
+  input: RecoverFailedHubTaskInput,
+): HubTaskLifecycleResult =>
+  persistHubTaskWithStrippedClaim({
+    cwd: input.cwd,
+    taskId: input.taskId,
+    hubStatus: input.targetStatus,
+    metadata: input.metadata,
+    env: input.env,
+  });
+
+export interface CompleteCloseFailedRecoveryInput {
+  readonly cwd: string;
+  readonly taskId: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  readonly env?: NodeJS.ProcessEnv;
+}
+
+export const completeCloseFailedRecovery = (
+  input: CompleteCloseFailedRecoveryInput,
+): HubTaskLifecycleResult => {
+  const closedTask = closeHubTask({
+    cwd: input.cwd,
+    taskId: input.taskId,
+    metadata: input.metadata,
+    env: input.env,
+  });
+
+  return toHubTaskLifecycleResult(closedTask);
 };

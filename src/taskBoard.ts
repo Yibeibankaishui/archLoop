@@ -998,6 +998,7 @@ export const closeHubTask = (input: CloseHubTaskInput): HubTaskProjection => {
   };
   delete metadata.failureReason;
   delete metadata.failed;
+  delete metadata.claim;
 
   const labelsToRemove = labelsToRemoveForHubStatus(task.labels, "done");
   const args = ["update", input.taskId, "--status", "closed"];

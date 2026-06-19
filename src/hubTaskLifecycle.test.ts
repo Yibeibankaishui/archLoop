@@ -10,13 +10,17 @@ import {
 } from "./hubExecution.js";
 import {
   claimHubTaskForImplementation,
+  completeCloseFailedRecovery,
+  recoverFailedHubTask,
   recordImplementationFailure,
   recordImplementationStarted,
   recordImplementationSuccess,
   recordHubTaskReviewFailure,
   recordHubTaskReviewSuccess,
   recordHubTaskSyncConflict,
+  releaseStaleHubTaskClaim,
 } from "./hubTaskLifecycle.js";
+import { loadHubTask } from "./taskBoard.js";
 
 const execAsync = promisify(exec);
 
@@ -445,6 +449,8 @@ describe("Hub task lifecycle", () => {
   });
 });
 
+});
+
 describe("Hub task lifecycle review outcomes", () => {
   it("records review success as waiting_for_merge with lifecycle events", async () => {
     const repoDir = await mkdtemp(
@@ -779,5 +785,166 @@ describe("Hub task lifecycle sync conflict outcomes", () => {
     });
     expect(doneTask?.labels).not.toContain("sync-conflict");
     expect(wontfixTask?.labels).not.toContain("sync-conflict");
+  });
+});
+
+describe("Hub task lifecycle recovery", () => {
+  it("releases stale claim metadata while preserving collaboration status", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-lifecycle-release-claim-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-stale",
+        title: "Ready with orphan claim",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {
+          hubStatus: "ready_for_agent",
+          claim: {
+            runId: "run-old",
+            batchId: "batch-old",
+            branch: "sandcastle/bd-stale-ready",
+            claimedAt: "2026-06-11T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const result = releaseStaleHubTaskClaim({
+      cwd: repoDir,
+      taskId: "bd-stale",
+      hubStatus: "ready_for_agent",
+      metadata: {
+        hubStatus: "ready_for_agent",
+        claim: {
+          runId: "run-old",
+          batchId: "batch-old",
+          branch: "sandcastle/bd-stale-ready",
+          claimedAt: "2026-06-11T10:00:00Z",
+        },
+      },
+      env,
+    });
+
+    const task = loadHubTask(repoDir, "bd-stale", env);
+    expect(result.hubStatus).toBe("ready_for_agent");
+    expect(task.hubStatus).toBe("ready_for_agent");
+    expect(task.claim).toBeUndefined();
+    expect(task.metadata.claim).toBeUndefined();
+  });
+
+  it("recovers a generic failed task to ready_for_agent and clears failure metadata", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-lifecycle-recover-failed-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-failed",
+        title: "Agent failed task",
+        status: "open",
+        labels: ["failed"],
+        metadata: {
+          hubStatus: "failed",
+          failed: true,
+          failureReason: "agent_failed",
+          claim: {
+            runId: "run-failed",
+            batchId: "batch-failed",
+            branch: "sandcastle/bd-failed-agent-failed-task",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const result = recoverFailedHubTask({
+      cwd: repoDir,
+      taskId: "bd-failed",
+      targetStatus: "ready_for_agent",
+      metadata: {
+        hubStatus: "failed",
+        failed: true,
+        failureReason: "agent_failed",
+        claim: {
+          runId: "run-failed",
+          batchId: "batch-failed",
+          branch: "sandcastle/bd-failed-agent-failed-task",
+          claimedAt: "2026-06-12T10:00:00Z",
+        },
+      },
+      env,
+    });
+
+    const task = loadHubTask(repoDir, "bd-failed", env);
+    expect(result.hubStatus).toBe("ready_for_agent");
+    expect(task.hubStatus).toBe("ready_for_agent");
+    expect(task.labels).toContain("ready-for-agent");
+    expect(task.labels).not.toContain("failed");
+    expect(task.claim).toBeUndefined();
+    expect(task.metadata.failed).toBeUndefined();
+    expect(task.metadata.failureReason).toBeUndefined();
+  });
+
+  it("completes close-failed recovery by closing the task and clearing claim metadata", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-lifecycle-close-failed-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-close",
+        title: "Close failed task",
+        status: "open",
+        labels: ["failed"],
+        metadata: {
+          hubStatus: "failed",
+          failed: true,
+          failureReason: "close_failed",
+          claim: {
+            runId: "run-close",
+            batchId: "batch-close",
+            branch: "sandcastle/bd-close-close-failed-task",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const result = await completeCloseFailedRecovery({
+      cwd: repoDir,
+      taskId: "bd-close",
+      metadata: {
+        hubStatus: "failed",
+        failed: true,
+        failureReason: "close_failed",
+        claim: {
+          runId: "run-close",
+          batchId: "batch-close",
+          branch: "sandcastle/bd-close-close-failed-task",
+          claimedAt: "2026-06-12T10:00:00Z",
+        },
+      },
+      env,
+    });
+
+    const task = loadHubTask(repoDir, "bd-close", env);
+    expect(result.hubStatus).toBe("done");
+    expect(task.hubStatus).toBe("done");
+    expect(task.labels).toContain("done");
+    expect(task.claim).toBeUndefined();
+    expect(task.metadata.failed).toBeUndefined();
+    expect(task.metadata.failureReason).toBeUndefined();
   });
 });

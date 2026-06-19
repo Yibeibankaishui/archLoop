@@ -4,11 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
-import type {
-  HubFlowMerger,
-  HubFlowVerifier,
-  HubTaskCloser,
-} from "./hubBatchMerge.js";
+import type { HubFlowMerger, HubFlowVerifier } from "./hubBatchMerge.js";
 import {
   formatHubRecoveryComment,
   isHubRecoveryComment,
@@ -321,17 +317,12 @@ describe("recoverHubTask", () => {
     const verifier = vi.fn<HubFlowVerifier>(async () => ({
       outcome: "success",
     }));
-    const closer = vi.fn<HubTaskCloser>(async (input) => {
-      const { closeHubTask } = await import("./taskBoard.js");
-      return closeHubTask(input);
-    });
 
     const result = await recoverHubTask({
       cwd: repoDir,
       taskId: "bd-close",
       env,
       verifier,
-      closer,
       merger,
     });
 
@@ -339,9 +330,10 @@ describe("recoverHubTask", () => {
     expect(result.outcome).toBe("recovered_close_failed");
     expect(task.hubStatus).toBe("done");
     expect(task.labels).toContain("done");
+    expect(task.claim).toBeUndefined();
+    expect(task.metadata.failureReason).toBeUndefined();
     expect(merger).not.toHaveBeenCalled();
     expect(verifier).toHaveBeenCalledTimes(1);
-    expect(closer).toHaveBeenCalledTimes(1);
     expect(await readFile(commentArgsFile, "utf-8")).toContain("close_failed");
     expect(await readFile(commentArgsFile, "utf-8")).toContain("merged");
   });
