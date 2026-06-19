@@ -16,7 +16,7 @@ export interface HubTaskLifecycleRunContext {
   readonly env?: NodeJS.ProcessEnv;
 }
 
-export interface RecordHubTaskReviewSuccessInput extends HubTaskLifecycleRunContext {
+interface RecordHubTaskReviewBaseInput extends HubTaskLifecycleRunContext {
   readonly taskId: string;
   readonly branch: string;
   readonly taskMetadata: Readonly<Record<string, unknown>>;
@@ -24,6 +24,8 @@ export interface RecordHubTaskReviewSuccessInput extends HubTaskLifecycleRunCont
   readonly commitCount: number;
   readonly createdAt: string;
 }
+
+export interface RecordHubTaskReviewSuccessInput extends RecordHubTaskReviewBaseInput {}
 
 export interface RecordHubTaskReviewSuccessResult {
   readonly hubStatus: HubTaskProjection["hubStatus"];
@@ -31,14 +33,8 @@ export interface RecordHubTaskReviewSuccessResult {
   readonly task: HubTaskProjection;
 }
 
-export interface RecordHubTaskReviewFailureInput extends HubTaskLifecycleRunContext {
-  readonly taskId: string;
-  readonly branch: string;
-  readonly taskMetadata: Readonly<Record<string, unknown>>;
-  readonly claim: HubTaskClaimMetadata;
+export interface RecordHubTaskReviewFailureInput extends RecordHubTaskReviewBaseInput {
   readonly failureReason: HubFailureReason;
-  readonly commitCount: number;
-  readonly createdAt: string;
 }
 
 export interface RecordHubTaskReviewFailureResult {
@@ -47,6 +43,15 @@ export interface RecordHubTaskReviewFailureResult {
   readonly outcome: "agent_failed" | "sandbox_failed";
   readonly task: HubTaskProjection;
 }
+
+const reviewFailureOutcome = (
+  failureReason: HubFailureReason,
+): RecordHubTaskReviewFailureResult["outcome"] => {
+  if (failureReason === "sandbox_failed") {
+    return "sandbox_failed";
+  }
+  return "agent_failed";
+};
 
 const recordTaskStatusAdvanced = (
   runDir: string,
@@ -151,10 +156,7 @@ export const recordHubTaskReviewFailure = (
   return {
     hubStatus: updatedTask.hubStatus,
     failureReason: input.failureReason,
-    outcome:
-      input.failureReason === "sandbox_failed"
-        ? "sandbox_failed"
-        : "agent_failed",
+    outcome: reviewFailureOutcome(input.failureReason),
     task: updatedTask,
   };
 };
