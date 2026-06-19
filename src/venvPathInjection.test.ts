@@ -80,14 +80,42 @@ describe("composeVenvPathEnv", () => {
     expect(env.PATH).toBe("/usr/bin");
   });
 
-  it("synthesises a PATH entry when the input env has no PATH", () => {
+  it("falls back to process.env.PATH when the input env has no PATH", () => {
     makeVenvBin();
-    const result = composeVenvPathEnv({
-      worktreePath: workdir,
-      providerTag: "bind-mount",
-      env: {},
-    });
-    expect(result.PATH).toBe(`${SANDBOX_REPO_DIR}/.venv/bin`);
+    const original = process.env.PATH;
+    process.env.PATH = "/host/bin:/host/usr/bin";
+    try {
+      const result = composeVenvPathEnv({
+        worktreePath: workdir,
+        providerTag: "bind-mount",
+        env: {},
+      });
+      // Without this fallback the agent's spawned shell loses /bin from
+      // PATH and every `spawn("sh", …)` fails with ENOENT. See issue #96
+      // follow-up: empty input env must not erase the host PATH.
+      expect(result.PATH).toBe(
+        `${SANDBOX_REPO_DIR}/.venv/bin:/host/bin:/host/usr/bin`,
+      );
+    } finally {
+      if (original === undefined) delete process.env.PATH;
+      else process.env.PATH = original;
+    }
+  });
+
+  it("yields only .venv/bin when both input env.PATH and process.env.PATH are empty", () => {
+    makeVenvBin();
+    const original = process.env.PATH;
+    delete process.env.PATH;
+    try {
+      const result = composeVenvPathEnv({
+        worktreePath: workdir,
+        providerTag: "bind-mount",
+        env: {},
+      });
+      expect(result.PATH).toBe(`${SANDBOX_REPO_DIR}/.venv/bin`);
+    } finally {
+      if (original !== undefined) process.env.PATH = original;
+    }
   });
 
   it("treats only a `.venv` directory without `bin` as no venv", () => {
