@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   claimHubTaskForImplementation,
   recordImplementationFailure,
+  recordImplementationStarted,
   recordImplementationSuccess,
 } from "./hubTaskLifecycle.js";
 
@@ -171,6 +172,51 @@ describe("Hub task lifecycle", () => {
       type: "task_claimed",
       taskId: "bd-claim",
     });
+  });
+
+  it("records implementation started with claim metadata", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-lifecycle-started-"));
+    const runDir = join(repoDir, "runs", "run-started");
+    await mkdir(join(runDir, "events"), { recursive: true });
+
+    recordImplementationStarted({
+      context: {
+        runId: "run-started",
+        batchId: "batch-started",
+        runDir,
+      },
+      taskId: "bd-started",
+      branch: "sandcastle/bd-started-started-task",
+      hubStatus: "implementing",
+      claim: {
+        runId: "run-started",
+        batchId: "batch-started",
+        branch: "sandcastle/bd-started-started-task",
+        claimedAt: "2026-06-19T10:00:00Z",
+        raw: {},
+      },
+      createdAt: "2026-06-19T10:01:00Z",
+    });
+
+    const taskEvents = await readJsonl(join(runDir, "events", "task.jsonl"));
+    expect(taskEvents).toEqual([
+      {
+        type: "task_implementation_started",
+        runId: "run-started",
+        batchId: "batch-started",
+        taskId: "bd-started",
+        branch: "sandcastle/bd-started-started-task",
+        createdAt: "2026-06-19T10:01:00Z",
+        status: "implementing",
+        claim: {
+          runId: "run-started",
+          batchId: "batch-started",
+          branch: "sandcastle/bd-started-started-task",
+          claimedAt: "2026-06-19T10:00:00Z",
+          raw: {},
+        },
+      },
+    ]);
   });
 
   it("records implementation success to waiting_for_merge without a reviewer", async () => {
