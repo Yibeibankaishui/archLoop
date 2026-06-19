@@ -39,6 +39,7 @@ import {
   DEFAULT_PROJECT_PROFILE,
   type ProjectProfileEntry,
 } from "./projectProfiles.js";
+import { PINNED_BEADS_VERSION } from "./resolveBdExecutable.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import { SCAFFOLD_TEMPLATES } from "./initTemplates.js";
 
@@ -59,6 +60,13 @@ worktrees/
 
 export type { TemplateMetadata } from "./initTemplates.js";
 export { listTemplates } from "./initTemplates.js";
+
+const buildProjectProfileTemplateArgs = (
+  projectProfile: ProjectProfileEntry,
+): Readonly<Record<string, string>> => ({
+  PROJECT_PROFILE_TOOLS: projectProfile.containerfileTools,
+  PROJECT_PROFILE_VERIFY_GUIDANCE: projectProfile.promptVerifyGuidance,
+});
 
 // ---------------------------------------------------------------------------
 // Agent registry (internal — not part of public API)
@@ -202,7 +210,7 @@ ENTRYPOINT ["sleep", "infinity"]
 `;
 
 const CODEX_DOCKERFILE_INSTALL = `# Install Codex CLI (run as root before USER agent)
-RUN npm install -g @openai/codex @openai/codex-linux-x64 \\
+RUN npm install -g @openai/codex \\
   && codex --version`;
 
 const CODEX_DOCKERFILE = `FROM node:22-bookworm
@@ -659,7 +667,11 @@ RUN apt-get update && apt-get install -y \\
        ln -s "$lib" "\${lib%.72}.74"; \\
      done
 
-RUN curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
+RUN curl -fsSL -o /tmp/beads.tar.gz \\
+  "https://github.com/gastownhall/beads/releases/download/v${PINNED_BEADS_VERSION}/beads_${PINNED_BEADS_VERSION}_linux_amd64.tar.gz" \\
+  && tar -xzf /tmp/beads.tar.gz -C /tmp bd \\
+  && install -m 0755 /tmp/bd /usr/local/bin/bd \\
+  && rm -f /tmp/beads.tar.gz /tmp/bd
 
 RUN corepack enable`;
 
@@ -668,7 +680,7 @@ const BACKLOG_MANAGER_REGISTRY: BacklogManagerEntry[] = [
     name: "github-issues",
     label: "GitHub Issues",
     templateArgs: {
-      LIST_TASKS_COMMAND: `gh issue list --state open -l Sandcastle --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
+      LIST_TASKS_COMMAND: `gh issue list --state open -l Sandcastle -l ready-for-agent --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
       VIEW_TASK_COMMAND: "gh issue view <ID>",
       CLOSE_TASK_COMMAND: `gh issue close <ID> --comment "Completed by Sandcastle"`,
       BACKLOG_MANAGER_TOOLS: GITHUB_CLI_TOOLS,
@@ -1379,9 +1391,8 @@ const rewriteMainCopyToWorktreeForPresets = (
 
 /**
  * When the user opted out of the Sandcastle label, strip ` --label Sandcastle`
- * and ` -l Sandcastle`
- * from all `.md` files in the scaffolded config directory so that `gh issue list`
- * commands work without a label filter.
+ * and ` -l Sandcastle` from scaffolded text files so that `gh issue list`
+ * commands work without a Sandcastle label filter.
  */
 const rewritePromptFiles = (
   configDir: string,
@@ -1391,9 +1402,9 @@ const rewritePromptFiles = (
     const files = yield* fs
       .readDirectory(configDir)
       .pipe(Effect.mapError((e) => new Error(e.message)));
-    const mdFiles = files.filter((f) => f.endsWith(".md"));
+    const textFiles = files.filter(isTextFile);
     yield* Effect.all(
-      mdFiles.map((f) =>
+      textFiles.map((f) =>
         Effect.gen(function* () {
           const filePath = join(configDir, f);
           const content = yield* fs
@@ -1417,6 +1428,8 @@ const rewritePromptFiles = (
 const TEXT_FILE_EXTENSIONS = new Set([
   ".md",
   ".txt",
+  ".mts",
+  ".ts",
   ".env",
   ".example",
   // Dockerfile / Containerfile have no extension — handled by name check below
@@ -1675,7 +1688,7 @@ export const scaffold = (
     // Replace backlog manager and project profile template arguments in all text files (must run before label stripping)
     yield* substituteTemplateArgs(configDir, {
       ...backlogManager.templateArgs,
-      PROJECT_PROFILE_TOOLS: projectProfile.containerfileTools,
+      ...buildProjectProfileTemplateArgs(projectProfile),
     });
 
     // Strip --label Sandcastle from prompt files when the user declined label creation

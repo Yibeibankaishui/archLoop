@@ -1907,6 +1907,44 @@ describe("Orchestrator error handling", () => {
     }
   });
 
+  it("enriches cursor auth stderr with sandcastle env guidance", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-cursor-auth-guidance-"));
+    const cursorProvider = cursorFactory("auto");
+    const authMessage =
+      "Please run `agent login` first, or set `CURSOR_API_KEY`";
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) =>
+      makeMockCursorAgentLayer(dir, {
+        stderr: authMessage,
+        exitCode: 1,
+      }),
+    );
+
+    const exit = await Effect.runPromiseExit(
+      orchestrate({
+        provider: cursorProvider,
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: "plan work",
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      const err = Cause.squash(exit.cause);
+      expect(err).toBeInstanceOf(AgentError);
+      if (err instanceof AgentError) {
+        expect(err.message).toContain("cursor exited with code 1:");
+        expect(err.message).toContain("sandcastle env init");
+        expect(err.message).toContain("sandcastle env set CURSOR_API_KEY");
+        expect(err.message).toContain(`Original error: ${authMessage}`);
+      }
+    }
+  });
+
   it("preserves stderr in error when stderr is non-empty", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "orch-stderr-present-"));
 

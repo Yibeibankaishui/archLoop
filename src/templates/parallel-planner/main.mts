@@ -15,8 +15,57 @@
 //   npm run sandcastle
 // Or directly: tsx .sandcastle/main.mts
 
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+
+const execAsync = promisify(exec);
+
+type PlannedIssue = { id: string; title: string; branch: string };
+
+const LIST_TASKS_COMMAND = `{{LIST_TASKS_COMMAND}}`;
+
+async function listReadyIssuesJson(): Promise<string> {
+  const { stdout } = await execAsync(LIST_TASKS_COMMAND, {
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  return stdout.trim() || "[]";
+}
+
+function extractAllowedIssueIds(issuesJson: string): Set<string> {
+  const parsed = JSON.parse(issuesJson) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error("Ready issue list did not contain a JSON array.");
+  }
+
+  return new Set(
+    parsed
+      .map((issue) => {
+        if (!issue || typeof issue !== "object") return undefined;
+        const record = issue as { id?: unknown; number?: unknown };
+        const id = record.id ?? record.number;
+        return id === undefined || id === null ? undefined : String(id);
+      })
+      .filter((id): id is string => id !== undefined),
+  );
+}
+
+function assertPlanUsesAllowedIssues(
+  issues: PlannedIssue[],
+  allowedIssueIds: Set<string>,
+): void {
+  const outOfScope = issues.filter(
+    (issue) => !allowedIssueIds.has(String(issue.id)),
+  );
+  if (outOfScope.length > 0) {
+    throw new Error(
+      `Planner selected issue(s) outside this run's ready queue: ${outOfScope
+        .map((issue) => issue.id)
+        .join(", ")}`,
+    );
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -59,6 +108,9 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   //
   // It outputs a <plan> JSON block — we parse that to drive Phase 2.
   // -------------------------------------------------------------------------
+  const readyIssuesJson = await listReadyIssuesJson();
+  const allowedIssueIds = extractAllowedIssueIds(readyIssuesJson);
+
   const plan = await sandcastle.run({
     hooks,
     sandbox: sandboxProvider,
@@ -69,6 +121,9 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     // Opus for planning: dependency analysis benefits from deeper reasoning.
     agent: sandcastle.claudeCode("claude-opus-4-6"),
     promptFile: "./.sandcastle/plan-prompt.md",
+    promptArgs: {
+      ISSUES_JSON: readyIssuesJson,
+    },
   });
 
   // Extract the <plan>…</plan> block from the agent's stdout.
@@ -81,8 +136,9 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
 
   // The plan JSON contains an array of issues, each with id, title, branch.
   const { issues } = JSON.parse(planMatch[1]!) as {
-    issues: { id: string; title: string; branch: string }[];
+    issues: PlannedIssue[];
   };
+  assertPlanUsesAllowedIssues(issues, allowedIssueIds);
 
   if (issues.length === 0) {
     // No unblocked work — either everything is done or everything is blocked.
@@ -194,9 +250,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       // A markdown list of branch names, one per line.
       BRANCHES: completedBranches.map((b) => `- ${b}`).join("\n"),
       // A markdown list of issue IDs and titles, one per line.
-      ISSUES: completedIssues
-        .map((i) => `- ${i.id}: ${i.title}`)
-        .join("\n"),
+      ISSUES: completedIssues.map((i) => `- ${i.id}: ${i.title}`).join("\n"),
     },
   });
 

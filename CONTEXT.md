@@ -22,6 +22,74 @@ _Avoid_: "local" (ambiguous -- the sandbox also has a local filesystem)
 The AI coding tool invoked inside the **sandbox** (e.g. Claude Code, Codex).
 _Avoid_: "RALPH", "the bot", "Claude" (too specific -- agent is swappable)
 
+**Sandcastle Hub**:
+The user-facing control plane that manages multiple **host** repos, shared credentials, **flows**, runs, and backlog status.
+_Avoid_: "workspace" (conflicts with sandbox/worktree language), "GUI" (too narrow), "dashboard" (display-only)
+
+**Hub project**:
+A named **Sandcastle Hub** entry that points to one **host** repo and stores user preferences for running Sandcastle there.
+_Avoid_: "project profile" (already means repo type), "workspace", "repo" (too narrow)
+
+**Hub project config**:
+The **Sandcastle Hub**-owned settings for a **Hub project**, separate from the repo's **config directory**.
+_Avoid_: "config directory", ".sandcastle config", "init config"
+
+**Hub project assets**:
+Editable files owned by **Sandcastle Hub** for one **Hub project**, such as Hub-managed bootstrap, verification, and context files.
+_Avoid_: "config directory", "scaffolded project files", "repo assets"
+
+**Hub asset mount**:
+The sandbox-visible location where **Hub project assets** are made available during a **flow** run.
+_Avoid_: "worktree copy", "repo mount", ".sandcastle"
+
+**Hub run directory**:
+The run-specific **Sandcastle Hub** location that stores logs, events, artifacts, and copied-out verification outputs for one **flow** run.
+_Avoid_: "run log" (a single file), "worktree", "project assets"
+
+**Hub task board**:
+The **Sandcastle Hub** projection that shows a **Hub project**'s tasks from the **local task store** with Sandcastle workflow and sync state.
+_Avoid_: "backlog manager" (source system), "issue tracker", "run log"
+
+**Local task store**:
+The Beads-backed task store that **Sandcastle Hub** uses as the local source for task planning, triage, dependencies, and task board state.
+_Avoid_: "Hub tasks JSON", "issue tracker", "remote backlog"
+
+**Remote task source**:
+An external task system such as GitHub Issues that can synchronize with the **local task store**.
+_Avoid_: "source of truth" (the Hub works from the local task store), "backlog manager" when discussing sync direction
+
+**Task sync**:
+The pull/push process that reconciles tasks between a **remote task source** and the **local task store**.
+_Avoid_: "import" (one-way), "mirror" (implies perfect identity), "backup"
+
+**Task projection**:
+A Hub-owned view of a **task** derived from the **backlog manager** and Sandcastle run events.
+_Avoid_: "task source", "canonical task", "issue"
+
+**Task origin**:
+How a **task** entered the **local task store**, such as PRD decomposition, user feedback, manual entry, or **task sync**.
+_Avoid_: "category" (reserved for bug/enhancement), "source of truth"
+
+**Task selector**:
+A user-provided reference to one **task** in the **Hub task board**, resolved as an exact Beads id, exact task title, or the 1-based number shown by `sandcastle tasks list`.
+_Avoid_: "task id" when title or list number is also accepted, "query" (implies fuzzy matching)
+
+**Slice type**:
+Whether a PRD-derived **task** is AFK-ready for an **agent** or HITL-owned by a human.
+_Avoid_: "category" (reserved for bug/enhancement), "status"
+
+**Sandcastle user data directory**:
+The **host** user data location where Sandcastle stores **Sandcastle Hub** state such as **Hub project config**, credential references, and run history.
+_Avoid_: "home directory", "install directory", "global .sandcastle"
+
+**Hub env file**:
+The plaintext `.env` file in the **Sandcastle user data directory** that stores shared credentials for **Sandcastle Hub** flows.
+_Avoid_: "secret vault", "credential reference", "project .env"
+
+**Hub auth directory**:
+A provider-specific login-state directory in the **Sandcastle user data directory** that **Sandcastle Hub** can mount into a **sandbox**.
+_Avoid_: "Hub env file" (API-key storage), "secret vault", "project auth directory"
+
 ### Sandboxes
 
 **Sandbox provider**:
@@ -85,6 +153,46 @@ _Avoid_: "agent runner", "agent caller"
 **Iteration**:
 A single invocation of the **agent** inside the **sandbox**, producing at most one commit against one **task**.
 _Avoid_: "run" (ambiguous with the JS `run()` function), "cycle", "loop"
+
+**Flow**:
+A runtime-selectable orchestration shape for a Sandcastle run.
+_Avoid_: "template" (reserved for scaffolded files), "script", "main file", "agent-flow" (too narrow)
+
+**Agent-driven task command**:
+A task-board CLI command whose judgment-producing work is performed by a **flow**, while the command remains as a user-friendly shortcut and Sandcastle owns validation, confirmation, and state writes.
+_Avoid_: "plain CLI logic" (misses the **agent** judgment), "skill call" (too provider-specific), "hidden flow"
+
+**Judgment-producing task command**:
+A task-board CLI command whose primary outcome depends on semantic judgment, such as PRD decomposition or task triage.
+_Avoid_: "task command" (too broad), "CRUD command" (not judgment-producing), "heuristic command"
+
+**Task proposal**:
+A schema-validated **structured output** produced by an **agent-driven task command** before Sandcastle writes to the **local task store**.
+_Avoid_: "task mutation" (too early), "agent result" (too vague), "draft" (ambiguous with human notes)
+
+**Proposal flow**:
+A no-sandbox **flow** that produces a **task proposal** without directly changing code or writing to the **local task store**.
+_Avoid_: "analysis command" (too vague), "sandboxed planning flow" (incorrect), "direct task writer"
+
+**Proposal session**:
+An interactive **proposal flow** conversation where the user and **agent** refine a **task proposal** before Sandcastle validates and applies it.
+_Avoid_: "chat" (too generic), "approval prompt" (too narrow), "one-shot proposal"
+
+**Flow batch**:
+A group of **tasks** selected together by a **flow** and coordinated through the same implement/review/merge cycle.
+_Avoid_: "iteration" (already one agent invocation), "run" (too broad), "sprint"
+
+**Flow prompt**:
+A **prompt** owned by a **flow**, used when Sandcastle runs that **flow** through **Sandcastle Hub**.
+_Avoid_: "prompt template" (ambiguous with scaffolded prompts), "project prompt"
+
+**Hub agent config**:
+A **Sandcastle Hub**-wide configuration that selects the **agent provider**, model, and provider-specific options for each stage inside each **flow**.
+_Avoid_: "agent profile" (already used by init scaffold metadata), "project agent config" (too narrow), "model config" (provider is part of the decision)
+
+**Hub agent role**:
+A reusable stage-level entry in **Hub agent config**, such as planning, triage, implementation, review, merge, or recovery.
+_Avoid_: "flow override" (too specific), "agent profile" (init scaffold metadata), "project role" (too narrow)
 
 **Task**:
 A work item from the **backlog manager** that the **agent** selects and works on during an **iteration**.
@@ -159,6 +267,10 @@ _Avoid_: "create", "bootstrap", "new"
 **Setup action**:
 An explicit user-approved action during **init** that may prepare the **host** repo or **host** tools beyond writing scaffold files.
 _Avoid_: "automatic setup" (implies no consent), "scaffold" (scaffold files are not the same as mutating project dependencies)
+
+**Hub setup action**:
+An explicit user-approved action during **Sandcastle Hub** project onboarding that may modify a **host** repo, **host** tool state, or external backlog state without writing Hub-owned orchestration assets into the repo.
+_Avoid_: "scaffold", "automatic setup", "init setup action"
 
 **Config directory**:
 The `.sandcastle/` directory in a **host** repo containing sandbox configuration.
@@ -298,6 +410,11 @@ _Avoid_: "log event" (the log file contains more than just agent output), "displ
 - The generated bootstrap script is not part of image build; it runs inside the **sandbox** after the worktree is mounted and before the **agent** runs.
 - A **verification entrypoint** is separate from the generated bootstrap script: bootstrap prepares the repo before agent work, while verification checks the result after agent changes.
 - The WeChat Mini Program **capability pack** uses layered verification: native fallback verification is the required core loop when a project-specific `wx:check` is absent, while `miniprogram-ci` platform validation is recommended, automatically enabled when its configuration is detected, and host-dependent runtime or cloud validation is optional.
+- **Sandcastle Hub** uses the **local task store** as the local source for task planning and the **Hub task board**; **remote task sources** synchronize into and out of it through **task sync**.
+- **Blocked** is a **Hub task board** status with a reason, not a family of separate task statuses.
+- Durable human decisions or human work should be represented as separate **tasks**; dependent agent-ready **tasks** are **blocked** by those human-owned dependencies.
+- **Waiting for merge** is a stable **Hub task board** status because a task may finish implementation and review before the rest of its flow batch is ready to merge.
+- When a **flow batch** enters merge, all eligible **tasks** in that batch move from waiting for merge to merging together.
 - A **project profile** is an **init** scaffolding choice, not a public runtime option on `run()`, `createSandbox()`, or a **sandbox provider**.
 - The generated bootstrap script is a user-editable scaffold artifact owned by the host repo after **init**.
 - The generated bootstrap script prepares the repo for agent work; it does not run full project verification by default.
@@ -414,3 +531,4 @@ _Avoid_: "log event" (the log file contains more than just agent output), "displ
 - **"No sandbox"** vs **"local"** vs **"none"** -- The provider type is `NoSandboxProvider`, the factory is `noSandbox()`, the tag is `"none"`. Say **no-sandbox provider** in prose.
 - **"Workspace"** -- Retired term. Use **worktree** for the git worktree on the **host**, and **sandbox** for the isolation boundary. Don't say "workspace" in this project.
 - **"Interactive mode"** -- Could mean `interactive()` (Sandcastle's function) or Claude Code's TUI. In this project, it means Sandcastle's `interactive()`. Don't confuse with **terminal mode**.
+- **"Pending"** -- Too broad for the **Hub task board**. Use a precise status such as `inbox`, `needs_info`, `ready_for_agent`, `ready_for_human`, `blocked`, or `waiting_for_merge`.

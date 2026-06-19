@@ -36,7 +36,7 @@
   },
   "scripts": {
     "build": "tsgo --project tsconfig.build.json",
-    "postbuild": "rm -rf dist/templates dist/preset-bundles dist/capability-bundles && cp -r src/templates dist/templates && cp -r src/preset-bundles dist/preset-bundles && cp -r src/capability-bundles dist/capability-bundles",
+    "postbuild": "rm -rf dist/templates dist/preset-bundles dist/capability-bundles dist/hub-flows && cp -r src/templates dist/templates && cp -r src/preset-bundles dist/preset-bundles && cp -r src/capability-bundles dist/capability-bundles && cp -r src/hub-flows dist/hub-flows",
     "test": "npm run build && vitest run",
     "test:watch": "vitest",
     "typecheck": "tsgo --noEmit",
@@ -75,6 +75,7 @@
     "@ai-hero/sandcastle": "^0.5.9"
   },
   "dependencies": {
+    "@beads/bd": "1.0.4",
     "@clack/prompts": "^1.1.0",
     "@effect/cli": "^0.74.0",
     "@effect/platform": "^0.95.0",

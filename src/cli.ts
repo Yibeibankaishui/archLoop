@@ -1,4 +1,4 @@
-import { Command, Options } from "@effect/cli";
+import { Args, Command, Options } from "@effect/cli";
 import { FileSystem } from "@effect/platform";
 import { Effect } from "effect";
 import * as clack from "@clack/prompts";
@@ -47,7 +47,15 @@ import type {
   ProjectProfileEntry,
   SandboxProviderEntry,
 } from "./InitService.js";
-import { ConfigDirError, InitError } from "./errors.js";
+import {
+  ConfigDirError,
+  HubFlowError,
+  HubAgentConfigError,
+  HubEnvError,
+  InitError,
+  ProjectStatusError,
+  TaskBoardError,
+} from "./errors.js";
 import {
   getCapabilityPackDefinition,
   listCapabilityAddonPromptOptions,
@@ -64,6 +72,76 @@ import {
   getPresetAgentDefinition,
   listPresetAgentsForInit,
 } from "./presetAgents.js";
+import {
+  resolveGitRepoRoot,
+  formatHubProjectStatusLines,
+  resolveHubProjectStatus,
+} from "./projectStatus.js";
+import {
+  createHubFlowRunImplementer,
+  createHubFlowRunReviewer,
+  formatHubFlowResultLines,
+  runHubFlow,
+} from "./hubFlowExecution.js";
+import { getHubFlowDefinition, listHubFlows } from "./hubFlows.js";
+import {
+  formatValidatedHubFlowInputSummary,
+  validateHubFlowInput,
+} from "./hubFlowInput.js";
+import {
+  handlePrdDecompositionFlowDisplay,
+  handleTriageProposalFlowDisplay,
+  runHubProposalFlowFromCli,
+  runPrdDecompositionProposalFlowFromCli,
+  runTriageProposalFlowFromCli,
+} from "./hubProposalFlowCli.js";
+import { promptTriageTaskSelection } from "./hubTriageProposalCli.js";
+import type {
+  PrdHubStatusMode,
+  PrdWarningSeverity,
+} from "./hubPrdDecomposition.js";
+import {
+  formatHubTaskBoardLines,
+  appendHubTaskComment,
+  createHubTask,
+  deleteHubTasks,
+  formatHubTaskCommentLines,
+  formatHubTaskDetailsRows,
+  loadHubTask,
+  loadHubTaskBoard,
+  resolveHubTaskSelector,
+  resolveHubTaskSelectors,
+} from "./taskBoard.js";
+import { HUB_TRIAGE_DEFAULT_TASK_QUERY } from "./hubTriage.js";
+import { isTriageTaskIdInput } from "./hubTriageProposal.js";
+import {
+  formatHubTaskSyncSummaryLines,
+  syncHubTasksWithGithub,
+} from "./hubTaskSync.js";
+import { formatHubRecoveryComment, recoverHubTask } from "./hubTaskRecover.js";
+import {
+  formatHubAgentConfigShowLines,
+  formatHubAgentRoleOptions,
+  HUB_AGENT_ROLES,
+  readHubAgentConfig,
+  resolveHubAgentConfigPath,
+  resolveHubAgentRoleEntry,
+  setHubAgentRole,
+  type HubAgentRole,
+  type HubAgentRoleEntry,
+} from "./hubAgentConfig.js";
+import {
+  promptHubAgentRoleSetup,
+  promptInitHubAgentConfig,
+} from "./hubAgentConfigPrompt.js";
+import {
+  formatHubEnvShowLines,
+  isHubEnvKnownKey,
+  resolveHubEnvPath,
+  upsertHubEnvKey,
+} from "./hubEnv.js";
+import { promptInitHubEnv } from "./hubEnvPrompt.js";
+import { isBdAvailable } from "./resolveBdExecutable.js";
 
 const require = createRequire(import.meta.url);
 const VERSION = (require("../package.json") as { version: string }).version;
@@ -84,6 +162,14 @@ const imageNameOption = Options.text("image-name").pipe(
 
 const resolveImageName = (cliFlag: OptionalTextFlag, cwd: string): string =>
   cliFlag._tag === "Some" ? cliFlag.value : defaultImageName(cwd);
+
+const optionalTextValue = (flag: OptionalTextFlag): string | undefined =>
+  flag._tag === "Some" ? flag.value : undefined;
+
+const toTaskBoardError = (error: unknown): TaskBoardError =>
+  new TaskBoardError({
+    message: error instanceof Error ? error.message : String(error),
+  });
 
 // --- Config directory check ---
 
@@ -464,20 +550,6 @@ const buildAuthSetupNextStepLines = (options: {
   return lines;
 };
 
-const hostHasCommand = (command: string): boolean => {
-  const checkCommand =
-    process.platform === "win32" ? `where ${command}` : `command -v ${command}`;
-  try {
-    execSync(checkCommand, {
-      stdio: "ignore",
-      env: process.env,
-    });
-    return true;
-  } catch {
-    return false;
-  }
-};
-
 const validateHostRequirementsForInit = (options: {
   readonly sandboxProvider: SandboxProviderEntry;
   readonly backlogManager: BacklogManagerEntry;
@@ -485,12 +557,12 @@ const validateHostRequirementsForInit = (options: {
   if (
     options.sandboxProvider.name === "no-sandbox" &&
     options.backlogManager.name === "beads" &&
-    !hostHasCommand("bd")
+    !isBdAvailable()
   ) {
     return Effect.fail(
       new InitError({
         message:
-          "Using --sandbox no-sandbox with backlog manager beads requires `bd` on the host PATH because backlog commands run on the host in this mode. Install Beads locally or choose docker.",
+          "Using --sandbox no-sandbox with backlog manager beads requires `bd` to be available from the bundled @beads/bd dependency, SANDCASTLE_BD_PATH, or the host PATH because backlog commands run on the host in this mode. Install dependencies, set SANDCASTLE_BD_PATH, install Beads locally, or choose docker.",
       }),
     );
   }
@@ -511,7 +583,7 @@ const buildHostRequirementNextStepLines = (options: {
   if (options.sandboxProvider.name === "no-sandbox") {
     if (options.backlogManager.name === "beads") {
       lines.push(
-        "Keep `bd` available on your host PATH when using no-sandbox + beads. Prompt shell expressions run on the host in this mode, not in a container.",
+        "Keep `bd` available via the bundled @beads/bd install, `SANDCASTLE_BD_PATH`, or your host PATH when using no-sandbox + beads. Prompt shell expressions run on the host in this mode, not in a container.",
       );
     }
 
@@ -1492,6 +1564,1060 @@ const removeImageCommand = Command.make(
     }),
 );
 
+// --- Project status command ---
+
+const formatHubProjectStatusRows = (
+  status: Awaited<ReturnType<typeof resolveHubProjectStatus>>,
+): Record<string, string> => ({
+  "Repository root": status.repoRoot,
+  "Sandcastle user data dir": status.sandcastleUserDataDir,
+  "Hub project dir": status.hubProjectDir,
+  "Hub project registration": status.projectRegistered ? "existing" : "created",
+  "Beads available": status.beadsAvailable ? "yes" : "no",
+  "Task board ready": String(status.taskCounts.ready),
+  "Task board total": String(status.taskCounts.total),
+});
+
+const taskIdArg = Args.text({ name: "id" });
+const taskTitleArg = Args.text({ name: "title" });
+const taskOriginOption = Options.text("origin").pipe(
+  Options.withDescription(
+    "Task origin (manual or user-feedback). Defaults to manual.",
+  ),
+  Options.optional,
+);
+const taskDescriptionOption = Options.text("description").pipe(
+  Options.withDescription("Optional task description"),
+  Options.optional,
+);
+const taskKindOption = Options.text("kind").pipe(
+  Options.withDescription("Optional task kind metadata"),
+  Options.withAlias("category"),
+  Options.optional,
+);
+const prdRefArg = Args.text({ name: "prd-ref" });
+const prdApproveOption = Options.boolean("yes").pipe(
+  Options.withDescription(
+    "Run a one-shot PRD decomposition proposal and create inbox tasks without interactive prompts.",
+  ),
+  Options.withDefault(false),
+);
+const prdStatusOption = Options.text("status").pipe(
+  Options.withDescription(
+    "Initial Hub status mode for PRD-derived tasks (inbox, classified_ready). Defaults to inbox.",
+  ),
+  Options.optional,
+);
+const prdDepsOption = Options.text("deps").pipe(
+  Options.withDescription(
+    "Dependency pairs as childIndex:parentIndex, e.g. 2:1,3:1.",
+  ),
+  Options.optional,
+);
+const taskDeleteYesOption = Options.boolean("yes").pipe(
+  Options.withDescription(
+    "Confirm destructive local delete without interactive prompts.",
+  ),
+  Options.withDefault(false),
+);
+const taskDeleteDryRunOption = Options.boolean("dry-run").pipe(
+  Options.withDescription(
+    "Preview what Beads would delete without making changes.",
+  ),
+  Options.withDefault(false),
+);
+const taskDeleteCascadeOption = Options.boolean("cascade").pipe(
+  Options.withDescription(
+    "Passthrough to Beads: recursively delete dependent tasks.",
+  ),
+  Options.withDefault(false),
+);
+const taskWarningOption = Options.text("warning").pipe(
+  Options.withDescription(
+    "Filter tasks by PRD warning severity (high, medium, or low).",
+  ),
+  Options.optional,
+);
+const taskSelectorsArg = Args.atLeast(
+  Args.text({ name: "task-selector" }).pipe(
+    Args.withDescription(
+      "Beads id, exact task title, or 1-based number from tasks list.",
+    ),
+  ),
+  1,
+);
+
+const normalizeTaskOrigin = (
+  value: string,
+): "manual" | "user-feedback" | undefined => {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "manual" || normalized === "user-feedback"
+    ? normalized
+    : undefined;
+};
+
+const resolveTaskOrigin = (
+  origin: OptionalTextFlag,
+): Effect.Effect<"manual" | "user-feedback", TaskBoardError, never> => {
+  if (origin._tag !== "Some") {
+    return Effect.succeed("manual");
+  }
+
+  const resolvedOrigin = normalizeTaskOrigin(origin.value);
+  if (resolvedOrigin) {
+    return Effect.succeed(resolvedOrigin);
+  }
+
+  return Effect.fail(
+    new TaskBoardError({
+      message: 'Invalid task origin. Use "manual" or "user-feedback".',
+    }),
+  );
+};
+
+const resolvePrdWarningFilter = (
+  warning: OptionalTextFlag,
+): Effect.Effect<PrdWarningSeverity | undefined, TaskBoardError, never> => {
+  if (warning._tag !== "Some") {
+    return Effect.succeed(undefined);
+  }
+
+  const normalized = warning.value.trim().toLowerCase();
+  if (
+    normalized === "high" ||
+    normalized === "medium" ||
+    normalized === "low"
+  ) {
+    return Effect.succeed(normalized);
+  }
+
+  return Effect.fail(
+    new TaskBoardError({
+      message: 'Invalid task warning filter. Use "high", "medium", or "low".',
+    }),
+  );
+};
+
+const tasksListCommand = Command.make(
+  "list",
+  { warning: taskWarningOption },
+  ({ warning }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      const warningFilter = yield* resolvePrdWarningFilter(warning);
+      const board = yield* Effect.try({
+        try: () => loadHubTaskBoard(cwd),
+        catch: toTaskBoardError,
+      });
+
+      for (const line of formatHubTaskBoardLines(board, { warningFilter })) {
+        yield* d.text(line);
+      }
+    }),
+);
+
+const tasksCreateCommand = Command.make(
+  "create",
+  {
+    title: taskTitleArg,
+    origin: taskOriginOption,
+    description: taskDescriptionOption,
+    kind: taskKindOption,
+  },
+  ({ title, origin, description, kind }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      const resolvedOrigin = yield* resolveTaskOrigin(origin);
+      const kindValue = optionalTextValue(kind);
+      const created = yield* Effect.try({
+        try: () =>
+          createHubTask(cwd, {
+            title,
+            description: optionalTextValue(description),
+            origin: resolvedOrigin,
+            kind: kindValue,
+          }),
+        catch: toTaskBoardError,
+      });
+
+      yield* d.summary("Created Beads task", {
+        "Beads id": created.id,
+        Title: created.title,
+        Origin: resolvedOrigin,
+        ...(kindValue !== undefined ? { Kind: kindValue } : {}),
+      });
+    }),
+);
+
+const tasksShowCommand = Command.make("show", { id: taskIdArg }, ({ id }) =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const cwd = process.cwd();
+    const task = yield* Effect.try({
+      try: () => loadHubTask(cwd, id),
+      catch: toTaskBoardError,
+    });
+
+    yield* d.summary(`Beads task ${task.id}`, formatHubTaskDetailsRows(task));
+    for (const line of formatHubTaskCommentLines(task)) {
+      yield* d.text(line);
+    }
+  }),
+);
+
+const triageTaskIdArg = Args.text({ name: "task-id" }).pipe(Args.optional);
+const triageQueryOption = Options.text("query").pipe(
+  Options.withDescription(
+    "Comma-separated Hub statuses to triage (inbox, needs_info).",
+  ),
+  Options.optional,
+);
+const triageApproveOption = Options.boolean("yes").pipe(
+  Options.withDescription(
+    "Approve and apply high-confidence triage decisions without interactive confirmation.",
+  ),
+  Options.withAlias("approve"),
+  Options.withDefault(false),
+);
+
+const tasksTriageCommand = Command.make(
+  "triage",
+  {
+    taskId: triageTaskIdArg,
+    query: triageQueryOption,
+    approve: triageApproveOption,
+  },
+  ({ taskId, query, approve }) =>
+    Effect.gen(function* () {
+      const cwd = process.cwd();
+      const explicitTaskId = optionalTextValue(taskId)?.trim();
+      const explicitQuery = optionalTextValue(query)?.trim();
+      const yes = approve;
+
+      if (explicitTaskId && explicitQuery) {
+        return yield* Effect.fail(
+          new TaskBoardError({
+            message:
+              "Use either a task id argument or --query, not both. Example: sandcastle tasks triage bd-42",
+          }),
+        );
+      }
+
+      let resolvedTaskIds: string[] | undefined;
+      let resolvedQuery: string | undefined;
+
+      if (explicitTaskId) {
+        if (!isTriageTaskIdInput(explicitTaskId)) {
+          return yield* Effect.fail(
+            new TaskBoardError({
+              message: `Invalid triage task id "${explicitTaskId}". Use a Beads task id such as bd-42.`,
+            }),
+          );
+        }
+        resolvedTaskIds = [explicitTaskId.toLowerCase()];
+      } else if (explicitQuery) {
+        yield* Effect.try({
+          try: () =>
+            validateHubFlowInput("triage", {
+              cwd,
+              rawInput: explicitQuery,
+            }),
+          catch: (error) =>
+            new TaskBoardError({
+              message: error instanceof Error ? error.message : String(error),
+            }),
+        });
+        resolvedQuery = explicitQuery;
+      } else if (process.stdin.isTTY) {
+        const board = yield* Effect.try({
+          try: () => loadHubTaskBoard(cwd),
+          catch: toTaskBoardError,
+        });
+        resolvedTaskIds = yield* Effect.tryPromise({
+          try: () => promptTriageTaskSelection({ board }),
+          catch: toTaskBoardError,
+        });
+      } else if (yes) {
+        resolvedQuery = HUB_TRIAGE_DEFAULT_TASK_QUERY;
+      } else {
+        return yield* Effect.fail(
+          new TaskBoardError({
+            message:
+              "Non-interactive triage requires a task id, --query, or --yes. Example: sandcastle tasks triage bd-42, sandcastle tasks triage --query inbox,needs_info, or sandcastle tasks triage --yes",
+          }),
+        );
+      }
+
+      const result = yield* Effect.tryPromise({
+        try: () =>
+          runTriageProposalFlowFromCli({
+            cwd,
+            taskIds: resolvedTaskIds,
+            query: resolvedQuery,
+            yes,
+            isTTY: process.stdin.isTTY,
+          }),
+        catch: toTaskBoardError,
+      });
+
+      yield* handleTriageProposalFlowDisplay(
+        result,
+        (message) => new TaskBoardError({ message }),
+      );
+    }),
+);
+
+const normalizePrdHubStatusMode = (
+  value: string,
+): PrdHubStatusMode | undefined => {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "inbox") {
+    return "inbox";
+  }
+  if (
+    normalized === "ready_for_agent" ||
+    normalized === "ready_for_human" ||
+    normalized === "classified_ready"
+  ) {
+    return "classified_ready";
+  }
+  return undefined;
+};
+
+const resolvePrdHubStatusMode = (
+  status: OptionalTextFlag,
+): Effect.Effect<PrdHubStatusMode, TaskBoardError, never> => {
+  if (status._tag !== "Some") {
+    return Effect.succeed("inbox");
+  }
+
+  const resolved = normalizePrdHubStatusMode(status.value);
+  if (resolved) {
+    return Effect.succeed(resolved);
+  }
+
+  return Effect.fail(
+    new TaskBoardError({
+      message:
+        'Invalid PRD task status. Use "inbox", "ready_for_agent", "ready_for_human", or "classified_ready".',
+    }),
+  );
+};
+
+const resolvePrdDependencyOverride = (
+  deps: OptionalTextFlag,
+): string | undefined => (deps._tag === "Some" ? deps.value : undefined);
+
+const tasksFromPrdCommand = Command.make(
+  "from-prd",
+  {
+    prdRef: prdRefArg,
+    approve: prdApproveOption,
+    status: prdStatusOption,
+    deps: prdDepsOption,
+  },
+  ({ prdRef, approve, status, deps }) =>
+    Effect.gen(function* () {
+      const cwd = process.cwd();
+      const explicitHubStatusMode =
+        !approve && status._tag === "Some"
+          ? yield* resolvePrdHubStatusMode(status)
+          : undefined;
+
+      const result = yield* Effect.tryPromise({
+        try: () =>
+          runPrdDecompositionProposalFlowFromCli({
+            cwd,
+            prdRef,
+            yes: approve,
+            hubStatusMode: explicitHubStatusMode,
+            dependencyOverride: resolvePrdDependencyOverride(deps),
+            isTTY: process.stdin.isTTY,
+          }),
+        catch: toTaskBoardError,
+      });
+
+      yield* handlePrdDecompositionFlowDisplay(
+        result,
+        (message) => new TaskBoardError({ message }),
+      );
+    }),
+);
+
+const tasksSyncCommand = Command.make("sync", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const cwd = process.cwd();
+    const result = yield* Effect.try({
+      try: () => syncHubTasksWithGithub({ cwd }),
+      catch: toTaskBoardError,
+    });
+
+    for (const line of formatHubTaskSyncSummaryLines(result)) {
+      yield* d.text(line);
+    }
+  }),
+);
+
+const tasksCommentCommand = Command.make(
+  "comment",
+  {
+    id: taskIdArg,
+    body: Options.text("body").pipe(
+      Options.withDescription("Comment body"),
+      Options.optional,
+    ),
+  },
+  ({ id, body }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      const task = yield* Effect.try({
+        try: () => resolveHubTaskSelector(cwd, id),
+        catch: toTaskBoardError,
+      });
+      const commentBody =
+        body._tag === "Some"
+          ? body.value
+          : yield* Effect.tryPromise({
+              try: async () => {
+                const result = await clack.text({
+                  message: "Comment body:",
+                });
+                if (clack.isCancel(result)) {
+                  throw new TaskBoardError({
+                    message: "Comment entry cancelled.",
+                  });
+                }
+                return String(result);
+              },
+              catch: toTaskBoardError,
+            });
+
+      yield* Effect.try({
+        try: () => appendHubTaskComment(cwd, task.id, commentBody),
+        catch: toTaskBoardError,
+      });
+
+      yield* d.status(
+        `Appended a comment to Beads task ${task.id}.`,
+        "success",
+      );
+    }),
+);
+
+const tasksRecoverCommand = Command.make(
+  "recover",
+  { id: taskIdArg },
+  ({ id }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      const task = yield* Effect.try({
+        try: () => resolveHubTaskSelector(cwd, id),
+        catch: toTaskBoardError,
+      });
+      const result = yield* Effect.tryPromise({
+        try: () => recoverHubTask({ cwd, taskId: task.id }),
+        catch: toTaskBoardError,
+      });
+
+      yield* d.summary(`Recovered Beads task ${task.id}`, {
+        Outcome: result.outcome,
+        "Prior status": result.priorStatus,
+        "Hub status": result.hubStatus,
+        Summary: result.summary,
+      });
+      yield* d.status(formatHubRecoveryComment(result.summary), "info");
+    }),
+);
+
+const tasksDeleteCommand = Command.make(
+  "delete",
+  {
+    selectors: taskSelectorsArg,
+    yes: taskDeleteYesOption,
+    dryRun: taskDeleteDryRunOption,
+    cascade: taskDeleteCascadeOption,
+  },
+  ({ selectors, yes, dryRun, cascade }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      const tasks = yield* Effect.try({
+        try: () => resolveHubTaskSelectors(cwd, selectors),
+        catch: toTaskBoardError,
+      });
+      const taskIds = tasks.map((task) => task.id);
+      const isTTY = process.stdin.isTTY === true;
+
+      if (!dryRun && !yes && !isTTY) {
+        return yield* Effect.fail(
+          new TaskBoardError({
+            message:
+              "sandcastle tasks delete is destructive. Re-run with --yes in non-interactive mode, or use --dry-run to preview.",
+          }),
+        );
+      }
+
+      if (!dryRun && !yes && isTTY) {
+        const preview = yield* Effect.try({
+          try: () =>
+            deleteHubTasks({
+              cwd,
+              taskIds,
+              dryRun: true,
+              cascade,
+            }),
+          catch: toTaskBoardError,
+        });
+        if (preview.trim().length > 0) {
+          yield* d.text(preview.trim());
+        }
+
+        const approved = yield* Effect.tryPromise({
+          try: async () => {
+            const result = await clack.confirm({
+              message: `Permanently delete local Beads task(s) ${taskIds.join(", ")}? This does not delete remote GitHub issues.`,
+              initialValue: false,
+            });
+            if (clack.isCancel(result)) {
+              throw new TaskBoardError({
+                message: "Task delete cancelled.",
+              });
+            }
+            return result === true;
+          },
+          catch: toTaskBoardError,
+        });
+
+        if (!approved) {
+          return yield* Effect.fail(
+            new TaskBoardError({
+              message: "Task delete cancelled.",
+            }),
+          );
+        }
+      }
+
+      const output = yield* Effect.try({
+        try: () =>
+          deleteHubTasks({
+            cwd,
+            taskIds,
+            dryRun,
+            cascade,
+            force: !dryRun,
+          }),
+        catch: toTaskBoardError,
+      });
+
+      if (dryRun) {
+        if (output.trim().length > 0) {
+          yield* d.text(output.trim());
+        }
+        yield* d.status(
+          `Dry run for local Beads task delete (${taskIds.join(", ")}).`,
+          "info",
+        );
+        return;
+      }
+
+      if (output.trim().length > 0) {
+        yield* d.text(output.trim());
+      }
+      yield* d.status(
+        `Deleted local Beads tasks ${taskIds.join(", ")}.`,
+        "success",
+      );
+    }),
+);
+
+const tasksCommand = Command.make("tasks", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.status(
+      "Hub task board commands. Use --help to see available subcommands.",
+      "info",
+    );
+  }),
+).pipe(
+  Command.withSubcommands([
+    tasksListCommand,
+    tasksShowCommand,
+    tasksCreateCommand,
+    tasksTriageCommand,
+    tasksFromPrdCommand,
+    tasksSyncCommand,
+    tasksCommentCommand,
+    tasksRecoverCommand,
+    tasksDeleteCommand,
+  ]),
+);
+
+const projectStatusCommand = Command.make("status", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const cwd = process.cwd();
+    const status = yield* Effect.try({
+      try: () => resolveHubProjectStatus({ cwd }),
+      catch: (error) =>
+        new ProjectStatusError({
+          message: error instanceof Error ? error.message : String(error),
+        }),
+    });
+
+    yield* d.summary("Hub project status", formatHubProjectStatusRows(status));
+    for (const line of formatHubProjectStatusLines(status)) {
+      yield* d.text(line);
+    }
+  }),
+);
+
+const projectCommand = Command.make("project", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.status(
+      "Hub project commands. Use --help to see available subcommands.",
+      "info",
+    );
+  }),
+).pipe(Command.withSubcommands([projectStatusCommand]));
+
+const getHubFlowIds = (): string =>
+  listHubFlows()
+    .map((flow) => flow.id)
+    .join(", ");
+
+const flowOption = Options.text("flow").pipe(
+  Options.withDescription(`Hub flow id (${getHubFlowIds()})`),
+);
+
+const flowInputOption = Options.text("input").pipe(
+  Options.withDescription(
+    "Flow-specific input value (PRD path for prd-decomposition; optional task query for triage)",
+  ),
+  Options.optional,
+);
+
+const flowYesOption = Options.boolean("yes").pipe(
+  Options.withDescription(
+    "Run proposal flows in one-shot mode without interactive prompts.",
+  ),
+  Options.withDefault(false),
+);
+
+const toHubAgentConfigError = (error: unknown): HubAgentConfigError =>
+  error instanceof HubAgentConfigError
+    ? error
+    : new HubAgentConfigError({
+        message: error instanceof Error ? error.message : String(error),
+      });
+
+const parseHubAgentRoleOptions = (
+  raw: string | undefined,
+): Record<string, string> | undefined => {
+  if (!raw || raw.trim().length === 0) {
+    return undefined;
+  }
+
+  const options: Record<string, string> = {};
+  for (const part of raw.split(",")) {
+    const trimmed = part.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    const separator = trimmed.indexOf("=");
+    if (separator <= 0 || separator === trimmed.length - 1) {
+      throw new HubAgentConfigError({
+        message: `Invalid --options value "${trimmed}". Use comma-separated key=value pairs.`,
+      });
+    }
+    const key = trimmed.slice(0, separator).trim();
+    const value = trimmed.slice(separator + 1).trim();
+    options[key] = value;
+  }
+
+  return Object.keys(options).length > 0 ? options : undefined;
+};
+
+const agentConfigPathCommand = Command.make("path", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.text(resolveHubAgentConfigPath());
+  }),
+);
+
+const agentConfigShowCommand = Command.make("show", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const config = yield* Effect.try({
+      try: () => readHubAgentConfig(),
+      catch: toHubAgentConfigError,
+    });
+    for (const line of formatHubAgentConfigShowLines(config)) {
+      yield* d.text(line);
+    }
+  }),
+);
+
+const agentConfigProviderOption = Options.text("provider").pipe(
+  Options.withDescription(
+    "Agent provider (claude-code, pi, codex, cursor, opencode)",
+  ),
+  Options.optional,
+);
+
+const agentConfigModelOption = Options.text("model").pipe(
+  Options.withDescription("Agent model"),
+  Options.optional,
+);
+
+const agentConfigOptionsOption = Options.text("options").pipe(
+  Options.withDescription(
+    "Comma-separated provider options as key=value pairs (e.g. effort=medium,mode=plan)",
+  ),
+  Options.optional,
+);
+
+const runAgentConfigInit = () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const config = yield* Effect.tryPromise({
+      try: () => promptInitHubAgentConfig(),
+      catch: toHubAgentConfigError,
+    });
+    const configuredRoleCount = HUB_AGENT_ROLES.filter(
+      (role) => config.roles[role] !== undefined,
+    ).length;
+    yield* d.summary("Configured Hub agent roles", {
+      Roles: String(configuredRoleCount),
+      Config: resolveHubAgentConfigPath(),
+    });
+  });
+
+const agentConfigInitCommand = Command.make("init", {}, runAgentConfigInit);
+
+const agentConfigConfigureCommand = Command.make(
+  "configure",
+  {},
+  runAgentConfigInit,
+);
+
+const agentConfigSetRoleCommand = Command.make(
+  "set-role",
+  {
+    role: Args.text({ name: "role" }).pipe(
+      Args.withDescription(
+        "Hub agent role (planning, triage, implementation, review, merge, recovery)",
+      ),
+    ),
+    provider: agentConfigProviderOption,
+    model: agentConfigModelOption,
+    options: agentConfigOptionsOption,
+  },
+  ({ role, provider, model, options }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const parsedOptions = yield* Effect.try({
+        try: () => parseHubAgentRoleOptions(optionalTextValue(options)),
+        catch: toHubAgentConfigError,
+      });
+      const entry = yield* Effect.tryPromise({
+        try: () =>
+          resolveHubAgentRoleEntry({
+            role,
+            provider: optionalTextValue(provider),
+            model: optionalTextValue(model),
+            options: parsedOptions,
+            isTTY: process.stdin.isTTY,
+            configureRole: promptHubAgentRoleSetup,
+          }),
+        catch: toHubAgentConfigError,
+      });
+      const saved = yield* Effect.try({
+        try: () => setHubAgentRole(role, entry),
+        catch: toHubAgentConfigError,
+      });
+      yield* d.summary(`Saved Hub agent role ${saved.role}`, {
+        Provider: saved.entry.provider,
+        Model: saved.entry.model,
+        Options: formatHubAgentRoleOptions(saved.entry.options) ?? "(none)",
+      });
+    }),
+);
+
+const agentConfigCommand = Command.make("agent-config", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.status(
+      "Hub-wide agent role configuration. Use --help to see available subcommands.",
+      "info",
+    );
+  }),
+).pipe(
+  Command.withSubcommands([
+    agentConfigPathCommand,
+    agentConfigShowCommand,
+    agentConfigInitCommand,
+    agentConfigConfigureCommand,
+    agentConfigSetRoleCommand,
+  ]),
+);
+
+const toHubEnvError = (error: unknown): HubEnvError =>
+  error instanceof HubEnvError
+    ? error
+    : new HubEnvError({
+        message: error instanceof Error ? error.message : String(error),
+      });
+
+const envPathCommand = Command.make("path", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.text(resolveHubEnvPath());
+  }),
+);
+
+const envShowCommand = Command.make("show", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    for (const line of formatHubEnvShowLines()) {
+      yield* d.text(line);
+    }
+  }),
+);
+
+const runEnvInit = () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      return yield* Effect.fail(
+        new HubEnvError({
+          message:
+            "Interactive Hub env setup requires a TTY. Use `sandcastle env set <key> <value>` in scripts.",
+        }),
+      );
+    }
+
+    yield* Effect.tryPromise({
+      try: () => promptInitHubEnv(),
+      catch: toHubEnvError,
+    });
+    yield* d.status("Hub environment configured.", "success");
+  });
+
+const envInitCommand = Command.make("init", {}, runEnvInit);
+
+const envConfigureCommand = Command.make("configure", {}, runEnvInit);
+
+const envSetKeyArg = Args.text({ name: "key" }).pipe(
+  Args.withDescription(
+    "Environment variable name (for example CURSOR_API_KEY)",
+  ),
+);
+
+const envSetValueArg = Args.text({ name: "value" }).pipe(
+  Args.withDescription("Environment variable value"),
+  Args.optional,
+);
+
+const envSetCommand = Command.make(
+  "set",
+  {
+    key: envSetKeyArg,
+    value: envSetValueArg,
+  },
+  ({ key, value }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const envKey = key.trim();
+      if (!isHubEnvKnownKey(envKey)) {
+        return yield* Effect.fail(
+          new HubEnvError({
+            message: `Unknown Hub env key "${envKey}". Known keys: CURSOR_API_KEY, ANTHROPIC_API_KEY, OPENAI_KEY, OPENCODE_API_KEY, GH_TOKEN.`,
+          }),
+        );
+      }
+
+      let envValue = optionalTextValue(value)?.trim() ?? "";
+      if (envValue.length === 0) {
+        if (!process.stdin.isTTY || !process.stdout.isTTY) {
+          return yield* Effect.fail(
+            new HubEnvError({
+              message: `sandcastle env set ${envKey} <value> requires a value in non-interactive mode.`,
+            }),
+          );
+        }
+
+        const prompted = yield* Effect.promise(() =>
+          clack.password({
+            message: `${envKey} value`,
+            validate: (input) => {
+              const trimmed = input?.trim() ?? "";
+              return trimmed.length === 0 ? "Value is required" : undefined;
+            },
+          }),
+        );
+        if (clack.isCancel(prompted)) {
+          return yield* Effect.fail(
+            new HubEnvError({ message: "Hub env setup cancelled." }),
+          );
+        }
+        envValue = String(prompted).trim();
+      }
+
+      const savedPath = yield* Effect.try({
+        try: () => upsertHubEnvKey(envKey, envValue),
+        catch: toHubEnvError,
+      });
+      yield* d.summary(`Saved ${envKey}`, { Path: savedPath });
+    }),
+);
+
+const envCommand = Command.make("env", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.status(
+      "Hub-wide environment variables for Sandcastle flows. Use --help to see available subcommands.",
+      "info",
+    );
+  }),
+).pipe(
+  Command.withSubcommands([
+    envPathCommand,
+    envShowCommand,
+    envInitCommand,
+    envConfigureCommand,
+    envSetCommand,
+  ]),
+);
+
+const toHubFlowError = (error: unknown): HubFlowError =>
+  error instanceof HubFlowError
+    ? error
+    : new HubFlowError({
+        message: error instanceof Error ? error.message : String(error),
+      });
+
+const runCommand = Command.make(
+  "run",
+  {
+    project: Args.text({ name: "project" }).pipe(
+      Args.withDescription(
+        "Path to the git repository (use . for current repo)",
+      ),
+    ),
+    flow: flowOption,
+    input: flowInputOption,
+    yes: flowYesOption,
+  },
+  ({ project, flow, input, yes }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const projectDir = project.trim().length > 0 ? project : ".";
+      const flowDefinition = getHubFlowDefinition(flow);
+      if (!flowDefinition) {
+        return yield* Effect.fail(
+          new HubFlowError({
+            message: `Unknown Hub flow "${flow}". Available flows: ${getHubFlowIds()}`,
+          }),
+        );
+      }
+
+      const repoRoot = yield* Effect.try({
+        try: () => resolveGitRepoRoot(projectDir),
+        catch: toHubFlowError,
+      });
+
+      const rawInput = optionalTextValue(input);
+      if (rawInput && !flowDefinition.input) {
+        return yield* Effect.fail(
+          new HubFlowError({
+            message: `Hub flow "${flow}" does not accept --input.`,
+          }),
+        );
+      }
+
+      if (flowDefinition.input) {
+        const validatedInput = yield* Effect.try({
+          try: () =>
+            validateHubFlowInput(flowDefinition.id, {
+              cwd: repoRoot,
+              rawInput,
+            }),
+          catch: toHubFlowError,
+        });
+        yield* d.status(
+          formatValidatedHubFlowInputSummary(validatedInput),
+          "info",
+        );
+
+        if (flowDefinition.kind === "proposal") {
+          const execution = yield* Effect.tryPromise({
+            try: () =>
+              runHubProposalFlowFromCli({
+                cwd: repoRoot,
+                validatedInput,
+                yes,
+                isTTY: process.stdin.isTTY,
+              }),
+            catch: toHubFlowError,
+          });
+
+          if (execution.flowId === "prd-decomposition") {
+            yield* handlePrdDecompositionFlowDisplay(
+              execution.result,
+              (message) => new HubFlowError({ message }),
+            );
+            return;
+          }
+
+          yield* handleTriageProposalFlowDisplay(
+            execution.result,
+            (message) => new HubFlowError({ message }),
+          );
+          return;
+        }
+      }
+
+      const result = yield* Effect.tryPromise({
+        try: () =>
+          runHubFlow({
+            flowId: flowDefinition.id,
+            cwd: repoRoot,
+            implementer: createHubFlowRunImplementer({ cwd: repoRoot }),
+            reviewer: flowDefinition.hasReviewer
+              ? createHubFlowRunReviewer({ cwd: repoRoot })
+              : undefined,
+          }),
+        catch: toHubFlowError,
+      });
+
+      for (const line of formatHubFlowResultLines(result)) {
+        yield* d.status(line, "info");
+      }
+
+      const failures = result.results.filter(
+        (taskResult) =>
+          taskResult.outcome === "agent_failed" ||
+          taskResult.outcome === "sandbox_failed",
+      );
+      if (failures.length > 0) {
+        yield* d.status(
+          `Hub flow completed with ${failures.length} failed task(s).`,
+          "warn",
+        );
+      } else if (result.results.length > 0) {
+        yield* d.status("Hub flow completed.", "success");
+      } else {
+        yield* d.status("Hub flow found no ready tasks to run.", "info");
+      }
+    }),
+);
+
 // --- Docker namespace command ---
 
 const dockerCommand = Command.make("docker", {}, () =>
@@ -1588,7 +2714,16 @@ const rootCommand = Command.make("sandcastle", {}, () =>
 );
 
 export const sandcastle = rootCommand.pipe(
-  Command.withSubcommands([initCommand, dockerCommand, podmanCommand]),
+  Command.withSubcommands([
+    initCommand,
+    runCommand,
+    tasksCommand,
+    projectCommand,
+    agentConfigCommand,
+    envCommand,
+    dockerCommand,
+    podmanCommand,
+  ]),
 );
 
 export const cli = Command.run(sandcastle, {

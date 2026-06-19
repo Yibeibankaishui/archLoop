@@ -39,6 +39,8 @@ Replace `<TARGET_REPO>` with the project being developed.
    npm link @ai-hero/sandcastle
    ```
    Verify it resolves and runs: `npx sandcastle --help` (confirms the link is usable).
+   If you want to inspect the repo before init, `npx sandcastle project status` shows the canonical repo root, Sandcastle user data dir, `bd` availability, task counts by Hub status, active runs and batch status, failed tasks with next actions, sync state summaries, recent Hub events, and paths to Hub run directories for full logs.
+   If the repo already has Beads data, `npx sandcastle tasks list` groups tasks by Hub status and shows 1-based task numbers. `npx sandcastle tasks show <task-selector>` shows a task's Beads details, Hub status, labels, metadata, comments, remote refs, and run refs. A task selector is an exact Beads id, exact task title, or the number from `tasks list`; ambiguous titles fail with candidate ids. Use `npx sandcastle tasks create <title>` to create a local `inbox` task with `origin` metadata, `npx sandcastle tasks triage [task-id]` to run the no-sandbox agent-driven triage proposal flow for inbox/needs_info tasks (interactive multi-select with an All option, `--query`, or guarded `--yes`), `npx sandcastle tasks sync` to pull GitHub Issues into Beads and push collaboration labels or closures back to GitHub, `npx sandcastle tasks from-prd <prd-ref>` to run the no-sandbox `prd-decomposition` proposal flow and create local dependency-aware Beads tasks only after structured proposal validation and approval, `npx sandcastle tasks comment <task-selector>` to append a readable Beads comment without changing task status, `npx sandcastle tasks recover <task-selector>` to repair failed or stale execution states (including `close_failed` when the branch is already merged), and `npx sandcastle tasks delete <task-selector> [more...]` to permanently remove local Beads tasks (not remote GitHub issues) with TTY confirmation or `--yes` / `--dry-run` guards. Proposal flows write local Beads only; use `tasks sync` for remote GitHub label/closure updates. Run `npx sandcastle run . --flow no-review` to execute the first Hub flow: it reads the Beads ready queue, claims tasks, runs bundled Hub prompts, advances successful work to `waiting_for_merge`, then merges eligible batch tasks with per-task events, runs verification after each merge, and closes local Beads tasks on success. Use `--flow with-review` when the flow should run a reviewer stage (`reviewing`) before merge. Proposal flows `prd-decomposition` and `triage` run end-to-end via `sandcastle run . --flow <id> --input <value>` (`--input <prd-ref>` or Beads task id / `inbox,needs_info` query); the matching `tasks` shortcuts remain the recommended entry points. Configure Hub roles with `npx sandcastle agent-config init` / `show` / `set-role`; `--category` is accepted as an alias for `--kind`.
 2. **Init once**: `npx sandcastle init`. Interactive prompts: sandbox provider, backlog manager, workflow template, project profile, default agent, installed runtimes.
    - Non-interactive example:
      ```bash
@@ -47,6 +49,9 @@ Replace `<TARGET_REPO>` with the project being developed.
        --project-profile node --build-image true
      ```
    - `init` **refuses to overwrite** an existing `.sandcastle/`. Back up and delete manually to redo.
+   - Sandcastle bundles Beads via `@beads/bd@1.0.4`. For `no-sandbox + beads`,
+     `bd` can come from the bundled install, `SANDCASTLE_BD_PATH`, or host
+     `PATH`.
 3. **Env**: `cp .sandcastle/.env.example .sandcastle/.env`, then fill tokens (see table below). Sandcastle skips empty values, so a blank `KEY=` is treated as unset.
 4. **Build image** (sandboxed providers): `npx sandcastle docker build-image` (or `podman`). Re-run after editing the Dockerfile/Containerfile.
 5. **Run the entry script with npx**:
@@ -69,9 +74,14 @@ Replace `<TARGET_REPO>` with the project being developed.
 | `parallel-planner`             | Plan → parallel branches → merge                  |
 | `parallel-planner-with-review` | Parallel implement + per-branch review → merge    |
 
+With GitHub Issues, planner templates only list the current `ready-for-agent`
+queue (`Sandcastle` + `ready-for-agent` when label creation is enabled) and the
+generated TypeScript fails fast if a planner returns an issue outside that
+allowed queue.
+
 ## Project profiles
 
-`--project-profile` only affects the Dockerfile tool layers and `bootstrap.sh`; it does not change runtime APIs. Choices: `generic` (default), `node`, `python`, `cpp`. v1 does not auto-detect — pick the closest. Non-blank templates run `.sandcastle/bootstrap.sh` from `sandbox.onSandboxReady`.
+`--project-profile` affects the Dockerfile tool layers, `bootstrap.sh`, and stack-specific verification guidance in generated workflow prompts. Choices: `generic` (default), `node`, `python`, `cpp`. v1 does not auto-detect — pick the closest. Non-blank templates run `.sandcastle/bootstrap.sh` from `sandbox.onSandboxReady`.
 
 ## Common env vars
 
@@ -100,15 +110,38 @@ Key APIs: `run()`, `interactive()`, `createSandbox()`, `createWorktree()`; sandb
 
 ## Common CLI
 
-| Command                          | Purpose                     |
-| -------------------------------- | --------------------------- |
-| `sandcastle init`                | Generate `.sandcastle/`     |
-| `sandcastle docker build-image`  | Build image from Dockerfile |
-| `sandcastle docker remove-image` | Remove image                |
-| `sandcastle --help`              | Help                        |
+| Command                                          | Purpose                              |
+| ------------------------------------------------ | ------------------------------------ |
+| `sandcastle init`                                | Generate `.sandcastle/`              |
+| `sandcastle project status`                      | Show Hub task board summary          |
+| `sandcastle agent-config path`                   | Show Hub agent config path           |
+| `sandcastle agent-config show`                   | Show configured Hub agent roles      |
+| `sandcastle agent-config init`                   | Interactive Hub agent role setup     |
+| `sandcastle agent-config configure`              | Alias for `agent-config init`        |
+| `sandcastle agent-config set-role <role>`        | Save a Hub agent role provider/model |
+| `sandcastle env path`                            | Show Hub env file path               |
+| `sandcastle env show`                            | Show configured Hub env keys         |
+| `sandcastle env init`                            | Interactive Hub credential setup     |
+| `sandcastle env configure`                       | Alias for `env init`                 |
+| `sandcastle env set <key> [value]`               | Save one Hub env value               |
+| `sandcastle tasks list`                          | Group Beads tasks by status          |
+| `sandcastle tasks show <selector>`               | Show one Beads task                  |
+| `sandcastle run . --flow <id> [--input <value>]` | Run a Hub flow                       |
+| `sandcastle tasks create <title>`                | Create a local Hub task              |
+| `sandcastle tasks triage [task-id]`              | Agent-driven triage proposal flow    |
+| `sandcastle tasks sync`                          | Sync GitHub Issues with Beads        |
+| `sandcastle tasks from-prd <ref>`                | Agent-driven PRD proposal flow       |
+| `sandcastle tasks comment <selector>`            | Append a Beads comment               |
+| `sandcastle tasks recover <selector>`            | Repair failed/stale task state       |
+| `sandcastle tasks delete <selector> [more...]`   | Delete local Beads tasks             |
+| `sandcastle docker build-image`                  | Build image from Dockerfile          |
+| `sandcastle docker remove-image`                 | Remove image                         |
+| `sandcastle --help`                              | Help                                 |
 
 ## Troubleshooting (known failure modes)
 
+- **Missing Hub agent role config / non-interactive flow failure**: Hub flows need provider/model settings for roles such as planning, triage, implementation, review, merge, and recovery. Run `sandcastle agent-config init` (or `configure`) in a TTY for first-time setup, `sandcastle agent-config show` to inspect roles, or `sandcastle agent-config set-role <role> --provider <provider> --model <model>` in scripts/CI.
+- **Cursor auth / `CURSOR_API_KEY` required in Hub flows**: Hub proposal and task flows run `agent --print` headlessly. `agent login` is not enough for automation. Run `sandcastle env init` to store shared credentials in the Sandcastle user data directory (`sandcastle env path`), or `sandcastle env set CURSOR_API_KEY <value>`. `process.env` overrides file values at runtime.
 - **`gh ... 401 Bad credentials` / `PromptError` during planner prompt expansion**: The sandbox `gh` uses mounted `.sandcastle/auth/gh` (or `GH_TOKEN`), independent of the host keyring. Host `gh auth status` succeeding does NOT mean the sandbox is authed. Fix: `GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login --insecure-storage`, or set a valid `GH_TOKEN` in `.sandcastle/.env`. Verify with `GH_CONFIG_DIR=.sandcastle/auth/gh gh issue list -l <label> --limit 1`.
 - **`bash .sandcastle/bootstrap.sh: No such file or directory` (exit 127)**: The hook script referenced by `onSandboxReady` is missing from the worktree. Restore it (`sandcastle init` for the profile, or recover from a stash). Often caused by a merge agent running `git stash push -u`, which sweeps untracked `.sandcastle/` files — recover with `git stash pop`.
 - **Long-lived loop keeps using stale config**: `main.ts` hooks are read once at process start. After editing `.sandcastle/main.ts`, restart the `main.ts` process; it does not hot-reload.

@@ -15,6 +15,8 @@ Only the **merge phase** closes issues. Implementers and reviewers must not clos
 
 ## Recovering from stalled work
 
-If an issue branch already has commits ahead of the base branch but the latest implementer run made no new commits (for example after a reviewer transport failure), the template still schedules review and merge for that branch.
+Before each implementer run, the template checks the **local** issue branch. If that branch already has commits ahead of the base branch (for example after a reviewer transport failure left work unmerged), it skips the implementer and goes straight to review and merge. This check uses local refs only, so it never matches an unrelated same-numbered branch from another remote.
 
-If the same issue completes with zero new commits across multiple iterations, the template stops scheduling it and prints recovery steps (merge the branch manually, close the issue, or fix the merge gate).
+If the same issue makes no merge progress across multiple iterations, the template stops scheduling it and prints recovery steps (merge the branch manually, close the issue, or fix the merge gate).
+
+The planner only performs dependency analysis; it does not inspect git branches. Branch state is handled deterministically in `main.mts`.

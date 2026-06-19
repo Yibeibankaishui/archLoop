@@ -71,6 +71,33 @@ export class InitError extends Data.TaggedError("InitError")<{
   readonly message: string;
 }> {}
 
+/** Hub project status operation failed */
+export class ProjectStatusError extends Data.TaggedError("ProjectStatusError")<{
+  readonly message: string;
+}> {}
+
+/** Hub task board operation failed */
+export class TaskBoardError extends Data.TaggedError("TaskBoardError")<{
+  readonly message: string;
+}> {}
+
+/** Hub flow execution failed */
+export class HubFlowError extends Data.TaggedError("HubFlowError")<{
+  readonly message: string;
+}> {}
+
+/** Hub agent role config operation failed */
+export class HubAgentConfigError extends Data.TaggedError(
+  "HubAgentConfigError",
+)<{
+  readonly message: string;
+}> {}
+
+/** Hub env file operation failed */
+export class HubEnvError extends Data.TaggedError("HubEnvError")<{
+  readonly message: string;
+}> {}
+
 /** Run exceeded the configured agent idle timeout */
 export class AgentIdleTimeoutError extends Data.TaggedError(
   "AgentIdleTimeoutError",
@@ -216,6 +243,11 @@ export type SandboxError =
   | AgentError
   | ConfigDirError
   | InitError
+  | ProjectStatusError
+  | TaskBoardError
+  | HubFlowError
+  | HubAgentConfigError
+  | HubEnvError
   | AgentIdleTimeoutError
   | WorktreeTimeoutError
   | ContainerStartTimeoutError

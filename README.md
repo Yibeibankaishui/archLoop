@@ -33,6 +33,10 @@ Sandcastle is provider-agnostic — it ships with built-in providers for Docker,
 npm install --save-dev @ai-hero/sandcastle
 ```
 
+Sandcastle bundles a pinned Beads runtime via `@beads/bd@1.0.4`, so Hub and
+Beads-backed commands can use the packaged `bd` binary without a separate
+system install. Set `SANDCASTLE_BD_PATH` to override the binary path if needed.
+
 2. Run `sandcastle init`. This scaffolds a `.sandcastle` directory with all the files needed.
 
 ```bash
@@ -648,6 +652,8 @@ console.log(result.output.score); // typed as number
 
 `parallel-planner-with-review` runs review and merge when an issue branch already has commits ahead of your current branch, even if the latest implementer run made no new commits (for example after a prior review failure). Prompts document the implement → review → merge → close lifecycle (only the merge phase closes issues), and the template stops repeated empty implement loops with actionable recovery steps. Re-run `sandcastle init` in an existing project to pick up template updates.
 
+For GitHub Issues backlogs, scaffolded planner templates list only issues in the current `ready-for-agent` queue (plus the `Sandcastle` label when label creation is enabled) and fail fast if the planner returns an issue outside that allowed queue.
+
 Select a template during `sandcastle init` when prompted, or re-run init in a fresh repo to try a different one.
 
 For all templates except `blank`, `.sandcastle/bootstrap.sh` is the repository bootstrap contract. `sandcastle init` scaffolds this user-editable script from your Project profile; non-blank templates run it from `sandbox.onSandboxReady` after the worktree is mounted and before the agent runs. Templates do not generate or repair bootstrap at run time. See [Project profiles](#project-profiles) under `sandcastle init` for the full model.
@@ -745,7 +751,11 @@ Think of the init agent choices as two layers:
 
 `main.mts`/`main.ts` remains the orchestration surface after init. If you install multiple runtimes, edit that file to import and call the providers you want for each `run()` or `createSandbox()` flow. For scripted init, omit `--runtimes` to install the selected `--agent` runtime, or pass a comma-separated list.
 
-When you pair `--sandbox no-sandbox` with `--backlog beads`, init validates that `bd` is already available on your host `PATH`. In no-sandbox mode, prompt shell expressions run on the host instead of inside a container, so Beads must be installed locally before the generated workflow can run.
+When you pair `--sandbox no-sandbox` with `--backlog beads`, init validates that
+`bd` is available from the bundled `@beads/bd` dependency, `SANDCASTLE_BD_PATH`,
+or your host `PATH`. In no-sandbox mode, prompt shell expressions run on the
+host instead of inside a container, so Beads still needs to be reachable from
+the host environment before the generated workflow can run.
 
 With `--sandbox no-sandbox` and `--project-profile python`, bootstrap runs on the host rather than in the Python profile image. Install `python3-venv` and/or `uv` on the host (Debian/Ubuntu: `apt install python3-venv`) so `.sandcastle/bootstrap.sh` can create a working virtualenv, or use the `docker` sandbox provider so the generated image supplies those tools.
 
@@ -768,6 +778,7 @@ What Project profile affects:
 
 - **Dockerfile or Containerfile** — language-specific tool layers composed with agent runtime and backlog manager layers.
 - **`.sandcastle/bootstrap.sh`** — a deterministic, user-editable scaffold script generated at init.
+- **Workflow prompts** — stack-specific verification guidance substituted into scaffolded prompt templates (for example npm checks for `node`, pytest-oriented checks for `python`, CMake/Make checks for `cpp`; `generic` stays user-editable).
 
 What Project profile does **not** affect:
 
@@ -818,6 +829,125 @@ Existing single-runtime projects remain valid. `sandcastle init` does not automa
 | `--install-miniprogram-ci`  | No       | Interactive prompt when applicable                | `true`/`false` to install project-local `miniprogram-ci` during `miniprogram` init                          |
 | `--create-sandcastle-label` | No       | Interactive prompt                                | `true`/`false` for creating the `Sandcastle` GitHub label                                                   |
 | `--build-image`             | No       | Interactive prompt                                | `true`/`false` to build sandbox image after scaffold                                                        |
+
+### `sandcastle project status`
+
+Reports the canonical git repo root, the Sandcastle user data directory, the Hub project directory, whether `bd` is available, and a CLI-first Hub task board summary. It works from any git repository, even if you have not run `sandcastle init` yet.
+
+The summary includes task counts by Hub status, active runs and batch statuses, failed tasks with failure reason and suggested next action, sync state counts such as `push_pending` or `conflict`, recent Hub events, and paths to Hub run directories for full logs and artifacts. Output remains useful when Beads is unavailable, there are no tasks, no active runs, or GitHub sync is not configured.
+
+Sandcastle resolves the user data directory from `XDG_DATA_HOME` when it is set and falls back to `~/.local/share/sandcastle`.
+
+### `sandcastle agent-config path`
+
+Prints the Hub-wide agent role config file path under the Sandcastle user data directory. Hub agent roles configure reusable stage providers and models for planning, triage, implementation, review, merge, and recovery. Credentials and login state stay in Hub env files and auth directories, not in role config.
+
+### `sandcastle agent-config show`
+
+Displays configured Hub agent roles and clearly reports missing roles. Use this before running agent-driven Hub flows to confirm provider/model settings are present.
+
+### `sandcastle agent-config init`
+
+Runs an interactive wizard to configure all Hub agent roles. You can apply one provider/model pair to every role, or configure each role individually. Use this for first-time Hub agent setup.
+
+### `sandcastle agent-config configure`
+
+Alias for `sandcastle agent-config init`.
+
+### `sandcastle agent-config set-role <role> [--provider <provider>] [--model <model>]`
+
+Persists provider, model, and optional provider options for a supported Hub agent role. In an interactive terminal, omit `--provider` and `--model` to configure the role via prompts. In non-interactive mode, both flags are required. Pass `--options` with comma-separated `key=value` pairs for provider-specific settings such as `effort=medium` or `mode=plan`. Role config stores provider/model/options only and rejects credential-like fields.
+
+### `sandcastle env path`
+
+Prints the Hub-wide env file path under the Sandcastle user data directory. Hub flows load credentials from this file so you do not need `sandcastle init` in every target repository.
+
+### `sandcastle env show`
+
+Displays configured Hub env keys with masked values. `process.env` overrides file values at runtime.
+
+### `sandcastle env init`
+
+Runs an interactive wizard to configure shared Hub credentials such as `CURSOR_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_KEY`, `OPENCODE_API_KEY`, and `GH_TOKEN`. The wizard prioritizes env keys required by your configured Hub agent roles.
+
+### `sandcastle env configure`
+
+Alias for `sandcastle env init`.
+
+### `sandcastle env set <key> [value]`
+
+Persists one Hub env value. In an interactive terminal, omit `value` to enter it securely at a prompt. In non-interactive mode, `value` is required.
+
+### `sandcastle tasks list`
+
+Shows the Hub task board grouped by canonical Hub task status from Beads data in the current git repository. Use it to inspect inbox, ready, blocked, implementation, review, merge, done, failure, and sync-conflict buckets. Each displayed task includes a 1-based list number that can be used as a task selector in follow-up commands.
+
+### `sandcastle tasks show <task-selector>`
+
+Shows a single Beads task with its Hub status, Beads lifecycle state, claim metadata/state, labels, metadata, comments, remote refs, and run refs when present.
+
+Task selectors resolve in this order: exact Beads id, exact task title, then the 1-based number shown by `sandcastle tasks list`. Ambiguous title matches fail with candidate ids instead of guessing.
+
+### `sandcastle tasks create <title>`
+
+Creates a local Beads task in the Hub `inbox` bucket with a `needs-triage` label and `origin` metadata. The `origin` flag defaults to `manual`; pass `--origin user-feedback` for feedback-driven tasks. Use `--description` for the task body and `--kind` for optional extra classification metadata when you need it. `--category` is accepted as an alias for `--kind`.
+
+### `sandcastle tasks triage [task-id]`
+
+Runs an agent-driven triage proposal flow for `inbox` and `needs_info` Hub tasks. The flow runs no-sandbox, prepares task and project context, invokes the configured **triage** role, lets you refine the recommendation in a proposal session, validates the final structured proposal, checks for unexpected repo or Beads mutations, and applies approved changes to local Beads only after confirmation. Applied comments start with `> *This was generated by AI during triage.*`.
+
+With no arguments in a TTY, Sandcastle opens a multi-select picker for inbox and needs_info tasks, including an **All inbox and needs_info tasks** option. Pass a Beads task id (for example `bd-42`) to triage one task, or `--query inbox,needs_info` to filter by Hub status. Pass `--yes` or `--approve` for one-shot mode: Sandcastle still invokes the agent and validates structured output, but only high-confidence, non-closing, non-dependency-changing decisions apply automatically. Wontfix, dependency changes, and medium/low confidence decisions require per-decision confirmation in interactive mode or are skipped as `unconfirmed` in non-interactive mode.
+
+Configure the Hub **triage** agent role before first use (`sandcastle agent-config init` or `set-role triage`).
+
+### `sandcastle tasks sync`
+
+Pulls GitHub Issues labeled `Sandcastle` into Beads and pushes core Hub collaboration state back to GitHub. Beads remains the local task store: execution statuses such as `implementing`, `reviewing`, `waiting_for_merge`, `merging`, and `failed` stay local, while collaboration statuses map to GitHub labels and `done` / `wontfix` close the remote issue when push succeeds. Sync failures record `push_pending` or `conflict` metadata without reopening completed local tasks, and semantic mismatches surface as `sync_conflict`.
+
+### `sandcastle tasks from-prd <prd-ref>`
+
+Runs the `prd-decomposition` proposal flow for a local PRD file. The flow runs no-sandbox, prepares PRD and project context, invokes the configured **planning** role, opens an interactive proposal session for tracer-bullet vertical slices, asks the agent for a final schema-validated task proposal, checks for unexpected repo or Beads mutations, and writes approved Beads tasks and dependency edges locally.
+
+Interactive sessions let you ask the agent to split, merge, reorder, reclassify, or clarify slices before approval. PRD-derived tasks default to `inbox` (`needs-triage`) unless you explicitly confirm direct `ready_for_agent` / `ready_for_human` creation after reviewing slice granularity, dependency suggestions, AFK/HITL classification, acceptance criteria, and warnings. Pass `--yes` for one-shot mode: Sandcastle still invokes the agent and validates structured output, creates inbox tasks by default, and does not silently create ready-state tasks.
+
+Configure the Hub **planning** agent role before first use (`sandcastle agent-config init` or `set-role planning`).
+
+Proposal flows never update GitHub Issues directly. They write local Beads tasks, comments, metadata, and dependency edges only; use `sandcastle tasks sync` when you want collaboration labels or closures pushed to a remote issue tracker.
+
+### `sandcastle tasks comment <task-selector>`
+
+Appends a readable Beads comment to the task without changing its status. Pass the comment text with `--body`, or omit it to enter the body interactively.
+
+### `sandcastle tasks recover <task-selector>`
+
+Repairs failed or stale Hub execution state for a single Beads task. Recovery is the explicit command allowed to release stale claim metadata, reset abandoned execution statuses such as `implementing` or `reviewing`, and move recoverable `failed` tasks back to an appropriate collaboration state (`ready_for_agent`, `ready_for_human`, `blocked`, or `wontfix`). For `failed(close_failed)`, recovery checks whether the task branch is already merged into `HEAD`, reruns verification, retries local Beads close, and marks the task `done` without repeating merge. Each recovery appends a concise Beads comment starting with `> *This was generated by Sandcastle during task recovery.*`.
+
+### `sandcastle tasks delete <task-selector> [task-selector...]`
+
+Permanently deletes one or more local Beads tasks. This is destructive removal, not lifecycle close: Hub merge/triage/recovery use close to mark work done locally while keeping the Beads record. Delete removes the task from Beads and does not delete remote GitHub issues.
+
+Task selectors match `tasks show` and `tasks comment` (Beads id, exact title, or `tasks list` number). Pass multiple selectors in one command to batch-delete. In a TTY, Sandcastle previews with Beads dry-run output and asks for confirmation. In non-interactive mode, pass `--yes` to confirm or `--dry-run` to preview only. `--cascade` passes through to Beads to recursively delete dependent tasks when a blocker would otherwise fail deletion.
+
+### `sandcastle run <project> --flow <id>`
+
+Runs a Hub-owned flow against the Beads task board in the target git repository. Use `.` for the current repository. Hub flows use bundled prompts from Sandcastle itself, not repo-local `.sandcastle/` prompt files.
+
+The first available task-board flows are `no-review` and `with-review`. Proposal flows `prd-decomposition` and `triage` run through the shared proposal session runtime: `sandcastle run . --flow prd-decomposition --input <prd-ref>` and `sandcastle run . --flow triage --input <task-id|statuses>` execute end-to-end. The matching `sandcastle tasks` shortcuts remain the recommended entry points.
+
+When `--flow` targets `prd-decomposition` or `triage`, Sandcastle runs the same agent-driven proposal path as the task shortcut: no-sandbox execution, Hub-wide role config, structured output validation, proposal artifacts in the Hub run directory, mutation detection before apply, and local-only Beads writes. Remote issue updates remain outside proposal flows and happen only through `sandcastle tasks sync`.
+
+The `no-review` flow reads the Beads ready queue, claims unblocked `ready_for_agent` tasks, runs an implementer with task id/title/branch supplied by TypeScript orchestration, and advances successful work to `waiting_for_merge`. Agent or sandbox failures move tasks to `failed` with a failure reason.
+
+The `with-review` flow adds a reviewer stage after implementation: successful work moves to `reviewing`, the reviewer receives the task branch and diff/commit context from orchestration, and completed review advances the task to `waiting_for_merge`. Review failures move tasks to `failed` with a failure reason.
+
+After implementation and review complete, Hub moves eligible `waiting_for_merge` tasks in the batch to `merging`, merges each branch with per-task events, runs verification after each merge, and closes the local Beads task only when merge, verification, and close all succeed. Merge conflicts, verification failures, or close failures stop the batch: the current task becomes `failed`, unprocessed tasks return to `waiting_for_merge`, and the batch becomes `partial_failed`.
+
+| Option    | Required | Description                                                                                                                     |
+| --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `--flow`  | Yes      | Hub flow id (`no-review`, `with-review`, `prd-decomposition`, `triage`)                                                         |
+| `--input` | No       | Flow-specific input (`<prd-ref>` for `prd-decomposition`; Beads task id or task query for `triage`, default `inbox,needs_info`) |
+
+Hub flow runs write run, batch, and task event records into the Hub run directory under the Sandcastle user data directory. The task board uses that run history to keep claims and execution progress separate from normal Beads task status.
 
 Creates the following files (plus optional `agents/`, `skills/`, `agent-profiles.json`, and Mini Program capability files when applicable):
 

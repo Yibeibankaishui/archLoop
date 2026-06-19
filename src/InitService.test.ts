@@ -201,9 +201,10 @@ describe("Agent runtime registry", () => {
       codexRuntime.dockerfileInstall.root!,
       codexRuntime.dockerfileTemplate,
     ]) {
-      expect(dockerfile).toContain("@openai/codex");
-      expect(dockerfile).toContain("@openai/codex-linux-x64");
+      expect(dockerfile).toContain("npm install -g @openai/codex");
       expect(dockerfile).toContain("codex --version");
+      expect(dockerfile).not.toContain("@openai/codex-linux-x64");
+      expect(dockerfile).not.toContain("CODEX_PLATFORM");
     }
   });
 
@@ -511,6 +512,97 @@ describe("InitService scaffold", () => {
     expect(dockerfile).not.toContain("{{PROJECT_PROFILE_TOOLS}}");
   });
 
+  describe("project profile prompt verification guidance", () => {
+    const promptFilesWithVerifyGuidance = [
+      "implement-prompt.md",
+      "merge-prompt.md",
+    ] as const;
+
+    it.each([
+      {
+        profileName: "python" as const,
+        includes: ["python -m pytest"],
+        excludes: ["npm run typecheck", "npm run test"],
+      },
+      {
+        profileName: "cpp" as const,
+        includes: ["cmake --build build"],
+        excludes: ["npm run typecheck", "npm run test"],
+      },
+      {
+        profileName: "node" as const,
+        includes: ["npm run typecheck", "npm run test"],
+        excludes: ["python -m pytest", "cmake --build build"],
+      },
+      {
+        profileName: "generic" as const,
+        includes: ["customize this prompt section"],
+        excludes: ["npm run typecheck", "npm run test"],
+      },
+    ])(
+      "scaffolds $profileName verification guidance into parallel-planner-with-review prompts",
+      async ({ profileName, includes, excludes }) => {
+        const dir = await makeDir();
+        await runScaffold(dir, {
+          templateName: "parallel-planner-with-review",
+          projectProfile: getProjectProfile(profileName)!,
+        });
+
+        for (const promptFile of promptFilesWithVerifyGuidance) {
+          const content = await readFile(
+            join(dir, ".sandcastle", promptFile),
+            "utf-8",
+          );
+          expect(content).not.toContain("{{PROJECT_PROFILE_VERIFY_GUIDANCE}}");
+          for (const text of includes) {
+            expect(content, promptFile).toContain(text);
+          }
+          for (const text of excludes) {
+            expect(content, promptFile).not.toContain(text);
+          }
+        }
+      },
+    );
+
+    it("preserves backlog placeholders while substituting project profile guidance", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner-with-review",
+        projectProfile: getProjectProfile("python")!,
+      });
+
+      const implementPrompt = await readFile(
+        join(dir, ".sandcastle", "implement-prompt.md"),
+        "utf-8",
+      );
+      expect(implementPrompt).toContain("{{TASK_ID}}");
+      expect(implementPrompt).toContain("gh issue view <ID>");
+      expect(implementPrompt).toContain("{{BRANCH}}");
+      expect(implementPrompt).toContain("python -m pytest");
+    });
+
+    it("appends Mini Program verification contract after project profile guidance", async () => {
+      const dir = await makeDir();
+      const capabilityInit = resolveCapabilityInitOptions({
+        capabilityId: "miniprogram",
+      });
+      await runScaffold(dir, {
+        templateName: "parallel-planner-with-review",
+        projectProfile: getProjectProfile("node")!,
+        capabilityInit,
+      });
+
+      const implementPrompt = await readFile(
+        join(dir, ".sandcastle", "implement-prompt.md"),
+        "utf-8",
+      );
+      expect(implementPrompt).toContain("npm run typecheck");
+      expect(implementPrompt).toContain(MINIPROGRAM_VERIFICATION_PROMPT_MARKER);
+      expect(implementPrompt).toContain(".sandcastle/verify.sh");
+      expect(implementPrompt).toContain("debug/wx-check.log");
+    });
+  });
+
   // --- Dynamic .env.example generation ---
 
   it.each([
@@ -811,9 +903,10 @@ describe("InitService scaffold", () => {
       "utf-8",
     );
 
-    expect(dockerfile).toContain("@openai/codex");
-    expect(dockerfile).toContain("@openai/codex-linux-x64");
+    expect(dockerfile).toContain("npm install -g @openai/codex");
     expect(dockerfile).toContain("codex --version");
+    expect(dockerfile).not.toContain("@openai/codex-linux-x64");
+    expect(dockerfile).not.toContain("CODEX_PLATFORM");
     expect(dockerfile).toContain("cursor.com/install");
     expect(dockerfile).toContain('test -x "$HOME/.local/bin/agent"');
     expect(dockerfile).not.toContain("claude.ai/install.sh");
@@ -1382,9 +1475,10 @@ describe("InitService scaffold", () => {
       "utf-8",
     );
     expect(dockerfile).toContain("FROM node:22-bookworm");
-    expect(dockerfile).toContain("@openai/codex");
-    expect(dockerfile).toContain("@openai/codex-linux-x64");
+    expect(dockerfile).toContain("npm install -g @openai/codex");
     expect(dockerfile).toContain("codex --version");
+    expect(dockerfile).not.toContain("@openai/codex-linux-x64");
+    expect(dockerfile).not.toContain("CODEX_PLATFORM");
     expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
   });
 
@@ -1466,6 +1560,19 @@ describe("InitService scaffold", () => {
     );
     expect(prompt).not.toContain("-l Sandcastle");
     expect(prompt).toContain("gh issue list");
+  });
+
+  it("parallel-planner main.mts strips only the Sandcastle label when createLabel is false", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, {
+      templateName: "parallel-planner",
+      createLabel: false,
+    });
+
+    const main = await readFile(join(dir, ".sandcastle", "main.mts"), "utf-8");
+    expect(main).toContain("gh issue list");
+    expect(main).not.toContain("-l Sandcastle");
+    expect(main).toContain("-l ready-for-agent");
   });
 
   it("sequential-reviewer implement-prompt.md strips -l Sandcastle when createLabel is false", async () => {
@@ -1752,7 +1859,7 @@ describe("InitService scaffold", () => {
       // Reviewer result must be captured, not discarded
       expect(mainTs).toContain("const review = await sandbox.run");
       // Commits from both implementer and reviewer must be merged
-      expect(mainTs).toContain("implement.commits");
+      expect(mainTs).toContain("implement?.commits");
       expect(mainTs).toContain("review.commits");
     });
 
@@ -1927,7 +2034,7 @@ describe("InitService scaffold", () => {
       expect(prompt).not.toMatch(/left open for human review/i);
     });
 
-    it("plan-prompt.md guides planner to skip fresh implementation for branches with unmerged commits", async () => {
+    it("plan-prompt.md leaves branch detection to the template, not the planner", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
@@ -1935,8 +2042,28 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "plan-prompt.md"),
         "utf-8",
       );
-      expect(prompt).toMatch(/unmerged commits|commits ahead/i);
-      expect(prompt).toMatch(/sandcastle\/issue-\{id\}/);
+      // The planner must only do dependency analysis; deterministic branch
+      // detection lives in main.mts. Instructing the LLM to match
+      // `sandcastle/issue-{id}-*` branches caused it to pick up unrelated
+      // same-numbered branches from other remotes.
+      expect(prompt).not.toContain("# EXISTING BRANCHES");
+      expect(prompt).not.toContain("git rev-list <base>..refs/heads/<branch>");
+      expect(prompt).toMatch(/do \*\*not\*\* inspect git branches/i);
+    });
+
+    it("main.mts skips fresh implementation when the local branch is already ahead", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain(
+        "const priorCommitsAhead = await countBranchCommitsAhead",
+      );
+      expect(mainTs).toMatch(/if \(priorCommitsAhead > 0\)/);
+      expect(mainTs).toContain("skipping fresh implementation");
     });
 
     it("main.mts applies an empty-run circuit breaker with actionable recovery steps", async () => {
@@ -1985,6 +2112,12 @@ describe("InitService scaffold", () => {
       expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
         "gh issue list",
       );
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+        "-l Sandcastle",
+      );
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
+        "-l ready-for-agent",
+      );
       expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain("labels");
       expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain("comments");
       expect(manager!.templateArgs.VIEW_TASK_COMMAND).toContain(
@@ -2008,6 +2141,18 @@ describe("InitService scaffold", () => {
       expect(manager!.templateArgs.CLOSE_TASK_COMMAND).toContain("bd close");
       expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain("beads");
       expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain("libicu72");
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain(
+        "gastownhall/beads",
+      );
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain(
+        "beads_1.0.4_linux_amd64.tar.gz",
+      );
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).not.toContain(
+        "steveyegge/beads",
+      );
+      expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).not.toContain(
+        "scripts/install.sh",
+      );
       expect(manager!.templateArgs.BACKLOG_MANAGER_TOOLS).toContain(
         "corepack enable",
       );
@@ -2230,10 +2375,35 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "plan-prompt.md"),
         "utf-8",
       );
-      expect(planPrompt).toContain("gh issue list");
-      expect(planPrompt).toContain("labels");
-      expect(planPrompt).toContain("comments");
+      expect(planPrompt).toContain("{{ISSUES_JSON}}");
+      expect(planPrompt).toContain(
+        "You may only choose issues from the provided `<issues-json>` list",
+      );
+      expect(planPrompt).toContain("If `<issues-json>` is an empty array");
+      expect(planPrompt).not.toContain("!`gh issue list");
       expect(planPrompt).not.toContain("{{LIST_TASKS_COMMAND}}");
+    });
+
+    it("parallel-planner main.mts lists and validates the ready queue before implementation", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner",
+        backlogManager: getBacklogManager("github-issues"),
+      });
+
+      const main = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(main).toContain("-l Sandcastle -l ready-for-agent");
+      expect(main).toContain(
+        "const readyIssuesJson = await listReadyIssuesJson()",
+      );
+      expect(main).toContain("extractAllowedIssueIds");
+      expect(main).toContain("assertPlanUsesAllowedIssues");
+      expect(main).toContain("ISSUES_JSON: readyIssuesJson");
+      expect(main).toContain("outside this run's ready queue");
+      expect(main).not.toContain("{{LIST_TASKS_COMMAND}}");
     });
 
     it("parallel-planner with beads produces plan-prompt with bd commands", async () => {
@@ -2247,8 +2417,11 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "plan-prompt.md"),
         "utf-8",
       );
-      expect(planPrompt).toContain("bd ready --json");
-      expect(planPrompt).not.toContain("gh issue");
+      expect(planPrompt).toContain("{{ISSUES_JSON}}");
+      expect(planPrompt).toContain(
+        "You may only choose issues from the provided `<issues-json>` list",
+      );
+      expect(planPrompt).not.toContain("!`bd ready --json");
       expect(planPrompt).not.toContain("{{LIST_TASKS_COMMAND}}");
     });
 
@@ -2383,10 +2556,35 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "plan-prompt.md"),
         "utf-8",
       );
-      expect(planPrompt).toContain("gh issue list");
-      expect(planPrompt).toContain("labels");
-      expect(planPrompt).toContain("comments");
+      expect(planPrompt).toContain("{{ISSUES_JSON}}");
+      expect(planPrompt).toContain(
+        "You may only choose issues from the provided `<issues-json>` list",
+      );
+      expect(planPrompt).toContain("If `<issues-json>` is an empty array");
+      expect(planPrompt).not.toContain("!`gh issue list");
       expect(planPrompt).not.toContain("{{LIST_TASKS_COMMAND}}");
+    });
+
+    it("parallel-planner-with-review main.mts lists and validates the ready queue before implementation", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner-with-review",
+        backlogManager: getBacklogManager("github-issues"),
+      });
+
+      const main = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(main).toContain("-l Sandcastle -l ready-for-agent");
+      expect(main).toContain(
+        "const readyIssuesJson = await listReadyIssuesJson()",
+      );
+      expect(main).toContain("extractAllowedIssueIds");
+      expect(main).toContain("assertPlanUsesAllowedIssues");
+      expect(main).toContain("ISSUES_JSON: readyIssuesJson");
+      expect(main).toContain("outside this run's ready queue");
+      expect(main).not.toContain("{{LIST_TASKS_COMMAND}}");
     });
 
     it("parallel-planner-with-review with beads produces plan-prompt with bd commands", async () => {
@@ -2400,8 +2598,11 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "plan-prompt.md"),
         "utf-8",
       );
-      expect(planPrompt).toContain("bd ready --json");
-      expect(planPrompt).not.toContain("gh issue");
+      expect(planPrompt).toContain("{{ISSUES_JSON}}");
+      expect(planPrompt).toContain(
+        "You may only choose issues from the provided `<issues-json>` list",
+      );
+      expect(planPrompt).not.toContain("!`bd ready --json");
       expect(planPrompt).not.toContain("{{LIST_TASKS_COMMAND}}");
     });
 
@@ -2554,9 +2755,13 @@ describe("InitService scaffold", () => {
       );
       expect(dockerfile).toContain("beads");
       expect(dockerfile).toContain("libicu72");
+      expect(dockerfile).toContain("gastownhall/beads");
+      expect(dockerfile).toContain("beads_1.0.4_linux_amd64.tar.gz");
       expect(dockerfile).toContain("corepack enable");
       expect(dockerfile).not.toContain("GitHub CLI");
       expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
+      expect(dockerfile).not.toContain("steveyegge/beads");
+      expect(dockerfile).not.toContain("scripts/install.sh");
       expect(dockerfile).not.toContain("x86_64-linux-gnu");
       expect(dockerfile).toContain("dpkg-architecture -qDEB_HOST_MULTIARCH");
     });
@@ -2575,8 +2780,12 @@ describe("InitService scaffold", () => {
       );
       expect(containerfile).toContain("beads");
       expect(containerfile).toContain("libicu72");
+      expect(containerfile).toContain("gastownhall/beads");
+      expect(containerfile).toContain("beads_1.0.4_linux_amd64.tar.gz");
       expect(containerfile).not.toContain("GitHub CLI");
       expect(containerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
+      expect(containerfile).not.toContain("steveyegge/beads");
+      expect(containerfile).not.toContain("scripts/install.sh");
       expect(containerfile).not.toContain("x86_64-linux-gnu");
       expect(containerfile).toContain("dpkg-architecture -qDEB_HOST_MULTIARCH");
     });

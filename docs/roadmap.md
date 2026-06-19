@@ -10,7 +10,7 @@ flowchart LR
     P02 --> P03["03 Capability Packs 与专业化开发闭环<br/>Done<br/>能力包 / 小程序 / 验证闭环"]
     P03 --> P04["04 Docker 环境与容器接入<br/>Planned<br/>Custom Dockerfile / Existing Container"]
     P04 --> P05["05 文档与用户体验<br/>Planned<br/>README / Init Next Steps / 用户指南"]
-    P05 --> P06["06 GUI<br/>Planned<br/>运行观察 / 配置管理 / Review 状态"]
+    P05 --> P06["06 Sandcastle Hub 与 GUI<br/>Planned<br/>任务表 / Flow / 配置管理 / 可视化"]
 
     P01 -. "能力沉淀" .-> P04
     P02 -. "使用边界" .-> P05
@@ -129,6 +129,7 @@ Goal: 让 Sandcastle 不再默认假设 Node 项目，而是通过项目级 boot
 - [x] 完成 `sandcastle init` 项目类型选择的产品/交互设计，包括 scripted init 参数和交互式选择（见 [#20](https://github.com/Yibeibankaishui/sandcastle/issues/20)）。
 - [x] 完成 Node、Python、C++ Project profiles 的实现拆分与 issue 准备（见 [#23](https://github.com/Yibeibankaishui/sandcastle/issues/23)、[#24](https://github.com/Yibeibankaishui/sandcastle/issues/24)、[#25](https://github.com/Yibeibankaishui/sandcastle/issues/25)）。
 - [x] 明确通用 Docker 镜像与 Project profile 的边界，并确认 bootstrap 不参与 image build、不由 init 验证（见 [ADR-0015](./adr/0015-project-profiles-generate-bootstrap-at-init-time.md)）。
+- [x] Project profile 影响生成 prompt 中的默认验证命令提示（见 [#75](https://github.com/Yibeibankaishui/sandcastle/issues/75)）。
 - [x] 调整 `sandcastle init` 的 sandbox 选项：新增 `no-sandbox`，隐藏 `podman`（保留 podman 命令与运行时代码）。
 - [x] 修复 `sandcastle init` 的 scaffold 入口与 sandbox 选择脱节的问题，并为 `no-sandbox + beads` 增加 `bd` host 依赖校验与提示。
 - [ ] 实现 `generic` Project profile 与 `--project-profile` 基础路径（见 [#21](https://github.com/Yibeibankaishui/sandcastle/issues/21)）。
@@ -263,30 +264,56 @@ Goal: 让用户能从 README、模板、init next steps 和 roadmap 中理解 Sa
 
 - [ ] 审阅 README，并按当前代码更新 public API 与 CLI 示例（Project profile 文档收口见 [#26](https://github.com/Yibeibankaishui/sandcastle/issues/26)）。
 - [ ] 补齐 provider/runtime/template/preset role 的概念说明。
+- [ ] 补齐 `sandcastle project status` 与 Sandcastle user data directory 的用户说明（见 [#63](https://github.com/Yibeibankaishui/sandcastle/issues/63)）。
 - [x] 补齐 capability pack 和小程序开发闭环说明（见 [capability-packs](./prd/capability-packs.md)、[ADR-0016](./adr/0016-capability-packs-compose-specialized-init-scaffolds.md)、[#48](https://github.com/Yibeibankaishui/sandcastle/issues/48)）。
 - [ ] 为常见工作流补充用户指南。
 - [ ] 建立 roadmap 与 PRD、ADR、changeset、issue 的链接规范。
 
-## 06 GUI
+## 06 Sandcastle Hub 与 GUI
 
 Status: Planned
 
-Goal: 提供可视化界面，用于配置、运行、观察和管理 Sandcastle workflow。
+Goal: 提供 CLI-first 的 Sandcastle Hub 控制面，并在同一状态模型上承接后续 GUI，用于管理项目、任务表、凭证、flows、运行观察和恢复。
 
 ### Scope
 
-- GUI 的核心用户路径、信息架构和运行入口。
-- Run、sandbox、branch、logs、agent stream、commits 和 review 状态的可视化模型。
-- GUI 与现有 CLI / JS API 的边界、复用关系和数据来源。
+- Sandcastle Hub 与现有 `sandcastle init` scaffold 路径的边界。
+- Hub project config、Hub project assets、Hub env file、Hub auth directory 和 Hub run directory。
+- Beads 本地任务表、远程任务源 pull/push sync、agent-driven PRD/triage proposal flows、任务评论和 recovery。
+- Flow、flow batch、task/run/batch 状态机、per-task merge events 和 task board projection。
+- 后续 GUI 的核心用户路径、信息架构和运行入口。
+- GUI 与 Hub CLI / JS API 的边界、复用关系和数据来源。
 
 ### Deliverables
 
-- GUI 的目标用户、核心流程和最小可用范围被明确记录。
-- 可视化状态模型能覆盖 Sandcastle 的 run lifecycle、sandbox lifecycle 和 agent output。
-- GUI 后续实现有独立 PRD 或设计文档承接。
+- Sandcastle Hub 的目标用户、核心流程和最小可用范围被明确记录。
+- Hub task board 的本地任务源、远程同步、任务状态机和 flow 事件模型被明确记录。
+- 可视化状态模型能覆盖 Sandcastle 的 task、batch、run、sandbox lifecycle 和 agent output。
+- GUI 后续实现能复用 Hub task board 与 run/event 数据模型。
 
 ### Tasks
 
-- [ ] 定义 GUI 的核心用户路径。
+- [x] 明确 Hub task board、Beads 本地任务源、远程任务源同步与状态机设计（见 [sandcastle-hub-task-board](./prd/sandcastle-hub-task-board.md)、[ADR-0021](./adr/0021-hub-task-board-uses-beads-local-store.md)、[ADR-0022](./adr/0022-hub-flows-emit-per-task-merge-events.md)、[ADR-0023](./adr/0023-hub-task-statuses.md)）。
+- [x] 实现 `sandcastle tasks list` / `sandcastle tasks show <task-selector>` 的只读 task board 投影与 Hub 状态分组；task selector 支持 Beads id、完整标题或 `tasks list` 序号。
+- [x] 实现 `sandcastle tasks create <title>` / `sandcastle tasks comment <task-selector>` 的本地任务创建与评论写入。
+- [x] 实现 `sandcastle tasks triage` 的 inbox / needs_info 协作状态分流与 AI triage 评论（见 [#66](https://github.com/Yibeibankaishui/sandcastle/issues/66)）。
+- [x] 实现 `sandcastle tasks from-prd <prd-ref>` 的 PRD 垂直切片分解、AFK/HITL 分类、人工确认依赖与 Beads 任务创建（见 [#67](https://github.com/Yibeibankaishui/sandcastle/issues/67)）。
+- [x] 实现 task claim metadata 与 Hub run 事件存储，为 flow 执行提供 run/batch/task 记录（见 [#69](https://github.com/Yibeibankaishui/sandcastle/issues/69)）。
+- [x] 实现首个 no-review Hub flow：从 Beads ready queue 选择任务、claim、运行 implementer，并将成功任务推进到 `waiting_for_merge`（见 [#70](https://github.com/Yibeibankaishui/sandcastle/issues/70)）。
+- [x] 实现 `sandcastle tasks sync` 的 GitHub Issues 远程同步：拉取 Issue 到 Beads、推送协作状态标签/关闭动作，并记录 `push_pending` / `sync_conflict`（见 [#68](https://github.com/Yibeibankaishui/sandcastle/issues/68)）。
+- [x] 实现 with-review Hub flow：implementation 成功后进入 `reviewing`，reviewer 完成后推进到 `waiting_for_merge`（见 [#71](https://github.com/Yibeibankaishui/sandcastle/issues/71)）。
+- [x] 实现 Hub batch merge：eligible `waiting_for_merge` 任务进入 `merging`，按任务 emit merge/verification/close 事件，并在 merge、verification、本地 close 全部成功后标记 `done`（见 [#72](https://github.com/Yibeibankaishui/sandcastle/issues/72)）。
+- [x] 实现 `sandcastle tasks recover <task-selector>`：释放 stale claim、恢复 recoverable `failed` 任务，并处理已 merge 分支上的 `close_failed`（见 [#73](https://github.com/Yibeibankaishui/sandcastle/issues/73)）。
+- [x] 增强 `sandcastle project status`：汇总 Hub 任务状态计数、active run/batch、失败任务与 sync 状态，并指向 Hub run 目录（见 [#74](https://github.com/Yibeibankaishui/sandcastle/issues/74)）。
+- [x] 实现 Hub-wide agent role config CLI：`agent-config path/show/set-role`、缺失角色提示与非交互失败行为（见 [#79](https://github.com/Yibeibankaishui/sandcastle/issues/79)、parent [#78](https://github.com/Yibeibankaishui/sandcastle/issues/78)）。
+- [x] 为 Hub flow registry 增加 typed input schema，并在 `sandcastle run --flow --input` 与 task shortcut 命令中校验 proposal flow 输入（见 [#80](https://github.com/Yibeibankaishui/sandcastle/issues/80)、parent [#78](https://github.com/Yibeibankaishui/sandcastle/issues/78)）。
+- [x] 实现 proposal session runtime：Hub 管理 transcript、结构化 finalization、取消/失败路径，并在 Hub run 目录持久化 prepared context、transcript、final proposal、apply placeholder 与 events（见 [#81](https://github.com/Yibeibankaishui/sandcastle/issues/81)、parent [#78](https://github.com/Yibeibankaishui/sandcastle/issues/78)）。
+- [x] 实现 proposal flow mutation detection：在 proposal flow 前后快照 repo 与本地 task store，检测意外变更后 fail before apply，报告变更且不自动回滚（见 [#82](https://github.com/Yibeibankaishui/sandcastle/issues/82)、parent [#78](https://github.com/Yibeibankaishui/sandcastle/issues/78)）。
+- [x] 实现 prd-decomposition proposal flow：Sandcastle-owned prompt、结构化 proposal schema、proposal session 编排、Beads apply 与 `sandcastle tasks from-prd` 接线（见 [#83](https://github.com/Yibeibankaishui/sandcastle/issues/83)、parent [#78](https://github.com/Yibeibankaishui/sandcastle/issues/78)）。
+- [x] 实现 triage proposal flow：Sandcastle-owned prompt、结构化 triage proposal schema、proposal session 编排、guarded `--yes` apply，并将 `sandcastle tasks triage` 接到 agent-driven proposal path（见 [#84](https://github.com/Yibeibankaishui/sandcastle/issues/84)、parent [#78](https://github.com/Yibeibankaishui/sandcastle/issues/78)）。
+- [x] 将 `sandcastle run --flow prd-decomposition/triage` 与 task shortcut 统一到 proposal flow 主路径，并将 deterministic PRD/triage helper 保留为测试或显式 fallback（见 [#85](https://github.com/Yibeibankaishui/sandcastle/issues/85)、parent [#78](https://github.com/Yibeibankaishui/sandcastle/issues/78)）。
+- [x] 完成 agent-driven task proposal flows 的文档与人工 QA 收尾：README、bundled usage skill、Hub task board PRD、QA 指标和 roadmap 均明确 proposal sessions、Hub-wide `agent-config`、`run --flow --input`、local-only Beads writes、task sync 边界、guarded `--yes` 行为和需要真实 agent 人工验收的场景（见 [#86](https://github.com/Yibeibankaishui/sandcastle/issues/86)、parent [#78](https://github.com/Yibeibankaishui/sandcastle/issues/78)）。
+- [ ] 定义 Sandcastle Hub 控制面的核心用户路径。
+- [ ] 设计 Hub project onboarding、credentials 和 flow run CLI。
 - [ ] 设计 run / sandbox / branch / logs / agent stream 的可视化模型。
-- [ ] 明确 GUI 与现有 CLI / JS API 的关系。
+- [ ] 明确 GUI 与 Hub CLI / JS API 的关系。

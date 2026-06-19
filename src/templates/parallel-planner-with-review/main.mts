@@ -22,14 +22,58 @@
 //   npm run sandcastle
 // Or directly: tsx .sandcastle/main.mts
 
-import { execFile } from "node:child_process";
+import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 
+const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
 type PlannedIssue = { id: string; title: string; branch: string };
+
+const LIST_TASKS_COMMAND = `{{LIST_TASKS_COMMAND}}`;
+
+async function listReadyIssuesJson(): Promise<string> {
+  const { stdout } = await execAsync(LIST_TASKS_COMMAND, {
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  return stdout.trim() || "[]";
+}
+
+function extractAllowedIssueIds(issuesJson: string): Set<string> {
+  const parsed = JSON.parse(issuesJson) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error("Ready issue list did not contain a JSON array.");
+  }
+
+  return new Set(
+    parsed
+      .map((issue) => {
+        if (!issue || typeof issue !== "object") return undefined;
+        const record = issue as { id?: unknown; number?: unknown };
+        const id = record.id ?? record.number;
+        return id === undefined || id === null ? undefined : String(id);
+      })
+      .filter((id): id is string => id !== undefined),
+  );
+}
+
+function assertPlanUsesAllowedIssues(
+  issues: PlannedIssue[],
+  allowedIssueIds: Set<string>,
+): void {
+  const outOfScope = issues.filter(
+    (issue) => !allowedIssueIds.has(String(issue.id)),
+  );
+  if (outOfScope.length > 0) {
+    throw new Error(
+      `Planner selected issue(s) outside this run's ready queue: ${outOfScope
+        .map((issue) => issue.id)
+        .join(", ")}`,
+    );
+  }
+}
 
 /** Host repo branch that issue branches merge into (current HEAD). */
 async function getCurrentBranch(): Promise<string> {
@@ -151,6 +195,9 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   //
   // It outputs a <plan> JSON block — we parse that to drive Phase 2.
   // -------------------------------------------------------------------------
+  const readyIssuesJson = await listReadyIssuesJson();
+  const allowedIssueIds = extractAllowedIssueIds(readyIssuesJson);
+
   const plan = await sandcastle.run({
     hooks,
     sandbox: sandboxProvider,
@@ -161,6 +208,9 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     // Opus for planning: dependency analysis benefits from deeper reasoning.
     agent: sandcastle.claudeCode("claude-opus-4-6"),
     promptFile: "./.sandcastle/plan-prompt.md",
+    promptArgs: {
+      ISSUES_JSON: readyIssuesJson,
+    },
   });
 
   // Extract the <plan>…</plan> block from the agent's stdout.
@@ -175,6 +225,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   const { issues } = JSON.parse(planMatch[1]!) as {
     issues: PlannedIssue[];
   };
+  assertPlanUsesAllowedIssues(issues, allowedIssueIds);
 
   if (issues.length === 0) {
     // No unblocked work — either everything is done or everything is blocked.
@@ -220,20 +271,36 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       });
 
       try {
-        // Run the implementer
-        const implement = await sandbox.run({
-          name: "implementer",
-          maxIterations: 100,
-          agent: sandcastle.claudeCode("claude-sonnet-4-6"),
-          promptFile: "./.sandcastle/implement-prompt.md",
-          promptArgs: {
-            TASK_ID: issue.id,
-            ISSUE_TITLE: issue.title,
-            BRANCH: issue.branch,
-          },
-        });
+        // Check the LOCAL issue branch first. If it already has commits ahead
+        // of the base (e.g. a prior iteration implemented it but review/merge
+        // never finished), skip a fresh implementer run and go straight to
+        // review/merge. This uses local refs only, so it never matches an
+        // unrelated same-numbered branch from another remote.
+        const priorCommitsAhead = await countBranchCommitsAhead(
+          currentBranch,
+          issue.branch,
+        );
 
-        const commitsThisRun = implement.commits.length;
+        let implement: Awaited<ReturnType<typeof sandbox.run>> | undefined;
+        if (priorCommitsAhead > 0) {
+          console.log(
+            `  ${issue.id}: branch already has ${priorCommitsAhead} commit(s) ahead of ${currentBranch}; skipping fresh implementation.`,
+          );
+        } else {
+          implement = await sandbox.run({
+            name: "implementer",
+            maxIterations: 100,
+            agent: sandcastle.claudeCode("claude-sonnet-4-6"),
+            promptFile: "./.sandcastle/implement-prompt.md",
+            promptArgs: {
+              TASK_ID: issue.id,
+              ISSUE_TITLE: issue.title,
+              BRANCH: issue.branch,
+            },
+          });
+        }
+
+        const commitsThisRun = implement?.commits.length ?? 0;
         const branchCommitsAhead = await countBranchCommitsAhead(
           currentBranch,
           issue.branch,
@@ -264,11 +331,11 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           // Each sandbox.run() only returns commits from its own run.
           pipelineResult = {
             ...review,
-            commits: [...implement.commits, ...review.commits],
+            commits: [...(implement?.commits ?? []), ...review.commits],
           };
         }
 
-        return { ...pipelineResult, branchHasUnmergedWork };
+        return { ...pipelineResult!, branchHasUnmergedWork };
       } finally {
         await sandbox.close();
       }
@@ -330,9 +397,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
       // A markdown list of branch names, one per line.
       BRANCHES: completedBranches.map((b) => `- ${b}`).join("\n"),
       // A markdown list of issue IDs and titles, one per line.
-      ISSUES: completedIssues
-        .map((i) => `- ${i.id}: ${i.title}`)
-        .join("\n"),
+      ISSUES: completedIssues.map((i) => `- ${i.id}: ${i.title}`).join("\n"),
     },
   });
 

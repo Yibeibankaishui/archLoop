@@ -4,15 +4,20 @@ Here are the open issues in the repo:
 
 <issues-json>
 
-!`{{LIST_TASKS_COMMAND}}`
+{{ISSUES_JSON}}
 
 </issues-json>
 
-The list above has already been filtered to issues ready for work.
+The list above is the complete allowed ready queue for this planner run.
 
 # TASK
 
 Analyze the open issues and build a dependency graph. For each issue, determine whether it **blocks** or **is blocked by** any other open issue.
+
+You may only choose issues from the provided `<issues-json>` list. Do not run
+additional `gh issue list`, `bd list`, `bd ready`, or other backlog-listing
+commands to discover more tasks. If `<issues-json>` is an empty array, output an
+empty plan.
 
 An issue B is **blocked by** issue A if:
 
