@@ -103,13 +103,19 @@ export interface RecordMergeFailureInput extends RecordMergePhaseFailureInput {
   >;
 }
 
+export interface CloseHubTaskInput {
+  readonly cwd: string;
+  readonly taskId: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  readonly env?: NodeJS.ProcessEnv;
+}
+
+export type HubTaskCloser = (
+  input: CloseHubTaskInput,
+) => Promise<HubTaskProjection>;
+
 export interface RecordTaskClosureInput extends RecordMergePhaseFailureInput {
-  readonly closer?: (input: {
-    readonly cwd: string;
-    readonly taskId: string;
-    readonly metadata: Readonly<Record<string, unknown>>;
-    readonly env?: NodeJS.ProcessEnv;
-  }) => Promise<HubTaskProjection>;
+  readonly closer?: HubTaskCloser;
 }
 
 export interface RevertTaskToWaitingForMergeInput {
@@ -377,18 +383,18 @@ export const recordCloseFailure = (
     failureReason: "close_failed",
   });
 
+const defaultCloseHubTask: HubTaskCloser = async (closeInput) =>
+  closeHubTask({
+    cwd: closeInput.cwd,
+    taskId: closeInput.taskId,
+    metadata: closeInput.metadata,
+    env: closeInput.env,
+  });
+
 export const recordTaskClosure = async (
   input: RecordTaskClosureInput,
 ): Promise<HubTaskLifecycleResult> => {
-  const closer =
-    input.closer ??
-    (async (closeInput) =>
-      closeHubTask({
-        cwd: closeInput.cwd,
-        taskId: closeInput.taskId,
-        metadata: closeInput.metadata,
-        env: closeInput.env,
-      }));
+  const closer = input.closer ?? defaultCloseHubTask;
 
   const closedTask = await closer({
     cwd: input.cwd,
