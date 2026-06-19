@@ -29,7 +29,13 @@ The repo ships a portable agent skill at `skills/sandcastle-usage/SKILL.md` that
 
 ### Issue tracker
 
-Issues are GitHub issues in the repository `gh` resolves for this clone (`gh repo view`). See `docs/agents/issue-tracker.md` for how to point `gh issue` at a fork (`gh repo set-default`). Upstream source repository: `mattpocock/sandcastle`.
+Issues are GitHub issues in the repository `gh` resolves for this clone (`gh repo view`).
+
+For this clone, treat `Yibeibankaishui/sandcastle` as the default remote repository for all `gh issue`, `gh pr`, PRD publication, and other GitHub CLI write operations. Before creating or editing issues/PRs, verify that `gh repo set-default --view` resolves to `Yibeibankaishui/sandcastle`; if it does not, either run `gh repo set-default Yibeibankaishui/sandcastle` or pass `-R Yibeibankaishui/sandcastle` explicitly on the command.
+
+Do not assume `origin` is the writable/default GitHub target for agent operations. In this clone, `origin` may point at upstream (`mattpocock/sandcastle`) while the intended default GitHub CLI target is the fork (`Yibeibankaishui/sandcastle`).
+
+See `docs/agents/issue-tracker.md` for general `gh` default-repository behavior. Upstream source repository: `mattpocock/sandcastle`.
 
 ### Triage labels
 
