@@ -735,7 +735,9 @@ export const runHubFlow = async (
       runId: context.runId,
       batchId: resumedBatchId ?? context.batchId,
       env: input.env,
-      merger: input.merger ?? createHubFlowRunMerger({ cwd: repoRoot }),
+      merger:
+        input.merger ??
+        createHubFlowRunMerger({ cwd: repoRoot, env: input.env }),
       verifier: input.verifier ?? createHubFlowRunVerifier({ cwd: repoRoot }),
     });
   }

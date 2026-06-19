@@ -9,6 +9,7 @@ import {
   createHubFlowRunVerifier,
   formatHubBatchMergeResultLines,
   runHubBatchMerge,
+  type HubMergeConflictResolver,
   type HubFlowMerger,
   type HubFlowVerifier,
   type HubMergeBranchInspector,
@@ -1059,8 +1060,15 @@ describe("runHubBatchMerge", () => {
     await execAsync("git checkout main", { cwd: repoDir });
 
     const merger = createHubFlowRunMerger({ cwd: repoDir });
+    const context = createMergeContext(
+      repoDir,
+      "batch-default-git",
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
     const result = await merger({
       flowId: "no-review",
+      runId: context.runId,
+      batchId: context.batchId,
       taskId: "bd-git",
       title: "Feature",
       branch,
@@ -1071,6 +1079,124 @@ describe("runHubBatchMerge", () => {
     expect(result.outcome).toBe("success");
     const merged = await readFile(join(repoDir, "feature.txt"), "utf-8");
     expect(merged).toBe("feature");
+  });
+
+  it("uses an agent conflict resolver when the default merger hits conflicts", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-batch-merge-agent-resolve-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "shared.txt", "base\n", "initial commit");
+
+    const branch = "sandcastle/bd-agent-conflict";
+    await execAsync(`git checkout -b "${branch}"`, { cwd: repoDir });
+    await commitFile(repoDir, "shared.txt", "branch\n", "branch edit");
+    await execAsync("git checkout main", { cwd: repoDir });
+    await commitFile(repoDir, "shared.txt", "main\n", "main edit");
+
+    const seenInputs: Array<{ conflictedFiles: readonly string[] }> = [];
+    const conflictResolver: HubMergeConflictResolver = async (input) => {
+      seenInputs.push({ conflictedFiles: input.conflictedFiles });
+      expect(input.gitStatus).toContain("UU shared.txt");
+      await writeFile(join(repoDir, "shared.txt"), "resolved\n");
+      await execAsync("git add shared.txt", { cwd: repoDir });
+      await execAsync("git commit --no-edit", { cwd: repoDir });
+      return { outcome: "success" };
+    };
+    const context = createMergeContext(
+      repoDir,
+      "batch-agent-resolve",
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
+
+    const merger = createHubFlowRunMerger({
+      cwd: repoDir,
+      conflictResolver,
+    });
+    const result = await merger({
+      flowId: "with-review",
+      runId: context.runId,
+      batchId: context.batchId,
+      taskId: "bd-agent",
+      title: "Agent conflict",
+      branch,
+      cwd: repoDir,
+      runDir: context.runDir,
+    });
+
+    expect(result.outcome).toBe("success");
+    expect(seenInputs).toEqual([{ conflictedFiles: ["shared.txt"] }]);
+    await expect(readFile(join(repoDir, "shared.txt"), "utf-8")).resolves.toBe(
+      "resolved\n",
+    );
+    await expect(
+      execAsync("git diff --name-only --diff-filter=U", { cwd: repoDir }),
+    ).resolves.toMatchObject({ stdout: "" });
+    await expect(
+      execAsync("git rev-parse -q --verify MERGE_HEAD", { cwd: repoDir }),
+    ).rejects.toBeTruthy();
+
+    const taskEvents = await readJsonl(
+      join(context.runDir, "events", "task.jsonl"),
+    );
+    expect(taskEvents.map((event) => (event as { type: string }).type)).toEqual(
+      [
+        "merge_conflict_resolution_started",
+        "merge_conflict_resolution_succeeded",
+      ],
+    );
+  });
+
+  it("fails agent-assisted merge when the resolver leaves conflicts unresolved", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-batch-merge-agent-unresolved-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "shared.txt", "base\n", "initial commit");
+
+    const branch = "sandcastle/bd-agent-unresolved";
+    await execAsync(`git checkout -b "${branch}"`, { cwd: repoDir });
+    await commitFile(repoDir, "shared.txt", "branch\n", "branch edit");
+    await execAsync("git checkout main", { cwd: repoDir });
+    await commitFile(repoDir, "shared.txt", "main\n", "main edit");
+
+    const context = createMergeContext(
+      repoDir,
+      "batch-agent-unresolved",
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
+    const merger = createHubFlowRunMerger({
+      cwd: repoDir,
+      conflictResolver: async () => ({ outcome: "success" }),
+    });
+    const result = await merger({
+      flowId: "with-review",
+      runId: context.runId,
+      batchId: context.batchId,
+      taskId: "bd-agent-unresolved",
+      title: "Agent unresolved",
+      branch,
+      cwd: repoDir,
+      runDir: context.runDir,
+    });
+
+    expect(result).toMatchObject({
+      outcome: "merge_conflict",
+      message: "Merge agent left unresolved conflicts: shared.txt",
+    });
+
+    const taskEvents = await readJsonl(
+      join(context.runDir, "events", "task.jsonl"),
+    );
+    expect(taskEvents.map((event) => (event as { type: string }).type)).toEqual(
+      ["merge_conflict_resolution_started", "merge_conflict_resolution_failed"],
+    );
+    expect(taskEvents.at(-1)).toMatchObject({
+      failureReason: "merge_conflict",
+      diagnosticSummary: expect.stringContaining(
+        "Merge agent left unresolved conflicts: shared.txt",
+      ),
+    });
   });
 
   it("passes through missing verify.sh in the default verifier helper", async () => {

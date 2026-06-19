@@ -1,13 +1,18 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+import { assertAgentCredentialsConfigured } from "./agentAuthGuidance.js";
 import {
   appendHubBatchEvent,
   appendHubTaskEvent,
   type HubTaskClaimMetadata,
 } from "./hubExecution.js";
+import { readHubAgentConfig } from "./hubAgentConfig.js";
+import { resolveHubAgentProvider } from "./hubProposalAgent.js";
+import { run } from "./run.js";
+import { noSandbox } from "./sandboxes/no-sandbox.js";
 import {
   closeHubTask,
   loadHubTaskBoard,
@@ -21,6 +26,8 @@ const execFileAsync = promisify(execFile);
 
 export interface HubMergeTaskInput {
   readonly flowId: string;
+  readonly runId: string;
+  readonly batchId: string;
   readonly taskId: string;
   readonly title: string;
   readonly branch: string;
@@ -46,6 +53,23 @@ export interface HubMergeTaskResult {
 export type HubFlowMerger = (
   input: HubMergeTaskInput,
 ) => Promise<HubMergeTaskResult>;
+
+export interface HubMergeConflictResolutionInput extends HubMergeTaskInput {
+  readonly diagnostics: HubMergeDiagnostics | undefined;
+  readonly conflictedFiles: readonly string[];
+  readonly gitStatus: string;
+  readonly baseBranch: string | undefined;
+}
+
+export interface HubMergeConflictResolutionResult {
+  readonly outcome: "success" | "failed";
+  readonly message?: string;
+  readonly diagnostics?: HubMergeDiagnostics;
+}
+
+export type HubMergeConflictResolver = (
+  input: HubMergeConflictResolutionInput,
+) => Promise<HubMergeConflictResolutionResult>;
 
 export interface HubVerifyTaskInput {
   readonly flowId: string;
@@ -653,6 +677,8 @@ const processMergeTask = async (
 
   const mergeResult = await input.merger({
     flowId: input.flowId,
+    runId: input.runId,
+    batchId: input.batchId,
     taskId: task.id,
     title: task.title,
     branch,
@@ -944,8 +970,171 @@ const isMergeConflict = (
   return /CONFLICT|conflicts?/i.test(message);
 };
 
+const readGitStdout = async (
+  cwd: string,
+  args: readonly string[],
+): Promise<string> => {
+  const { stdout } = await execFileAsync("git", [...args], {
+    cwd,
+    encoding: "utf8",
+  });
+  return String(stdout);
+};
+
+const listUnmergedFiles = async (cwd: string): Promise<readonly string[]> =>
+  (await readGitStdout(cwd, ["diff", "--name-only", "--diff-filter=U"]))
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+const readGitStatusShort = async (cwd: string): Promise<string> =>
+  readGitStdout(cwd, ["status", "--short"]);
+
+const readCurrentBranch = async (cwd: string): Promise<string | undefined> => {
+  const branch = (
+    await readGitStdout(cwd, ["branch", "--show-current"])
+  ).trim();
+  return branch.length > 0 ? branch : undefined;
+};
+
+const isMergeInProgress = async (cwd: string): Promise<boolean> => {
+  try {
+    await execFileAsync("git", ["rev-parse", "-q", "--verify", "MERGE_HEAD"], {
+      cwd,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const formatPromptBlock = (value: string | undefined): string =>
+  value && value.trim().length > 0 ? value.trim() : "(none)";
+
+const buildMergeConflictPrompt = (
+  input: HubMergeConflictResolutionInput,
+): string => `# Hub merge conflict resolution
+
+You are Sandcastle's Hub merge agent. A deterministic merge already ran and left this repository in a merge-conflict state.
+
+## Task
+
+- Task id: ${input.taskId}
+- Title: ${input.title}
+- Branch being merged: ${input.branch}
+- Current base branch: ${input.baseBranch ?? "(unknown)"}
+- Flow: ${input.flowId}
+
+## Conflicted files
+
+${input.conflictedFiles.map((file) => `- ${file}`).join("\n") || "(none reported)"}
+
+## Git status
+
+\`\`\`
+${formatPromptBlock(input.gitStatus)}
+\`\`\`
+
+## Merge diagnostics
+
+\`\`\`
+${formatPromptBlock(input.diagnostics?.stderr ?? input.diagnostics?.stdout ?? input.diagnostics?.message)}
+\`\`\`
+
+## Required behavior
+
+1. Inspect the conflicted files and understand both sides of the merge.
+2. Resolve conflicts intelligently, preserving behavior from both the base branch and ${input.branch} where appropriate.
+3. Do not close tasks, update Beads directly, create unrelated branches, or stash/delete Sandcastle runtime files.
+4. After resolving conflicts, run \`git status --short\` and ensure there are no unmerged files.
+5. Complete the merge commit with the existing merge message, for example \`git commit --no-edit\` after staging resolved files.
+6. Run the repository verification command if one is obvious from project docs or scripts. If verification is not available, explain that in your final response.
+7. Output \`<promise>COMPLETE</promise>\` only after the merge conflict is resolved and the merge commit is complete.
+`;
+
+export const createHubMergeConflictResolver = (options: {
+  readonly cwd: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly homeDir?: string;
+}): HubMergeConflictResolver => {
+  return async (input) => {
+    const config = readHubAgentConfig({
+      env: options.env,
+      homeDir: options.homeDir,
+    });
+    const roleEntry = config.roles.merge;
+    if (!roleEntry) {
+      return {
+        outcome: "failed",
+        message:
+          "Missing Hub agent role config: merge. Run `sandcastle agent-config set-role merge --provider <provider> --model <model>`.",
+      };
+    }
+
+    const agent = resolveHubAgentProvider(roleEntry);
+    try {
+      await assertAgentCredentialsConfigured({
+        providerName: agent.name,
+        cwd: options.cwd,
+        env: options.env,
+      });
+
+      const logDir = join(input.runDir, "logs");
+      mkdirSync(logDir, { recursive: true });
+      const result = await run({
+        agent,
+        sandbox: noSandbox(),
+        cwd: options.cwd,
+        prompt: buildMergeConflictPrompt(input),
+        branchStrategy: { type: "head" },
+        name: `merge-${input.taskId}`,
+        logging: {
+          type: "file",
+          path: join(logDir, `${input.taskId}-merge.log`),
+        },
+      });
+
+      if (!result.completionSignal) {
+        return {
+          outcome: "failed",
+          message: "Merge agent finished without completion signal",
+        };
+      }
+
+      const remainingConflicts = await listUnmergedFiles(options.cwd);
+      if (remainingConflicts.length > 0) {
+        return {
+          outcome: "failed",
+          message: `Merge agent left unresolved conflicts: ${remainingConflicts.join(", ")}`,
+          diagnostics: {
+            details: { remainingConflicts },
+          },
+        };
+      }
+
+      if (await isMergeInProgress(options.cwd)) {
+        return {
+          outcome: "failed",
+          message:
+            "Merge agent resolved files but left the merge commit unfinished.",
+        };
+      }
+
+      return { outcome: "success" };
+    } catch (error) {
+      return {
+        outcome: "failed",
+        message: error instanceof Error ? error.message : String(error),
+        diagnostics: compactDiagnostics(extractErrorDiagnostics(error)),
+      };
+    }
+  };
+};
+
 export const createHubFlowRunMerger = (options: {
   readonly cwd: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly conflictResolver?: HubMergeConflictResolver;
 }): HubFlowMerger => {
   return async (input) => {
     try {
@@ -958,10 +1147,105 @@ export const createHubFlowRunMerger = (options: {
     } catch (error) {
       const diagnostics = compactDiagnostics(extractErrorDiagnostics(error));
       if (isMergeConflict(error, diagnostics)) {
+        const conflictedFiles = await listUnmergedFiles(options.cwd);
+        const gitStatus = await readGitStatusShort(options.cwd);
+        const baseBranch = await readCurrentBranch(options.cwd);
+        const conflictStartedAt = new Date().toISOString();
+        appendHubTaskEvent(input.runDir, {
+          type: "merge_conflict_resolution_started",
+          runId: input.runId,
+          batchId: input.batchId,
+          taskId: input.taskId,
+          branch: input.branch,
+          createdAt: conflictStartedAt,
+          status: "merging",
+          diagnostics: {
+            ...diagnostics,
+            details: {
+              ...diagnostics?.details,
+              conflictedFiles,
+              gitStatus,
+              baseBranch,
+            },
+          },
+        });
+
+        const resolver =
+          options.conflictResolver ??
+          createHubMergeConflictResolver({
+            cwd: options.cwd,
+            env: options.env,
+          });
+        const resolution = await resolver({
+          ...input,
+          diagnostics,
+          conflictedFiles,
+          gitStatus,
+          baseBranch,
+        });
+        const conflictFinishedAt = new Date().toISOString();
+
+        const remainingConflicts = await listUnmergedFiles(options.cwd);
+        const mergeStillInProgress = await isMergeInProgress(options.cwd);
+
+        if (
+          resolution.outcome === "success" &&
+          remainingConflicts.length === 0 &&
+          !mergeStillInProgress
+        ) {
+          appendHubTaskEvent(input.runDir, {
+            type: "merge_conflict_resolution_succeeded",
+            runId: input.runId,
+            batchId: input.batchId,
+            taskId: input.taskId,
+            branch: input.branch,
+            createdAt: conflictFinishedAt,
+            status: "merging",
+          });
+          return { outcome: "success" };
+        }
+
+        const guardMessage =
+          resolution.outcome === "success" && remainingConflicts.length > 0
+            ? `Merge agent left unresolved conflicts: ${remainingConflicts.join(", ")}`
+            : resolution.outcome === "success" && mergeStillInProgress
+              ? "Merge agent resolved files but left the merge commit unfinished."
+              : resolution.message;
+        const resolutionDiagnostics = compactDiagnostics({
+          ...diagnostics,
+          ...resolution.diagnostics,
+          message: guardMessage ?? resolution.diagnostics?.message,
+          details: {
+            ...diagnostics?.details,
+            ...resolution.diagnostics?.details,
+            conflictedFiles,
+            gitStatus,
+            baseBranch,
+            ...(remainingConflicts.length > 0 ? { remainingConflicts } : {}),
+            ...(mergeStillInProgress ? { mergeStillInProgress } : {}),
+          },
+        });
+        appendHubTaskEvent(input.runDir, {
+          type: "merge_conflict_resolution_failed",
+          runId: input.runId,
+          batchId: input.batchId,
+          taskId: input.taskId,
+          branch: input.branch,
+          createdAt: conflictFinishedAt,
+          status: "failed",
+          failureReason: "merge_conflict",
+          diagnostics: resolutionDiagnostics,
+          diagnosticSummary: formatMergeDiagnosticSummary(
+            resolutionDiagnostics,
+          ),
+        });
+
         return {
           outcome: "merge_conflict",
-          message: error instanceof Error ? error.message : String(error),
-          diagnostics,
+          message:
+            guardMessage ??
+            (error instanceof Error ? error.message : String(error)),
+          diagnostics: resolutionDiagnostics,
         };
       }
 
