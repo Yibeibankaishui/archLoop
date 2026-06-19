@@ -24,6 +24,13 @@ export interface HubTaskLifecycleResult {
   readonly hubStatus: HubTaskStatus;
 }
 
+const toHubTaskLifecycleResult = (
+  task: HubTaskProjection,
+): HubTaskLifecycleResult => ({
+  task,
+  hubStatus: task.hubStatus,
+});
+
 type ImplementationFailureReason = Extract<
   HubFailureReason,
   "agent_failed" | "sandbox_failed"
@@ -98,12 +105,10 @@ type RecordImplementationOutcomeInput = Readonly<{
 type ImplementationOutcomeEvent =
   | {
       readonly type: "task_implementation_succeeded";
-      readonly status: HubTaskStatus;
       readonly hubStatus: HubTaskStatus;
     }
   | {
       readonly type: "task_implementation_failed";
-      readonly status: "failed";
       readonly hubStatus: "failed";
       readonly failureReason: ImplementationFailureReason;
     };
@@ -154,7 +159,7 @@ const recordImplementationOutcome = (
     taskId: input.taskId,
     branch: input.branch,
     createdAt: input.createdAt,
-    status: outcome.status,
+    status: outcome.hubStatus,
     failureReason,
     commitCount: input.commitCount,
     claim: input.claim,
@@ -180,10 +185,7 @@ const recordImplementationOutcome = (
     commitCount: input.commitCount,
   });
 
-  return {
-    task: updatedTask,
-    hubStatus: updatedTask.hubStatus,
-  };
+  return toHubTaskLifecycleResult(updatedTask);
 };
 
 export const recordImplementationSuccess = (
@@ -195,7 +197,6 @@ export const recordImplementationSuccess = (
 
   return recordImplementationOutcome(input, {
     type: "task_implementation_succeeded",
-    status: postImplementationStatus,
     hubStatus: postImplementationStatus,
   });
 };
@@ -205,7 +206,6 @@ export const recordImplementationFailure = (
 ): HubTaskLifecycleResult =>
   recordImplementationOutcome(input, {
     type: "task_implementation_failed",
-    status: "failed",
     hubStatus: "failed",
     failureReason: input.failureReason,
   });
@@ -242,10 +242,7 @@ const persistHubTaskWithStrippedClaim = (input: {
     env: input.env,
   });
 
-  return {
-    task: updatedTask,
-    hubStatus: updatedTask.hubStatus,
-  };
+  return toHubTaskLifecycleResult(updatedTask);
 };
 
 export const releaseStaleHubTaskClaim = (
@@ -291,12 +288,9 @@ export const completeCloseFailedRecovery = (
   const closedTask = closeHubTask({
     cwd: input.cwd,
     taskId: input.taskId,
-    metadata: stripClaimMetadata(input.metadata),
+    metadata: input.metadata,
     env: input.env,
   });
 
-  return {
-    task: closedTask,
-    hubStatus: closedTask.hubStatus,
-  };
+  return toHubTaskLifecycleResult(closedTask);
 };

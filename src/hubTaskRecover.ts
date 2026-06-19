@@ -173,6 +173,9 @@ export const isBranchMergedIntoHead = async (
 const resolveTaskBranch = (task: HubTaskProjection): string =>
   task.claim?.branch ?? resolveHubTaskBranch(task.id, task.title);
 
+const defaultCloseFailedRecoveryCloser: HubTaskCloser = async (closeInput) =>
+  completeCloseFailedRecovery(closeInput).task;
+
 const recoverToTargetStatus = (
   input: RecoverHubTaskInput,
   task: HubTaskProjection,
@@ -232,15 +235,7 @@ const recoverCloseFailedTask = async (
     });
   }
 
-  const closer =
-    input.closer ??
-    (async (closeInput) =>
-      completeCloseFailedRecovery({
-        cwd: closeInput.cwd,
-        taskId: closeInput.taskId,
-        metadata: closeInput.metadata,
-        env: closeInput.env,
-      }).task);
+  const closer = input.closer ?? defaultCloseFailedRecoveryCloser;
 
   const closedTask = await closer({
     cwd: input.cwd,
