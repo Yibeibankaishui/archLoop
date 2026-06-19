@@ -867,6 +867,7 @@ export const closeHubTask = (input: CloseHubTaskInput): HubTaskProjection => {
   };
   delete metadata.failureReason;
   delete metadata.failed;
+  delete metadata.claim;
 
   const labelsToRemove = task.labels.filter((existingLabel) =>
     EXECUTION_STATUS_LABELS.has(existingLabel),

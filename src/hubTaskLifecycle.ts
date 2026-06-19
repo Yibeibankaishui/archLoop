@@ -4,6 +4,7 @@ import {
 } from "./hubExecution.js";
 import {
   claimHubTask,
+  closeHubTask,
   updateHubTaskStatus,
   type ClaimHubTaskInput,
   type ClaimHubTaskResult,
@@ -212,3 +213,93 @@ export const recordImplementationFailure = (
     hubStatus: "failed",
     failureReason: input.failureReason,
   });
+
+const stripClaimMetadata = (
+  metadata: Readonly<Record<string, unknown>>,
+): Record<string, unknown> => {
+  const next = { ...metadata };
+  delete next.claim;
+  return next;
+};
+
+export interface ReleaseStaleHubTaskClaimInput {
+  readonly cwd: string;
+  readonly taskId: string;
+  readonly hubStatus: HubTaskStatus;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  readonly env?: NodeJS.ProcessEnv;
+}
+
+export interface RecoverHubTaskLifecycleResult {
+  readonly task: HubTaskProjection;
+  readonly hubStatus: HubTaskStatus;
+}
+
+export const releaseStaleHubTaskClaim = (
+  input: ReleaseStaleHubTaskClaimInput,
+): RecoverHubTaskLifecycleResult => {
+  const metadata = stripClaimMetadata(input.metadata);
+  const updatedTask = updateHubTaskStatus({
+    cwd: input.cwd,
+    taskId: input.taskId,
+    hubStatus: input.hubStatus,
+    metadata,
+    replaceMetadata: true,
+    env: input.env,
+  });
+
+  return {
+    task: updatedTask,
+    hubStatus: updatedTask.hubStatus,
+  };
+};
+
+export interface RecoverFailedHubTaskInput {
+  readonly cwd: string;
+  readonly taskId: string;
+  readonly targetStatus: HubTaskStatus;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  readonly env?: NodeJS.ProcessEnv;
+}
+
+export const recoverFailedHubTask = (
+  input: RecoverFailedHubTaskInput,
+): RecoverHubTaskLifecycleResult => {
+  const metadata = stripClaimMetadata(input.metadata);
+  const updatedTask = updateHubTaskStatus({
+    cwd: input.cwd,
+    taskId: input.taskId,
+    hubStatus: input.targetStatus,
+    metadata,
+    replaceMetadata: true,
+    env: input.env,
+  });
+
+  return {
+    task: updatedTask,
+    hubStatus: updatedTask.hubStatus,
+  };
+};
+
+export interface CompleteCloseFailedRecoveryInput {
+  readonly cwd: string;
+  readonly taskId: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  readonly env?: NodeJS.ProcessEnv;
+}
+
+export const completeCloseFailedRecovery = async (
+  input: CompleteCloseFailedRecoveryInput,
+): Promise<RecoverHubTaskLifecycleResult> => {
+  const closedTask = closeHubTask({
+    cwd: input.cwd,
+    taskId: input.taskId,
+    metadata: stripClaimMetadata(input.metadata),
+    env: input.env,
+  });
+
+  return {
+    task: closedTask,
+    hubStatus: closedTask.hubStatus,
+  };
+};
