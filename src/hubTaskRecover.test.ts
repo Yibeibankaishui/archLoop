@@ -235,6 +235,54 @@ describe("recoverHubTask", () => {
     );
   });
 
+  it("moves a failed task with existing unmerged branch work back to waiting_for_merge", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-recover-unmerged-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env, commentArgsFile } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-unmerged",
+        title: "Failed with branch work",
+        status: "open",
+        labels: ["failed", "implementing"],
+        metadata: {
+          hubStatus: "failed",
+          failed: true,
+          failureReason: "agent_failed",
+          claim: {
+            runId: "run-unmerged",
+            batchId: "batch-unmerged",
+            branch: "sandcastle/bd-unmerged-failed-with-branch-work",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const result = await recoverHubTask({
+      cwd: repoDir,
+      taskId: "bd-unmerged",
+      env,
+      branchHasUnmergedWork: async () => true,
+    });
+
+    const task = loadHubTask(repoDir, "bd-unmerged", env);
+    expect(result.outcome).toBe("recovered_failed");
+    expect(result.priorStatus).toBe("failed");
+    expect(task.hubStatus).toBe("waiting_for_merge");
+    expect(task.labels).toContain("waiting-for-merge");
+    expect(task.labels).not.toContain("failed");
+    expect(task.labels).not.toContain("implementing");
+    expect(task.claim).toBeDefined();
+    expect(task.metadata.failed).toBeUndefined();
+    expect(task.metadata.failureReason).toBeUndefined();
+    expect(await readFile(commentArgsFile, "utf-8")).toContain(
+      "waiting_for_merge",
+    );
+  });
+
   it("recovers close_failed tasks when the branch is already merged", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-recover-close-"));
     await initRepo(repoDir);

@@ -58,6 +58,10 @@ export interface RecoverHubTaskInput {
   readonly closer?: HubTaskCloser;
   readonly merger?: HubFlowMerger;
   readonly isBranchMerged?: (cwd: string, branch: string) => Promise<boolean>;
+  readonly branchHasUnmergedWork?: (
+    cwd: string,
+    branch: string,
+  ) => Promise<boolean>;
 }
 
 export interface RecoverHubTaskResult {
@@ -176,6 +180,22 @@ export const isBranchMergedIntoHead = async (
   }
 };
 
+export const hasBranchUnmergedWork = async (
+  cwd: string,
+  branch: string,
+): Promise<boolean> => {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["rev-list", "--count", `HEAD..${branch}`],
+      { cwd, encoding: "utf8" },
+    );
+    return Number(String(stdout).trim()) > 0;
+  } catch {
+    return false;
+  }
+};
+
 const resolveTaskBranch = (task: HubTaskProjection): string =>
   task.claim?.branch ?? resolveHubTaskBranch(task.id, task.title);
 
@@ -243,13 +263,24 @@ const recoverCloseFailedTask = async (
   };
 };
 
-const recoverGenericFailedTask = (
+const recoverGenericFailedTask = async (
   input: RecoverHubTaskInput,
   task: HubTaskProjection,
   failureReason: HubFailureReason | undefined,
-): RecoverHubTaskResult => {
-  const targetStatus = resolveFailedRecoveryTarget(task, failureReason);
-  const metadata = stripClaimMetadata(task.metadata);
+): Promise<RecoverHubTaskResult> => {
+  const branch = resolveTaskBranch(task);
+  const branchHasWork =
+    task.claim !== undefined &&
+    (await (input.branchHasUnmergedWork ?? hasBranchUnmergedWork)(
+      input.cwd,
+      branch,
+    ));
+  const targetStatus = branchHasWork
+    ? "waiting_for_merge"
+    : resolveFailedRecoveryTarget(task, failureReason);
+  const metadata = branchHasWork
+    ? { ...task.metadata }
+    : stripClaimMetadata(task.metadata);
   const updatedTask = updateHubTaskStatus({
     cwd: input.cwd,
     taskId: input.taskId,
@@ -259,7 +290,9 @@ const recoverGenericFailedTask = (
     env: input.env,
   });
 
-  const summary = `Moved failed task from failed to ${targetStatus} and cleared execution failure metadata.`;
+  const summary = branchHasWork
+    ? `Moved failed task from failed to waiting_for_merge because ${branch} has existing unmerged work.`
+    : `Moved failed task from failed to ${targetStatus} and cleared execution failure metadata.`;
   appendRecoveryComment(input, summary);
 
   return {

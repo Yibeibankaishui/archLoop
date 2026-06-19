@@ -71,6 +71,15 @@ export interface HubBatchMergeStartedEvent {
   readonly taskIds: readonly string[];
 }
 
+export interface HubBatchMergeSelectionEvent {
+  readonly type: "batch_merge_selection";
+  readonly runId: string;
+  readonly batchId: string;
+  readonly createdAt: string;
+  readonly selectedTaskIds: readonly string[];
+  readonly diagnostics: readonly object[];
+}
+
 export interface HubBatchMergeCompletedEvent {
   readonly type: "batch_merge_completed";
   readonly runId: string;
@@ -115,6 +124,8 @@ export interface HubTaskEvent {
   readonly diagnosticSummary?: string;
   readonly diagnostics?: Readonly<Record<string, unknown>>;
   readonly commitCount?: number;
+  readonly branchHasUnmergedWork?: boolean;
+  readonly implementationWork?: "new_commits" | "existing_unmerged_work";
   readonly claim?: HubTaskClaimMetadata;
 }
 
@@ -294,6 +305,7 @@ export const appendHubBatchEvent = (
   event:
     | HubBatchStartedEvent
     | HubBatchPlannedEvent
+    | HubBatchMergeSelectionEvent
     | HubBatchMergeStartedEvent
     | HubBatchMergeCompletedEvent,
 ): string => {

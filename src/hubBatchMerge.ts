@@ -12,7 +12,6 @@ import {
   closeHubTask,
   loadHubTaskBoard,
   resolveHubTaskBranch,
-  selectHubBatchMergeTasks,
   updateHubTaskStatus,
   type HubFailureReason,
   type HubTaskProjection,
@@ -77,6 +76,51 @@ export type HubTaskCloser = (
   input: CloseHubTaskAttemptInput,
 ) => Promise<HubTaskProjection>;
 
+export type HubBatchMergeSelectionDecision = "selected" | "skipped" | "blocked";
+
+export type HubBatchMergeSelectionReason =
+  | "selected"
+  | "status_mismatch"
+  | "batch_mismatch"
+  | "missing_claim"
+  | "missing_branch"
+  | "no_unmerged_work"
+  | "dirty_worktree"
+  | "task_store_dirty";
+
+export interface HubBatchMergeSelectionDiagnostic {
+  readonly taskId: string;
+  readonly title: string;
+  readonly hubStatus: string;
+  readonly decision: HubBatchMergeSelectionDecision;
+  readonly reason: HubBatchMergeSelectionReason;
+  readonly branch?: string;
+  readonly batchId?: string;
+  readonly message?: string;
+  readonly taskStoreDirtyFiles?: readonly string[];
+  readonly taskStoreBranchFiles?: readonly string[];
+}
+
+export interface HubMergeBranchState {
+  readonly exists: boolean;
+  readonly hasUnmergedWork: boolean;
+  readonly changedFiles?: readonly string[];
+}
+
+export type HubMergeBranchInspector = (
+  branch: string,
+  cwd: string,
+) => Promise<HubMergeBranchState>;
+
+export interface HubMergeWorktreeState {
+  readonly dirtySourceFiles: readonly string[];
+  readonly dirtyTaskStoreFiles: readonly string[];
+}
+
+export type HubMergeWorktreeInspector = (
+  cwd: string,
+) => Promise<HubMergeWorktreeState>;
+
 export interface RunHubBatchMergeInput {
   readonly flowId: string;
   readonly cwd: string;
@@ -86,6 +130,8 @@ export interface RunHubBatchMergeInput {
   readonly merger: HubFlowMerger;
   readonly verifier: HubFlowVerifier;
   readonly closer?: HubTaskCloser;
+  readonly branchInspector?: HubMergeBranchInspector;
+  readonly worktreeInspector?: HubMergeWorktreeInspector;
   readonly env?: NodeJS.ProcessEnv;
 }
 
@@ -110,12 +156,18 @@ export interface RunHubBatchMergeResult {
   readonly runId: string;
   readonly batchId: string;
   readonly selectedTaskIds: readonly string[];
+  readonly selectionDiagnostics: readonly HubBatchMergeSelectionDiagnostic[];
   readonly batchStatus: "done" | "partial_failed" | "skipped";
   readonly results: readonly HubBatchMergeTaskResult[];
 }
 
 const resolveBranch = (task: HubTaskProjection): string =>
   task.claim?.branch ?? resolveHubTaskBranch(task.id, task.title);
+
+const resolveClaimBranch = (task: HubTaskProjection): string | undefined =>
+  task.claim?.branch && task.claim.branch.trim().length > 0
+    ? task.claim.branch
+    : undefined;
 
 const readErrorProperty = (error: unknown, key: string): unknown | undefined =>
   error && typeof error === "object"
@@ -226,6 +278,248 @@ const extractErrorDiagnostics = (error: unknown): HubMergeDiagnostics => {
     signal: readStringProperty(error, "signal"),
     details,
   };
+};
+
+const defaultBranchInspector: HubMergeBranchInspector = async (branch, cwd) => {
+  try {
+    await execFileAsync(
+      "git",
+      ["rev-parse", "--verify", `${branch}^{commit}`],
+      {
+        cwd,
+      },
+    );
+  } catch {
+    return { exists: false, hasUnmergedWork: false };
+  }
+
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["rev-list", "--count", `HEAD..${branch}`],
+      { cwd, encoding: "utf8" },
+    );
+    const diff = await execFileAsync(
+      "git",
+      ["diff", "--name-only", `HEAD...${branch}`],
+      { cwd, encoding: "utf8" },
+    ).catch(() => ({ stdout: "" }));
+    return {
+      exists: true,
+      hasUnmergedWork: Number(String(stdout).trim()) > 0,
+      changedFiles: String(diff.stdout)
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0),
+    };
+  } catch {
+    return { exists: true, hasUnmergedWork: false };
+  }
+};
+
+const normalizeGitPath = (path: string): string => path.replace(/\\/g, "/");
+
+const isTaskStoreRuntimePath = (path: string): boolean => {
+  const normalized = normalizeGitPath(path);
+  return normalized === ".beads" || normalized.startsWith(".beads/");
+};
+
+const parseGitStatusPorcelain = (stdout: string): string[] => {
+  const entries = stdout.split("\0").filter((entry) => entry.length > 0);
+  const paths: string[] = [];
+
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index]!;
+    if (entry.length < 4) {
+      continue;
+    }
+
+    const status = entry.slice(0, 2);
+    const path = entry.slice(3);
+    if (path.length > 0) {
+      paths.push(path);
+    }
+
+    if (status.includes("R") || status.includes("C")) {
+      index += 1;
+      const renamedPath = entries[index];
+      if (renamedPath && renamedPath.length > 0) {
+        paths.push(renamedPath);
+      }
+    }
+  }
+
+  return paths;
+};
+
+const defaultWorktreeInspector: HubMergeWorktreeInspector = async (cwd) => {
+  const { stdout } = await execFileAsync(
+    "git",
+    ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    { cwd, encoding: "utf8" },
+  );
+  const dirtyFiles = parseGitStatusPorcelain(String(stdout));
+  return {
+    dirtySourceFiles: dirtyFiles.filter(
+      (path) => !isTaskStoreRuntimePath(path),
+    ),
+    dirtyTaskStoreFiles: dirtyFiles.filter(isTaskStoreRuntimePath),
+  };
+};
+
+const buildSelectionDiagnostic = (
+  task: HubTaskProjection,
+  input: Pick<
+    HubBatchMergeSelectionDiagnostic,
+    | "decision"
+    | "reason"
+    | "branch"
+    | "message"
+    | "taskStoreDirtyFiles"
+    | "taskStoreBranchFiles"
+  >,
+): HubBatchMergeSelectionDiagnostic => ({
+  taskId: task.id,
+  title: task.title,
+  hubStatus: task.hubStatus,
+  batchId: task.claim?.batchId,
+  ...input,
+});
+
+const evaluateHubBatchMergeSelection = async (input: {
+  readonly cwd: string;
+  readonly batchId: string;
+  readonly tasks: readonly HubTaskProjection[];
+  readonly branchInspector: HubMergeBranchInspector;
+  readonly worktreeState: HubMergeWorktreeState;
+}): Promise<{
+  readonly selectedTasks: readonly HubTaskProjection[];
+  readonly diagnostics: readonly HubBatchMergeSelectionDiagnostic[];
+}> => {
+  const selectedTasks: HubTaskProjection[] = [];
+  const diagnostics: HubBatchMergeSelectionDiagnostic[] = [];
+
+  for (const task of input.tasks) {
+    if (task.hubStatus !== "waiting_for_merge") {
+      if (task.claim?.batchId === input.batchId) {
+        diagnostics.push(
+          buildSelectionDiagnostic(task, {
+            decision: "skipped",
+            reason: "status_mismatch",
+            branch: resolveClaimBranch(task),
+            message: `Task is ${task.hubStatus}, not waiting_for_merge.`,
+          }),
+        );
+      }
+      continue;
+    }
+
+    if (!task.claim) {
+      diagnostics.push(
+        buildSelectionDiagnostic(task, {
+          decision: "skipped",
+          reason: "missing_claim",
+          message: "Task is waiting_for_merge without claim metadata.",
+        }),
+      );
+      continue;
+    }
+
+    if (task.claim.batchId !== input.batchId) {
+      diagnostics.push(
+        buildSelectionDiagnostic(task, {
+          decision: "skipped",
+          reason: "batch_mismatch",
+          branch: resolveClaimBranch(task),
+          message: `Task belongs to batch ${task.claim.batchId ?? "<missing>"}, not ${input.batchId}.`,
+        }),
+      );
+      continue;
+    }
+
+    const branch = resolveClaimBranch(task);
+    if (!branch) {
+      diagnostics.push(
+        buildSelectionDiagnostic(task, {
+          decision: "skipped",
+          reason: "missing_branch",
+          message: "Task claim does not include a branch.",
+        }),
+      );
+      continue;
+    }
+
+    const branchState = await input.branchInspector(branch, input.cwd);
+    if (!branchState.exists) {
+      diagnostics.push(
+        buildSelectionDiagnostic(task, {
+          decision: "skipped",
+          reason: "missing_branch",
+          branch,
+          message: `Branch ${branch} does not exist.`,
+        }),
+      );
+      continue;
+    }
+
+    if (!branchState.hasUnmergedWork) {
+      diagnostics.push(
+        buildSelectionDiagnostic(task, {
+          decision: "skipped",
+          reason: "no_unmerged_work",
+          branch,
+          message: `Branch ${branch} has no commits ahead of HEAD.`,
+        }),
+      );
+      continue;
+    }
+
+    const taskStoreBranchFiles = (branchState.changedFiles ?? []).filter(
+      isTaskStoreRuntimePath,
+    );
+    if (taskStoreBranchFiles.length > 0) {
+      diagnostics.push(
+        buildSelectionDiagnostic(task, {
+          decision: "blocked",
+          reason: "task_store_dirty",
+          branch,
+          message: `Task branch changes Beads runtime/export files (${taskStoreBranchFiles.join(", ")}). Keep local task-store state out of normal Hub merges; remove those files from the branch or sync task state through Sandcastle task sync before retrying.`,
+          taskStoreBranchFiles,
+        }),
+      );
+      continue;
+    }
+
+    if (input.worktreeState.dirtySourceFiles.length > 0) {
+      diagnostics.push(
+        buildSelectionDiagnostic(task, {
+          decision: "blocked",
+          reason: "dirty_worktree",
+          branch,
+          message: `Clean or stash dirty source files before merging: ${input.worktreeState.dirtySourceFiles.join(", ")}`,
+        }),
+      );
+      continue;
+    }
+
+    selectedTasks.push(task);
+    const taskStoreDirtyFiles = input.worktreeState.dirtyTaskStoreFiles;
+    diagnostics.push(
+      buildSelectionDiagnostic(task, {
+        decision: "selected",
+        reason: "selected",
+        branch,
+        message:
+          taskStoreDirtyFiles.length > 0
+            ? `Branch ${branch} has unmerged work; task-store dirty: ${taskStoreDirtyFiles.join(", ")}. Hub merge preflight ignores local Beads runtime/export dirtiness unless the task branch also changes those files.`
+            : `Branch ${branch} has unmerged work.`,
+        taskStoreDirtyFiles:
+          taskStoreDirtyFiles.length > 0 ? taskStoreDirtyFiles : undefined,
+      }),
+    );
+  }
+
+  return { selectedTasks, diagnostics };
 };
 
 const recordTaskStatusAdvanced = (
@@ -515,14 +809,35 @@ export const runHubBatchMerge = async (
   input: RunHubBatchMergeInput,
 ): Promise<RunHubBatchMergeResult> => {
   const board = loadHubTaskBoard(input.cwd, input.env);
-  const selectedTasks = selectHubBatchMergeTasks(board, input.batchId);
+  const worktreeState = await (
+    input.worktreeInspector ?? defaultWorktreeInspector
+  )(input.cwd);
+  const selection = await evaluateHubBatchMergeSelection({
+    cwd: input.cwd,
+    batchId: input.batchId,
+    tasks: board.tasks,
+    branchInspector: input.branchInspector ?? defaultBranchInspector,
+    worktreeState,
+  });
+  const selectedTasks = selection.selectedTasks;
   const selectedTaskIds = selectedTasks.map((task) => task.id);
+  const selectionCreatedAt = new Date().toISOString();
+
+  appendHubBatchEvent(input.runDir, {
+    type: "batch_merge_selection",
+    runId: input.runId,
+    batchId: input.batchId,
+    createdAt: selectionCreatedAt,
+    selectedTaskIds,
+    diagnostics: selection.diagnostics,
+  });
 
   if (selectedTasks.length === 0) {
     return {
       runId: input.runId,
       batchId: input.batchId,
       selectedTaskIds,
+      selectionDiagnostics: selection.diagnostics,
       batchStatus: "skipped",
       results: [],
     };
@@ -589,6 +904,7 @@ export const runHubBatchMerge = async (
         selectedTaskIds,
         batchStatus: "partial_failed",
         results,
+        selectionDiagnostics: selection.diagnostics,
       };
     }
   }
@@ -606,6 +922,7 @@ export const runHubBatchMerge = async (
     runId: input.runId,
     batchId: input.batchId,
     selectedTaskIds,
+    selectionDiagnostics: selection.diagnostics,
     batchStatus: "done",
     results,
   };
@@ -686,6 +1003,19 @@ export const formatHubBatchMergeResultLines = (
     `Batch status: ${result.batchStatus}`,
     `Selected tasks: ${result.selectedTaskIds.length}`,
   ];
+
+  if (result.selectionDiagnostics.length > 0) {
+    lines.push("Selection diagnostics:");
+    for (const diagnostic of result.selectionDiagnostics) {
+      const branchSuffix = diagnostic.branch ? ` ${diagnostic.branch}` : "";
+      const messageSuffix = diagnostic.message ? `; ${diagnostic.message}` : "";
+      const decisionSummary =
+        diagnostic.decision === "selected"
+          ? `selected${branchSuffix}`
+          : `${diagnostic.decision} ${diagnostic.reason}${branchSuffix}`;
+      lines.push(`  ${diagnostic.taskId}: ${decisionSummary}${messageSuffix}`);
+    }
+  }
 
   if (result.selectedTaskIds.length === 0) {
     lines.push("No waiting_for_merge tasks selected for merge.");

@@ -799,6 +799,33 @@ const HUB_STATUS_BEADS_LIFECYCLE: Readonly<
   sync_conflict: "blocked",
 };
 
+const FAILURE_METADATA_KEYS = [
+  "failureReason",
+  "failure_reason",
+  "failed",
+] as const;
+const BLOCKED_METADATA_KEYS = [
+  "blocked_reason",
+  "blockedReason",
+  "blocked_reason_kind",
+  "blockedReasonKind",
+  "blocked",
+] as const;
+const NEEDS_INFO_METADATA_KEYS = [
+  "needs_info",
+  "needsInfo",
+  "needs_info_reason",
+  "needsInfoReason",
+] as const;
+const SYNC_CONFLICT_METADATA_KEYS = [
+  "sync_conflict",
+  "syncConflict",
+  "sync_conflict_reason",
+  "syncConflictReason",
+] as const;
+const WONTFIX_METADATA_KEYS = ["wontfix", "wontFix", "rejected"] as const;
+const DONE_METADATA_KEYS = ["done"] as const;
+
 const resolveHubStatusLabel = (label: string): HubTaskStatus | undefined =>
   STATUS_LABEL_TO_HUB_STATUS[normalizeKey(label)];
 
@@ -816,6 +843,50 @@ const labelsToRemoveForHubStatus = (
     }
     return normalizeKey(existingLabel) !== canonicalLabelKey;
   });
+};
+
+const deleteMetadataKeys = (
+  metadata: Record<string, unknown>,
+  keys: readonly string[],
+): void => {
+  for (const key of keys) {
+    delete metadata[key];
+  }
+};
+
+const clearStaleHubStatusMetadata = (
+  metadata: Record<string, unknown>,
+  hubStatus: HubTaskStatus,
+): void => {
+  if (hubStatus !== "failed") {
+    deleteMetadataKeys(metadata, FAILURE_METADATA_KEYS);
+  }
+  if (hubStatus !== "blocked") {
+    deleteMetadataKeys(metadata, BLOCKED_METADATA_KEYS);
+  }
+  if (hubStatus !== "needs_info") {
+    deleteMetadataKeys(metadata, NEEDS_INFO_METADATA_KEYS);
+  }
+  if (hubStatus !== "sync_conflict") {
+    deleteMetadataKeys(metadata, SYNC_CONFLICT_METADATA_KEYS);
+  }
+  if (hubStatus !== "wontfix") {
+    deleteMetadataKeys(metadata, WONTFIX_METADATA_KEYS);
+  }
+  if (hubStatus !== "done") {
+    deleteMetadataKeys(metadata, DONE_METADATA_KEYS);
+  }
+};
+
+const assertProjectedHubStatus = (
+  task: HubTaskProjection,
+  expectedStatus: HubTaskStatus,
+): void => {
+  if (task.hubStatus !== expectedStatus) {
+    throw new TaskBoardError({
+      message: `sandcastle tasks update ${task.id} wrote ${expectedStatus}, but the projected Hub task board status is ${task.hubStatus}. Clear stale Beads labels/metadata and retry.`,
+    });
+  }
 };
 
 export interface UpdateHubTaskStatusInput {
@@ -846,6 +917,7 @@ export const updateHubTaskStatus = (
         hubStatus: input.hubStatus,
       };
 
+  clearStaleHubStatusMetadata(metadata, input.hubStatus);
   if (input.failureReason) {
     metadata.failureReason = input.failureReason;
     metadata.failed = true;
@@ -875,7 +947,9 @@ export const updateHubTaskStatus = (
   appendBdMetadataArg(args, metadata);
   runBdText(input.cwd, args, `tasks update ${input.taskId}`, input.env);
 
-  return loadHubTask(input.cwd, input.taskId, input.env);
+  const updatedTask = loadHubTask(input.cwd, input.taskId, input.env);
+  assertProjectedHubStatus(updatedTask, input.hubStatus);
+  return updatedTask;
 };
 
 export interface CloseHubTaskInput {
@@ -906,7 +980,9 @@ export const closeHubTask = (input: CloseHubTaskInput): HubTaskProjection => {
 
   runBdText(input.cwd, args, `tasks close ${input.taskId}`, input.env);
 
-  return loadHubTask(input.cwd, input.taskId, input.env);
+  const closedTask = loadHubTask(input.cwd, input.taskId, input.env);
+  assertProjectedHubStatus(closedTask, "done");
+  return closedTask;
 };
 
 export interface DeleteHubTasksInput {

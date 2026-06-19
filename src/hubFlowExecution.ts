@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import { assertAgentCredentialsConfigured } from "./agentAuthGuidance.js";
 import {
@@ -33,6 +35,8 @@ import {
   type HubTaskProjection,
 } from "./taskBoard.js";
 
+const execFileAsync = promisify(execFile);
+
 export interface HubImplementTaskInput {
   readonly flowId: string;
   readonly taskId: string;
@@ -47,6 +51,7 @@ export interface HubImplementTaskResult {
   readonly outcome: "success" | "agent_failed" | "sandbox_failed";
   readonly commits: readonly { readonly sha: string }[];
   readonly completionSignal?: string;
+  readonly branchHasUnmergedWork?: boolean;
   readonly message?: string;
 }
 
@@ -102,6 +107,7 @@ export interface HubFlowTaskResult {
   readonly hubStatus: string;
   readonly failureReason?: HubFailureReason;
   readonly commitCount: number;
+  readonly implementationWork?: "new_commits" | "existing_unmerged_work";
 }
 
 export interface RunHubFlowResult {
@@ -119,10 +125,19 @@ const resolveFailureReason = (
 ): HubFailureReason =>
   outcome === "sandbox_failed" ? "sandbox_failed" : "agent_failed";
 
+const resolveImplementationWork = (
+  result: HubImplementTaskResult,
+): HubFlowTaskResult["implementationWork"] => {
+  if (result.commits.length > 0) {
+    return "new_commits";
+  }
+  return result.branchHasUnmergedWork ? "existing_unmerged_work" : undefined;
+};
+
 const isSuccessfulImplementation = (result: HubImplementTaskResult): boolean =>
   result.outcome === "success" &&
-  result.commits.length > 0 &&
-  result.completionSignal !== undefined;
+  result.completionSignal !== undefined &&
+  resolveImplementationWork(result) !== undefined;
 
 const isSuccessfulReview = (result: HubReviewTaskResult): boolean =>
   result.outcome === "success" && result.completionSignal !== undefined;
@@ -159,6 +174,8 @@ const recordTaskStatusAdvanced = (
     readonly reason?: string;
     readonly failureReason?: string;
     readonly commitCount?: number;
+    readonly branchHasUnmergedWork?: boolean;
+    readonly implementationWork?: "new_commits" | "existing_unmerged_work";
   },
 ): void => {
   appendHubTaskEvent(runDir, {
@@ -172,6 +189,8 @@ const recordTaskStatusAdvanced = (
     reason: input.reason,
     failureReason: input.failureReason,
     commitCount: input.commitCount,
+    branchHasUnmergedWork: input.branchHasUnmergedWork,
+    implementationWork: input.implementationWork,
   });
 };
 
@@ -433,6 +452,7 @@ const implementSelectedTask = async (
     const postImplementationStatus = hasReviewer
       ? "reviewing"
       : "waiting_for_merge";
+    const implementationWork = resolveImplementationWork(implementationResult);
 
     appendHubTaskEvent(context.runDir, {
       type: "task_implementation_succeeded",
@@ -443,6 +463,9 @@ const implementSelectedTask = async (
       createdAt: finishedAt,
       status: postImplementationStatus,
       commitCount: implementationResult.commits.length,
+      branchHasUnmergedWork:
+        implementationResult.branchHasUnmergedWork === true,
+      implementationWork,
       claim: claimResult.claim,
     });
 
@@ -461,6 +484,9 @@ const implementSelectedTask = async (
       createdAt: finishedAt,
       status: updatedTask.hubStatus,
       commitCount: implementationResult.commits.length,
+      branchHasUnmergedWork:
+        implementationResult.branchHasUnmergedWork === true,
+      implementationWork,
     });
 
     if (hasReviewer) {
@@ -483,6 +509,7 @@ const implementSelectedTask = async (
       outcome: "implemented",
       hubStatus: updatedTask.hubStatus,
       commitCount: implementationResult.commits.length,
+      implementationWork,
     };
   }
 
@@ -643,8 +670,16 @@ export const formatHubFlowResultLines = (
   }
 
   for (const taskResult of result.results) {
+    const workSuffix =
+      taskResult.implementationWork === "existing_unmerged_work"
+        ? " (existing unmerged work)"
+        : taskResult.implementationWork === "new_commits"
+          ? ` (${taskResult.commitCount} new ${
+              taskResult.commitCount === 1 ? "commit" : "commits"
+            })`
+          : "";
     lines.push(
-      `  ${taskResult.taskId}: ${taskResult.outcome} -> ${taskResult.hubStatus}`,
+      `  ${taskResult.taskId}: ${taskResult.outcome} -> ${taskResult.hubStatus}${workSuffix}`,
     );
   }
 
@@ -656,6 +691,22 @@ export const formatHubFlowResultLines = (
   }
 
   return lines;
+};
+
+const hasBranchUnmergedWork = async (
+  cwd: string,
+  branch: string,
+): Promise<boolean> => {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["rev-list", "--count", `HEAD..${branch}`],
+      { cwd, encoding: "utf8" },
+    );
+    return Number(String(stdout).trim()) > 0;
+  } catch {
+    return false;
+  }
 };
 
 export const createHubFlowRunImplementer = (options: {
@@ -682,7 +733,12 @@ export const createHubFlowRunImplementer = (options: {
         };
       }
 
-      if (result.commits.length === 0) {
+      const branchHasUnmergedWork = await hasBranchUnmergedWork(
+        options.cwd,
+        input.branch,
+      );
+
+      if (result.commits.length === 0 && !branchHasUnmergedWork) {
         return {
           outcome: "agent_failed",
           commits: result.commits,
@@ -695,6 +751,7 @@ export const createHubFlowRunImplementer = (options: {
         outcome: "success",
         commits: result.commits,
         completionSignal: result.completionSignal,
+        branchHasUnmergedWork,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

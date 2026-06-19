@@ -310,6 +310,75 @@ describe("no-review Hub flow execution", () => {
     );
   });
 
+  it("treats completion with existing unmerged branch work as implemented even when the rerun creates no new commits", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-rerun-work-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-rerun",
+        title: "Rerun existing work",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "sandcastle",
+      "hub",
+      "projects",
+      "rerun-work",
+    );
+    const result = await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      implementer: async () => ({
+        outcome: "success",
+        commits: [],
+        completionSignal: "<promise>COMPLETE</promise>",
+        branchHasUnmergedWork: true,
+      }),
+      runMergePhase: false,
+    });
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(finalState[0]?.labels).toContain("waiting-for-merge");
+    expect(finalState[0]?.metadata.hubStatus).toBe("waiting_for_merge");
+    expect(result.results[0]).toMatchObject({
+      taskId: "bd-rerun",
+      outcome: "implemented",
+      hubStatus: "waiting_for_merge",
+      commitCount: 0,
+      implementationWork: "existing_unmerged_work",
+    });
+
+    const taskEvents = await readJsonl(
+      join(result.runDir, "events", "task.jsonl"),
+    );
+    expect(taskEvents).toContainEqual(
+      expect.objectContaining({
+        type: "task_implementation_succeeded",
+        taskId: "bd-rerun",
+        status: "waiting_for_merge",
+        commitCount: 0,
+        branchHasUnmergedWork: true,
+        implementationWork: "existing_unmerged_work",
+      }),
+    );
+    expect(formatHubFlowResultLines(result).join("\n")).toContain(
+      "bd-rerun: implemented -> waiting_for_merge (existing unmerged work)",
+    );
+  });
+
   it("marks agent failures as failed with agent_failed", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-agent-fail-"));
     await initRepo(repoDir);
@@ -503,6 +572,81 @@ describe("with-review Hub flow execution", () => {
     expect(formatHubFlowResultLines(result).join("\n")).toContain(
       "bd-71: reviewed -> waiting_for_merge",
     );
+  });
+
+  it("clears stale lifecycle labels and metadata when review advances to waiting_for_merge", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-review-stale-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-stale-review",
+        title: "Review with stale status",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    const reviewer: HubFlowReviewer = async () => {
+      const state = JSON.parse(
+        await readFile(stateFile, "utf-8"),
+      ) as MockBeadsTask[];
+      const task = state.find((entry) => entry.id === "bd-stale-review")!;
+      task.labels = [...task.labels, "failed", "implementing"];
+      task.metadata = {
+        ...task.metadata,
+        failed: true,
+        failureReason: "agent_failed",
+        blocked_reason: "stale dependency note",
+      };
+      await writeFile(stateFile, JSON.stringify(state, null, 2));
+
+      return {
+        outcome: "success",
+        commits: [],
+        completionSignal: "<promise>COMPLETE</promise>",
+      };
+    };
+
+    const result = await runHubFlow({
+      flowId: "with-review",
+      cwd: repoDir,
+      hubProjectDir: join(
+        repoDir,
+        "data",
+        "sandcastle",
+        "hub",
+        "projects",
+        "review-stale",
+      ),
+      env,
+      implementer: async () => ({
+        outcome: "success",
+        commits: [{ sha: "abc123" }],
+        completionSignal: "<promise>COMPLETE</promise>",
+      }),
+      reviewer,
+      runMergePhase: false,
+    });
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(result.results[0]).toMatchObject({
+      taskId: "bd-stale-review",
+      outcome: "reviewed",
+      hubStatus: "waiting_for_merge",
+    });
+    expect(finalState[0]?.labels).toContain("waiting-for-merge");
+    expect(finalState[0]?.labels).not.toContain("failed");
+    expect(finalState[0]?.labels).not.toContain("implementing");
+    expect(finalState[0]?.metadata.hubStatus).toBe("waiting_for_merge");
+    expect(finalState[0]?.metadata.failed).toBeUndefined();
+    expect(finalState[0]?.metadata.failureReason).toBeUndefined();
+    expect(finalState[0]?.metadata.blocked_reason).toBeUndefined();
   });
 
   it("marks review failures as failed with agent_failed", async () => {

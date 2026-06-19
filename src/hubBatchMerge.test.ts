@@ -11,6 +11,8 @@ import {
   runHubBatchMerge,
   type HubFlowMerger,
   type HubFlowVerifier,
+  type HubMergeBranchInspector,
+  type HubMergeWorktreeInspector,
   type HubTaskCloser,
 } from "./hubBatchMerge.js";
 import { createHubRunContext } from "./hubExecution.js";
@@ -155,6 +157,14 @@ const createMergeContext = (
 
 const successMerger: HubFlowMerger = async () => ({ outcome: "success" });
 const successVerifier: HubFlowVerifier = async () => ({ outcome: "success" });
+const branchReadyInspector: HubMergeBranchInspector = async () => ({
+  exists: true,
+  hasUnmergedWork: true,
+});
+const cleanWorktreeInspector: HubMergeWorktreeInspector = async () => ({
+  dirtySourceFiles: [],
+  dirtyTaskStoreFiles: [],
+});
 
 describe("Hub batch merge selection", () => {
   it("selects waiting_for_merge tasks for the current batch id", async () => {
@@ -241,6 +251,8 @@ describe("runHubBatchMerge", () => {
       env,
       merger: successMerger,
       verifier: successVerifier,
+      branchInspector: branchReadyInspector,
+      worktreeInspector: cleanWorktreeInspector,
     });
 
     expect(result.batchStatus).toBe("done");
@@ -278,9 +290,391 @@ describe("runHubBatchMerge", () => {
     );
     expect(
       batchEvents.map((event) => (event as { type: string }).type),
-    ).toEqual(["batch_merge_started", "batch_merge_completed"]);
+    ).toEqual([
+      "batch_merge_selection",
+      "batch_merge_started",
+      "batch_merge_completed",
+    ]);
     expect(formatHubBatchMergeResultLines(result).join("\n")).toContain(
       "bd-72: merged -> done",
+    );
+  });
+
+  it("records selected and skipped task selection reasons before merging", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-merge-reasons-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const batchId = "batch-selection";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-selected",
+        title: "Selected task",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch: "branch-selected",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+      {
+        id: "bd-status",
+        title: "Wrong status",
+        status: "in_progress",
+        labels: ["reviewing"],
+        metadata: {
+          hubStatus: "reviewing",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch: "branch-status",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+      {
+        id: "bd-other-batch",
+        title: "Other batch",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId: "batch-other",
+            branch: "branch-other",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+      {
+        id: "bd-missing-claim",
+        title: "Missing claim",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+        },
+      },
+      {
+        id: "bd-missing-branch",
+        title: "Missing branch",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+      {
+        id: "bd-no-work",
+        title: "No unmerged work",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch: "branch-no-work",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
+
+    const result = await runHubBatchMerge({
+      flowId: "no-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger: successMerger,
+      verifier: successVerifier,
+      branchInspector: async (branch) => ({
+        exists: branch !== "branch-missing",
+        hasUnmergedWork: branch !== "branch-no-work",
+      }),
+      worktreeInspector: cleanWorktreeInspector,
+    });
+
+    expect(result.selectedTaskIds).toEqual(["bd-selected"]);
+    expect(
+      result.selectionDiagnostics.map(({ taskId, decision, reason }) => ({
+        taskId,
+        decision,
+        reason,
+      })),
+    ).toEqual([
+      {
+        taskId: "bd-missing-branch",
+        decision: "skipped",
+        reason: "missing_branch",
+      },
+      {
+        taskId: "bd-missing-claim",
+        decision: "skipped",
+        reason: "missing_claim",
+      },
+      { taskId: "bd-no-work", decision: "skipped", reason: "no_unmerged_work" },
+      {
+        taskId: "bd-other-batch",
+        decision: "skipped",
+        reason: "batch_mismatch",
+      },
+      { taskId: "bd-selected", decision: "selected", reason: "selected" },
+      { taskId: "bd-status", decision: "skipped", reason: "status_mismatch" },
+    ]);
+
+    const batchEvents = await readJsonl(
+      join(context.runDir, "events", "batch.jsonl"),
+    );
+    expect(batchEvents).toContainEqual(
+      expect.objectContaining({
+        type: "batch_merge_selection",
+        selectedTaskIds: ["bd-selected"],
+        diagnostics: expect.arrayContaining([
+          expect.objectContaining({
+            taskId: "bd-no-work",
+            decision: "skipped",
+            reason: "no_unmerged_work",
+          }),
+        ]),
+      }),
+    );
+
+    const summary = formatHubBatchMergeResultLines(result).join("\n");
+    expect(summary).toContain("Selection diagnostics:");
+    expect(summary).toContain("bd-selected: selected branch-selected");
+    expect(summary).toContain("bd-status: skipped status_mismatch");
+    expect(summary).toContain("bd-other-batch: skipped batch_mismatch");
+    expect(summary).toContain("bd-missing-claim: skipped missing_claim");
+    expect(summary).toContain("bd-missing-branch: skipped missing_branch");
+    expect(summary).toContain("bd-no-work: skipped no_unmerged_work");
+  });
+
+  it("blocks merge preflight when the source worktree has dirty source files", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-merge-dirty-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+    await writeFile(join(repoDir, "dirty-source.txt"), "uncommitted");
+
+    const batchId = "batch-dirty";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-dirty",
+        title: "Dirty source task",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch: "branch-dirty",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
+    let mergeCalls = 0;
+
+    const result = await runHubBatchMerge({
+      flowId: "no-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger: async () => {
+        mergeCalls += 1;
+        return { outcome: "success" };
+      },
+      verifier: successVerifier,
+      branchInspector: branchReadyInspector,
+    });
+
+    expect(mergeCalls).toBe(0);
+    expect(result.batchStatus).toBe("skipped");
+    expect(result.selectedTaskIds).toEqual([]);
+    expect(result.selectionDiagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-dirty",
+        decision: "blocked",
+        reason: "dirty_worktree",
+        message: expect.stringContaining("dirty-source.txt"),
+      }),
+    );
+    expect(formatHubBatchMergeResultLines(result).join("\n")).toContain(
+      "bd-dirty: blocked dirty_worktree branch-dirty",
+    );
+  });
+
+  it("does not block merge preflight for dirty Beads runtime/export files in the source worktree", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-merge-beads-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const batchId = "batch-beads-dirty";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-beads-dirty",
+        title: "Beads dirty task",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch: "branch-beads-dirty",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
+    let mergeCalls = 0;
+
+    const result = await runHubBatchMerge({
+      flowId: "no-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger: async () => {
+        mergeCalls += 1;
+        return { outcome: "success" };
+      },
+      verifier: successVerifier,
+      branchInspector: branchReadyInspector,
+      worktreeInspector: async () => ({
+        dirtySourceFiles: [],
+        dirtyTaskStoreFiles: [
+          ".beads/issues.jsonl",
+          ".beads/interactions.jsonl",
+        ],
+      }),
+    });
+
+    expect(mergeCalls).toBe(1);
+    expect(result.batchStatus).toBe("done");
+    expect(result.selectedTaskIds).toEqual(["bd-beads-dirty"]);
+    expect(result.selectionDiagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-beads-dirty",
+        decision: "selected",
+        reason: "selected",
+        taskStoreDirtyFiles: [
+          ".beads/issues.jsonl",
+          ".beads/interactions.jsonl",
+        ],
+      }),
+    );
+    expect(formatHubBatchMergeResultLines(result).join("\n")).toContain(
+      "task-store dirty: .beads/issues.jsonl, .beads/interactions.jsonl",
+    );
+  });
+
+  it("blocks task branches that include Beads runtime/export files in their diff", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-batch-merge-beads-diff-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const batchId = "batch-beads-diff";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-beads-diff",
+        title: "Beads branch diff",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch: "branch-beads-diff",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
+    let mergeCalls = 0;
+
+    const result = await runHubBatchMerge({
+      flowId: "no-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger: async () => {
+        mergeCalls += 1;
+        return { outcome: "success" };
+      },
+      verifier: successVerifier,
+      branchInspector: async () => ({
+        exists: true,
+        hasUnmergedWork: true,
+        changedFiles: [".beads/issues.jsonl"],
+      }),
+      worktreeInspector: cleanWorktreeInspector,
+    });
+
+    expect(mergeCalls).toBe(0);
+    expect(result.batchStatus).toBe("skipped");
+    expect(result.selectedTaskIds).toEqual([]);
+    expect(result.selectionDiagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-beads-diff",
+        decision: "blocked",
+        reason: "task_store_dirty",
+        branch: "branch-beads-diff",
+        taskStoreBranchFiles: [".beads/issues.jsonl"],
+      }),
+    );
+    expect(formatHubBatchMergeResultLines(result).join("\n")).toContain(
+      "bd-beads-diff: blocked task_store_dirty branch-beads-diff",
     );
   });
 
@@ -347,6 +741,8 @@ describe("runHubBatchMerge", () => {
       env,
       merger: successMerger,
       verifier,
+      branchInspector: branchReadyInspector,
+      worktreeInspector: cleanWorktreeInspector,
     });
 
     expect(result.batchStatus).toBe("partial_failed");
@@ -435,6 +831,8 @@ describe("runHubBatchMerge", () => {
       env,
       merger,
       verifier: successVerifier,
+      branchInspector: branchReadyInspector,
+      worktreeInspector: cleanWorktreeInspector,
     });
 
     expect(result.batchStatus).toBe("partial_failed");
@@ -507,6 +905,8 @@ describe("runHubBatchMerge", () => {
       env,
       merger,
       verifier: successVerifier,
+      branchInspector: branchReadyInspector,
+      worktreeInspector: cleanWorktreeInspector,
     });
 
     expect(result.batchStatus).toBe("partial_failed");
@@ -624,6 +1024,8 @@ describe("runHubBatchMerge", () => {
       merger: successMerger,
       verifier: successVerifier,
       closer,
+      branchInspector: branchReadyInspector,
+      worktreeInspector: cleanWorktreeInspector,
     });
 
     expect(result.batchStatus).toBe("partial_failed");
