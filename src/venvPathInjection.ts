@@ -60,7 +60,12 @@ export const composeVenvPathEnv = (
       ? hostVenvBin
       : `${SANDBOX_REPO_DIR}/${VENV_BIN_SUBPATH}`;
 
-  const existingPath = env.PATH ?? "";
+  // Fall back to process.env.PATH when the passed-in env doesn't carry one
+  // (resolveEnv / mergeProviderEnv don't include process.env). Without this
+  // fallback, prepending venvBin to an empty string yields a PATH containing
+  // only .venv/bin — and the agent's spawned shell can't find /bin/sh,
+  // producing ENOENT on every sandbox.exec.
+  const existingPath = env.PATH ?? process.env.PATH ?? "";
   const newPath =
     existingPath.length > 0
       ? `${venvBinForAgent}:${existingPath}`
