@@ -17,44 +17,48 @@ import { assertAgentCredentialsConfigured } from "./agentAuthGuidance.js";
 import { run } from "./run.js";
 import { noSandbox } from "./sandboxes/no-sandbox.js";
 
+const pickAllowedOption = <T extends string>(
+  value: string | undefined,
+  allowed: readonly T[],
+): T | undefined => {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return (allowed as readonly string[]).includes(trimmed)
+    ? (trimmed as T)
+    : undefined;
+};
+
 const resolveCodexOptions = (
   options: HubAgentRoleEntry["options"],
 ): { readonly effort?: "low" | "medium" | "high" | "xhigh" } => {
-  const effort = options?.effort;
-  if (
-    effort === "low" ||
-    effort === "medium" ||
-    effort === "high" ||
-    effort === "xhigh"
-  ) {
-    return { effort };
-  }
-  return {};
+  const effort = pickAllowedOption(options?.effort, [
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+  ] as const);
+  return effort ? { effort } : {};
 };
 
 const resolveClaudeCodeOptions = (
   options: HubAgentRoleEntry["options"],
 ): { readonly effort?: "low" | "medium" | "high" | "max" } => {
-  const effort = options?.effort;
-  if (
-    effort === "low" ||
-    effort === "medium" ||
-    effort === "high" ||
-    effort === "max"
-  ) {
-    return { effort };
-  }
-  return {};
+  const effort = pickAllowedOption(options?.effort, [
+    "low",
+    "medium",
+    "high",
+    "max",
+  ] as const);
+  return effort ? { effort } : {};
 };
 
 const resolveCursorOptions = (
   options: HubAgentRoleEntry["options"],
 ): { readonly mode?: "plan" | "ask" } => {
-  const mode = options?.mode;
-  if (mode === "plan" || mode === "ask") {
-    return { mode };
-  }
-  return {};
+  const mode = pickAllowedOption(options?.mode, ["plan", "ask"] as const);
+  return mode ? { mode } : {};
 };
 
 const resolveOpenCodeOptions = (

@@ -17,7 +17,42 @@ import {
   type HubAgentRoleEntry,
 } from "./hubAgentConfig.js";
 
-const promptHubAgentModel = async (providerName: string): Promise<string> => {
+const HUB_AGENT_ROLE_SETUP_CANCELLED = "Hub agent role setup cancelled.";
+
+type HubAgentPromptCancelHandler = () => never;
+
+const throwHubAgentSetupCancelled: HubAgentPromptCancelHandler = () => {
+  throw new TaskBoardError({
+    message: HUB_AGENT_ROLE_SETUP_CANCELLED,
+  });
+};
+
+const exitHubAgentSetupCancelled: HubAgentPromptCancelHandler = () => {
+  clack.cancel(HUB_AGENT_ROLE_SETUP_CANCELLED);
+  process.exit(0);
+};
+
+const buildAgentProviderSelectOptions = () =>
+  listAgents().map((agent) => ({
+    value: agent.name,
+    label: agent.label,
+    hint: `default model: ${agent.defaultModel}`,
+  }));
+
+const buildHubAgentRoleEntry = (
+  providerName: string,
+  model: string,
+  options: HubAgentRoleEntry["options"],
+): HubAgentRoleEntry => ({
+  provider: providerName,
+  model,
+  ...(options ? { options } : {}),
+});
+
+const promptHubAgentModel = async (
+  providerName: string,
+  onCancel: HubAgentPromptCancelHandler,
+): Promise<string> => {
   const selectedAgent = getAgent(providerName);
   const modelOptions = buildHubAgentModelSelectOptions(providerName);
   const defaultModel = selectedAgent?.defaultModel;
@@ -36,9 +71,7 @@ const promptHubAgentModel = async (providerName: string): Promise<string> => {
     })),
   });
   if (clack.isCancel(modelSelection)) {
-    throw new TaskBoardError({
-      message: "Hub agent role setup cancelled.",
-    });
+    onCancel();
   }
 
   if (!isHubAgentCustomModelSelection(String(modelSelection))) {
@@ -55,9 +88,7 @@ const promptHubAgentModel = async (providerName: string): Promise<string> => {
     },
   });
   if (clack.isCancel(customModel)) {
-    throw new TaskBoardError({
-      message: "Hub agent role setup cancelled.",
-    });
+    onCancel();
   }
 
   return String(customModel).trim();
@@ -65,6 +96,7 @@ const promptHubAgentModel = async (providerName: string): Promise<string> => {
 
 const promptHubAgentRoleOptions = async (
   providerName: string,
+  onCancel: HubAgentPromptCancelHandler,
 ): Promise<HubAgentRoleEntry["options"]> => {
   const selections: Record<string, string | undefined> = {};
 
@@ -83,9 +115,7 @@ const promptHubAgentRoleOptions = async (
       ],
     });
     if (clack.isCancel(selected)) {
-      throw new TaskBoardError({
-        message: "Hub agent role setup cancelled.",
-      });
+      onCancel();
     }
 
     const value = String(selected);
@@ -97,63 +127,44 @@ const promptHubAgentRoleOptions = async (
   return buildHubAgentRoleOptionsFromSelections(providerName, selections);
 };
 
-export const promptHubAgentRoleEntry = async (
-  role: HubAgentRole,
+const promptHubAgentRoleDetails = async (
+  providerMessage: string,
+  onCancel: HubAgentPromptCancelHandler,
 ): Promise<HubAgentRoleEntry> => {
-  const providers = listAgents();
   const providerSelection = await clack.select({
-    message: `Select agent provider for ${role} role:`,
-    options: providers.map((provider) => ({
-      value: provider.name,
-      label: provider.label,
-      hint: `default model: ${provider.defaultModel}`,
-    })),
+    message: providerMessage,
+    options: buildAgentProviderSelectOptions(),
   });
   if (clack.isCancel(providerSelection)) {
-    throw new TaskBoardError({
-      message: "Hub agent role setup cancelled.",
-    });
+    onCancel();
   }
 
   const providerName = String(providerSelection);
-  const model = await promptHubAgentModel(providerName);
-  const options = await promptHubAgentRoleOptions(providerName);
-
-  return {
-    provider: providerName,
-    model,
-    ...(options ? { options } : {}),
-  };
+  const model = await promptHubAgentModel(providerName, onCancel);
+  const options = await promptHubAgentRoleOptions(providerName, onCancel);
+  return buildHubAgentRoleEntry(providerName, model, options);
 };
+
+export const promptHubAgentRoleEntry = async (
+  role: HubAgentRole,
+): Promise<HubAgentRoleEntry> =>
+  promptHubAgentRoleDetails(
+    `Select agent provider for ${role} role:`,
+    throwHubAgentSetupCancelled,
+  );
 
 export const promptHubAgentRoleSetup = async (
   role: HubAgentRole,
 ): Promise<HubAgentRoleEntry> => {
   clack.intro(`Configure Hub agent role: ${role}`);
 
-  const provider = await clack.select({
-    message: "Agent provider",
-    options: listAgents().map((agent) => ({
-      value: agent.name,
-      label: agent.label,
-      hint: `default model: ${agent.defaultModel}`,
-    })),
-  });
-  if (clack.isCancel(provider)) {
-    clack.cancel("Hub agent role setup cancelled.");
-    process.exit(0);
-  }
-
-  const providerName = String(provider);
-  const model = await promptHubAgentModel(providerName);
-  const options = await promptHubAgentRoleOptions(providerName);
+  const entry = await promptHubAgentRoleDetails(
+    "Agent provider",
+    exitHubAgentSetupCancelled,
+  );
 
   clack.outro(`Saved ${role} provider settings.`);
-  return {
-    provider: providerName,
-    model,
-    ...(options ? { options } : {}),
-  };
+  return entry;
 };
 
 export const promptInitHubAgentConfig = async (
@@ -170,7 +181,7 @@ export const promptInitHubAgentConfig = async (
         initialValue: true,
       });
       if (clack.isCancel(applyToAll)) {
-        clack.cancel("Hub agent role setup cancelled.");
+        clack.cancel(HUB_AGENT_ROLE_SETUP_CANCELLED);
         process.exit(0);
       }
       return Boolean(applyToAll);

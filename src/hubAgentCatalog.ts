@@ -2,13 +2,7 @@ import { getAgent } from "./InitService.js";
 
 export const HUB_AGENT_CUSTOM_MODEL_VALUE = "__custom__" as const;
 
-export interface HubAgentModelSelectOption {
-  readonly value: string;
-  readonly label: string;
-  readonly hint?: string;
-}
-
-export interface HubAgentRoleOptionChoice {
+export interface HubAgentSelectChoice {
   readonly value: string;
   readonly label: string;
   readonly hint?: string;
@@ -17,9 +11,27 @@ export interface HubAgentRoleOptionChoice {
 export interface HubAgentRoleOptionPrompt {
   readonly key: string;
   readonly message: string;
-  readonly choices: readonly HubAgentRoleOptionChoice[];
+  readonly choices: readonly HubAgentSelectChoice[];
   readonly skipLabel?: string;
 }
+
+const hubAgentChoice = (
+  value: string,
+  hint?: string,
+): HubAgentSelectChoice => ({
+  value,
+  label: value,
+  ...(hint ? { hint } : {}),
+});
+
+const hubAgentEffortChoices = (
+  extra: HubAgentSelectChoice,
+): readonly HubAgentSelectChoice[] => [
+  hubAgentChoice("low"),
+  hubAgentChoice("medium"),
+  hubAgentChoice("high"),
+  extra,
+];
 
 const HUB_AGENT_MODEL_CATALOG: Readonly<Record<string, readonly string[]>> = {
   "claude-code": [
@@ -55,14 +67,12 @@ export const listKnownHubAgentModels = (
 
 export const buildHubAgentModelSelectOptions = (
   providerName: string,
-): HubAgentModelSelectOption[] => {
+): HubAgentSelectChoice[] => {
   const agent = getAgent(providerName);
   const defaultModel = agent?.defaultModel ?? "";
-  const options = listKnownHubAgentModels(providerName).map((model) => ({
-    value: model,
-    label: model,
-    hint: model === defaultModel ? "default" : undefined,
-  }));
+  const options = listKnownHubAgentModels(providerName).map((model) =>
+    hubAgentChoice(model, model === defaultModel ? "default" : undefined),
+  );
 
   options.push({
     value: HUB_AGENT_CUSTOM_MODEL_VALUE,
@@ -88,12 +98,7 @@ export const listHubAgentRoleOptionPrompts = (
         {
           key: "effort",
           message: "Codex reasoning effort",
-          choices: [
-            { value: "low", label: "low" },
-            { value: "medium", label: "medium" },
-            { value: "high", label: "high" },
-            { value: "xhigh", label: "xhigh" },
-          ],
+          choices: hubAgentEffortChoices(hubAgentChoice("xhigh")),
           skipLabel: "None (default)",
         },
       ];
@@ -102,12 +107,7 @@ export const listHubAgentRoleOptionPrompts = (
         {
           key: "effort",
           message: "Claude Code reasoning effort",
-          choices: [
-            { value: "low", label: "low" },
-            { value: "medium", label: "medium" },
-            { value: "high", label: "high" },
-            { value: "max", label: "max" },
-          ],
+          choices: hubAgentEffortChoices(hubAgentChoice("max")),
           skipLabel: "None (default)",
         },
       ];
@@ -117,8 +117,8 @@ export const listHubAgentRoleOptionPrompts = (
           key: "mode",
           message: "Cursor agent mode",
           choices: [
-            { value: "plan", label: "plan", hint: "planning mode" },
-            { value: "ask", label: "ask", hint: "Q&A mode" },
+            hubAgentChoice("plan", "planning mode"),
+            hubAgentChoice("ask", "Q&A mode"),
           ],
           skipLabel: "Full coding mode (default)",
         },
@@ -129,10 +129,10 @@ export const listHubAgentRoleOptionPrompts = (
           key: "variant",
           message: "OpenCode variant",
           choices: [
-            { value: "low", label: "low" },
-            { value: "high", label: "high" },
-            { value: "max", label: "max" },
-            { value: "minimal", label: "minimal" },
+            hubAgentChoice("low"),
+            hubAgentChoice("high"),
+            hubAgentChoice("max"),
+            hubAgentChoice("minimal"),
           ],
           skipLabel: "None (default)",
         },
@@ -149,7 +149,7 @@ export const buildHubAgentRoleOptionsFromSelections = (
   const options: Record<string, string> = {};
   for (const prompt of listHubAgentRoleOptionPrompts(providerName)) {
     const value = selections[prompt.key]?.trim();
-    if (value && value.length > 0) {
+    if (value) {
       options[prompt.key] = value;
     }
   }
