@@ -848,7 +848,7 @@ Displays configured Hub agent roles and clearly reports missing roles. Use this 
 
 ### `sandcastle agent-config init`
 
-Runs an interactive wizard to configure all Hub agent roles. You can apply one provider/model pair to every role, or configure each role individually. Use this for first-time Hub agent setup.
+Runs an interactive wizard to configure all Hub agent roles. After you choose a provider, Sandcastle offers a provider-specific model picker (default model marked) with a custom-model escape hatch, then prompts for supported provider options such as Codex/Claude effort or Cursor mode. You can apply one provider/model/options set to every role, or configure each role individually. Use this for first-time Hub agent setup.
 
 ### `sandcastle agent-config configure`
 
