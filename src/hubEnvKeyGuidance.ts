@@ -9,12 +9,16 @@ export interface HubEnvKeyGuidance {
   readonly alternate?: string;
 }
 
+type HubEnvKeyGuidanceDefinition = Omit<HubEnvKeyGuidance, "key">;
+
 export const HUB_ENV_BLANK_INPUT_NOTE =
   "Leave blank to keep the existing value (does not clear it).";
 
-const HUB_ENV_KEY_GUIDANCE: Record<HubEnvKnownKey, HubEnvKeyGuidance> = {
+const HUB_ENV_KEY_GUIDANCE: Record<
+  HubEnvKnownKey,
+  HubEnvKeyGuidanceDefinition
+> = {
   OPENAI_KEY: {
-    key: "OPENAI_KEY",
     service: "OpenAI API",
     summary: "OpenAI platform API key for Codex API billing.",
     acquisition:
@@ -24,14 +28,12 @@ const HUB_ENV_KEY_GUIDANCE: Record<HubEnvKnownKey, HubEnvKeyGuidance> = {
       "For a Codex/ChatGPT CLI login session instead of API billing, run `sandcastle auth login codex`.",
   },
   ANTHROPIC_API_KEY: {
-    key: "ANTHROPIC_API_KEY",
     service: "Anthropic Console",
     summary: "Anthropic API key for Claude Code and Pi agents.",
     acquisition: "Create an API key in the Anthropic Console.",
     url: "https://console.anthropic.com/settings/keys",
   },
   CURSOR_API_KEY: {
-    key: "CURSOR_API_KEY",
     service: "Cursor",
     summary:
       "Cursor user API key for headless Hub automation (`agent --print`).",
@@ -40,7 +42,6 @@ const HUB_ENV_KEY_GUIDANCE: Record<HubEnvKnownKey, HubEnvKeyGuidance> = {
     url: "https://cursor.com/docs/cli/reference/authentication",
   },
   GH_TOKEN: {
-    key: "GH_TOKEN",
     service: "GitHub",
     summary: "GitHub token for GitHub Issues sync and `gh` CLI operations.",
     acquisition:
@@ -50,7 +51,6 @@ const HUB_ENV_KEY_GUIDANCE: Record<HubEnvKnownKey, HubEnvKeyGuidance> = {
       "For a reusable Hub-owned GitHub session, run `sandcastle auth login github`.",
   },
   OPENCODE_API_KEY: {
-    key: "OPENCODE_API_KEY",
     service: "OpenCode",
     summary: "OpenCode provider credential passed to the OpenCode CLI.",
     acquisition:
@@ -59,24 +59,23 @@ const HUB_ENV_KEY_GUIDANCE: Record<HubEnvKnownKey, HubEnvKeyGuidance> = {
   },
 };
 
-export const getHubEnvKeyGuidance = (key: HubEnvKnownKey): HubEnvKeyGuidance =>
-  HUB_ENV_KEY_GUIDANCE[key];
+export const getHubEnvKeyGuidance = (
+  key: HubEnvKnownKey,
+): HubEnvKeyGuidance => ({
+  key,
+  ...HUB_ENV_KEY_GUIDANCE[key],
+});
 
 export const formatHubEnvKeyGuidanceLines = (
   key: HubEnvKnownKey,
 ): readonly string[] => {
   const guidance = getHubEnvKeyGuidance(key);
-  const lines = [
+  return [
     `${guidance.service}: ${guidance.summary}`,
     guidance.acquisition,
+    ...(guidance.url ? [guidance.url] : []),
+    ...(guidance.alternate ? [guidance.alternate] : []),
   ];
-  if (guidance.url) {
-    lines.push(guidance.url);
-  }
-  if (guidance.alternate) {
-    lines.push(guidance.alternate);
-  }
-  return lines;
 };
 
 export const formatHubEnvKeyAcquisitionHint = (key: HubEnvKnownKey): string => {

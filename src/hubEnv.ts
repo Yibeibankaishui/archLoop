@@ -192,6 +192,7 @@ export const formatHubEnvShowLines = (
   const envPath = resolveHubEnvPath(options);
   const fileEnv = readHubEnvFile(options);
   const resolved = resolveHubEnv(options);
+  const runtimeEnv = options.env ?? process.env;
   const keys =
     Object.keys(fileEnv).length > 0
       ? [...new Set([...HUB_ENV_KNOWN_KEYS, ...Object.keys(fileEnv)])].sort()
@@ -203,11 +204,12 @@ export const formatHubEnvShowLines = (
   for (const key of keys) {
     const fileValue = fileEnv[key] ?? "";
     const effectiveValue = resolved[key] ?? "";
+    const runtimeValue = runtimeEnv[key];
     const runtimeOverride =
-      (options.env ?? process.env)[key] &&
-      (options.env ?? process.env)[key]!.length > 0 &&
+      runtimeValue &&
+      runtimeValue.length > 0 &&
       fileValue.length > 0 &&
-      (options.env ?? process.env)[key] !== fileValue;
+      runtimeValue !== fileValue;
 
     lines.push(
       `  ${key}: ${maskEnvValue(key, effectiveValue)}${

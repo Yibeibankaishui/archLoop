@@ -1,5 +1,6 @@
 import * as clack from "@clack/prompts";
 
+import { maskEnvValue } from "./envFile.js";
 import {
   collectHubEnvKeysForSetup,
   ensureHubEnvFile,
@@ -8,7 +9,6 @@ import {
   type HubEnvStoreOptions,
   writeHubEnvFile,
 } from "./hubEnv.js";
-import { maskEnvValue } from "./envFile.js";
 import {
   formatHubEnvKeyGuidanceLines,
   HUB_ENV_BLANK_INPUT_NOTE,

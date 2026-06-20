@@ -105,7 +105,10 @@ describe("hubEnv", () => {
   });
 
   it("shows acquisition hints for empty known keys", async () => {
-    const { env } = await makeStore();
+    const homeDir = await mkdtemp(join(tmpdir(), "hub-env-show-hints-"));
+    const dataDir = join(homeDir, "xdg-data");
+    await mkdir(dataDir, { recursive: true });
+    const env: NodeJS.ProcessEnv = { XDG_DATA_HOME: dataDir };
     ensureHubEnvFile({ env });
     writeHubEnvFile({ CURSOR_API_KEY: "saved-key" }, { env });
 
