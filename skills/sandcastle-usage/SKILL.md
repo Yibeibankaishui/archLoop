@@ -77,7 +77,9 @@ Replace `<TARGET_REPO>` with the project being developed.
 With GitHub Issues, planner templates only list the current `ready-for-agent`
 queue (`Sandcastle` + `ready-for-agent` when label creation is enabled) and the
 generated TypeScript fails fast if a planner returns an issue outside that
-allowed queue.
+allowed queue. `parallel-planner-with-review` also enriches each ready issue with
+computed `openBlockers` from live blocker state before planning, so stale
+`## Blocked by` prose does not skip work whose blockers are already closed.
 
 ## Project profiles
 

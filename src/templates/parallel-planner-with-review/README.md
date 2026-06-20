@@ -20,3 +20,13 @@ Before each implementer run, the template checks the **local** issue branch. If 
 If the same issue makes no merge progress across multiple iterations, the template stops scheduling it and prints recovery steps (merge the branch manually, close the issue, or fix the merge gate).
 
 The planner only performs dependency analysis; it does not inspect git branches. Branch state is handled deterministically in `main.mts`.
+
+## Stale blocker hygiene
+
+Before the planner runs, `main.mts` enriches each ready issue with computed
+blocker fields (`blockersDeclared`, `blockersResolved`, `openBlockers`) by
+parsing `## Blocked by` from the issue body and resolving live blocker state
+via `gh issue view` (GitHub Issues) or `bd show` (Beads). The planner prompt
+treats `openBlockers` as the source of truth, so downstream work is not skipped
+when blocker issues are already closed but the body was not updated. A warning
+is printed when all declared blockers are closed.

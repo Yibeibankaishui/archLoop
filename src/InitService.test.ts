@@ -2042,6 +2042,20 @@ describe("InitService scaffold", () => {
       ).toBe(true);
     });
 
+    it("scaffolds blocker resolution helper for planner enrichment", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner-with-review",
+        backlogManager: getBacklogManager("github-issues"),
+      });
+
+      const blockerResolution = await readFile(
+        join(dir, ".sandcastle", "blockerResolution.ts"),
+        "utf-8",
+      );
+      expect(blockerResolution).toContain("openBlockers");
+    });
+
     it("common files are still generated", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
@@ -2649,6 +2663,10 @@ describe("InitService scaffold", () => {
         "You may only choose issues from the provided `<issues-json>` list",
       );
       expect(planPrompt).toContain("If `<issues-json>` is an empty array");
+      expect(planPrompt).toContain("openBlockers");
+      expect(planPrompt).toContain(
+        "Primary source of truth for whether an issue is blocked",
+      );
       expect(planPrompt).not.toContain("!`gh issue list");
       expect(planPrompt).not.toContain("{{LIST_TASKS_COMMAND}}");
     });
@@ -2665,9 +2683,10 @@ describe("InitService scaffold", () => {
         "utf-8",
       );
       expect(main).toContain("-l Sandcastle -l ready-for-agent");
-      expect(main).toContain(
-        "const readyIssuesJson = await listReadyIssuesJson()",
-      );
+      expect(main).toContain("enrichReadyIssuesJson");
+      expect(main).toContain("blockerResolution.js");
+      expect(main).toContain('execFileAsync("gh"');
+      expect(main).toContain('"view"');
       expect(main).toContain("extractAllowedIssueIds");
       expect(main).toContain("assertPlanUsesAllowedIssues");
       expect(main).toContain("ISSUES_JSON: readyIssuesJson");
