@@ -865,11 +865,13 @@ describe("Hub task lifecycle review outcomes", () => {
       },
     ]);
 
+    const hubProjectDir = join(repoDir, "hub-project");
     const context = createHubRunContext({
       cwd: repoDir,
       branch: "flow/with-review",
       runId: "run-review-success",
       batchId: "batch-review-success",
+      hubProjectDir,
       env,
     });
     const createdAt = "2026-06-19T10:05:00.000Z";
@@ -935,11 +937,13 @@ describe("Hub task lifecycle review outcomes", () => {
       },
     ]);
 
+    const hubProjectDir = join(repoDir, "hub-project");
     const context = createHubRunContext({
       cwd: repoDir,
       branch: "flow/with-review",
       runId: "run-review-agent-fail",
       batchId: "batch-review-agent-fail",
+      hubProjectDir,
       env,
     });
 
@@ -1008,11 +1012,13 @@ describe("Hub task lifecycle review outcomes", () => {
       },
     ]);
 
+    const hubProjectDir = join(repoDir, "hub-project");
     const context = createHubRunContext({
       cwd: repoDir,
       branch: "flow/with-review",
       runId: "run-review-sandbox-fail",
       batchId: "batch-review-sandbox-fail",
+      hubProjectDir,
       env,
     });
 
