@@ -34,10 +34,7 @@ import {
   runHostHooks,
   type SandboxHooks,
 } from "./SandboxLifecycle.js";
-import {
-  syncSandboxHookScriptsToWorktree,
-  validateSandboxHookScripts,
-} from "./sandboxHookPreflight.js";
+import { prepareSandboxHookScripts } from "./sandboxHookPreflight.js";
 import {
   Sandbox as SandboxTag,
   SandboxFactory,
@@ -198,6 +195,46 @@ interface SandboxHandleContext {
     | undefined;
   readonly applyToHost: () => Effect.Effect<void, any>;
 }
+
+/** @internal Runs onSandboxReady hooks after syncing and validating hook scripts. */
+const runOnSandboxReadyHooks = (options: {
+  hostRepoDir: string;
+  worktreePath: string;
+  hooks: SandboxHooks | undefined;
+  sandboxRepoDir: string;
+  sandboxLayer: Layer.Layer<SandboxTag>;
+  copyToWorktreeMs?: number;
+}) =>
+  Effect.gen(function* () {
+    const sandboxOnReady = options.hooks?.sandbox?.onSandboxReady;
+    const hostOnReady = options.hooks?.host?.onSandboxReady;
+    if (!sandboxOnReady?.length && !hostOnReady?.length) return;
+
+    yield* prepareSandboxHookScripts(
+      options.hostRepoDir,
+      options.worktreePath,
+      options.hooks,
+      options.copyToWorktreeMs,
+    );
+
+    const sandbox = yield* SandboxTag;
+    yield* sandbox.exec(
+      `git config --global --add safe.directory "${options.sandboxRepoDir}"`,
+    );
+    const sandboxEffects = (sandboxOnReady ?? []).map((hook) =>
+      sandbox.exec(hook.command, {
+        cwd: options.sandboxRepoDir,
+        sudo: hook.sudo,
+      }),
+    );
+    const allEffects = [...sandboxEffects] as Effect.Effect<unknown, unknown>[];
+    if (hostOnReady?.length) {
+      allEffects.push(runHostHooks(hostOnReady, options.worktreePath));
+    }
+    yield* Effect.all(allEffects, {
+      concurrency: "unbounded",
+    });
+  }).pipe(Effect.provide(options.sandboxLayer));
 
 /**
  * @internal Builds a Sandbox handle with run() and interactive() methods.
@@ -630,46 +667,16 @@ export const createSandboxFromWorktree = async (
   }
 
   // 3. Run onSandboxReady hooks (sandbox-side and host-side in parallel)
-  const sandboxOnReady = options.hooks?.sandbox?.onSandboxReady;
-  const hostOnReady = options.hooks?.host?.onSandboxReady;
-
-  if (sandboxOnReady?.length || hostOnReady?.length) {
-    await Effect.runPromise(
-      syncSandboxHookScriptsToWorktree(
-        hostRepoDir,
-        worktreePath,
-        options.hooks,
-        options.timeouts?.copyToWorktreeMs,
-      ),
-    );
-    await Effect.runPromise(
-      validateSandboxHookScripts(worktreePath, options.hooks),
-    );
-    await Effect.runPromise(
-      Effect.gen(function* () {
-        const sandbox = yield* SandboxTag;
-        yield* sandbox.exec(
-          `git config --global --add safe.directory "${sandboxRepoDir}"`,
-        );
-        const sandboxEffects = (sandboxOnReady ?? []).map((hook) =>
-          sandbox.exec(hook.command, {
-            cwd: sandboxRepoDir,
-            sudo: hook.sudo,
-          }),
-        );
-        const allEffects = [...sandboxEffects] as Effect.Effect<
-          unknown,
-          unknown
-        >[];
-        if (hostOnReady?.length) {
-          allEffects.push(runHostHooks(hostOnReady, worktreePath));
-        }
-        yield* Effect.all(allEffects, {
-          concurrency: "unbounded",
-        });
-      }).pipe(Effect.provide(sandboxLayer)),
-    );
-  }
+  await Effect.runPromise(
+    runOnSandboxReadyHooks({
+      hostRepoDir,
+      worktreePath,
+      hooks: options.hooks,
+      sandboxRepoDir,
+      sandboxLayer,
+      copyToWorktreeMs: options.timeouts?.copyToWorktreeMs,
+    }),
+  );
 
   // 4. Build applyToHost callback
   const applyToHost =
@@ -837,48 +844,16 @@ export const createSandbox = async (
   }
 
   // 4. Run onSandboxReady hooks (sandbox-side and host-side in parallel)
-  {
-    const sandboxOnReady = options.hooks?.sandbox?.onSandboxReady;
-    const hostOnReady = options.hooks?.host?.onSandboxReady;
-
-    if (sandboxOnReady?.length || hostOnReady?.length) {
-      await Effect.runPromise(
-        syncSandboxHookScriptsToWorktree(
-          hostRepoDir,
-          worktreePath,
-          options.hooks,
-          options.timeouts?.copyToWorktreeMs,
-        ),
-      );
-      await Effect.runPromise(
-        validateSandboxHookScripts(worktreePath, options.hooks),
-      );
-      await Effect.runPromise(
-        Effect.gen(function* () {
-          const sandbox = yield* SandboxTag;
-          yield* sandbox.exec(
-            `git config --global --add safe.directory "${sandboxRepoDir}"`,
-          );
-          const sandboxEffects = (sandboxOnReady ?? []).map((hook) =>
-            sandbox.exec(hook.command, {
-              cwd: sandboxRepoDir,
-              sudo: hook.sudo,
-            }),
-          );
-          const allEffects = [...sandboxEffects] as Effect.Effect<
-            unknown,
-            unknown
-          >[];
-          if (hostOnReady?.length) {
-            allEffects.push(runHostHooks(hostOnReady, worktreePath));
-          }
-          yield* Effect.all(allEffects, {
-            concurrency: "unbounded",
-          });
-        }).pipe(Effect.provide(sandboxLayer)),
-      );
-    }
-  }
+  await Effect.runPromise(
+    runOnSandboxReadyHooks({
+      hostRepoDir,
+      worktreePath,
+      hooks: options.hooks,
+      sandboxRepoDir,
+      sandboxLayer,
+      copyToWorktreeMs: options.timeouts?.copyToWorktreeMs,
+    }),
+  );
 
   // 5. Build applyToHost callback (once, reused across runs)
   const applyToHost =
