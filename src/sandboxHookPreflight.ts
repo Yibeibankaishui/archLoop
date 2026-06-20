@@ -1,6 +1,11 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { Effect } from "effect";
+import { copyToWorktree } from "./CopyToWorktree.js";
+import type {
+  CopyToWorktreeError,
+  CopyToWorktreeTimeoutError,
+} from "./errors.js";
 import { MissingSandboxHookScriptError } from "./errors.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 
@@ -16,6 +21,14 @@ export const extractSandcastleScriptPaths = (command: string): string[] => {
   }
   return [...paths];
 };
+
+export const collectSandboxHookScriptPaths = (
+  hooks: SandboxHooks | undefined,
+): string[] => [
+  ...new Set(
+    collectSandboxHookCommands(hooks).flatMap(extractSandcastleScriptPaths),
+  ),
+];
 
 export const collectSandboxHookCommands = (
   hooks: SandboxHooks | undefined,
@@ -43,17 +56,70 @@ export const formatMissingSandboxHookScriptMessage = (
   "- After changing \`.sandcastle/main.ts\` hooks, restart the long-lived \`main.ts\` process so it reloads configuration.";
 
 /**
+ * Copy hook-referenced `.sandcastle/*.sh` scripts from the host repo into an
+ * issue worktree when they exist on the host but not in the worktree (typical
+ * when `.sandcastle/` is gitignored init scaffold).
+ */
+export const syncSandboxHookScriptsToWorktree = (
+  hostRepoDir: string,
+  worktreePath: string,
+  hooks: SandboxHooks | undefined,
+  timeoutMs?: number,
+): Effect.Effect<
+  void,
+  CopyToWorktreeTimeoutError | CopyToWorktreeError
+> =>
+  Effect.gen(function* () {
+    if (hostRepoDir === worktreePath) return;
+
+    const pathsToCopy = collectSandboxHookScriptPaths(hooks).filter(
+      (relativePath) =>
+        !existsSync(join(worktreePath, relativePath)) &&
+        existsSync(join(hostRepoDir, relativePath)),
+    );
+
+    if (pathsToCopy.length === 0) return;
+
+    yield* copyToWorktree(pathsToCopy, hostRepoDir, worktreePath, timeoutMs);
+  });
+
+/**
+ * Sync hook scripts from the host repo, then validate they exist in the
+ * target worktree before sandbox hook execution.
+ */
+export const prepareSandboxHookScripts = (
+  hostRepoDir: string,
+  worktreePath: string,
+  hooks: SandboxHooks | undefined,
+  timeoutMs?: number,
+): Effect.Effect<
+  void,
+  | CopyToWorktreeTimeoutError
+  | CopyToWorktreeError
+  | MissingSandboxHookScriptError
+> =>
+  Effect.gen(function* () {
+    yield* syncSandboxHookScriptsToWorktree(
+      hostRepoDir,
+      worktreePath,
+      hooks,
+      timeoutMs,
+    );
+    yield* validateSandboxHookScripts(worktreePath, hooks);
+  });
+
+/**
  * Fail before sandbox hook execution when a hook command references a
- * `.sandcastle/*.sh` script that is absent from the host worktree.
+ * `.sandcastle/*.sh` script that is absent from the worktree.
  */
 export const validateSandboxHookScripts = (
-  hostWorktreePath: string,
+  worktreePath: string,
   hooks: SandboxHooks | undefined,
 ): Effect.Effect<void, MissingSandboxHookScriptError> =>
   Effect.gen(function* () {
     for (const command of collectSandboxHookCommands(hooks)) {
       for (const relativePath of extractSandcastleScriptPaths(command)) {
-        const absolutePath = join(hostWorktreePath, relativePath);
+        const absolutePath = join(worktreePath, relativePath);
         if (!existsSync(absolutePath)) {
           return yield* Effect.fail(
             new MissingSandboxHookScriptError({

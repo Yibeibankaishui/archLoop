@@ -58,6 +58,29 @@ describe("copyToWorktree", () => {
     }
   });
 
+  it("copies nested paths, creating parent directories in the worktree", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cw-test-"));
+    const worktreeDir = await mkdtemp(join(tmpdir(), "cw-wt-"));
+
+    await mkdir(join(hostDir, ".sandcastle"));
+    await writeFile(
+      join(hostDir, ".sandcastle", "bootstrap.sh"),
+      "#!/bin/bash\n",
+    );
+
+    try {
+      await Effect.runPromise(
+        copyToWorktree([".sandcastle/bootstrap.sh"], hostDir, worktreeDir),
+      );
+      expect(
+        existsSync(join(worktreeDir, ".sandcastle", "bootstrap.sh")),
+      ).toBe(true);
+    } finally {
+      await rm(hostDir, { recursive: true, force: true });
+      await rm(worktreeDir, { recursive: true, force: true });
+    }
+  });
+
   it("succeeds when first cp fails but fallback cp -R succeeds", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cw-test-"));
     const worktreeDir = await mkdtemp(join(tmpdir(), "cw-wt-"));
