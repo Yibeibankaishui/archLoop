@@ -2,6 +2,7 @@ import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
 
 import {
   applyPrdDecompositionProposal,
@@ -167,6 +168,7 @@ describe("validatePrdDecompositionProposal", () => {
 describe("applyPrdDecompositionProposal", () => {
   it("creates Beads tasks with PRD metadata, acceptance criteria, and dependencies", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "prd-proposal-apply-"));
+    seedHubTaskStoreMetadata(hostDir);
     const binDir = join(hostDir, "bin");
     await mkdir(binDir, { recursive: true });
 
@@ -232,6 +234,7 @@ exit 1
 
   it("includes userStoriesCovered in task body when present", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "prd-proposal-stories-"));
+    seedHubTaskStoreMetadata(hostDir);
     const binDir = join(hostDir, "bin");
     await mkdir(binDir, { recursive: true });
 
@@ -294,6 +297,7 @@ exit 1
 
   it("maps AFK and HITL slices to ready states in classified mode", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "prd-proposal-ready-"));
+    seedHubTaskStoreMetadata(hostDir);
     const binDir = join(hostDir, "bin");
     await mkdir(binDir, { recursive: true });
 
@@ -350,6 +354,7 @@ exit 1
 
   it("persists PRD warning metadata, description section, and label on warned slices", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "prd-proposal-warnings-"));
+    seedHubTaskStoreMetadata(hostDir);
     const binDir = join(hostDir, "bin");
     await mkdir(binDir, { recursive: true });
 
@@ -454,6 +459,7 @@ exit 1
 describe("prd decomposition helpers", () => {
   it("prepares PRD and Hub context for the proposal session", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "prd-proposal-context-"));
+    seedHubTaskStoreMetadata(hostDir);
     const binDir = join(hostDir, "bin");
     await mkdir(binDir, { recursive: true });
     const bdPath = join(binDir, "bd");
@@ -536,6 +542,7 @@ describe("prd decomposition helpers", () => {
 describe("runPrdDecompositionFlow", () => {
   it("runs a one-shot proposal session and applies inbox tasks by default", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "prd-proposal-flow-"));
+    seedHubTaskStoreMetadata(hostDir);
     const { exec } = await import("node:child_process");
     const { promisify } = await import("node:util");
     const execAsync = promisify(exec);
@@ -618,6 +625,7 @@ exit 1
 
   it("passes a draft prompt with substituted prepared context to the agent", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "prd-proposal-draft-"));
+    seedHubTaskStoreMetadata(hostDir);
     const { exec } = await import("node:child_process");
     const { promisify } = await import("node:util");
     const execAsync = promisify(exec);

@@ -171,10 +171,11 @@ Steps:
 
 ```bash
 cd "$TARGET_REPO"
-bd init
-bd create "QA inbox task" --label needs-triage
-bd create "QA agent task" --label ready-for-agent
-bd create "QA human task" --label ready-for-human
+sandcastle tasks init
+sandcastle tasks create "QA inbox task"
+sandcastle tasks create "QA agent task" --description "Add retry handling with clear acceptance criteria and verification steps."
+sandcastle tasks create "QA human task" --description "Human-owned release approval. Requires product decision before implementation."
+sandcastle tasks triage --yes
 sandcastle tasks list
 sandcastle tasks show <TASK_SELECTOR>
 ```

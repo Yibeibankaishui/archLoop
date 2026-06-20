@@ -2,6 +2,7 @@ import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
 
 import {
   draftPrdSlices,
@@ -71,6 +72,7 @@ describe("prdDecomposition", () => {
 
   it("creates Beads tasks and dependency edges from an approved PRD draft", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "prd-decomposition-"));
+    seedHubTaskStoreMetadata(hostDir);
     const binDir = join(hostDir, "bin");
     await mkdir(binDir, { recursive: true });
 

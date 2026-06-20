@@ -1,4 +1,5 @@
 import { exec } from "node:child_process";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +15,15 @@ import {
 import { projectHubTask } from "./taskBoard.js";
 
 const execAsync = promisify(exec);
+
+const seedHubTaskStore = (repoDir: string): void => {
+  const beadsDir = join(repoDir, ".beads");
+  mkdirSync(beadsDir, { recursive: true });
+  const metadataPath = join(beadsDir, "metadata.json");
+  if (!existsSync(metadataPath)) {
+    writeFileSync(metadataPath, JSON.stringify({ backend: "dolt" }));
+  }
+};
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
@@ -144,6 +154,7 @@ describe("triageHubTasks", () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-triage-"));
     await initRepo(repoDir);
     await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+    seedHubTaskStore(repoDir);
 
     const binDir = join(repoDir, "bin");
     await mkdir(binDir, { recursive: true });

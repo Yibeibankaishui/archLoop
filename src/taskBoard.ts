@@ -1,5 +1,3 @@
-import { execFileSync } from "node:child_process";
-
 import type { PrdWarningSeverity } from "./hubPrdDecomposition.js";
 import {
   formatPrdWarningDetailsRow,
@@ -24,7 +22,7 @@ import {
   appendBdRemoveLabelArgs,
 } from "./bdCliArgs.js";
 import { TaskBoardError } from "./errors.js";
-import { resolveBdExecutable } from "./resolveBdExecutable.js";
+import { runBdTextForHubTaskStore } from "./hubTaskStore.js";
 
 export const HUB_TASK_STATUSES = [
   "inbox",
@@ -523,27 +521,7 @@ const parseBdJsonOutput = (output: string): unknown[] => {
   return [];
 };
 
-const runBdText = (
-  cwd: string,
-  args: readonly string[],
-  failureLabel: string,
-  env: NodeJS.ProcessEnv = process.env,
-): string => {
-  try {
-    return execFileSync(resolveBdExecutable(env), [...args], {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      env,
-    });
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "unable to execute bd";
-    throw new TaskBoardError({
-      message: `sandcastle ${failureLabel} requires Beads in the current repo: ${message}`,
-    });
-  }
-};
+const runBdText = runBdTextForHubTaskStore;
 
 const runBdJson = (
   cwd: string,
@@ -1088,7 +1066,7 @@ const verifyHubTasksDeleted = (
   throw new TaskBoardError({
     message: [
       `sandcastle tasks delete reported success, but Beads still has: ${stillPresent.join(", ")}.`,
-      `Retry with: bd delete ${stillPresent.join(" ")} --force`,
+      `Retry with: sandcastle tasks delete ${stillPresent.join(" ")} --yes --force`,
     ].join(" "),
   });
 };

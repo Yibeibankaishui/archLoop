@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 
 import { Output } from "./Output.js";
@@ -24,7 +23,7 @@ import {
   type RunProposalSessionResult,
 } from "./hubProposalSession.js";
 import { appendBdAddLabelArgs, appendBdRemoveLabelArgs } from "./bdCliArgs.js";
-import { resolveBdExecutable } from "./resolveBdExecutable.js";
+import { runBdTextForHubTaskStore } from "./hubTaskStore.js";
 import { TaskBoardError } from "./errors.js";
 import {
   addHubTaskDependency,
@@ -689,20 +688,7 @@ const runBdText = (
   failureLabel: string,
   env: NodeJS.ProcessEnv,
 ): void => {
-  try {
-    execFileSync(resolveBdExecutable(env), [...args], {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      env,
-    });
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "unable to execute bd";
-    throw new TaskBoardError({
-      message: `sandcastle ${failureLabel} requires Beads in the current repo: ${message}`,
-    });
-  }
+  runBdTextForHubTaskStore(cwd, args, failureLabel, env);
 };
 
 const addHubTaskLabels = (

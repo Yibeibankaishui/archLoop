@@ -114,6 +114,7 @@ import {
   resolveHubTaskSelectors,
 } from "./taskBoard.js";
 import { HUB_TRIAGE_DEFAULT_TASK_QUERY } from "./hubTriage.js";
+import { initHubTaskStore } from "./hubTaskStore.js";
 import { isTriageTaskIdInput } from "./hubTriageProposal.js";
 import {
   formatHubTaskSyncPreviewLines,
@@ -1583,6 +1584,7 @@ const formatHubProjectStatusRows = (
   "Hub project dir": status.hubProjectDir,
   "Hub project registration": status.projectRegistered ? "existing" : "created",
   "Beads available": status.beadsAvailable ? "yes" : "no",
+  "Task store initialized": status.taskStoreInitialized ? "yes" : "no",
   "Task board ready": String(status.taskCounts.ready),
   "Task board total": String(status.taskCounts.total),
 });
@@ -1722,6 +1724,27 @@ const resolvePrdWarningFilter = (
     }),
   );
 };
+
+const tasksInitCommand = Command.make("init", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const cwd = process.cwd();
+    const result = yield* Effect.try({
+      try: () => initHubTaskStore(cwd),
+      catch: toTaskBoardError,
+    });
+
+    if (result.alreadyInitialized) {
+      yield* d.status("Hub task store is already initialized.", "success");
+      return;
+    }
+
+    if (result.output.trim().length > 0) {
+      yield* d.text(result.output.trim());
+    }
+    yield* d.status("Initialized local Hub task store.", "success");
+  }),
+);
 
 const tasksListCommand = Command.make(
   "list",
@@ -2272,6 +2295,7 @@ const tasksCommand = Command.make("tasks", {}, () =>
   }),
 ).pipe(
   Command.withSubcommands([
+    tasksInitCommand,
     tasksListCommand,
     tasksShowCommand,
     tasksCreateCommand,

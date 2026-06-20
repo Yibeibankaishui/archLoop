@@ -2,6 +2,7 @@ import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
 
 import { readHubFlowPrompt } from "./hubFlows.js";
 import {
@@ -442,6 +443,7 @@ process.exit(1);
 describe("applyTriageProposal", () => {
   it("applies status transitions, comments, labels, dependencies, and wontfix closure", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "triage-proposal-apply-"));
+    seedHubTaskStoreMetadata(repoDir);
     const { exec } = await import("node:child_process");
     const { promisify } = await import("node:util");
     const execAsync = promisify(exec);
@@ -600,6 +602,7 @@ describe("applyTriageProposal", () => {
 
   it("applies ready_for_human outcome with hub status and label", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "triage-proposal-human-"));
+    seedHubTaskStoreMetadata(repoDir);
     const { exec } = await import("node:child_process");
     const { promisify } = await import("node:util");
     const { readFile: readFileAsync } = await import("node:fs/promises");
@@ -735,6 +738,7 @@ describe("runTriageProposalFlow", () => {
   it("auto-applies high-confidence decisions under yes and skips wontfix without confirmation", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "triage-proposal-flow-"));
     await initRepo(hostDir);
+    seedHubTaskStoreMetadata(hostDir);
 
     const binDir = join(hostDir, "bin");
     await mkdir(binDir, { recursive: true });
@@ -840,6 +844,7 @@ describe("runTriageProposalFlow", () => {
   it("returns cancelled when approval is rejected", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "triage-proposal-cancel-"));
     await initRepo(hostDir);
+    seedHubTaskStoreMetadata(hostDir);
 
     const binDir = join(hostDir, "bin");
     await mkdir(binDir, { recursive: true });
@@ -907,6 +912,7 @@ describe("runTriageProposalFlow", () => {
   it("fails validation when finalization references unknown task ids", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "triage-proposal-invalid-"));
     await initRepo(hostDir);
+    seedHubTaskStoreMetadata(hostDir);
 
     const binDir = join(hostDir, "bin");
     await mkdir(binDir, { recursive: true });
@@ -979,6 +985,7 @@ describe("runTriageProposalFlow", () => {
   it("applies triage when agent proposes valid and ghost blocker dependencies", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "triage-proposal-ghost-dep-"));
     await initRepo(hostDir);
+    seedHubTaskStoreMetadata(hostDir);
 
     const binDir = join(hostDir, "bin");
     await mkdir(binDir, { recursive: true });
@@ -1153,6 +1160,7 @@ describe("triage proposal helpers", () => {
 
   it("includes boardTaskCatalog with every hub board task sorted by id", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "triage-proposal-catalog-"));
+    seedHubTaskStoreMetadata(hostDir);
     const binDir = join(hostDir, "bin");
     await mkdir(binDir, { recursive: true });
     const stateFile = join(hostDir, "bd-state.json");
@@ -1228,6 +1236,7 @@ describe("triage proposal helpers", () => {
 
   it("prepares context and substitutes draft prompt placeholders", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "triage-proposal-context-"));
+    seedHubTaskStoreMetadata(hostDir);
     const binDir = join(hostDir, "bin");
     await mkdir(binDir, { recursive: true });
     const stateFile = join(hostDir, "bd-state.json");

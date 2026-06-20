@@ -9,6 +9,7 @@ import {
   createHubRunContext,
   createHubTaskClaimMetadata,
 } from "./hubExecution.js";
+import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
 import {
   claimHubTaskForImplementation,
   completeCloseFailedRecovery,
@@ -70,6 +71,7 @@ const writeMockBd = async (
   stateFile: string,
   initialTasks: MockBeadsTask[],
 ) => {
+  seedHubTaskStoreMetadata(repoDir);
   const binDir = join(repoDir, "bin");
   await mkdir(binDir, { recursive: true });
   const gitPath = (await execAsync("command -v git")).stdout.trim();
