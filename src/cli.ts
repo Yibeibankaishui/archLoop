@@ -115,6 +115,7 @@ import {
 import { HUB_TRIAGE_DEFAULT_TASK_QUERY } from "./hubTriage.js";
 import { isTriageTaskIdInput } from "./hubTriageProposal.js";
 import {
+  formatHubTaskSyncPreviewLines,
   formatHubTaskSyncSummaryLines,
   syncHubTasksWithGithub,
 } from "./hubTaskSync.js";
@@ -1632,6 +1633,22 @@ const taskDeleteCascadeOption = Options.boolean("cascade").pipe(
   ),
   Options.withDefault(false),
 );
+const taskSyncYesOption = Options.boolean("yes").pipe(
+  Options.withDescription(
+    "Apply sync changes after previewing them. Required for non-interactive tasks sync.",
+  ),
+  Options.withDefault(false),
+);
+const taskSyncDryRunOption = Options.boolean("dry-run").pipe(
+  Options.withDescription("Preview task sync changes without applying them."),
+  Options.withDefault(false),
+);
+const taskSyncIncludeClosedOption = Options.boolean("include-closed").pipe(
+  Options.withDescription(
+    "Include closed historical GitHub issues when pulling into Beads.",
+  ),
+  Options.withDefault(false),
+);
 const taskWarningOption = Options.text("warning").pipe(
   Options.withDescription(
     "Filter tasks by PRD warning severity (high, medium, or low).",
@@ -1946,19 +1963,121 @@ const tasksFromPrdCommand = Command.make(
     }),
 );
 
-const tasksSyncCommand = Command.make("sync", {}, () =>
+const runHubTaskSyncCommand = (input: {
+  readonly mode: "sync" | "pull" | "push";
+  readonly yes?: boolean;
+  readonly dryRun?: boolean;
+  readonly includeClosed?: boolean;
+}) =>
   Effect.gen(function* () {
     const d = yield* Display;
     const cwd = process.cwd();
+    const dryRun = input.dryRun === true;
+    const shouldPreview = input.mode === "sync" || dryRun;
+
+    if (shouldPreview) {
+      const preview = yield* Effect.try({
+        try: () =>
+          syncHubTasksWithGithub({
+            cwd,
+            mode: input.mode,
+            includeClosed: input.includeClosed,
+            dryRun: true,
+          }),
+        catch: toTaskBoardError,
+      });
+
+      for (const line of formatHubTaskSyncPreviewLines(preview)) {
+        yield* d.text(line);
+      }
+
+      if (dryRun) {
+        return;
+      }
+
+      if (input.mode === "sync") {
+        const isTTY = process.stdin.isTTY === true;
+        if (!input.yes && !isTTY) {
+          return yield* Effect.fail(
+            new TaskBoardError({
+              message:
+                "sandcastle tasks sync mutates local Beads and GitHub state. Re-run with --yes in non-interactive mode, or use --dry-run to preview.",
+            }),
+          );
+        }
+
+        if (!input.yes && isTTY) {
+          const approved = yield* Effect.tryPromise({
+            try: async () => {
+              const result = await clack.confirm({
+                message: "Apply these Hub task sync changes?",
+                initialValue: false,
+              });
+              if (clack.isCancel(result)) {
+                throw new TaskBoardError({
+                  message: "Task sync cancelled.",
+                });
+              }
+              return result === true;
+            },
+            catch: toTaskBoardError,
+          });
+
+          if (!approved) {
+            return yield* Effect.fail(
+              new TaskBoardError({
+                message: "Task sync cancelled.",
+              }),
+            );
+          }
+        }
+      }
+    }
+
     const result = yield* Effect.try({
-      try: () => syncHubTasksWithGithub({ cwd }),
+      try: () =>
+        syncHubTasksWithGithub({
+          cwd,
+          mode: input.mode,
+          includeClosed: input.includeClosed,
+        }),
       catch: toTaskBoardError,
     });
 
     for (const line of formatHubTaskSyncSummaryLines(result)) {
       yield* d.text(line);
     }
-  }),
+  });
+
+const tasksSyncCommand = Command.make(
+  "sync",
+  {
+    yes: taskSyncYesOption,
+    dryRun: taskSyncDryRunOption,
+    includeClosed: taskSyncIncludeClosedOption,
+  },
+  ({ yes, dryRun, includeClosed }) =>
+    runHubTaskSyncCommand({ mode: "sync", yes, dryRun, includeClosed }),
+);
+
+const tasksPullCommand = Command.make(
+  "pull",
+  {
+    includeClosed: taskSyncIncludeClosedOption,
+    dryRun: taskSyncDryRunOption,
+  },
+  ({ includeClosed, dryRun }) =>
+    runHubTaskSyncCommand({
+      mode: "pull",
+      includeClosed,
+      dryRun,
+    }),
+);
+
+const tasksPushCommand = Command.make(
+  "push",
+  { dryRun: taskSyncDryRunOption },
+  ({ dryRun }) => runHubTaskSyncCommand({ mode: "push", dryRun }),
 );
 
 const tasksCommentCommand = Command.make(
@@ -2150,6 +2269,8 @@ const tasksCommand = Command.make("tasks", {}, () =>
     tasksCreateCommand,
     tasksTriageCommand,
     tasksFromPrdCommand,
+    tasksPullCommand,
+    tasksPushCommand,
     tasksSyncCommand,
     tasksCommentCommand,
     tasksRecoverCommand,

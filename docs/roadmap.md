@@ -300,7 +300,7 @@ Goal: 提供 CLI-first 的 Sandcastle Hub 控制面，并在同一状态模型�
 - [x] 实现 `sandcastle tasks from-prd <prd-ref>` 的 PRD 垂直切片分解、AFK/HITL 分类、人工确认依赖与 Beads 任务创建（见 [#67](https://github.com/Yibeibankaishui/sandcastle/issues/67)）。
 - [x] 实现 task claim metadata 与 Hub run 事件存储，为 flow 执行提供 run/batch/task 记录（见 [#69](https://github.com/Yibeibankaishui/sandcastle/issues/69)）。
 - [x] 实现首个 no-review Hub flow：从 Beads ready queue 选择任务、claim、运行 implementer，并将成功任务推进到 `waiting_for_merge`（见 [#70](https://github.com/Yibeibankaishui/sandcastle/issues/70)）。
-- [x] 实现 `sandcastle tasks sync` 的 GitHub Issues 远程同步：拉取 Issue 到 Beads、推送协作状态标签/关闭动作，并记录 `push_pending` / `sync_conflict`（见 [#68](https://github.com/Yibeibankaishui/sandcastle/issues/68)）。
+- [x] 实现 GitHub Issues 远程任务交换：`sandcastle tasks pull` 默认只拉 open issues，`tasks push` 将本地协作状态/关闭动作推到 GitHub，`tasks sync` 以 preview/确认方式做双向 reconcile，并避免同标题远端 issue 静默创建重复本地任务（见 [#68](https://github.com/Yibeibankaishui/sandcastle/issues/68)、[#113](https://github.com/Yibeibankaishui/sandcastle/issues/113)）。
 - [x] 实现 with-review Hub flow：implementation 成功后进入 `reviewing`，reviewer 完成后推进到 `waiting_for_merge`（见 [#71](https://github.com/Yibeibankaishui/sandcastle/issues/71)）。
 - [x] 实现 Hub batch merge：eligible `waiting_for_merge` 任务进入 `merging`，按任务 emit merge/verification/close 事件，并在 merge、verification、本地 close 全部成功后标记 `done`（见 [#72](https://github.com/Yibeibankaishui/sandcastle/issues/72)）。
 - [x] 实现 `sandcastle tasks recover <task-selector>`：释放 stale claim、恢复 recoverable `failed` 任务，并处理已 merge 分支上的 `close_failed`（见 [#73](https://github.com/Yibeibankaishui/sandcastle/issues/73)）。

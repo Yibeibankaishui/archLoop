@@ -12,6 +12,8 @@
 - `sandcastle tasks create`
 - `sandcastle tasks from-prd <prd-ref>`
 - `sandcastle tasks triage`
+- `sandcastle tasks pull`
+- `sandcastle tasks push`
 - `sandcastle tasks sync`
 - `sandcastle tasks comment <task-selector>`
 - `sandcastle tasks recover <task-selector>`
@@ -319,7 +321,7 @@ Fail signals:
 - Dependencies are described in prose only and not stored in Beads.
 - Human-owned work is hidden as a blocked reason instead of a separate task.
 - Proposal flow mutates repo files or Beads before the approved apply phase.
-- GitHub Issues are changed before `sandcastle tasks sync`.
+- GitHub Issues are changed before `sandcastle tasks push` or confirmed `sandcastle tasks sync`.
 
 ## Scenario 05: Triage Proposal Session
 
@@ -390,7 +392,7 @@ Fail signals:
 - `triaging` appears as task status.
 - `wontfix` leaves the task open without marker.
 - AI triage comment uses `_This ..._` or any prefix other than the required `*This ...*` format.
-- GitHub Issues are changed before `sandcastle tasks sync`.
+- GitHub Issues are changed before `sandcastle tasks push` or confirmed `sandcastle tasks sync`.
 
 ## Scenario 06: GitHub Task Sync
 
@@ -402,7 +404,7 @@ Steps:
 cd "$TARGET_REPO"
 gh repo set-default "$TEST_GITHUB_REPO"
 gh issue create --title "Hub QA remote issue" --body "Remote feedback for sync QA" --label needs-triage
-sandcastle tasks sync
+sandcastle tasks pull
 sandcastle tasks list
 sandcastle tasks show <SYNCED_TASK_SELECTOR>
 ```
@@ -411,14 +413,24 @@ Then change local status and push:
 
 ```bash
 sandcastle tasks triage
-sandcastle tasks sync
+sandcastle tasks push
 gh issue view <GITHUB_ISSUE_ID> --json labels,state,comments
+```
+
+Preview the bidirectional reconcile plan without mutation:
+
+```bash
+sandcastle tasks sync --dry-run
 ```
 
 Expected:
 
-- Remote issue is pulled into Beads.
+- `tasks pull` imports open remote issues into Beads; closed historical issues require `--include-closed`.
 - Core collaboration labels sync back to GitHub.
+- A linked local `done` or `wontfix` task closes the GitHub issue instead of being downgraded by stale open labels.
+- `tasks push` does not pull remote-only issues or create local tasks.
+- `tasks sync` shows a preview and requires confirmation or `--yes` before applying.
+- Same-title remote issues without links are shown as duplicate candidates instead of silently creating new local tasks.
 - Execution statuses are not required as remote labels.
 - Local Beads state remains the complete source.
 - Proposal-flow changes from Scenarios 04 and 05 remain local until this sync command runs.
@@ -428,6 +440,8 @@ Metrics:
 
 - Pull creates exactly one local task per remote issue.
 - Remote collaboration label mapping accuracy: 100%.
+- Local completed task downgrade rate during sync: 0%.
+- Silent duplicate local task creation from same-title remote issues: `0`.
 - Remote execution labels created: `0`.
 - Local `done` reverted by remote push failure: `0`.
 

@@ -6,7 +6,7 @@
 
 Hub batch merge preflight classifies dirty worktree files into source files and task-store/runtime files. Dirty source files block merge with an actionable summary. Dirty `.beads/` files in the source worktree are reported separately and do not block by themselves.
 
-Task branches are different: if a branch diff includes `.beads/` runtime/export files, Hub blocks that branch before merge. Task state exchange with remote systems must flow through `sandcastle tasks sync`, not through ordinary code branch merges.
+Task branches are different: if a branch diff includes `.beads/` runtime/export files, Hub blocks that branch before merge. Task state exchange with remote systems must flow through explicit `sandcastle tasks pull`, `sandcastle tasks push`, or confirmed `sandcastle tasks sync`, not through ordinary code branch merges.
 
 ## Considered Options
 

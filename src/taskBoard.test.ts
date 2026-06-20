@@ -262,6 +262,51 @@ describe("task status projection", () => {
     ]);
   });
 
+  it("projects remote and run refs stored in metadata", () => {
+    const task = projectHubTask({
+      id: "bd-43",
+      title: "Metadata refs task",
+      status: "closed",
+      metadata: {
+        hubStatus: "done",
+        remote_refs: ["github#102"],
+        run_refs: ["run-abc"],
+      },
+    });
+
+    expect(task.hubStatus).toBe("done");
+    expect(task.remoteRefs).toEqual(["github#102"]);
+    expect(task.runRefs).toEqual(["run-abc"]);
+  });
+
+  it("projects github_issue metadata into remote refs", () => {
+    const task = projectHubTask({
+      id: "bd-45",
+      title: "GitHub issue metadata task",
+      status: "open",
+      metadata: {
+        github_issue: 110,
+      },
+    });
+
+    expect(task.remoteRefs).toEqual(["github#110"]);
+  });
+
+  it("keeps done metadata authoritative over stale collaboration labels", () => {
+    const task = projectHubTask({
+      id: "bd-44",
+      title: "Completed task with stale label",
+      status: "closed",
+      labels: ["ready-for-agent"],
+      metadata: {
+        done: true,
+        remote_refs: ["github#106"],
+      },
+    });
+
+    expect(task.hubStatus).toBe("done");
+  });
+
   it("represents task claims in metadata without inventing a claimed status", () => {
     const task = projectHubTask({
       id: "bd-69",

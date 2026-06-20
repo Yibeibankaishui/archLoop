@@ -119,6 +119,10 @@ const METADATA_STATUS_RULES = [
     keys: ["wontfix", "wontFix", "rejected"] as const,
     status: "wontfix" as const,
   },
+  {
+    keys: ["done"] as const,
+    status: "done" as const,
+  },
 ] as const;
 const IMPLEMENTING_LABEL_STATUSES = new Set([
   "inbox",
@@ -275,6 +279,23 @@ const readComments = (value: unknown): BeadsTaskComment[] => {
 const readRefs = (value: unknown): string[] =>
   readStringList(value, ["url", "ref", "name", "title", "id", "branch"]);
 
+const uniqueStrings = (values: readonly string[]): string[] => [
+  ...new Set(values),
+];
+
+const readGithubIssueRemoteRefs = (value: unknown): string[] => {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+    return [`github#${value}`];
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^\d+$/.test(trimmed)) {
+      return [`github#${Number(trimmed)}`];
+    }
+  }
+  return [];
+};
+
 const normalizeHubTaskStatus = (value: unknown): HubTaskStatus | undefined => {
   if (typeof value !== "string") {
     return undefined;
@@ -416,10 +437,19 @@ export const projectHubTask = (task: BeadsTaskRecord): HubTaskProjection => {
   const comments = readComments(
     task.comments ?? task.comment_threads ?? task.commentThreads,
   );
-  const remoteRefs = readRefs(
-    task.remoteRefs ?? task.remote_refs ?? task.remoteReferences,
-  );
-  const runRefs = readRefs(task.runRefs ?? task.run_refs ?? task.runReferences);
+  const remoteRefs = uniqueStrings([
+    ...readRefs(task.remoteRefs ?? task.remote_refs ?? task.remoteReferences),
+    ...readRefs(
+      metadata.remoteRefs ?? metadata.remote_refs ?? metadata.remoteReferences,
+    ),
+    ...readGithubIssueRemoteRefs(metadata.github_issue),
+  ]);
+  const runRefs = uniqueStrings([
+    ...readRefs(task.runRefs ?? task.run_refs ?? task.runReferences),
+    ...readRefs(
+      metadata.runRefs ?? metadata.run_refs ?? metadata.runReferences,
+    ),
+  ]);
   const hubStatus = resolveStatusFromTaskShape(task, labels, metadata);
   const beadsStatus = readFirstString(task, BEADS_LIFECYCLE_KEYS) ?? undefined;
   const claim = readHubTaskClaim(metadata);
