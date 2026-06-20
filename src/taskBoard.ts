@@ -1048,9 +1048,15 @@ const resolveTransitionClaim = (
   task: HubTaskProjection,
   hubStatus: HubTaskStatus,
   metadataPatch: Readonly<Record<string, unknown>> | undefined,
+  replaceClaimMetadata: boolean = false,
 ): Record<string, unknown> | undefined => {
   if (shouldClearClaimForStatus(hubStatus)) {
     return undefined;
+  }
+
+  const patchClaim = readPatchClaimRecord(metadataPatch);
+  if (replaceClaimMetadata && patchClaim) {
+    return { ...patchClaim };
   }
 
   const existingClaim = task.claim?.raw;
@@ -1058,7 +1064,6 @@ const resolveTransitionClaim = (
     return { ...existingClaim };
   }
 
-  const patchClaim = readPatchClaimRecord(metadataPatch);
   return patchClaim ? { ...patchClaim } : undefined;
 };
 
@@ -1069,6 +1074,7 @@ export interface UpdateHubTaskStatusInput {
   readonly metadata?: Readonly<Record<string, unknown>>;
   readonly failureReason?: HubFailureReason;
   readonly labelsToRemove?: readonly string[];
+  readonly replaceClaimMetadata?: boolean;
   readonly env?: NodeJS.ProcessEnv;
 }
 
@@ -1092,7 +1098,12 @@ export const transitionHubTaskStatus = (
   };
 
   clearStaleHubStatusMetadata(metadata, input.hubStatus);
-  const claim = resolveTransitionClaim(task, input.hubStatus, input.metadata);
+  const claim = resolveTransitionClaim(
+    task,
+    input.hubStatus,
+    input.metadata,
+    input.replaceClaimMetadata === true,
+  );
   if (claim) {
     metadata.claim = claim;
   } else {

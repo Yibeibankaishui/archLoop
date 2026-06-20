@@ -16,6 +16,7 @@ import { Effect, Ref } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 import { SilentDisplay, type DisplayEntry } from "./Display.js";
+import { createHubRunContext } from "./hubExecution.js";
 import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
 
 const execAsync = promisify(exec);
@@ -600,6 +601,8 @@ exit 1
     expect(stdout).toContain("tasks from-prd");
     expect(stdout).toContain("tasks sync");
     expect(stdout).toContain("tasks comment");
+    expect(stdout).toContain("tasks doctor");
+    expect(stdout).toContain("tasks repair-state");
     expect(stdout).toContain("tasks delete");
   });
 
@@ -620,6 +623,8 @@ exit 1
     expect(stdout).toContain("push");
     expect(stdout).toContain("sync");
     expect(stdout).toContain("comment");
+    expect(stdout).toContain("doctor");
+    expect(stdout).toContain("repair-state");
     expect(stdout).toContain("delete");
   });
 
@@ -2191,6 +2196,225 @@ exit 1
     const commentArgs = await readFile(commentArgsFile, "utf-8");
     expect(commentArgs).toContain("comments add bd-2 Comment from title");
     expect(commentArgs).toContain("comments add bd-2 Comment from index");
+  });
+
+  it("tasks doctor reports state-inconsistent merge-ready task state", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+    await execAsync("git checkout -b sandcastle/bd-cli-doctor", {
+      cwd: hostDir,
+    });
+    await commitFile(hostDir, "doctor.txt", "doctor", "doctor work");
+    await execAsync("git checkout main", { cwd: hostDir });
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const stateFile = join(hostDir, "bd-state.json");
+    await writeFile(
+      stateFile,
+      JSON.stringify(
+        [
+          {
+            id: "bd-cli",
+            title: "CLI repair task",
+            status: "open",
+            labels: ["ready-for-agent", "customer-label"],
+            metadata: { hubStatus: "ready_for_agent" },
+          },
+        ],
+        null,
+        2,
+      ),
+    );
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "list" ]; then
+  cat "${stateFile}"
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const env = withBdEnv(bdPath, hostDir, {
+      XDG_DATA_HOME: join(hostDir, ".test-xdg-data"),
+    });
+    const context = createHubRunContext({
+      cwd: hostDir,
+      env,
+      branch: "flow/with-review",
+      runId: "run-cli-doctor",
+      batchId: "batch-cli-doctor",
+    });
+    await writeFile(
+      join(context.runDir, "events", "task.jsonl"),
+      `${JSON.stringify({
+        type: "task_review_succeeded",
+        runId: context.runId,
+        batchId: context.batchId,
+        taskId: "bd-cli",
+        branch: "sandcastle/bd-cli-doctor",
+        createdAt: "2026-06-20T10:15:00.000Z",
+        status: "waiting_for_merge",
+        commitCount: 1,
+      })}\n`,
+    );
+
+    const { stdout } = await runCli("tasks doctor", hostDir, env);
+
+    expect(stdout).toContain("Hub task state doctor");
+    expect(stdout).toContain("bd-cli: state_inconsistent");
+    expect(stdout).toContain("sandcastle tasks repair-state bd-cli");
+    expect(JSON.parse(await readFile(stateFile, "utf-8"))[0]).toMatchObject({
+      labels: ["ready-for-agent", "customer-label"],
+      metadata: { hubStatus: "ready_for_agent" },
+    });
+  });
+
+  it("tasks repair-state applies confirmed local Beads repair through the CLI", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+    await execAsync("git checkout -b sandcastle/bd-cli-repair", {
+      cwd: hostDir,
+    });
+    await commitFile(hostDir, "repair.txt", "repair", "repair work");
+    await execAsync("git checkout main", { cwd: hostDir });
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const stateFile = join(hostDir, "bd-state.json");
+    const updateArgsFile = join(hostDir, "repair-update-args.txt");
+    await writeFile(
+      stateFile,
+      JSON.stringify(
+        [
+          {
+            id: "bd-cli",
+            title: "CLI repair task",
+            status: "open",
+            labels: ["ready-for-agent", "customer-label"],
+            metadata: { hubStatus: "ready_for_agent", owner: "platform" },
+          },
+        ],
+        null,
+        2,
+      ),
+    );
+    await writeFile(updateArgsFile, "");
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = ${JSON.stringify(stateFile)};
+const updateArgsFile = ${JSON.stringify(updateArgsFile)};
+const args = process.argv.slice(2);
+const command = args[0];
+const readState = () => JSON.parse(fs.readFileSync(stateFile, "utf8"));
+const writeState = (state) => fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+const findTask = (state, taskId) => state.find((task) => task.id === taskId);
+
+if (command === "list") {
+  process.stdout.write(JSON.stringify(readState()));
+  process.exit(0);
+}
+
+if (command === "show") {
+  const task = findTask(readState(), args[1]);
+  if (!task) process.exit(1);
+  process.stdout.write(JSON.stringify([task]));
+  process.exit(0);
+}
+
+if (command === "update") {
+  fs.appendFileSync(updateArgsFile, args.join(" ") + "\\n");
+  const state = readState();
+  const task = findTask(state, args[1]);
+  if (!task) process.exit(1);
+  const statusIndex = args.indexOf("--status");
+  if (statusIndex >= 0) task.status = args[statusIndex + 1];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") task.labels = [];
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      const label = args[index + 1];
+      if (!task.labels.includes(label)) task.labels.push(label);
+    }
+  }
+  const metadataIndex = args.indexOf("--metadata");
+  if (metadataIndex >= 0) task.metadata = JSON.parse(args[metadataIndex + 1]);
+  writeState(state);
+  process.exit(0);
+}
+
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const env = withBdEnv(bdPath, hostDir, {
+      XDG_DATA_HOME: join(hostDir, ".test-xdg-data"),
+    });
+    const context = createHubRunContext({
+      cwd: hostDir,
+      env,
+      branch: "flow/with-review",
+      runId: "run-cli-repair",
+      batchId: "batch-cli-repair",
+    });
+    await writeFile(
+      join(context.runDir, "events", "task.jsonl"),
+      `${JSON.stringify({
+        type: "task_review_succeeded",
+        runId: context.runId,
+        batchId: context.batchId,
+        taskId: "bd-cli",
+        branch: "sandcastle/bd-cli-repair",
+        createdAt: "2026-06-20T10:15:00.000Z",
+        status: "waiting_for_merge",
+        commitCount: 1,
+      })}\n`,
+    );
+
+    const { stdout } = await runCli(
+      "tasks repair-state bd-cli --yes",
+      hostDir,
+      env,
+    );
+
+    expect(stdout).toContain("Hub task state repair");
+    expect(stdout).toContain("Applied repairs");
+    expect(await readFile(updateArgsFile, "utf-8")).toContain(
+      "--set-labels waiting-for-merge",
+    );
+    const [task] = JSON.parse(await readFile(stateFile, "utf-8"));
+    expect(task).toMatchObject({
+      status: "in_progress",
+      labels: ["customer-label", "waiting-for-merge"],
+      metadata: {
+        hubStatus: "waiting_for_merge",
+        owner: "platform",
+        claim: {
+          runId: "run-cli-repair",
+          batchId: "batch-cli-repair",
+          branch: "sandcastle/bd-cli-repair",
+        },
+      },
+    });
   });
 
   it("tasks delete removes local Beads tasks with --yes", async () => {

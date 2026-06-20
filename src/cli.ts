@@ -123,6 +123,12 @@ import {
 } from "./hubTaskSync.js";
 import { formatHubRecoveryComment, recoverHubTask } from "./hubTaskRecover.js";
 import {
+  doctorHubTaskState,
+  formatHubTaskStateDoctorLines,
+  formatHubTaskStateRepairLines,
+  repairHubTaskState,
+} from "./hubTaskStateDoctor.js";
+import {
   formatHubAgentConfigShowLines,
   formatHubAgentRoleOptions,
   HUB_AGENT_ROLES,
@@ -1631,6 +1637,12 @@ const taskDeleteYesOption = Options.boolean("yes").pipe(
   ),
   Options.withDefault(false),
 );
+const taskRepairStateYesOption = Options.boolean("yes").pipe(
+  Options.withDescription(
+    "Apply local Beads task-state repair after previewing planned changes.",
+  ),
+  Options.withDefault(false),
+);
 const taskDeleteDryRunOption = Options.boolean("dry-run").pipe(
   Options.withDescription(
     "Preview what Beads would delete without making changes.",
@@ -2184,6 +2196,90 @@ const tasksRecoverCommand = Command.make(
     }),
 );
 
+const tasksDoctorCommand = Command.make("doctor", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const cwd = process.cwd();
+    const result = yield* Effect.tryPromise({
+      try: () => doctorHubTaskState({ cwd }),
+      catch: toTaskBoardError,
+    });
+
+    for (const line of formatHubTaskStateDoctorLines(result)) {
+      yield* d.text(line);
+    }
+  }),
+);
+
+const tasksRepairStateCommand = Command.make(
+  "repair-state",
+  {
+    id: taskIdArg,
+    yes: taskRepairStateYesOption,
+  },
+  ({ id, yes }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      const preview = yield* Effect.tryPromise({
+        try: () => repairHubTaskState({ cwd, taskSelector: id }),
+        catch: toTaskBoardError,
+      });
+
+      for (const line of formatHubTaskStateRepairLines(preview)) {
+        yield* d.text(line);
+      }
+
+      if (preview.plannedRepairs.length === 0) {
+        return;
+      }
+
+      const isTTY = process.stdin.isTTY === true;
+      if (!yes && !isTTY) {
+        return yield* Effect.fail(
+          new TaskBoardError({
+            message:
+              "sandcastle tasks repair-state mutates local Beads state. Re-run with --yes in non-interactive mode after reviewing the preview.",
+          }),
+        );
+      }
+
+      if (!yes && isTTY) {
+        const approved = yield* Effect.tryPromise({
+          try: async () => {
+            const result = await clack.confirm({
+              message: `Apply local task-state repair for ${id}?`,
+              initialValue: false,
+            });
+            if (clack.isCancel(result)) {
+              throw new TaskBoardError({
+                message: "Task state repair cancelled.",
+              });
+            }
+            return result === true;
+          },
+          catch: toTaskBoardError,
+        });
+
+        if (!approved) {
+          return yield* Effect.fail(
+            new TaskBoardError({
+              message: "Task state repair cancelled.",
+            }),
+          );
+        }
+      }
+
+      const applied = yield* Effect.tryPromise({
+        try: () => repairHubTaskState({ cwd, taskSelector: id, yes: true }),
+        catch: toTaskBoardError,
+      });
+      for (const line of formatHubTaskStateRepairLines(applied)) {
+        yield* d.text(line);
+      }
+    }),
+);
+
 const tasksDeleteCommand = Command.make(
   "delete",
   {
@@ -2306,6 +2402,8 @@ const tasksCommand = Command.make("tasks", {}, () =>
     tasksSyncCommand,
     tasksCommentCommand,
     tasksRecoverCommand,
+    tasksDoctorCommand,
+    tasksRepairStateCommand,
     tasksDeleteCommand,
   ]),
 );

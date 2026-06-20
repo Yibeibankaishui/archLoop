@@ -242,9 +242,26 @@ sandcastle tasks triage --yes
 sandcastle run . --flow triage --input inbox,needs_info
 ```
 
-## 6 执行 Flow
+## 6 诊断和修复任务状态
 
-### 6.1 无 reviewer flow
+```bash
+sandcastle tasks doctor
+```
+
+`tasks doctor` 只读检查本地 Beads task board、Hub run events、git 分支和工作区状态，不会修改 Beads、git 或远端 GitHub Issues。它会报告多重 Sandcastle 状态标签、过期的 `metadata.hubStatus`、缺失的 execution claim、failed 任务上仍存在的分支工作、已 review 但无法被 merge 选择的任务、terminal 任务里残留的 execution metadata、dirty worktree gate，以及需要 `tasks push` 的同步状态。
+
+每条输出都会说明下一步：重新运行 flow、执行 `sandcastle tasks recover <selector>`、执行 `sandcastle tasks repair-state <selector>`，或推送 task sync。`dirty_worktree` 不是可修复的 Beads 状态污染；先 commit、stash 或 revert 脏文件，再重新运行同一个 flow 让批次恢复。
+
+```bash
+sandcastle tasks repair-state <selector>
+sandcastle tasks repair-state <selector> --yes
+```
+
+`repair-state` 会先预览本地 Beads mutation；TTY 中需要确认，非交互模式需要 `--yes`。它使用和正常 Hub lifecycle 相同的 canonical transition path，只重写 Sandcastle 管理的状态标签和 metadata，保留用户自定义标签，不会修改远端 GitHub Issues。典型用途是修复 Hub event 已记录 `task_review_succeeded`、分支仍有未合并工作，但 Beads labels/metadata/claim 过期导致无法 merge 的 QA incident。`commitCount=0` 且没有 branch work 的 agent failure 不会被提升到 `waiting_for_merge`，应通过 recovery policy 处理。
+
+## 7 执行 Flow
+
+### 7.1 无 reviewer flow
 
 ```bash
 sandcastle run . --flow no-review
@@ -252,7 +269,7 @@ sandcastle run . --flow no-review
 
 适合先验证最短闭环：读取 `ready_for_agent` 队列，执行实现任务，成功后进入 `waiting_for_merge`，再按批次合并并关闭本地任务。
 
-### 6.2 带 reviewer flow
+### 7.2 带 reviewer flow
 
 ```bash
 sandcastle run . --flow with-review
@@ -262,7 +279,7 @@ sandcastle run . --flow with-review
 
 Merge 阶段会在真正合并前输出 selected / skipped / blocked 诊断。若 Hub 事件显示任务已实现或审核完成、分支仍有未合并工作，但 Beads 投影状态或 claim 元数据已经过期，诊断会显示 `state_inconsistent` 并提示运行 `sandcastle tasks repair-state <selector>`；若任务处于 failed 或 stale execution 状态，`sandcastle tasks recover <selector>` 也可能适用。若被 `dirty_worktree` 阻塞，这是 Git 安全门而不是任务状态不一致；提交、stash 或 revert 列出的脏文件后，重新运行同一个 flow 即可恢复批次。
 
-### 6.3 Flow 状态
+### 7.3 Flow 状态
 
 Hub task board 使用这些状态：
 
@@ -289,7 +306,7 @@ sandcastle project status
 sandcastle tasks list
 ```
 
-## 7 GitHub Issues 同步
+## 8 GitHub Issues 同步
 
 Hub task board 的本地任务源是 Beads。GitHub Issues 是远端协作表，通过同步命令 pull / push。
 
@@ -308,7 +325,7 @@ sandcastle tasks sync
 
 如果同步失败，本地已完成任务不会被重新打开；任务会保留 `push_pending` 或 `conflict` 元数据，供后续处理。
 
-## 8 Recovery
+## 9 Recovery
 
 任务卡在失败或中间态时，使用 recovery 命令修复。
 
@@ -325,7 +342,7 @@ sandcastle tasks recover 1
 | verification failure | 修复验证问题后重新进入可恢复路径           |
 | close_failed         | 如果分支已合并且验证通过，重试关闭本地任务 |
 
-## 9 Legacy Init 兼容路径
+## 10 Legacy Init 兼容路径
 
 `sandcastle init` 继续存在，适用于需要项目内脚手架和自定义 TypeScript 编排的场景。
 
@@ -353,7 +370,7 @@ sandcastle run . --flow no-review
 
 就会使用 Sandcastle Hub 自带的 flow prompt，而不是项目 `.sandcastle/` 中生成的 main 脚本或 prompt。
 
-## 10 QA 建议路径
+## 11 QA 建议路径
 
 建议按下面顺序做首轮 QA：
 
@@ -371,7 +388,7 @@ sandcastle run . --flow no-review
 12. 人工制造一个失败或 stale 状态，运行 `sandcastle tasks recover <selector>`。
 13. 运行 legacy `sandcastle init`，确认旧的 `.sandcastle/main.ts` 或 `.sandcastle/main.mts` 路径仍可用。
 
-## 11 验收指标
+## 12 验收指标
 
 | 指标                          | 通过标准                                                                       |
 | ----------------------------- | ------------------------------------------------------------------------------ |
