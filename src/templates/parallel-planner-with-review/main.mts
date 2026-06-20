@@ -26,6 +26,11 @@ import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import {
+  enrichReadyIssuesWithBlockers,
+  type BlockerRef,
+  type ResolvedBlocker,
+} from "./blockerResolution.js";
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -33,12 +38,84 @@ const execFileAsync = promisify(execFile);
 type PlannedIssue = { id: string; title: string; branch: string };
 
 const LIST_TASKS_COMMAND = `{{LIST_TASKS_COMMAND}}`;
+const BLOCKER_RESOLUTION_MODE = LIST_TASKS_COMMAND.includes("gh issue list")
+  ? ("github" as const)
+  : ("beads" as const);
 
 async function listReadyIssuesJson(): Promise<string> {
   const { stdout } = await execAsync(LIST_TASKS_COMMAND, {
     maxBuffer: 10 * 1024 * 1024,
   });
   return stdout.trim() || "[]";
+}
+
+async function resolveBlockerRef(
+  ref: BlockerRef,
+): Promise<ResolvedBlocker | null> {
+  try {
+    if (BLOCKER_RESOLUTION_MODE === "github") {
+      const { stdout } = await execFileAsync("gh", [
+        "issue",
+        "view",
+        String(ref),
+        "--json",
+        "number,title,state",
+      ]);
+      const parsed = JSON.parse(stdout) as {
+        number: unknown;
+        title: string;
+        state: string;
+      };
+      const number =
+        typeof parsed.number === "number" ? parsed.number : Number(ref);
+      return {
+        ref: number,
+        state: parsed.state,
+        title: parsed.title,
+      };
+    }
+
+    const { stdout } = await execFileAsync("bd", [
+      "show",
+      String(ref),
+      "--json",
+    ]);
+    const parsed = JSON.parse(stdout) as {
+      id?: string;
+      title?: string;
+      status?: string;
+    };
+    if (!parsed.id) {
+      return null;
+    }
+    return {
+      ref: parsed.id,
+      state: parsed.status ?? "open",
+      title: parsed.title ?? parsed.id,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function enrichReadyIssuesJson(issuesJson: string): Promise<string> {
+  const parsed = JSON.parse(issuesJson) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error("Ready issue list did not contain a JSON array.");
+  }
+
+  const issues = parsed.filter(
+    (issue): issue is Record<string, unknown> =>
+      !!issue && typeof issue === "object",
+  );
+
+  const enriched = await enrichReadyIssuesWithBlockers(issues, {
+    mode: BLOCKER_RESOLUTION_MODE,
+    resolveBlocker: resolveBlockerRef,
+    warn: (message) => console.warn(`[planner] ${message}`),
+  });
+
+  return JSON.stringify(enriched);
 }
 
 function extractAllowedIssueIds(issuesJson: string): Set<string> {
@@ -272,7 +349,9 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // already handled below. This prevents a single planner stall from killing
   // the whole multi-iteration run. See sandcastle issue #97.
   // -------------------------------------------------------------------------
-  const readyIssuesJson = await listReadyIssuesJson();
+  const readyIssuesJson = await enrichReadyIssuesJson(
+    await listReadyIssuesJson(),
+  );
   const allowedIssueIds = extractAllowedIssueIds(readyIssuesJson);
 
   let plan: Awaited<ReturnType<typeof sandcastle.run>>;

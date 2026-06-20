@@ -1180,6 +1180,7 @@ const copyTemplateFiles = (
           (f) =>
             f !== "template.json" &&
             f !== ".env.example" &&
+            !f.endsWith(".test.ts") &&
             !COMPILED_FILE_EXTENSIONS.some((ext) => f.endsWith(ext)),
         )
         .map((f) => {
