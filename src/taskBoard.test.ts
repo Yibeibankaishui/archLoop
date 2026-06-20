@@ -262,6 +262,59 @@ describe("task status projection", () => {
     ]);
   });
 
+  it("loads all Beads tasks including closed tasks beyond the default list page", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "taskboard-load-all-"));
+    const binDir = join(repoDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const argsFile = join(repoDir, "bd-list-args.txt");
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+fs.writeFileSync(${JSON.stringify(argsFile)}, args.join(" "));
+if (args[0] !== "list") {
+  process.exit(1);
+}
+const includeClosed = args.includes("--all");
+const limitIndex = args.indexOf("--limit");
+const limit = limitIndex >= 0 ? Number(args[limitIndex + 1]) : 50;
+let tasks = Array.from({ length: 55 }, (_, index) => ({
+  id: \`bd-open-\${index}\`,
+  title: \`Open \${index}\`,
+  status: "open",
+}));
+tasks.push({
+  id: "bd-closed-target",
+  title: "Closed target",
+  status: "closed",
+  labels: ["done"],
+});
+if (!includeClosed) {
+  tasks = tasks.filter((task) => task.status !== "closed");
+}
+if (limit > 0) {
+  tasks = tasks.slice(0, limit);
+}
+fs.writeSync(1, JSON.stringify(tasks));
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const board = loadHubTaskBoard(repoDir, {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      SANDCASTLE_BD_PATH: bdPath,
+    });
+
+    expect(board.tasks).toHaveLength(56);
+    expect(board.tasks.map((task) => task.id)).toContain("bd-closed-target");
+    expect(await readFile(argsFile, "utf-8")).toBe(
+      "list --json --all --limit 0",
+    );
+  });
+
   it("projects remote and run refs stored in metadata", () => {
     const task = projectHubTask({
       id: "bd-43",

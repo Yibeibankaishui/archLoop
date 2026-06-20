@@ -8,7 +8,6 @@ import {
   HUB_COLLABORATION_LABELS_TO_CLEAR,
   isCompletedHubStatus,
   loadHubTaskBoard,
-  loadHubTask,
   type HubTaskProjection,
   type HubTaskStatus,
 } from "./taskBoard.js";
@@ -444,7 +443,7 @@ const pushHubTaskToGithub = (
 
   if (dryRun) {
     if (isCompletedHubStatus(task.hubStatus)) {
-      return "closed";
+      return issue?.state === "CLOSED" ? "synced" : "closed";
     }
 
     const remoteLabel = resolveRemoteCollaborationLabel(task.hubStatus);
@@ -454,12 +453,15 @@ const pushHubTaskToGithub = (
   try {
     if (isCompletedHubStatus(task.hubStatus)) {
       if (task.hubStatus === "wontfix") {
-        github.editIssue(issueNumber, { addLabels: ["wontfix"] });
+        if (!(issue?.labels ?? task.labels).includes("wontfix")) {
+          github.editIssue(issueNumber, { addLabels: ["wontfix"] });
+        }
       }
       if (issue?.state !== "CLOSED") {
         github.closeIssue(issueNumber);
+        return "closed";
       }
-      return "closed";
+      return "synced";
     }
 
     const remoteLabel = resolveRemoteCollaborationLabel(task.hubStatus);
@@ -483,16 +485,11 @@ const pushHubTaskToGithub = (
 
 const updateHubTaskSyncState = (
   cwd: string,
-  taskId: string,
+  task: HubTaskProjection,
   syncState: HubSyncState,
   env: NodeJS.ProcessEnv,
 ): void => {
-  setHubTaskSyncMetadata(
-    cwd,
-    loadHubTask(cwd, taskId, env),
-    { sync_state: syncState },
-    env,
-  );
+  setHubTaskSyncMetadata(cwd, task, { sync_state: syncState }, env);
 };
 
 const pullGithubIssues = (
@@ -584,20 +581,29 @@ const pushHubTasks = (
 
     if (outcome === "push_pending") {
       pushPending.push(task.id);
-      if (!dryRun) {
-        updateHubTaskSyncState(cwd, task.id, "push_pending", env);
+      if (!dryRun && syncState !== "push_pending") {
+        updateHubTaskSyncState(cwd, task, "push_pending", env);
       }
       continue;
     }
 
     if (outcome === "closed") {
       closed.push(task.id);
+      const existingIssue = issuesByNumber.get(issueNumber);
+      issuesByNumber.set(issueNumber, {
+        number: issueNumber,
+        title: existingIssue?.title ?? task.title,
+        body: existingIssue?.body,
+        state: "CLOSED",
+        labels: existingIssue?.labels ?? task.labels,
+        updatedAt: existingIssue?.updatedAt,
+      });
     } else {
       synced.push(task.id);
     }
 
-    if (!dryRun) {
-      updateHubTaskSyncState(cwd, task.id, "synced", env);
+    if (!dryRun && syncState !== "synced") {
+      updateHubTaskSyncState(cwd, task, "synced", env);
     }
   }
 

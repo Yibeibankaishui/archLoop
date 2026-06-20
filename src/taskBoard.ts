@@ -604,7 +604,12 @@ export const loadHubTaskBoard = (
   env: NodeJS.ProcessEnv = process.env,
 ): HubTaskBoard =>
   projectHubTaskBoard(
-    runBdJson(cwd, ["list", "--json"], "tasks list", env) as BeadsTaskRecord[],
+    runBdJson(
+      cwd,
+      ["list", "--json", "--all", "--limit", "0"],
+      "tasks list",
+      env,
+    ) as BeadsTaskRecord[],
   );
 
 export const getHubTaskBoardDisplayTasks = (
