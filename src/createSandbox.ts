@@ -34,7 +34,10 @@ import {
   runHostHooks,
   type SandboxHooks,
 } from "./SandboxLifecycle.js";
-import { validateSandboxHookScripts } from "./sandboxHookPreflight.js";
+import {
+  syncSandboxHookScriptsToWorktree,
+  validateSandboxHookScripts,
+} from "./sandboxHookPreflight.js";
 import {
   Sandbox as SandboxTag,
   SandboxFactory,
@@ -632,6 +635,14 @@ export const createSandboxFromWorktree = async (
 
   if (sandboxOnReady?.length || hostOnReady?.length) {
     await Effect.runPromise(
+      syncSandboxHookScriptsToWorktree(
+        hostRepoDir,
+        worktreePath,
+        options.hooks,
+        options.timeouts?.copyToWorktreeMs,
+      ),
+    );
+    await Effect.runPromise(
       validateSandboxHookScripts(worktreePath, options.hooks),
     );
     await Effect.runPromise(
@@ -831,6 +842,14 @@ export const createSandbox = async (
     const hostOnReady = options.hooks?.host?.onSandboxReady;
 
     if (sandboxOnReady?.length || hostOnReady?.length) {
+      await Effect.runPromise(
+        syncSandboxHookScriptsToWorktree(
+          hostRepoDir,
+          worktreePath,
+          options.hooks,
+          options.timeouts?.copyToWorktreeMs,
+        ),
+      );
       await Effect.runPromise(
         validateSandboxHookScripts(worktreePath, options.hooks),
       );
