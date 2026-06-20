@@ -114,6 +114,18 @@ const expectMainUsesInitBootstrapOnly = (mainTs: string) => {
   expect(mainTs).not.toContain("node_modules");
 };
 
+const expectScaffoldedMainUsesDeterministicIssueBranches = (mainTs: string) => {
+  expect(mainTs).toContain("canonicalizeIssueBranch");
+  expect(mainTs).toContain("canonicalizePlannedIssues");
+  expect(mainTs).toContain("`sandcastle/issue-${");
+};
+
+const expectScaffoldedPlanPromptOmitsSlugBranches = (prompt: string) => {
+  expect(prompt).not.toContain("sandcastle/issue-{id}-{slug}");
+  expect(prompt).toMatch(/do \*\*not\*\* assign branch names/i);
+  expect(prompt).toContain("sandcastle/issue-{id}");
+};
+
 // ---------------------------------------------------------------------------
 // Agent registry
 // ---------------------------------------------------------------------------
@@ -229,35 +241,21 @@ describe("Agent runtime registry", () => {
 
 describe("Auth requirement collection", () => {
   it("collects auth requirements from selected runtimes and backlog manager", () => {
-    const originalXdgDataHome = process.env.XDG_DATA_HOME;
-    process.env.XDG_DATA_HOME = join(tmpdir(), "sandcastle-auth-test-data");
+    const requirements = collectAuthRequirements({
+      installedRuntimes: [
+        getAgentRuntime("codex")!,
+        getAgentRuntime("cursor")!,
+      ],
+      backlogManager: getBacklogManager("github-issues")!,
+    });
 
-    let requirements: ReturnType<typeof collectAuthRequirements> | undefined;
-    try {
-      requirements = collectAuthRequirements({
-        installedRuntimes: [
-          getAgentRuntime("codex")!,
-          getAgentRuntime("cursor")!,
-        ],
-        backlogManager: getBacklogManager("github-issues")!,
-      });
-    } finally {
-      if (originalXdgDataHome === undefined) {
-        delete process.env.XDG_DATA_HOME;
-      } else {
-        process.env.XDG_DATA_HOME = originalXdgDataHome;
-      }
-    }
-    expect(requirements).toBeDefined();
-    const resolvedRequirements = requirements!;
-
-    expect(resolvedRequirements.map((requirement) => requirement.id)).toEqual([
+    expect(requirements.map((requirement) => requirement.id)).toEqual([
       "codex",
       "cursor",
       "github-issues",
     ]);
     expect(
-      resolvedRequirements.find((requirement) => requirement.id === "codex"),
+      requirements.find((requirement) => requirement.id === "codex"),
     ).toMatchObject({
       envVars: ["OPENAI_KEY"],
       authMounts: [
@@ -270,9 +268,7 @@ describe("Auth requirement collection", () => {
       ],
     });
     expect(
-      resolvedRequirements.find(
-        (requirement) => requirement.id === "github-issues",
-      ),
+      requirements.find((requirement) => requirement.id === "github-issues"),
     ).toMatchObject({
       envVars: ["GH_TOKEN"],
       authMounts: [
@@ -1819,9 +1815,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain("canonicalizeIssueBranch");
-      expect(mainTs).toContain("canonicalizePlannedIssues");
-      expect(mainTs).toContain("`sandcastle/issue-${");
+      expectScaffoldedMainUsesDeterministicIssueBranches(mainTs);
     });
 
     it("plan-prompt.md does not ask the planner for title-derived branch slugs", async () => {
@@ -1832,9 +1826,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "plan-prompt.md"),
         "utf-8",
       );
-      expect(prompt).not.toContain("sandcastle/issue-{id}-{slug}");
-      expect(prompt).toMatch(/do \*\*not\*\* assign branch names/i);
-      expect(prompt).toContain("sandcastle/issue-{id}");
+      expectScaffoldedPlanPromptOmitsSlugBranches(prompt);
     });
 
     it("common files are still generated with parallel-planner template", async () => {
@@ -2173,9 +2165,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "plan-prompt.md"),
         "utf-8",
       );
-      expect(prompt).not.toContain("sandcastle/issue-{id}-{slug}");
-      expect(prompt).toMatch(/do \*\*not\*\* assign branch names/i);
-      expect(prompt).toContain("sandcastle/issue-{id}");
+      expectScaffoldedPlanPromptOmitsSlugBranches(prompt);
     });
 
     it("main.mts derives deterministic issue branches from issue ids", async () => {
@@ -2186,9 +2176,7 @@ describe("InitService scaffold", () => {
         join(dir, ".sandcastle", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain("canonicalizeIssueBranch");
-      expect(mainTs).toContain("canonicalizePlannedIssues");
-      expect(mainTs).toContain("`sandcastle/issue-${");
+      expectScaffoldedMainUsesDeterministicIssueBranches(mainTs);
     });
 
     it("main.mts skips fresh implementation when the local branch is already ahead", async () => {

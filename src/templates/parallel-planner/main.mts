@@ -2,8 +2,8 @@
 //
 // This template drives a multi-phase workflow:
 //   Phase 1 (Plan):    An opus agent analyzes open issues, builds a dependency
-//                      graph, and outputs a <plan> JSON listing unblocked issues
-//                      with their target branch names.
+//                      graph, and outputs a <plan> JSON listing unblocked issues.
+//                      Branch names are derived deterministically from issue ids.
 //   Phase 2 (Execute): N sonnet agents run in parallel via Promise.allSettled,
 //                      each working a single issue on its own branch.
 //   Phase 3 (Merge):   A sonnet agent merges all branches that produced commits.
