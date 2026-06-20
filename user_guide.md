@@ -115,12 +115,12 @@ sandcastle auth show
 
 ## 4 任务表使用
 
-### 4.1 初始化或查看 Beads
+### 4.1 初始化本地任务表
 
-如果目标项目还没有 Beads 数据，可以先初始化：
+如果目标项目还没有本地任务表，先运行：
 
 ```bash
-bd init
+sandcastle tasks init
 ```
 
 查看 Sandcastle 投影后的任务表：
@@ -358,7 +358,7 @@ sandcastle run . --flow no-review
 1. 在目标 Git 项目中运行 `sandcastle project status`，确认不需要 `.sandcastle/`。
 2. 运行 `sandcastle agent-config init`，配置 `planning`、`triage`、`implementation`、`review`、`merge`、`recovery`。
 3. 运行 `sandcastle env init`，配置 agent 和 GitHub 所需凭据。
-4. 运行 `bd init`，再用 `sandcastle tasks create` 创建 2 到 3 个测试任务。
+4. 运行 `sandcastle tasks init`，再用 `sandcastle tasks create` 创建 2 到 3 个测试任务。
 5. 用 `sandcastle tasks list` 确认任务带序号，用 `tasks show` 分别测试 id、标题、序号选择。
 6. 用 `sandcastle tasks comment` 追加评论，再用 `tasks show` 验证评论可见。
 7. 准备一个 PRD 文件，运行 `sandcastle tasks from-prd <prd-file>`，人工调整 proposal 后确认写入。

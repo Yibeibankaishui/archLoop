@@ -16,6 +16,7 @@ import { Effect, Ref } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 import { SilentDisplay, type DisplayEntry } from "./Display.js";
+import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
 
 const execAsync = promisify(exec);
 vi.setConfig({ testTimeout: 60_000 });
@@ -94,13 +95,30 @@ const cliFailureOutput = (err: unknown): string => {
 
 const withBdEnv = (
   bdPath: string,
-  env: NodeJS.ProcessEnv = {},
-): NodeJS.ProcessEnv => ({
-  ...process.env,
-  ...env,
-  PATH: `${dirname(bdPath)}:${process.env.PATH ?? ""}`,
-  SANDCASTLE_BD_PATH: bdPath,
-});
+  repoDirOrEnv?: string | NodeJS.ProcessEnv,
+  maybeEnv?: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv => {
+  let repoDir: string | undefined;
+  let mergedEnv: NodeJS.ProcessEnv = {};
+
+  if (typeof repoDirOrEnv === "string") {
+    repoDir = repoDirOrEnv;
+    mergedEnv = maybeEnv ?? {};
+  } else if (repoDirOrEnv) {
+    mergedEnv = repoDirOrEnv;
+  }
+
+  if (repoDir) {
+    seedHubTaskStoreMetadata(repoDir);
+  }
+
+  return {
+    ...process.env,
+    ...mergedEnv,
+    PATH: `${dirname(bdPath)}:${mergedEnv.PATH ?? process.env.PATH ?? ""}`,
+    SANDCASTLE_BD_PATH: bdPath,
+  };
+};
 
 describe("sandcastle CLI", () => {
   it("shows help with --help flag", async () => {
@@ -543,7 +561,7 @@ exit 1
     await chmod(bdPath, 0o755);
 
     try {
-      await runCli("run . --flow triage", hostDir, withBdEnv(bdPath));
+      await runCli("run . --flow triage", hostDir, withBdEnv(bdPath, hostDir));
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       expect(cliFailureOutput(err)).toMatch(
@@ -567,6 +585,7 @@ exit 1
   it("root help exposes the tasks namespace", async () => {
     const { stdout } = await runCli("--help", process.cwd());
     expect(stdout).toContain("tasks");
+    expect(stdout).toContain("tasks init");
     expect(stdout).toContain("tasks list");
     expect(stdout).toContain("tasks show");
     expect(stdout).toContain("tasks create");
@@ -584,6 +603,7 @@ exit 1
 
   it("tasks --help shows the list, sync, pull, and push subcommands", async () => {
     const { stdout } = await runCli("tasks --help", process.cwd());
+    expect(stdout).toContain("init");
     expect(stdout).toContain("list");
     expect(stdout).toContain("show");
     expect(stdout).toContain("create");
@@ -657,8 +677,87 @@ exit 1
     expect(stdout).toContain(hostDir);
     expect(stdout).toContain("xdg-data/sandcastle");
     expect(stdout).toContain("Beads available");
+    expect(stdout).toContain("Task store initialized");
     expect(stdout).toContain("Task board ready");
     expect(stdout).toContain("Task board total");
+  });
+
+  it("tasks list points to sandcastle tasks init when the task store is missing", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+process.stderr.write("Error: no beads database found\\n");
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    try {
+      await runCli("tasks list", hostDir, {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        SANDCASTLE_BD_PATH: bdPath,
+      });
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      expect(cliFailureOutput(err)).toContain("sandcastle tasks init");
+      expect(cliFailureOutput(err)).not.toContain("bd init");
+    }
+  });
+
+  it("tasks init initializes a fresh git repo and tasks list succeeds afterward", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const bundledBd = join(
+      process.cwd(),
+      "node_modules",
+      "@beads",
+      "bd",
+      "bin",
+      "bd",
+    );
+    await access(bundledBd);
+
+    const { stdout: initStdout } = await runCli("tasks init", hostDir, {
+      ...process.env,
+      SANDCASTLE_BD_PATH: bundledBd,
+      PATH: `${join(hostDir, "bin")}:${process.env.PATH ?? ""}`,
+    });
+    expect(initStdout).toContain("Initialized local Hub task store");
+
+    const boardJson = JSON.stringify([]);
+    const mockBdPath = join(hostDir, "bin", "bd");
+    await mkdir(join(hostDir, "bin"), { recursive: true });
+    await writeFile(
+      mockBdPath,
+      `#!/bin/sh
+if [ "$1" = "list" ]; then
+  printf '%s\\n' '${boardJson}'
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(mockBdPath, 0o755);
+
+    const { stdout } = await runCli(
+      "tasks list",
+      hostDir,
+      withBdEnv(mockBdPath, hostDir),
+    );
+    expect(stdout).toContain("Hub task board");
+    expect(stdout).toContain("No Beads tasks found");
   });
 
   it("tasks list groups representative Beads tasks by Hub status", async () => {
@@ -722,7 +821,11 @@ exit 1
     );
     await chmod(bdPath, 0o755);
 
-    const { stdout } = await runCli("tasks list", hostDir, withBdEnv(bdPath));
+    const { stdout } = await runCli(
+      "tasks list",
+      hostDir,
+      withBdEnv(bdPath, hostDir),
+    );
 
     expect(stdout).toContain("Hub task board");
     expect(stdout).toContain("Total tasks: 3");
@@ -783,7 +886,7 @@ exit 1
     const { stdout } = await runCli(
       "tasks list --warning high",
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
 
     expect(stdout).toContain("PRD warnings: 1 high · 0 medium · 0 low");
@@ -855,7 +958,7 @@ exit 1
     const { stdout } = await runCli(
       "tasks show bd-3",
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
 
     expect(stdout).toContain("Beads task bd-3");
@@ -934,14 +1037,14 @@ exit 1
     const titleResult = await runCli(
       'tasks show "Write docs"',
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
     expect(titleResult.stdout).toContain("Beads task bd-2");
 
     const indexResult = await runCli(
       "tasks show 2",
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
     expect(indexResult.stdout).toContain("Beads task bd-2");
 
@@ -1018,7 +1121,7 @@ exit 1
     const { stdout } = await runCli(
       'tasks show "Write docs"',
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
 
     expect(stdout).toContain("Beads task bd-2");
@@ -1058,7 +1161,11 @@ exit 1
     await chmod(bdPath, 0o755);
 
     try {
-      await runCli('tasks show "Duplicate task"', hostDir, withBdEnv(bdPath));
+      await runCli(
+        'tasks show "Duplicate task"',
+        hostDir,
+        withBdEnv(bdPath, hostDir),
+      );
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       const output = cliFailureOutput(err);
@@ -1101,7 +1208,7 @@ exit 1
     await chmod(bdPath, 0o755);
 
     try {
-      await runCli("tasks show 3", hostDir, withBdEnv(bdPath));
+      await runCli("tasks show 3", hostDir, withBdEnv(bdPath, hostDir));
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       const output = cliFailureOutput(err);
@@ -1145,7 +1252,7 @@ exit 1
     const { stdout } = await runCli(
       'tasks create "Manual task" --description "Track local work"',
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
 
     const args = await readFile(argsFile, "utf-8");
@@ -1201,7 +1308,7 @@ exit 1
     await runCli(
       'tasks create "Feedback task" --origin user-feedback --kind enhancement',
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
 
     const args = await readFile(argsFile, "utf-8");
@@ -1245,7 +1352,7 @@ exit 1
     await runCli(
       'tasks create "Categorized task" --category enhancement',
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
 
     const args = await readFile(argsFile, "utf-8");
@@ -1416,7 +1523,7 @@ process.exit(1);
     const { stdout } = await runCli(
       "tasks triage --yes --query inbox,needs_info",
       hostDir,
-      withBdEnv(bdPath, {
+      withBdEnv(bdPath, hostDir, {
         XDG_DATA_HOME: dataHome,
         OPENAI_KEY: "test-key",
       }),
@@ -1531,7 +1638,7 @@ process.exit(1);
     const { stdout } = await runCli(
       "tasks sync --yes",
       hostDir,
-      withBdEnv(bdPath, { BD_STATE_FILE: stateFile }),
+      withBdEnv(bdPath, hostDir, { BD_STATE_FILE: stateFile }),
     );
 
     expect(stdout).toContain("Hub task sync preview");
@@ -1599,7 +1706,7 @@ process.exit(1);
       await runCli(
         "tasks sync",
         hostDir,
-        withBdEnv(bdPath, { BD_STATE_FILE: stateFile }),
+        withBdEnv(bdPath, hostDir, { BD_STATE_FILE: stateFile }),
       );
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
@@ -1667,7 +1774,7 @@ process.exit(1);
     const { stdout } = await runCli(
       "tasks pull --include-closed --dry-run",
       hostDir,
-      withBdEnv(bdPath, { BD_STATE_FILE: stateFile }),
+      withBdEnv(bdPath, hostDir, { BD_STATE_FILE: stateFile }),
     );
 
     expect(stdout).toContain("Hub task sync preview");
@@ -1783,7 +1890,7 @@ process.exit(1);
     const { stdout } = await runCli(
       "tasks push",
       hostDir,
-      withBdEnv(bdPath, { BD_STATE_FILE: stateFile }),
+      withBdEnv(bdPath, hostDir, { BD_STATE_FILE: stateFile }),
     );
 
     expect(stdout).toContain("Pushed: 0 synced, 1 closed");
@@ -1933,7 +2040,7 @@ exit 1
     const { stdout } = await runCli(
       'tasks from-prd docs/prd/feature.md --yes --deps "2:1,3:2"',
       hostDir,
-      withBdEnv(bdPath, {
+      withBdEnv(bdPath, hostDir, {
         XDG_DATA_HOME: dataHome,
         OPENAI_KEY: "test-key",
       }),
@@ -1997,7 +2104,7 @@ exit 1
     const { stdout } = await runCli(
       'tasks comment bd-99 --body "Still needs a clear acceptance test"',
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
 
     const args = await readFile(argsFile, "utf-8");
@@ -2051,7 +2158,7 @@ exit 1
     const titleResult = await runCli(
       'tasks comment "Write docs" --body "Comment from title"',
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
     expect(titleResult.stdout).toContain(
       "Appended a comment to Beads task bd-2.",
@@ -2060,7 +2167,7 @@ exit 1
     const indexResult = await runCli(
       'tasks comment 2 --body "Comment from index"',
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
     expect(indexResult.stdout).toContain(
       "Appended a comment to Beads task bd-2.",
@@ -2135,7 +2242,7 @@ process.exit(1);
     const { stdout } = await runCli(
       "tasks delete bd-1 bd-2 --yes",
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
 
     const deleteArgs = await readFile(deleteArgsFile, "utf-8");
@@ -2177,7 +2284,7 @@ process.exit(1);
     await chmod(bdPath, 0o755);
 
     try {
-      await runCli("tasks delete bd-1", hostDir, withBdEnv(bdPath));
+      await runCli("tasks delete bd-1", hostDir, withBdEnv(bdPath, hostDir));
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       expect(cliFailureOutput(err)).toContain("--yes");
@@ -2227,7 +2334,7 @@ process.exit(1);
     const { stdout } = await runCli(
       "tasks delete bd-1 --dry-run",
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
 
     const deleteArgs = await readFile(deleteArgsFile, "utf-8");
@@ -2281,7 +2388,11 @@ process.exit(1);
     await chmod(bdPath, 0o755);
 
     try {
-      await runCli("tasks delete bd-1 --yes", hostDir, withBdEnv(bdPath));
+      await runCli(
+        "tasks delete bd-1 --yes",
+        hostDir,
+        withBdEnv(bdPath, hostDir),
+      );
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       expect(cliFailureOutput(err)).toContain("dependents not in deletion set");

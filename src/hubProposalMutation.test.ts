@@ -17,6 +17,7 @@ import {
   type ProposalAgentInvokeResult,
   type ProposalAgentInvoker,
 } from "./hubProposalSession.js";
+import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
 
 const execAsync = promisify(exec);
 
@@ -50,6 +51,7 @@ const writeMockBd = async (
   stateFile: string,
   initialTasks: MockBeadsTask[],
 ) => {
+  seedHubTaskStoreMetadata(repoDir);
   const binDir = join(repoDir, "bin");
   await mkdir(binDir, { recursive: true });
   const gitPath = (await execAsync("command -v git")).stdout.trim();

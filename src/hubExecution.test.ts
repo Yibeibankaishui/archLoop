@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { claimHubTask } from "./taskBoard.js";
+import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
 import { createHubRunContext, resolveHubRunDirectory } from "./hubExecution.js";
 
 const execAsync = promisify(exec);
@@ -82,6 +83,7 @@ describe("task claims", () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-claim-"));
     await initRepo(repoDir);
     await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+    seedHubTaskStoreMetadata(repoDir);
 
     const binDir = join(repoDir, "bin");
     await mkdir(binDir, { recursive: true });
@@ -188,6 +190,7 @@ process.exit(1);
     const repoDir = await mkdtemp(join(tmpdir(), "hub-claim-skip-"));
     await initRepo(repoDir);
     await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+    seedHubTaskStoreMetadata(repoDir);
 
     const binDir = join(repoDir, "bin");
     await mkdir(binDir, { recursive: true });

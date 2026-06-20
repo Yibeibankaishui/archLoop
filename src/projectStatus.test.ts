@@ -65,7 +65,8 @@ describe("resolveGitRepoRoot", () => {
 
     const nestedDir = join(repoDir, "nested", "path");
     await mkdir(nestedDir, { recursive: true });
-    expect(resolveGitRepoRoot(nestedDir)).toBe(repoDir);
+    const canonicalRepoRoot = resolveGitRepoRoot(repoDir);
+    expect(resolveGitRepoRoot(nestedDir)).toBe(canonicalRepoRoot);
   });
 });
 
@@ -89,6 +90,7 @@ describe("resolveHubProjectStatus", () => {
       cwd: repoDir,
     });
 
+    const canonicalRepoRoot = resolveGitRepoRoot(repoDir);
     const sandcastleUserDataDir = join(repoDir, "data", "sandcastle");
     const status = resolveHubProjectStatus({
       cwd: repoDir,
@@ -96,10 +98,11 @@ describe("resolveHubProjectStatus", () => {
       detectBeadsAvailable: () => false,
     });
 
-    expect(status.repoRoot).toBe(repoDir);
+    expect(status.repoRoot).toBe(canonicalRepoRoot);
     expect(status.sandcastleUserDataDir).toBe(sandcastleUserDataDir);
     expect(status.projectRegistered).toBe(false);
     expect(status.beadsAvailable).toBe(false);
+    expect(status.taskStoreInitialized).toBe(false);
     expect(status.taskCounts).toEqual({ ready: 0, total: 0 });
     expect(status.statusCounts).toEqual({});
     expect(status.failedTasks).toEqual([]);
@@ -137,6 +140,7 @@ describe("resolveHubProjectStatus", () => {
       cwd: repoDir,
       sandcastleUserDataDir: join(repoDir, "data", "sandcastle"),
       detectBeadsAvailable: () => true,
+      detectTaskStoreInitialized: () => true,
       countReadyTasks: () => 2,
       countTotalTasks: () => 7,
       loadTaskBoard: () => ({
@@ -157,6 +161,7 @@ describe("resolveHubProjectStatus", () => {
     });
 
     expect(status.beadsAvailable).toBe(true);
+    expect(status.taskStoreInitialized).toBe(true);
     expect(status.taskCounts).toEqual({ ready: 2, total: 7 });
     expect(status.statusCounts).toEqual({
       ready_for_agent: 1,
@@ -164,11 +169,36 @@ describe("resolveHubProjectStatus", () => {
     });
   });
 
+  it("reports uninitialized task store guidance in Sandcastle terms", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-status-"));
+    await initRepo(repoDir);
+
+    const status = resolveHubProjectStatus({
+      cwd: repoDir,
+      sandcastleUserDataDir: join(repoDir, "data", "sandcastle"),
+      detectBeadsAvailable: () => true,
+      detectTaskStoreInitialized: () => false,
+    });
+
+    expect(status.taskStoreInitialized).toBe(false);
+    expect(status.taskCounts).toEqual({ ready: 0, total: 0 });
+    expect(formatHubProjectStatusLines(status).join("\n")).toContain(
+      "sandcastle tasks init",
+    );
+    expect(formatHubProjectStatusLines(status).join("\n")).not.toContain(
+      "bd init",
+    );
+  });
+
   it("summarizes active batches, failed tasks, and run directories", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-status-"));
     await initRepo(repoDir);
+    const canonicalRepoRoot = resolveGitRepoRoot(repoDir);
     const sandcastleUserDataDir = join(repoDir, "data", "sandcastle");
-    const hubProjectDir = resolveHubProjectDir(sandcastleUserDataDir, repoDir);
+    const hubProjectDir = resolveHubProjectDir(
+      sandcastleUserDataDir,
+      canonicalRepoRoot,
+    );
     const runDir = join(hubProjectDir, "runs", "run-active");
     const eventsDir = join(runDir, "events");
     await mkdir(eventsDir, { recursive: true });
@@ -221,6 +251,7 @@ describe("resolveHubProjectStatus", () => {
       cwd: repoDir,
       sandcastleUserDataDir,
       detectBeadsAvailable: () => true,
+      detectTaskStoreInitialized: () => true,
       countReadyTasks: () => 0,
       countTotalTasks: () => 2,
       ensureHubProjectDir: () => true,
@@ -281,6 +312,7 @@ describe("resolveHubProjectStatus", () => {
       cwd: repoDir,
       sandcastleUserDataDir: join(repoDir, "data", "sandcastle"),
       detectBeadsAvailable: () => true,
+      detectTaskStoreInitialized: () => true,
       countReadyTasks: () => 0,
       countTotalTasks: () => 3,
       loadTaskBoard: () => ({
@@ -327,7 +359,9 @@ describe("formatHubProjectStatusLines", () => {
         detectBeadsAvailable: () => false,
       }),
     );
-    expect(emptyLines.join("\n")).toContain("Beads unavailable");
+    expect(emptyLines.join("\n")).toContain(
+      "Sandcastle task runtime unavailable",
+    );
     expect(emptyLines.join("\n")).toContain("No Hub run directories");
 
     const activeLines = formatHubProjectStatusLines(
@@ -336,6 +370,7 @@ describe("formatHubProjectStatusLines", () => {
         sandcastleUserDataDir: "/tmp/data/sandcastle",
         resolveRepoRoot: () => "/tmp/repo",
         detectBeadsAvailable: () => true,
+        detectTaskStoreInitialized: () => true,
         countReadyTasks: () => 1,
         countTotalTasks: () => 2,
         loadTaskBoard: () => ({
@@ -379,6 +414,7 @@ describe("formatHubProjectStatusLines", () => {
         sandcastleUserDataDir: "/tmp/data/sandcastle",
         resolveRepoRoot: () => "/tmp/repo",
         detectBeadsAvailable: () => true,
+        detectTaskStoreInitialized: () => true,
         countReadyTasks: () => 0,
         countTotalTasks: () => 1,
         loadTaskBoard: () => ({
@@ -406,6 +442,7 @@ describe("formatHubProjectStatusLines", () => {
         sandcastleUserDataDir: "/tmp/data/sandcastle",
         resolveRepoRoot: () => "/tmp/repo",
         detectBeadsAvailable: () => true,
+        detectTaskStoreInitialized: () => true,
         countReadyTasks: () => 0,
         countTotalTasks: () => 1,
         loadTaskBoard: () => ({

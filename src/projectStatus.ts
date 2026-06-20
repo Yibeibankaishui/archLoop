@@ -6,6 +6,10 @@ import { join } from "node:path";
 
 import { isBdAvailable, resolveBdExecutable } from "./resolveBdExecutable.js";
 import {
+  HUB_TASK_STORE_INIT_COMMAND,
+  isHubTaskStoreInitialized,
+} from "./hubTaskStore.js";
+import {
   loadHubTaskBoard,
   type HubFailureReason,
   type HubTaskBoard,
@@ -61,6 +65,7 @@ export interface HubProjectStatus {
   readonly hubProjectDir: string;
   readonly projectRegistered: boolean;
   readonly beadsAvailable: boolean;
+  readonly taskStoreInitialized: boolean;
   readonly taskCounts: HubProjectTaskCounts;
   readonly statusCounts: Partial<Record<HubTaskStatus, number>>;
   readonly failedTasks: readonly HubProjectFailedTask[];
@@ -75,6 +80,7 @@ export interface HubProjectStatusOptions {
   readonly sandcastleUserDataDir?: string;
   readonly resolveRepoRoot?: (cwd: string) => string;
   readonly detectBeadsAvailable?: () => boolean;
+  readonly detectTaskStoreInitialized?: (repoRoot: string) => boolean;
   readonly countReadyTasks?: (repoRoot: string) => number;
   readonly countTotalTasks?: (repoRoot: string) => number;
   readonly ensureHubProjectDir?: (hubProjectDir: string) => boolean;
@@ -443,13 +449,20 @@ const appendTaskCountLines = (lines: string[], status: HubProjectStatus) => {
   lines.push("Task counts by Hub status");
   if (!status.beadsAvailable) {
     lines.push(
-      "  Beads unavailable — install dependencies, set SANDCASTLE_BD_PATH, or add bd to PATH to load the task board.",
+      "  Sandcastle task runtime unavailable — install dependencies, set SANDCASTLE_BD_PATH, or ensure the bundled Beads runtime is available.",
+    );
+    return;
+  }
+
+  if (!status.taskStoreInitialized) {
+    lines.push(
+      `  Local task store not initialized — run \`${HUB_TASK_STORE_INIT_COMMAND}\` in this repository first.`,
     );
     return;
   }
 
   if (Object.keys(status.statusCounts).length === 0) {
-    lines.push("  No Beads tasks found.");
+    lines.push("  No Hub tasks found.");
     return;
   }
 
@@ -669,13 +682,23 @@ const resolveBeadsAvailable = (
   detectBeadsAvailable: HubProjectStatusOptions["detectBeadsAvailable"],
 ): boolean => (detectBeadsAvailable ?? (() => isBdAvailable()))();
 
+const resolveTaskStoreInitialized = (
+  repoRoot: string,
+  beadsAvailable: boolean,
+  detectTaskStoreInitialized: HubProjectStatusOptions["detectTaskStoreInitialized"],
+): boolean =>
+  beadsAvailable
+    ? (detectTaskStoreInitialized ?? isHubTaskStoreInitialized)(repoRoot)
+    : false;
+
 const resolveTaskCounts = (
   repoRoot: string,
   beadsAvailable: boolean,
+  taskStoreInitialized: boolean,
   countReadyTasks: HubProjectStatusOptions["countReadyTasks"],
   countTotalTasks: HubProjectStatusOptions["countTotalTasks"],
 ): HubProjectTaskCounts =>
-  beadsAvailable
+  beadsAvailable && taskStoreInitialized
     ? {
         ready: (
           countReadyTasks ??
@@ -708,9 +731,10 @@ const resolveUserDataDir = (
 const loadTaskBoardSafe = (
   repoRoot: string,
   beadsAvailable: boolean,
+  taskStoreInitialized: boolean,
   loadTaskBoard: HubProjectStatusOptions["loadTaskBoard"],
 ): HubTaskBoard | undefined => {
-  if (!beadsAvailable) {
+  if (!beadsAvailable || !taskStoreInitialized) {
     return undefined;
   }
 
@@ -739,15 +763,22 @@ export const resolveHubProjectStatus = (
     options.ensureHubProjectDir,
   );
   const beadsAvailable = resolveBeadsAvailable(options.detectBeadsAvailable);
+  const taskStoreInitialized = resolveTaskStoreInitialized(
+    repoRoot,
+    beadsAvailable,
+    options.detectTaskStoreInitialized,
+  );
   const taskCounts = resolveTaskCounts(
     repoRoot,
     beadsAvailable,
+    taskStoreInitialized,
     options.countReadyTasks,
     options.countTotalTasks,
   );
   const board = loadTaskBoardSafe(
     repoRoot,
     beadsAvailable,
+    taskStoreInitialized,
     options.loadTaskBoard,
   );
   const { statusCounts, failedTasks, syncCounts } = summarizeTaskBoard(board);
@@ -770,6 +801,7 @@ export const resolveHubProjectStatus = (
     hubProjectDir,
     projectRegistered,
     beadsAvailable,
+    taskStoreInitialized,
     taskCounts,
     statusCounts,
     failedTasks,

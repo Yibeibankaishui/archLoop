@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import { appendHubBatchEvent, createHubRunContext } from "./hubExecution.js";
+import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
 import {
   createHubFlowRunImplementer,
   formatHubFlowResultLines,
@@ -70,6 +71,7 @@ const writeMockBd = async (
   initialTasks: MockBeadsTask[],
   options: { readonly argsFile?: string } = {},
 ) => {
+  seedHubTaskStoreMetadata(repoDir);
   const binDir = join(repoDir, "bin");
   await mkdir(binDir, { recursive: true });
   const gitPath = (await execAsync("command -v git")).stdout.trim();

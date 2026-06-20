@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
 import {
   detectSemanticSyncConflict,
   formatGithubRemoteRef,
@@ -115,6 +116,7 @@ describe("syncHubTasksWithGithub", () => {
     repoDir: string,
     initialState: Record<string, unknown>[],
   ) => {
+    seedHubTaskStoreMetadata(repoDir);
     const binDir = join(repoDir, "bin");
     await mkdir(binDir, { recursive: true });
     const gitPath = (await execAsync("command -v git")).stdout.trim();

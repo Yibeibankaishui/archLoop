@@ -1,4 +1,5 @@
 import { exec } from "node:child_process";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,6 +21,15 @@ import {
 
 const execAsync = promisify(exec);
 
+const seedHubTaskStore = (repoDir: string): void => {
+  const beadsDir = join(repoDir, ".beads");
+  mkdirSync(beadsDir, { recursive: true });
+  const metadataPath = join(beadsDir, "metadata.json");
+  if (!existsSync(metadataPath)) {
+    writeFileSync(metadataPath, JSON.stringify({ backend: "dolt" }));
+  }
+};
+
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
   await execAsync('git config user.email "test@test.com"', { cwd: dir });
@@ -30,6 +40,7 @@ const writeMockBdDelete = async (
   repoDir: string,
   initialTasks: { id: string; title: string; status: string }[],
 ) => {
+  seedHubTaskStore(repoDir);
   const binDir = join(repoDir, "bin");
   await mkdir(binDir, { recursive: true });
   const gitPath = (await execAsync("command -v git")).stdout.trim();
@@ -264,6 +275,7 @@ describe("task status projection", () => {
 
   it("loads all Beads tasks including closed tasks beyond the default list page", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "taskboard-load-all-"));
+    seedHubTaskStore(repoDir);
     const binDir = join(repoDir, "bin");
     await mkdir(binDir, { recursive: true });
     const argsFile = join(repoDir, "bd-list-args.txt");
@@ -486,6 +498,7 @@ describe("task lifecycle transitions", () => {
   it("claims ready tasks by aligning Beads status, labels, metadata, and projection", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "taskboard-claim-"));
     await initRepo(repoDir);
+    seedHubTaskStore(repoDir);
 
     const binDir = join(repoDir, "bin");
     await mkdir(binDir, { recursive: true });
@@ -677,6 +690,7 @@ describe("deleteHubTasks", () => {
       join(tmpdir(), "taskboard-delete-false-success-"),
     );
     await initRepo(repoDir);
+    seedHubTaskStore(repoDir);
 
     const binDir = join(repoDir, "bin");
     await mkdir(binDir, { recursive: true });
@@ -778,6 +792,7 @@ describe("deleteHubTasks dependency failures", () => {
   it("surfaces Beads dependency errors from bd delete", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "taskboard-delete-deps-"));
     await initRepo(repoDir);
+    seedHubTaskStore(repoDir);
 
     const binDir = join(repoDir, "bin");
     await mkdir(binDir, { recursive: true });
