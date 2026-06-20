@@ -9,6 +9,10 @@ import {
 } from "./envFile.js";
 import type { HubAgentConfig } from "./hubAgentConfig.js";
 import { readHubAgentConfig } from "./hubAgentConfig.js";
+import {
+  formatHubEnvKeyAcquisitionHint,
+  getHubEnvKeyGuidance,
+} from "./hubEnvKeyGuidance.js";
 import { resolveSandcastleUserDataDir } from "./projectStatus.js";
 
 export const HUB_ENV_KNOWN_KEYS = [
@@ -194,6 +198,8 @@ export const formatHubEnvShowLines = (
       : [...HUB_ENV_KNOWN_KEYS];
 
   const lines = [`Hub env file: ${envPath}`, ""];
+  let hasEmptyKnownKey = false;
+
   for (const key of keys) {
     const fileValue = fileEnv[key] ?? "";
     const effectiveValue = resolved[key] ?? "";
@@ -208,6 +214,11 @@ export const formatHubEnvShowLines = (
         runtimeOverride ? " (overridden by process.env)" : ""
       }`,
     );
+
+    if (effectiveValue.length === 0 && isHubEnvKnownKey(key)) {
+      hasEmptyKnownKey = true;
+      lines.push(`    hint: ${formatHubEnvKeyAcquisitionHint(key)}`);
+    }
   }
 
   if (Object.keys(fileEnv).length === 0) {
@@ -215,6 +226,8 @@ export const formatHubEnvShowLines = (
       "",
       "No Hub env file yet. Run `sandcastle env init` to create one.",
     );
+  } else if (hasEmptyKnownKey) {
+    lines.push("", "Run `sandcastle env init` for guided credential setup.");
   }
 
   return lines;
@@ -228,10 +241,11 @@ export const listHubEnvKeyDescriptions = (): readonly {
     const agent = listAgents().find((entry) =>
       getAgentRuntime(entry.name)?.envVars.includes(key),
     );
+    const guidance = getHubEnvKeyGuidance(key);
     const backlogLabel =
       key === "GH_TOKEN" ? "GitHub Issues / gh CLI" : undefined;
     return {
       key,
-      label: agent?.label ?? backlogLabel ?? key,
+      label: agent?.label ?? backlogLabel ?? guidance.service,
     };
   });

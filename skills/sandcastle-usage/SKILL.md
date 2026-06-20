@@ -110,39 +110,39 @@ Key APIs: `run()`, `interactive()`, `createSandbox()`, `createWorktree()`; sandb
 
 ## Common CLI
 
-| Command                                          | Purpose                                   |
-| ------------------------------------------------ | ----------------------------------------- |
-| `sandcastle init`                                | Generate `.sandcastle/`                   |
-| `sandcastle project status`                      | Show Hub task board summary               |
-| `sandcastle agent-config path`                   | Show Hub agent config path                |
-| `sandcastle agent-config show`                   | Show configured Hub agent roles           |
-| `sandcastle agent-config init`                   | Interactive Hub agent role setup          |
-| `sandcastle agent-config configure`              | Alias for `agent-config init`             |
-| `sandcastle agent-config set-role <role>`        | Save a Hub agent role provider/model      |
-| `sandcastle env path`                            | Show Hub env file path                    |
-| `sandcastle env show`                            | Show configured Hub env keys              |
-| `sandcastle env init`                            | Interactive Hub credential setup          |
-| `sandcastle env configure`                       | Alias for `env init`                      |
-| `sandcastle env set <key> [value]`               | Save one Hub env value                    |
-| `sandcastle auth show`                           | Show provider auth source/status          |
-| `sandcastle auth path <provider>`                | Show Hub auth dir for a provider          |
-| `sandcastle auth login codex`                    | Run Codex login with Hub `CODEX_HOME`     |
-| `sandcastle auth login github`                   | Run GitHub login with Hub `GH_CONFIG_DIR` |
-| `sandcastle tasks list`                          | Group Beads tasks by status               |
-| `sandcastle tasks show <selector>`               | Show one Beads task                       |
-| `sandcastle run . --flow <id> [--input <value>]` | Run a Hub flow                            |
-| `sandcastle tasks create <title>`                | Create a local Hub task                   |
-| `sandcastle tasks triage [task-id]`              | Agent-driven triage proposal flow         |
-| `sandcastle tasks pull`                          | Pull open GitHub Issues into Beads        |
-| `sandcastle tasks push`                          | Push local task state to GitHub           |
-| `sandcastle tasks sync`                          | Preview/confirm bidirectional sync        |
-| `sandcastle tasks from-prd <ref>`                | Agent-driven PRD proposal flow            |
-| `sandcastle tasks comment <selector>`            | Append a Beads comment                    |
-| `sandcastle tasks recover <selector>`            | Repair failed/stale task state            |
-| `sandcastle tasks delete <selector> [more...]`   | Delete local Beads tasks                  |
-| `sandcastle docker build-image`                  | Build image from Dockerfile               |
-| `sandcastle docker remove-image`                 | Remove image                              |
-| `sandcastle --help`                              | Help                                      |
+| Command                                          | Purpose                                                |
+| ------------------------------------------------ | ------------------------------------------------------ |
+| `sandcastle init`                                | Generate `.sandcastle/`                                |
+| `sandcastle project status`                      | Show Hub task board summary                            |
+| `sandcastle agent-config path`                   | Show Hub agent config path                             |
+| `sandcastle agent-config show`                   | Show configured Hub agent roles                        |
+| `sandcastle agent-config init`                   | Interactive Hub agent role setup                       |
+| `sandcastle agent-config configure`              | Alias for `agent-config init`                          |
+| `sandcastle agent-config set-role <role>`        | Save a Hub agent role provider/model                   |
+| `sandcastle env path`                            | Show Hub env file path                                 |
+| `sandcastle env show`                            | Show configured Hub env keys (hints for empty keys)    |
+| `sandcastle env init`                            | Interactive Hub credential setup with per-key guidance |
+| `sandcastle env configure`                       | Alias for `env init`                                   |
+| `sandcastle env set <key> [value]`               | Save one Hub env value                                 |
+| `sandcastle auth show`                           | Show provider auth source/status                       |
+| `sandcastle auth path <provider>`                | Show Hub auth dir for a provider                       |
+| `sandcastle auth login codex`                    | Run Codex login with Hub `CODEX_HOME`                  |
+| `sandcastle auth login github`                   | Run GitHub login with Hub `GH_CONFIG_DIR`              |
+| `sandcastle tasks list`                          | Group Beads tasks by status                            |
+| `sandcastle tasks show <selector>`               | Show one Beads task                                    |
+| `sandcastle run . --flow <id> [--input <value>]` | Run a Hub flow                                         |
+| `sandcastle tasks create <title>`                | Create a local Hub task                                |
+| `sandcastle tasks triage [task-id]`              | Agent-driven triage proposal flow                      |
+| `sandcastle tasks pull`                          | Pull open GitHub Issues into Beads                     |
+| `sandcastle tasks push`                          | Push local task state to GitHub                        |
+| `sandcastle tasks sync`                          | Preview/confirm bidirectional sync                     |
+| `sandcastle tasks from-prd <ref>`                | Agent-driven PRD proposal flow                         |
+| `sandcastle tasks comment <selector>`            | Append a Beads comment                                 |
+| `sandcastle tasks recover <selector>`            | Repair failed/stale task state                         |
+| `sandcastle tasks delete <selector> [more...]`   | Delete local Beads tasks                               |
+| `sandcastle docker build-image`                  | Build image from Dockerfile                            |
+| `sandcastle docker remove-image`                 | Remove image                                           |
+| `sandcastle --help`                              | Help                                                   |
 
 ## Troubleshooting (known failure modes)
 

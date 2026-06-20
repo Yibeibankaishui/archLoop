@@ -864,11 +864,11 @@ Prints the Hub-wide env file path under the Sandcastle user data directory. Hub 
 
 ### `sandcastle env show`
 
-Displays configured Hub env keys with masked values. `process.env` overrides file values at runtime.
+Displays configured Hub env keys with masked values. `process.env` overrides file values at runtime. Empty known keys include a short acquisition hint and a pointer to `sandcastle env init`.
 
 ### `sandcastle env init`
 
-Runs an interactive wizard to configure shared Hub env keys such as `CURSOR_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_KEY`, `OPENCODE_API_KEY`, and `GH_TOKEN`. The wizard prioritizes env keys required by your configured Hub agent roles. For Codex, `OPENAI_KEY` uses OpenAI API billing; use `sandcastle auth login codex` for a Codex/ChatGPT CLI login session.
+Runs an interactive wizard to configure shared Hub env keys such as `CURSOR_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_KEY`, `OPENCODE_API_KEY`, and `GH_TOKEN`. Before each prompt, the wizard shows provider-specific guidance (including stable documentation URLs) for where to obtain the credential. Leaving a prompt blank keeps the existing value and does not clear it. The wizard prioritizes env keys required by your configured Hub agent roles. For Codex, `OPENAI_KEY` uses OpenAI API billing; use `sandcastle auth login codex` for a Codex/ChatGPT CLI login session.
 
 ### `sandcastle env configure`
 

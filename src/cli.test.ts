@@ -225,6 +225,10 @@ describe("sandcastle CLI", () => {
     });
     expect(stdout).toContain("CURSOR_API_KEY");
     expect(stdout).toContain("sandcastle env init");
+    expect(stdout).toMatch(/hint:.*Cursor/i);
+    expect(stdout).toContain(
+      "https://cursor.com/docs/cli/reference/authentication",
+    );
   });
 
   it("env set persists a Hub env value", async () => {
@@ -238,7 +242,10 @@ describe("sandcastle CLI", () => {
     );
     expect(stdout).toContain("Saved CURSOR_API_KEY");
 
-    const show = await runCli("env show", hostDir, env);
+    const show = await runCli("env show", hostDir, {
+      ...env,
+      CURSOR_API_KEY: "",
+    });
     expect(show.stdout).toContain("CURSOR_API_KEY");
     expect(show.stdout).toContain("test");
   });
