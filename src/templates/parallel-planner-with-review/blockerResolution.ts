@@ -6,12 +6,6 @@ export type ResolvedBlocker = {
   title: string;
 };
 
-export type BlockerEnrichmentFields = {
-  blockersDeclared: BlockerRef[];
-  blockersResolved: ResolvedBlocker[];
-  openBlockers: BlockerRef[];
-};
-
 const NONE_MARKERS =
   /^(?:none|nothing|n\/a|not applicable|can start immediately)\b/i;
 
@@ -39,16 +33,10 @@ const dedupeRefs = (refs: BlockerRef[]): BlockerRef[] => {
 export const sectionDeclaresNoBlockers = (section: string): boolean => {
   const trimmed = section.trim();
   if (!trimmed) return true;
-  if (NONE_MARKERS.test(trimmed) && !trimmed.includes("#")) {
-    return true;
-  }
-  const withoutListMarkers = trimmed
-    .replace(/^-\s+/gm, "")
-    .replace(/\s+/g, " ")
-    .trim();
-  return (
-    NONE_MARKERS.test(withoutListMarkers) && !withoutListMarkers.includes("#")
-  );
+
+  const normalized = trimmed.replace(/^-\s+/gm, "").replace(/\s+/g, " ").trim();
+
+  return NONE_MARKERS.test(normalized) && !normalized.includes("#");
 };
 
 export const extractBlockedBySection = (body: string): string => {
@@ -125,10 +113,9 @@ export const enrichReadyIssuesWithBlockers = async (
 
   return Promise.all(
     issues.map(async (issue) => {
-      const body = typeof issue.body === "string" ? issue.body : "";
-      const description =
-        typeof issue.description === "string" ? issue.description : "";
-      const blockerBody = body || description;
+      const blockerBody =
+        (typeof issue.body === "string" ? issue.body : "") ||
+        (typeof issue.description === "string" ? issue.description : "");
 
       const blockersDeclared = parseDeclaredBlockers(blockerBody, options.mode);
 
@@ -145,11 +132,12 @@ export const enrichReadyIssuesWithBlockers = async (
         .map((blocker) => blocker.ref);
 
       const issueId = issue.number ?? issue.id;
-      if (
+      const declaredBlockersAllClosed =
         blockersDeclared.length > 0 &&
         openBlockers.length === 0 &&
-        blockersResolved.length === blockersDeclared.length
-      ) {
+        blockersResolved.length === blockersDeclared.length;
+
+      if (declaredBlockersAllClosed) {
         warn(
           `Issue ${issueId}: declared blockers [${blockersDeclared.join(", ")}] are all closed — issue body may be stale.`,
         );

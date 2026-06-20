@@ -49,87 +49,95 @@ async function listReadyIssuesJson(): Promise<string> {
   return stdout.trim() || "[]";
 }
 
+function parseReadyIssuesArray(issuesJson: string): Record<string, unknown>[] {
+  const parsed = JSON.parse(issuesJson) as unknown;
+  if (!Array.isArray(parsed)) {
+    throw new Error("Ready issue list did not contain a JSON array.");
+  }
+
+  return parsed.filter(
+    (issue): issue is Record<string, unknown> =>
+      !!issue && typeof issue === "object",
+  );
+}
+
+async function resolveGithubBlocker(
+  ref: BlockerRef,
+): Promise<ResolvedBlocker | null> {
+  const { stdout } = await execFileAsync("gh", [
+    "issue",
+    "view",
+    String(ref),
+    "--json",
+    "number,title,state",
+  ]);
+  const parsed = JSON.parse(stdout) as {
+    number: unknown;
+    title: string;
+    state: string;
+  };
+  const number =
+    typeof parsed.number === "number" ? parsed.number : Number(ref);
+  return {
+    ref: number,
+    state: parsed.state,
+    title: parsed.title,
+  };
+}
+
+async function resolveBeadsBlocker(
+  ref: BlockerRef,
+): Promise<ResolvedBlocker | null> {
+  const { stdout } = await execFileAsync("bd", [
+    "show",
+    String(ref),
+    "--json",
+  ]);
+  const parsed = JSON.parse(stdout) as {
+    id?: string;
+    title?: string;
+    status?: string;
+  };
+  if (!parsed.id) {
+    return null;
+  }
+  return {
+    ref: parsed.id,
+    state: parsed.status ?? "open",
+    title: parsed.title ?? parsed.id,
+  };
+}
+
 async function resolveBlockerRef(
   ref: BlockerRef,
 ): Promise<ResolvedBlocker | null> {
   try {
-    if (BLOCKER_RESOLUTION_MODE === "github") {
-      const { stdout } = await execFileAsync("gh", [
-        "issue",
-        "view",
-        String(ref),
-        "--json",
-        "number,title,state",
-      ]);
-      const parsed = JSON.parse(stdout) as {
-        number: unknown;
-        title: string;
-        state: string;
-      };
-      const number =
-        typeof parsed.number === "number" ? parsed.number : Number(ref);
-      return {
-        ref: number,
-        state: parsed.state,
-        title: parsed.title,
-      };
-    }
-
-    const { stdout } = await execFileAsync("bd", [
-      "show",
-      String(ref),
-      "--json",
-    ]);
-    const parsed = JSON.parse(stdout) as {
-      id?: string;
-      title?: string;
-      status?: string;
-    };
-    if (!parsed.id) {
-      return null;
-    }
-    return {
-      ref: parsed.id,
-      state: parsed.status ?? "open",
-      title: parsed.title ?? parsed.id,
-    };
+    return BLOCKER_RESOLUTION_MODE === "github"
+      ? await resolveGithubBlocker(ref)
+      : await resolveBeadsBlocker(ref);
   } catch {
     return null;
   }
 }
 
 async function enrichReadyIssuesJson(issuesJson: string): Promise<string> {
-  const parsed = JSON.parse(issuesJson) as unknown;
-  if (!Array.isArray(parsed)) {
-    throw new Error("Ready issue list did not contain a JSON array.");
-  }
-
-  const issues = parsed.filter(
-    (issue): issue is Record<string, unknown> =>
-      !!issue && typeof issue === "object",
+  const enriched = await enrichReadyIssuesWithBlockers(
+    parseReadyIssuesArray(issuesJson),
+    {
+      mode: BLOCKER_RESOLUTION_MODE,
+      resolveBlocker: resolveBlockerRef,
+      warn: (message) => console.warn(`[planner] ${message}`),
+    },
   );
-
-  const enriched = await enrichReadyIssuesWithBlockers(issues, {
-    mode: BLOCKER_RESOLUTION_MODE,
-    resolveBlocker: resolveBlockerRef,
-    warn: (message) => console.warn(`[planner] ${message}`),
-  });
 
   return JSON.stringify(enriched);
 }
 
 function extractAllowedIssueIds(issuesJson: string): Set<string> {
-  const parsed = JSON.parse(issuesJson) as unknown;
-  if (!Array.isArray(parsed)) {
-    throw new Error("Ready issue list did not contain a JSON array.");
-  }
-
   return new Set(
-    parsed
+    parseReadyIssuesArray(issuesJson)
       .map((issue) => {
-        if (!issue || typeof issue !== "object") return undefined;
-        const record = issue as { id?: unknown; number?: unknown };
-        const id = record.id ?? record.number;
+        const id = issue.id ?? issue.number;
         return id === undefined || id === null ? undefined : String(id);
       })
       .filter((id): id is string => id !== undefined),
