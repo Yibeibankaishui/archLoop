@@ -65,7 +65,10 @@ const seedSandcastlePackage = async (dir: string) => {
 const cliPath = join(import.meta.dirname, "..", "dist", "main.js");
 
 const runCli = (args: string, cwd: string, env?: NodeJS.ProcessEnv) =>
-  execAsync(`"${process.execPath}" ${cliPath} ${args}`, { cwd, env });
+  execAsync(`"${process.execPath}" ${cliPath} ${args}`, {
+    cwd,
+    env: env ?? { ...process.env, XDG_DATA_HOME: join(cwd, ".test-xdg-data") },
+  });
 
 const runNonInteractiveInit = (cwd: string, args: string) =>
   runCli(
@@ -195,6 +198,14 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("env set");
   });
 
+  it("root help exposes the auth namespace", async () => {
+    const { stdout } = await runCli("--help", process.cwd());
+    expect(stdout).toContain("auth");
+    expect(stdout).toContain("auth show");
+    expect(stdout).toContain("auth path");
+    expect(stdout).toContain("auth login");
+  });
+
   it("env path prints the Hub env file path", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-hub-env-"));
     const dataDir = join(hostDir, "xdg-data");
@@ -230,6 +241,100 @@ describe("sandcastle CLI", () => {
     const show = await runCli("env show", hostDir, env);
     expect(show.stdout).toContain("CURSOR_API_KEY");
     expect(show.stdout).toContain("test");
+  });
+
+  it("env init non-interactive guidance points Codex users to auth login", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-hub-env-"));
+    const dataDir = join(hostDir, "xdg-data");
+
+    try {
+      await runCli("env init", hostDir, {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      });
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain("sandcastle env set <key> <value>");
+      expect(output).toContain("sandcastle auth login codex");
+      expect(output).toMatch(/OPENAI_KEY.*API billing/i);
+    }
+  });
+
+  it("auth path prints Hub-owned provider auth directories", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-hub-auth-"));
+    const dataDir = join(hostDir, "xdg-data");
+    const env = { ...process.env, XDG_DATA_HOME: dataDir };
+
+    const codex = await runCli("auth path codex", hostDir, env);
+    expect(codex.stdout).toContain(
+      join(dataDir, "sandcastle", "hub", "auth", "codex"),
+    );
+
+    const github = await runCli("auth path github", hostDir, env);
+    expect(github.stdout).toContain(
+      join(dataDir, "sandcastle", "hub", "auth", "github"),
+    );
+  });
+
+  it("auth show reports process env, Hub env file, Hub auth session, and missing guidance", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-hub-auth-"));
+    const dataDir = join(hostDir, "xdg-data");
+    const authDir = join(dataDir, "sandcastle", "hub", "auth", "github");
+    await mkdir(authDir, { recursive: true });
+    await writeFile(join(authDir, "hosts.yml"), "github.com: {}\n");
+    await writeFile(
+      join(dataDir, "sandcastle", ".env"),
+      "CURSOR_API_KEY=hub-cursor-key\n",
+    );
+
+    const { stdout } = await runCli("auth show", hostDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+      OPENAI_KEY: "runtime-openai-key",
+      GH_TOKEN: "",
+      CURSOR_API_KEY: "",
+      OPENCODE_API_KEY: "",
+      ANTHROPIC_API_KEY: "",
+    });
+
+    expect(stdout).toContain("codex: process env OPENAI_KEY=");
+    expect(stdout).toContain("github: Hub auth dir/session");
+    expect(stdout).toContain(join(dataDir, "sandcastle", "hub", "auth"));
+    expect(stdout).toContain("cursor: Hub env file CURSOR_API_KEY=");
+    expect(stdout).toContain("opencode: missing");
+    expect(stdout).toContain("sandcastle env set OPENCODE_API_KEY <value>");
+  });
+
+  it("auth login fails with actionable commands in non-interactive mode", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-hub-auth-"));
+    const dataDir = join(hostDir, "xdg-data");
+    const env = { ...process.env, XDG_DATA_HOME: dataDir };
+
+    try {
+      await runCli("auth login codex", hostDir, env);
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toMatch(/Interactive codex login requires a TTY/i);
+      expect(output).toContain(
+        `CODEX_HOME=${join(dataDir, "sandcastle", "hub", "auth", "codex")} codex login`,
+      );
+      expect(output).toContain("sandcastle env set OPENAI_KEY <value>");
+      expect(output).toMatch(/API billing|Codex\/ChatGPT CLI login/i);
+    }
+
+    try {
+      await runCli("auth login github", hostDir, env);
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toMatch(/Interactive github login requires a TTY/i);
+      expect(output).toContain(
+        `GH_CONFIG_DIR=${join(dataDir, "sandcastle", "hub", "auth", "github")} gh auth login --insecure-storage`,
+      );
+      expect(output).toContain("sandcastle env set GH_TOKEN <value>");
+    }
   });
 
   it("agent-config path prints the Hub agent config file path", async () => {

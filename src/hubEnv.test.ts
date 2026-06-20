@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -16,7 +16,7 @@ import {
 import { readHubAgentConfig, setHubAgentRole } from "./hubAgentConfig.js";
 
 const makeStore = async () => {
-  const homeDir = await mkdtemp(join(homedir(), "hub-env-test-"));
+  const homeDir = await mkdtemp(join(tmpdir(), "hub-env-test-"));
   const dataDir = join(homeDir, "xdg-data");
   await mkdir(dataDir, { recursive: true });
   const env = { ...process.env, XDG_DATA_HOME: dataDir };

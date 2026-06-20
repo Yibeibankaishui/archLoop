@@ -110,41 +110,46 @@ Key APIs: `run()`, `interactive()`, `createSandbox()`, `createWorktree()`; sandb
 
 ## Common CLI
 
-| Command                                          | Purpose                              |
-| ------------------------------------------------ | ------------------------------------ |
-| `sandcastle init`                                | Generate `.sandcastle/`              |
-| `sandcastle project status`                      | Show Hub task board summary          |
-| `sandcastle agent-config path`                   | Show Hub agent config path           |
-| `sandcastle agent-config show`                   | Show configured Hub agent roles      |
-| `sandcastle agent-config init`                   | Interactive Hub agent role setup     |
-| `sandcastle agent-config configure`              | Alias for `agent-config init`        |
-| `sandcastle agent-config set-role <role>`        | Save a Hub agent role provider/model |
-| `sandcastle env path`                            | Show Hub env file path               |
-| `sandcastle env show`                            | Show configured Hub env keys         |
-| `sandcastle env init`                            | Interactive Hub credential setup     |
-| `sandcastle env configure`                       | Alias for `env init`                 |
-| `sandcastle env set <key> [value]`               | Save one Hub env value               |
-| `sandcastle tasks list`                          | Group Beads tasks by status          |
-| `sandcastle tasks show <selector>`               | Show one Beads task                  |
-| `sandcastle run . --flow <id> [--input <value>]` | Run a Hub flow                       |
-| `sandcastle tasks create <title>`                | Create a local Hub task              |
-| `sandcastle tasks triage [task-id]`              | Agent-driven triage proposal flow    |
-| `sandcastle tasks pull`                          | Pull open GitHub Issues into Beads   |
-| `sandcastle tasks push`                          | Push local task state to GitHub      |
-| `sandcastle tasks sync`                          | Preview/confirm bidirectional sync   |
-| `sandcastle tasks from-prd <ref>`                | Agent-driven PRD proposal flow       |
-| `sandcastle tasks comment <selector>`            | Append a Beads comment               |
-| `sandcastle tasks recover <selector>`            | Repair failed/stale task state       |
-| `sandcastle tasks delete <selector> [more...]`   | Delete local Beads tasks             |
-| `sandcastle docker build-image`                  | Build image from Dockerfile          |
-| `sandcastle docker remove-image`                 | Remove image                         |
-| `sandcastle --help`                              | Help                                 |
+| Command                                          | Purpose                                   |
+| ------------------------------------------------ | ----------------------------------------- |
+| `sandcastle init`                                | Generate `.sandcastle/`                   |
+| `sandcastle project status`                      | Show Hub task board summary               |
+| `sandcastle agent-config path`                   | Show Hub agent config path                |
+| `sandcastle agent-config show`                   | Show configured Hub agent roles           |
+| `sandcastle agent-config init`                   | Interactive Hub agent role setup          |
+| `sandcastle agent-config configure`              | Alias for `agent-config init`             |
+| `sandcastle agent-config set-role <role>`        | Save a Hub agent role provider/model      |
+| `sandcastle env path`                            | Show Hub env file path                    |
+| `sandcastle env show`                            | Show configured Hub env keys              |
+| `sandcastle env init`                            | Interactive Hub credential setup          |
+| `sandcastle env configure`                       | Alias for `env init`                      |
+| `sandcastle env set <key> [value]`               | Save one Hub env value                    |
+| `sandcastle auth show`                           | Show provider auth source/status          |
+| `sandcastle auth path <provider>`                | Show Hub auth dir for a provider          |
+| `sandcastle auth login codex`                    | Run Codex login with Hub `CODEX_HOME`     |
+| `sandcastle auth login github`                   | Run GitHub login with Hub `GH_CONFIG_DIR` |
+| `sandcastle tasks list`                          | Group Beads tasks by status               |
+| `sandcastle tasks show <selector>`               | Show one Beads task                       |
+| `sandcastle run . --flow <id> [--input <value>]` | Run a Hub flow                            |
+| `sandcastle tasks create <title>`                | Create a local Hub task                   |
+| `sandcastle tasks triage [task-id]`              | Agent-driven triage proposal flow         |
+| `sandcastle tasks pull`                          | Pull open GitHub Issues into Beads        |
+| `sandcastle tasks push`                          | Push local task state to GitHub           |
+| `sandcastle tasks sync`                          | Preview/confirm bidirectional sync        |
+| `sandcastle tasks from-prd <ref>`                | Agent-driven PRD proposal flow            |
+| `sandcastle tasks comment <selector>`            | Append a Beads comment                    |
+| `sandcastle tasks recover <selector>`            | Repair failed/stale task state            |
+| `sandcastle tasks delete <selector> [more...]`   | Delete local Beads tasks                  |
+| `sandcastle docker build-image`                  | Build image from Dockerfile               |
+| `sandcastle docker remove-image`                 | Remove image                              |
+| `sandcastle --help`                              | Help                                      |
 
 ## Troubleshooting (known failure modes)
 
 - **Missing Hub agent role config / non-interactive flow failure**: Hub flows need provider/model settings for roles such as planning, triage, implementation, review, merge, and recovery. Run `sandcastle agent-config init` (or `configure`) in a TTY for first-time setup, `sandcastle agent-config show` to inspect roles, or `sandcastle agent-config set-role <role> --provider <provider> --model <model>` in scripts/CI.
 - **Cursor auth / `CURSOR_API_KEY` required in Hub flows**: Hub proposal and task flows run `agent --print` headlessly. `agent login` is not enough for automation. Run `sandcastle env init` to store shared credentials in the Sandcastle user data directory (`sandcastle env path`), or `sandcastle env set CURSOR_API_KEY <value>`. `process.env` overrides file values at runtime.
-- **`gh ... 401 Bad credentials` / `PromptError` during planner prompt expansion**: The sandbox `gh` uses mounted `.sandcastle/auth/gh` (or `GH_TOKEN`), independent of the host keyring. Host `gh auth status` succeeding does NOT mean the sandbox is authed. Fix: `GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login --insecure-storage`, or set a valid `GH_TOKEN` in `.sandcastle/.env`. Verify with `GH_CONFIG_DIR=.sandcastle/auth/gh gh issue list -l <label> --limit 1`.
+- **Codex auth model confusion**: `OPENAI_KEY` in the Hub env file uses OpenAI API billing. To use a Codex/ChatGPT CLI login session for Hub flows, run `sandcastle auth login codex`; inspect the Hub-owned `CODEX_HOME` path with `sandcastle auth path codex`.
+- **`gh ... 401 Bad credentials` / `PromptError` during planner prompt expansion**: The sandbox `gh` uses Hub auth (`sandcastle auth login github`) or `GH_TOKEN`, independent of the host keyring. Host `gh auth status` succeeding does NOT mean the sandbox is authed. Fix: run `sandcastle auth login github`, or set a valid `GH_TOKEN` with `sandcastle env set GH_TOKEN <value>`. Inspect current source/status with `sandcastle auth show`.
 - **`bash .sandcastle/bootstrap.sh: No such file or directory` (exit 127)**: The hook script referenced by `onSandboxReady` is missing from the worktree. Restore it (`sandcastle init` for the profile, or recover from a stash). Often caused by a merge agent running `git stash push -u`, which sweeps untracked `.sandcastle/` files — recover with `git stash pop`.
 - **Long-lived loop keeps using stale config**: `main.ts` hooks are read once at process start. After editing `.sandcastle/main.ts`, restart the `main.ts` process; it does not hot-reload.
 - **Hub flow merge selection/preflight**: `sandcastle run . --flow ...` prints selected/skipped/blocked reasons for merge candidates. Dirty source files block before merge; clean or stash them and retry. Dirty `.beads/` runtime/export files are reported separately and do not block by themselves, but a task branch that changes `.beads/` files is blocked. Keep Beads local state out of code branches and use `sandcastle tasks pull` / `push` / `sync` for remote task exchange.

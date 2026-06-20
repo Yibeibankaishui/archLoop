@@ -9,7 +9,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   buildCapabilityManifest,
   RUNTIME_DEBUG_ADDON_ID,
@@ -50,6 +50,20 @@ import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import { SKELETON_PROMPT } from "./templates.js";
 
 const makeDir = () => mkdtemp(join(tmpdir(), "init-service-"));
+
+let originalXdgDataHome: string | undefined;
+
+beforeEach(async () => {
+  originalXdgDataHome = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = await mkdtemp(
+    join(tmpdir(), "init-service-xdg-"),
+  );
+});
+
+afterEach(() => {
+  if (originalXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+  else process.env.XDG_DATA_HOME = originalXdgDataHome;
+});
 
 const claudeCodeAgent = getAgent("claude-code")!;
 const piAgent = getAgent("pi")!;
@@ -215,37 +229,57 @@ describe("Agent runtime registry", () => {
 
 describe("Auth requirement collection", () => {
   it("collects auth requirements from selected runtimes and backlog manager", () => {
-    const requirements = collectAuthRequirements({
-      installedRuntimes: [
-        getAgentRuntime("codex")!,
-        getAgentRuntime("cursor")!,
-      ],
-      backlogManager: getBacklogManager("github-issues")!,
-    });
+    const originalXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = join(tmpdir(), "sandcastle-auth-test-data");
 
-    expect(requirements.map((requirement) => requirement.id)).toEqual([
+    let requirements: ReturnType<typeof collectAuthRequirements> | undefined;
+    try {
+      requirements = collectAuthRequirements({
+        installedRuntimes: [
+          getAgentRuntime("codex")!,
+          getAgentRuntime("cursor")!,
+        ],
+        backlogManager: getBacklogManager("github-issues")!,
+      });
+    } finally {
+      if (originalXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = originalXdgDataHome;
+      }
+    }
+    expect(requirements).toBeDefined();
+    const resolvedRequirements = requirements!;
+
+    expect(resolvedRequirements.map((requirement) => requirement.id)).toEqual([
       "codex",
       "cursor",
       "github-issues",
     ]);
     expect(
-      requirements.find((requirement) => requirement.id === "codex"),
+      resolvedRequirements.find((requirement) => requirement.id === "codex"),
     ).toMatchObject({
       envVars: ["OPENAI_KEY"],
       authMounts: [
         {
-          hostPath: ".sandcastle/auth/codex",
+          hostPath: expect.stringContaining(
+            join("sandcastle", "hub", "auth", "codex"),
+          ),
           sandboxPath: "/home/agent/.codex",
         },
       ],
     });
     expect(
-      requirements.find((requirement) => requirement.id === "github-issues"),
+      resolvedRequirements.find(
+        (requirement) => requirement.id === "github-issues",
+      ),
     ).toMatchObject({
       envVars: ["GH_TOKEN"],
       authMounts: [
         {
-          hostPath: ".sandcastle/auth/gh",
+          hostPath: expect.stringContaining(
+            join("sandcastle", "hub", "auth", "github"),
+          ),
           sandboxPath: "/home/agent/.config/gh",
         },
       ],
@@ -1023,29 +1057,44 @@ describe("InitService scaffold", () => {
 
   it("scaffolds auth mounts for selected runtimes and backlog manager only", async () => {
     const dir = await makeDir();
-    await runScaffold(dir, {
-      templateName: "simple-loop",
-      installedRuntimes: [getAgentRuntime("codex")!],
-      backlogManager: getBacklogManager("github-issues"),
-    });
+    const dataHome = join(dir, "data");
+    const originalXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = dataHome;
+    try {
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        installedRuntimes: [getAgentRuntime("codex")!],
+        backlogManager: getBacklogManager("github-issues"),
+      });
+    } finally {
+      if (originalXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = originalXdgDataHome;
+      }
+    }
 
     const mainTs = await readFile(
       join(dir, ".sandcastle", "main.mts"),
       "utf-8",
     );
 
-    expect(mainTs).toContain(".sandcastle/auth/codex");
+    expect(mainTs).toContain(
+      join(dataHome, "sandcastle", "hub", "auth", "codex"),
+    );
     expect(mainTs).toContain("/home/agent/.codex");
-    expect(mainTs).toContain(".sandcastle/auth/gh");
+    expect(mainTs).toContain(
+      join(dataHome, "sandcastle", "hub", "auth", "github"),
+    );
     expect(mainTs).toContain("/home/agent/.config/gh");
     expect(mainTs).not.toContain(".sandcastle/auth/cursor");
     expect(mainTs).not.toContain(".sandcastle/auth/cursor-config");
 
     await expect(
-      access(join(dir, ".sandcastle", "auth", "codex")),
+      access(join(dataHome, "sandcastle", "hub", "auth", "codex")),
     ).resolves.toBeUndefined();
     await expect(
-      access(join(dir, ".sandcastle", "auth", "gh")),
+      access(join(dataHome, "sandcastle", "hub", "auth", "github")),
     ).resolves.toBeUndefined();
     await expect(
       access(join(dir, ".sandcastle", "auth", "cursor")),
@@ -1057,21 +1106,34 @@ describe("InitService scaffold", () => {
 
   it("scaffolds combined auth mounts for multiple selected runtimes", async () => {
     const dir = await makeDir();
-    await runScaffold(dir, {
-      templateName: "simple-loop",
-      installedRuntimes: [
-        getAgentRuntime("codex")!,
-        getAgentRuntime("cursor")!,
-      ],
-      backlogManager: getBacklogManager("beads"),
-    });
+    const dataHome = join(dir, "data");
+    const originalXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = dataHome;
+    try {
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        installedRuntimes: [
+          getAgentRuntime("codex")!,
+          getAgentRuntime("cursor")!,
+        ],
+        backlogManager: getBacklogManager("beads"),
+      });
+    } finally {
+      if (originalXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = originalXdgDataHome;
+      }
+    }
 
     const mainTs = await readFile(
       join(dir, ".sandcastle", "main.mts"),
       "utf-8",
     );
 
-    expect(mainTs).toContain(".sandcastle/auth/codex");
+    expect(mainTs).toContain(
+      join(dataHome, "sandcastle", "hub", "auth", "codex"),
+    );
     expect(mainTs).toContain("/home/agent/.codex");
     expect(mainTs).not.toContain(".sandcastle/auth/cursor");
     expect(mainTs).not.toContain("/home/agent/.cursor");
@@ -1080,7 +1142,7 @@ describe("InitService scaffold", () => {
     expect(mainTs).not.toContain(".sandcastle/auth/gh");
 
     await expect(
-      access(join(dir, ".sandcastle", "auth", "codex")),
+      access(join(dataHome, "sandcastle", "hub", "auth", "codex")),
     ).resolves.toBeUndefined();
     await expect(
       access(join(dir, ".sandcastle", "auth", "cursor")),

@@ -90,13 +90,13 @@ cp .sandcastle/.env.example .sandcastle/.env
 
 常见变量（以 init 所选 runtime 为准）：
 
-| 变量                                          | 用途                    |
-| --------------------------------------------- | ----------------------- |
-| `ANTHROPIC_API_KEY`                           | Claude Code / Pi        |
-| `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL` | Claude 兼容网关（可选） |
-| `OPENAI_KEY`                                  | Codex                   |
-| `CURSOR_API_KEY`                              | Cursor                  |
-| `GH_TOKEN`                                    | GitHub Issues backlog   |
+| 变量                                          | 用途                                                                              |
+| --------------------------------------------- | --------------------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`                           | Claude Code / Pi                                                                  |
+| `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_BASE_URL` | Claude 兼容网关（可选）                                                           |
+| `OPENAI_KEY`                                  | Codex API key（也可用 `sandcastle auth login codex` 配置 Codex/ChatGPT CLI 登录） |
+| `CURSOR_API_KEY`                              | Cursor                                                                            |
+| `GH_TOKEN`                                    | GitHub Issues backlog（也可用 `sandcastle auth login github`）                    |
 
 ### 步骤 4：构建沙箱镜像
 

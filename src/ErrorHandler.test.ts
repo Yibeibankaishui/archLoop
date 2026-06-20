@@ -88,12 +88,12 @@ describe("formatErrorMessage", () => {
           "GitHub authentication failed while expanding prompt shell expression `gh issue list`.\n" +
           "Fix one of:\n" +
           "- Set a non-empty `GH_TOKEN` in `.sandcastle/.env`\n" +
-          "- Run `GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login --insecure-storage`",
+          "- Run `sandcastle auth login github`",
       }),
     );
     expect(msg).toContain("GitHub authentication failed");
     expect(msg).toContain("GH_TOKEN");
-    expect(msg).toContain("GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login");
+    expect(msg).toContain("sandcastle auth login github");
   });
 
   it("AgentError includes message", () => {

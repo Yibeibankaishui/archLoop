@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -56,9 +56,10 @@ describe("resolveUserMounts scaffold auth host directories", () => {
     );
 
     await access(authDir);
+    const resolvedAuthDir = await realpath(authDir);
     expect(result).toEqual([
       {
-        hostPath: authDir,
+        hostPath: resolvedAuthDir,
         sandboxPath: "/home/agent/.codex",
       },
     ]);

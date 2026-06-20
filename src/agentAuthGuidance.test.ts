@@ -44,7 +44,11 @@ describe("detectAgentAuthFailure", () => {
       "codex",
       "Error: invalid api key provided",
     );
-    expect(result).toEqual({ envKey: "OPENAI_KEY", label: "Codex" });
+    expect(result).toEqual({
+      envKey: "OPENAI_KEY",
+      label: "Codex",
+      authEnvKey: "CODEX_HOME",
+    });
   });
 
   it("detects claude-code auth failure", () => {
@@ -83,7 +87,7 @@ describe("formatAgentAuthFailureMessage", () => {
     expect(message).toContain("sandcastle env set CURSOR_API_KEY");
     expect(message).toContain("sandcastle env show");
     expect(message).toContain(".sandcastle/.env");
-    expect(message).toMatch(/not rely on agent login/i);
+    expect(message).toMatch(/not rely on host-global provider login state/i);
     expect(message).toContain("Original error: Please run `agent login` first");
   });
 
@@ -95,7 +99,7 @@ describe("formatAgentAuthFailureMessage", () => {
       originalDetail: "not logged in",
     });
 
-    expect(message).toContain("CODEX_HOME=.sandcastle/auth/codex codex login");
+    expect(message).toContain("sandcastle auth login codex");
     expect(message).toContain("Original error: not logged in");
   });
 });
@@ -134,13 +138,25 @@ describe("assertAgentCredentialsConfigured", () => {
 
   it("throws with sandcastle env guidance when credentials are missing", async () => {
     const dir = await makeDir();
+    const dataDir = join(dir, "xdg-data");
+    const origXdgDataHome = process.env.XDG_DATA_HOME;
+    const origCursorApiKey = process.env.CURSOR_API_KEY;
 
-    await expect(
-      assertAgentCredentialsConfigured({
-        providerName: "cursor",
-        cwd: dir,
-      }),
-    ).rejects.toThrow(/sandcastle env init/);
+    try {
+      process.env.XDG_DATA_HOME = dataDir;
+      process.env.CURSOR_API_KEY = "";
+      await expect(
+        assertAgentCredentialsConfigured({
+          providerName: "cursor",
+          cwd: dir,
+        }),
+      ).rejects.toThrow(/sandcastle env init/);
+    } finally {
+      if (origXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = origXdgDataHome;
+      if (origCursorApiKey === undefined) delete process.env.CURSOR_API_KEY;
+      else process.env.CURSOR_API_KEY = origCursorApiKey;
+    }
   });
 
   it("passes when hub env file has the required key", async () => {
@@ -177,5 +193,33 @@ describe("assertAgentCredentialsConfigured", () => {
       providerName: "cursor",
       cwd: dir,
     });
+  });
+
+  it("passes for Codex when a Hub auth session exists without OPENAI_KEY", async () => {
+    const dir = await makeDir();
+    const dataDir = join(dir, "xdg-data");
+    const codexDir = join(dataDir, "sandcastle", "hub", "auth", "codex");
+    await mkdir(codexDir, { recursive: true });
+    await writeFile(join(codexDir, "auth.json"), "{}\n");
+
+    const origXdgDataHome = process.env.XDG_DATA_HOME;
+    const origOpenAiKey = process.env.OPENAI_KEY;
+    const origCodexHome = process.env.CODEX_HOME;
+    try {
+      process.env.XDG_DATA_HOME = dataDir;
+      delete process.env.OPENAI_KEY;
+      delete process.env.CODEX_HOME;
+      await assertAgentCredentialsConfigured({
+        providerName: "codex",
+        cwd: dir,
+      });
+    } finally {
+      if (origXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = origXdgDataHome;
+      if (origOpenAiKey === undefined) delete process.env.OPENAI_KEY;
+      else process.env.OPENAI_KEY = origOpenAiKey;
+      if (origCodexHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = origCodexHome;
+    }
   });
 });

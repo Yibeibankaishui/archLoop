@@ -36,10 +36,13 @@ import { RUNTIME_DEBUG_ADDON_ID } from "./capabilityPacks.js";
 describe("sandcastle init interactive runtime selection", () => {
   let hostDir: string;
   let originalCwd: string;
+  let originalXdgDataHome: string | undefined;
 
   beforeEach(async () => {
     originalCwd = process.cwd();
+    originalXdgDataHome = process.env.XDG_DATA_HOME;
     hostDir = await mkdtemp(join(tmpdir(), "cli-interactive-init-"));
+    process.env.XDG_DATA_HOME = join(hostDir, "data");
     process.chdir(hostDir);
 
     mockSelect.mockImplementation(
@@ -84,6 +87,11 @@ describe("sandcastle init interactive runtime selection", () => {
 
   afterEach(() => {
     process.chdir(originalCwd);
+    if (originalXdgDataHome === undefined) {
+      delete process.env.XDG_DATA_HOME;
+    } else {
+      process.env.XDG_DATA_HOME = originalXdgDataHome;
+    }
     vi.clearAllMocks();
   });
 
@@ -335,7 +343,9 @@ describe("sandcastle init interactive runtime selection", () => {
       "gh auth login --insecure-storage",
       expect.objectContaining({
         env: expect.objectContaining({
-          GH_CONFIG_DIR: expect.stringContaining(".sandcastle/auth/gh"),
+          GH_CONFIG_DIR: expect.stringContaining(
+            join("sandcastle", "hub", "auth", "github"),
+          ),
         }),
       }),
     );
@@ -343,7 +353,9 @@ describe("sandcastle init interactive runtime selection", () => {
       "codex login",
       expect.objectContaining({
         env: expect.objectContaining({
-          CODEX_HOME: expect.stringContaining(".sandcastle/auth/codex"),
+          CODEX_HOME: expect.stringContaining(
+            join("sandcastle", "hub", "auth", "codex"),
+          ),
         }),
       }),
     );
@@ -545,6 +557,7 @@ describe("sandcastle init interactive runtime selection", () => {
 describe("sandcastle init interactive capability add-ons", () => {
   let hostDir: string;
   let originalCwd: string;
+  let originalXdgDataHome: string | undefined;
 
   const runMiniprogramInteractiveInit = async (options: {
     sandbox: "docker" | "no-sandbox";
@@ -612,15 +625,22 @@ describe("sandcastle init interactive capability add-ons", () => {
 
   beforeEach(async () => {
     originalCwd = process.cwd();
+    originalXdgDataHome = process.env.XDG_DATA_HOME;
     hostDir = await mkdtemp(
       join(tmpdir(), "cli-interactive-capability-addons-"),
     );
+    process.env.XDG_DATA_HOME = join(hostDir, "data");
     process.chdir(hostDir);
     vi.clearAllMocks();
   });
 
   afterEach(() => {
     process.chdir(originalCwd);
+    if (originalXdgDataHome === undefined) {
+      delete process.env.XDG_DATA_HOME;
+    } else {
+      process.env.XDG_DATA_HOME = originalXdgDataHome;
+    }
     vi.clearAllMocks();
   });
 

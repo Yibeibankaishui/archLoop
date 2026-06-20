@@ -1,5 +1,5 @@
 import { Effect, Layer, Ref } from "effect";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -121,11 +121,8 @@ describe("PromptPreprocessor", () => {
 
     expect(result).toBeInstanceOf(PromptError);
     expect(result.message).toContain("GitHub authentication failed");
-    expect(result.message).toContain(".sandcastle/auth/gh");
     expect(result.message).toContain("GH_TOKEN");
-    expect(result.message).toContain(
-      "GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login --insecure-storage",
-    );
+    expect(result.message).toContain("sandcastle auth login github");
     expect(result.message).toContain("host `gh auth status`");
     expect(result.message).not.toContain("FiberFailure");
   });
@@ -140,16 +137,14 @@ describe("PromptPreprocessor", () => {
     expect(result).toBeInstanceOf(PromptError);
     expect(result.message).toContain("GitHub authentication failed");
     expect(result.message).toContain("GH_TOKEN");
-    expect(result.message).toContain(
-      "GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login --insecure-storage",
-    );
+    expect(result.message).toContain("sandcastle auth login github");
   });
 
   it("runs commands with the provided cwd", async () => {
     const { sandboxDir, layer } = await setup();
     const prompt = "Dir: !`pwd`";
     const result = await run(prompt, layer, sandboxDir);
-    expect(result).toBe(`Dir: ${sandboxDir}`);
+    expect(result).toBe(`Dir: ${await realpath(sandboxDir)}`);
   });
 
   it("runs multiple shell expressions in parallel", async () => {

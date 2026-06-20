@@ -51,6 +51,7 @@ import {
   ConfigDirError,
   HubFlowError,
   HubAgentConfigError,
+  HubAuthError,
   HubEnvError,
   InitError,
   ProjectStatusError,
@@ -142,6 +143,13 @@ import {
   upsertHubEnvKey,
 } from "./hubEnv.js";
 import { promptInitHubEnv } from "./hubEnvPrompt.js";
+import {
+  ensureHubAuthDir,
+  formatHubAuthShowLines,
+  getHubAuthEnvVar,
+  getHubAuthLoginCommand,
+  resolveProviderHubAuthDir,
+} from "./hubAuth.js";
 import { isBdAvailable } from "./resolveBdExecutable.js";
 
 const require = createRequire(import.meta.url);
@@ -512,11 +520,11 @@ const buildAuthSetupNextStepLines = (options: {
     );
   } else if (options.githubChoice === "skip") {
     lines.push(
-      "Set up GitHub auth later with GH_TOKEN in .sandcastle/.env or `GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login --insecure-storage`.",
+      "Set up GitHub auth later with GH_TOKEN in .sandcastle/.env or `sandcastle auth login github`.",
     );
   } else if (options.githubChoice === "deferred") {
     lines.push(
-      "This scripted init skipped interactive GitHub auth setup. Use GH_TOKEN in .sandcastle/.env or `GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login --insecure-storage` before running GitHub Issues templates.",
+      "This scripted init skipped interactive GitHub auth setup. Use GH_TOKEN in .sandcastle/.env or `sandcastle auth login github` before running GitHub Issues templates.",
     );
   }
 
@@ -526,11 +534,11 @@ const buildAuthSetupNextStepLines = (options: {
     );
   } else if (options.codexChoice === "skip") {
     lines.push(
-      "Set up Codex auth later with OPENAI_KEY in .sandcastle/.env or `CODEX_HOME=.sandcastle/auth/codex codex login`.",
+      "Set up Codex auth later with OPENAI_KEY in .sandcastle/.env for OpenAI API billing or `sandcastle auth login codex` for a Codex/ChatGPT CLI login session.",
     );
   } else if (options.codexChoice === "deferred") {
     lines.push(
-      "This scripted init skipped interactive Codex auth setup. Use OPENAI_KEY in .sandcastle/.env or `CODEX_HOME=.sandcastle/auth/codex codex login` before running Codex in the sandbox.",
+      "This scripted init skipped interactive Codex auth setup. Use OPENAI_KEY in .sandcastle/.env for OpenAI API billing or `sandcastle auth login codex` for a Codex/ChatGPT CLI login session before running Codex in the sandbox.",
     );
   }
 
@@ -1248,7 +1256,7 @@ const initCommand = Command.make(
                 },
                 {
                   value: "login",
-                  label: "Run gh auth login into .sandcastle/auth/gh",
+                  label: "Run gh auth login into the Hub auth directory",
                 },
                 {
                   value: "skip",
@@ -1278,13 +1286,13 @@ const initCommand = Command.make(
                   stdio: "inherit",
                   env: {
                     ...process.env,
-                    GH_CONFIG_DIR: join(cwd, ".sandcastle", "auth", "gh"),
+                    GH_CONFIG_DIR: ensureHubAuthDir("github"),
                   },
                 }),
               catch: () =>
                 new InitError({
                   message:
-                    "GitHub login failed. You can retry with `GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login --insecure-storage`.",
+                    "GitHub login failed. You can retry with `sandcastle auth login github`.",
                 }),
             });
           } else {
@@ -1312,7 +1320,7 @@ const initCommand = Command.make(
                 },
                 {
                   value: "login",
-                  label: "Run codex login into .sandcastle/auth/codex",
+                  label: "Run codex login into the Hub auth directory",
                 },
                 {
                   value: "skip",
@@ -1342,13 +1350,13 @@ const initCommand = Command.make(
                   stdio: "inherit",
                   env: {
                     ...process.env,
-                    CODEX_HOME: join(cwd, ".sandcastle", "auth", "codex"),
+                    CODEX_HOME: ensureHubAuthDir("codex"),
                   },
                 }),
               catch: () =>
                 new InitError({
                   message:
-                    "Codex login failed. You can retry with `CODEX_HOME=.sandcastle/auth/codex codex login`.",
+                    "Codex login failed. You can retry with `sandcastle auth login codex`.",
                 }),
             });
           } else {
@@ -2518,7 +2526,7 @@ const runEnvInit = () =>
       return yield* Effect.fail(
         new HubEnvError({
           message:
-            "Interactive Hub env setup requires a TTY. Use `sandcastle env set <key> <value>` in scripts.",
+            "Interactive Hub env setup requires a TTY. Use `sandcastle env set <key> <value>` in scripts. For Codex CLI session auth, use `sandcastle auth login codex` instead of `OPENAI_KEY`; `OPENAI_KEY` uses OpenAI API billing.",
         }),
       );
     }
@@ -2614,6 +2622,120 @@ const envCommand = Command.make("env", {}, () =>
     envConfigureCommand,
     envSetCommand,
   ]),
+);
+
+const toHubAuthError = (error: unknown): HubAuthError =>
+  error instanceof HubAuthError
+    ? error
+    : new HubAuthError({
+        message: error instanceof Error ? error.message : String(error),
+      });
+
+const authPathProviderArg = Args.text({ name: "provider" }).pipe(
+  Args.withDescription("Provider auth path to print (codex or github)"),
+);
+
+const authPathCommand = Command.make(
+  "path",
+  { provider: authPathProviderArg },
+  ({ provider }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const path = yield* Effect.try({
+        try: () => resolveProviderHubAuthDir(provider.trim()),
+        catch: toHubAuthError,
+      });
+      yield* d.text(path);
+    }),
+);
+
+const authShowCommand = Command.make("show", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    for (const line of formatHubAuthShowLines()) {
+      yield* d.text(line);
+    }
+  }),
+);
+
+const runHubAuthLogin = (provider: "codex" | "github") =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const envVar = getHubAuthEnvVar(provider);
+    const authDir = ensureHubAuthDir(provider);
+    const command = getHubAuthLoginCommand(provider);
+    const actionableCommand = `${envVar}=${authDir} ${command}`;
+
+    if (provider === "codex") {
+      yield* d.status(
+        "Codex supports either OPENAI_KEY API billing through `sandcastle env set OPENAI_KEY <value>` or a Codex/ChatGPT CLI login session through this command.",
+        "info",
+      );
+    }
+
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      return yield* Effect.fail(
+        new HubAuthError({
+          message: `Interactive ${provider} login requires a TTY. Run \`${actionableCommand}\` from an interactive shell, or use \`sandcastle env set ${provider === "codex" ? "OPENAI_KEY" : "GH_TOKEN"} <value>\`.`,
+        }),
+      );
+    }
+
+    yield* d.status(`Running ${command} with ${envVar}=${authDir}`, "info");
+    yield* Effect.try({
+      try: () =>
+        execSync(command, {
+          stdio: "inherit",
+          env: {
+            ...process.env,
+            [envVar]: authDir,
+          },
+        }),
+      catch: (error) =>
+        new HubAuthError({
+          message: `${provider === "codex" ? "Codex" : "GitHub"} login failed. Retry with \`${actionableCommand}\`. ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        }),
+    });
+    yield* d.summary(
+      `${provider === "codex" ? "Codex" : "GitHub"} auth saved`,
+      {
+        [envVar]: authDir,
+      },
+    );
+  });
+
+const authLoginCodexCommand = Command.make("codex", {}, () =>
+  runHubAuthLogin("codex"),
+);
+
+const authLoginGithubCommand = Command.make("github", {}, () =>
+  runHubAuthLogin("github"),
+);
+
+const authLoginCommand = Command.make("login", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.status(
+      "Provider login commands. Use --help to see available subcommands.",
+      "info",
+    );
+  }),
+).pipe(
+  Command.withSubcommands([authLoginCodexCommand, authLoginGithubCommand]),
+);
+
+const authCommand = Command.make("auth", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    yield* d.status(
+      "Hub provider auth sessions. Use --help to see available subcommands.",
+      "info",
+    );
+  }),
+).pipe(
+  Command.withSubcommands([authShowCommand, authPathCommand, authLoginCommand]),
 );
 
 const toHubFlowError = (error: unknown): HubFlowError =>
@@ -2842,6 +2964,7 @@ export const sandcastle = rootCommand.pipe(
     projectCommand,
     agentConfigCommand,
     envCommand,
+    authCommand,
     dockerCommand,
     podmanCommand,
   ]),

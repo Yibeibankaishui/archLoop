@@ -91,6 +91,8 @@ Hub v1 使用 Sandcastle user data directory 下的本地明文 `.env` 文件保
 sandcastle env init
 ```
 
+Codex users can choose `sandcastle auth login codex` for a Codex/ChatGPT CLI login session instead of setting `OPENAI_KEY`, which uses OpenAI API billing. GitHub Issues task sync can use `sandcastle auth login github` instead of `GH_TOKEN`.
+
 也可以单独设置：
 
 ```bash
@@ -106,6 +108,7 @@ sandcastle env set GH_TOKEN
 ```bash
 sandcastle env show
 sandcastle env path
+sandcastle auth show
 ```
 
 `process.env` 中的同名变量会覆盖 Hub `.env` 中的值。

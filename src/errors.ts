@@ -98,6 +98,11 @@ export class HubEnvError extends Data.TaggedError("HubEnvError")<{
   readonly message: string;
 }> {}
 
+/** Hub provider auth operation failed */
+export class HubAuthError extends Data.TaggedError("HubAuthError")<{
+  readonly message: string;
+}> {}
+
 /** Run exceeded the configured agent idle timeout */
 export class AgentIdleTimeoutError extends Data.TaggedError(
   "AgentIdleTimeoutError",

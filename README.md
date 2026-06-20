@@ -742,7 +742,7 @@ Optional **no-sandbox only** add-on for WeChat Developer Tools / MCP runtime deb
 
 ### `sandcastle init`
 
-Scaffolds the `.sandcastle/` config directory and optionally builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a capability pack (first), default scaffold agent, installed runtimes, sandbox provider, backlog manager, optional capability add-ons (when the pack exposes them), workflow template, and Project profile. Init now offers `docker` and `no-sandbox`: choosing `docker` follows the normal image-build flow, while choosing `no-sandbox` skips image build during init and rewrites the scaffolded `main.mts` or `main.ts` to call `noSandbox()`. After scaffold (and before optional image build), init also runs an auth setup step for selected tools, including GitHub Issues, Codex, and Cursor. When you select the `miniprogram` capability pack, init may also offer project-local `miniprogram-ci` installation and writes Mini Program verification scaffold files.
+Scaffolds the `.sandcastle/` config directory and optionally builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a capability pack (first), default scaffold agent, installed runtimes, sandbox provider, backlog manager, optional capability add-ons (when the pack exposes them), workflow template, and Project profile. Init now offers `docker` and `no-sandbox`: choosing `docker` follows the normal image-build flow, while choosing `no-sandbox` skips image build during init and rewrites the scaffolded `main.mts` or `main.ts` to call `noSandbox()`. After scaffold (and before optional image build), init also points selected tools such as GitHub Issues, Codex, and Cursor toward env keys or Hub-owned auth sessions under the Sandcastle user data directory. When you select the `miniprogram` capability pack, init may also offer project-local `miniprogram-ci` installation and writes Mini Program verification scaffold files.
 
 Think of the init agent choices as two layers:
 
@@ -868,7 +868,7 @@ Displays configured Hub env keys with masked values. `process.env` overrides fil
 
 ### `sandcastle env init`
 
-Runs an interactive wizard to configure shared Hub credentials such as `CURSOR_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_KEY`, `OPENCODE_API_KEY`, and `GH_TOKEN`. The wizard prioritizes env keys required by your configured Hub agent roles.
+Runs an interactive wizard to configure shared Hub env keys such as `CURSOR_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_KEY`, `OPENCODE_API_KEY`, and `GH_TOKEN`. The wizard prioritizes env keys required by your configured Hub agent roles. For Codex, `OPENAI_KEY` uses OpenAI API billing; use `sandcastle auth login codex` for a Codex/ChatGPT CLI login session.
 
 ### `sandcastle env configure`
 
@@ -877,6 +877,22 @@ Alias for `sandcastle env init`.
 ### `sandcastle env set <key> [value]`
 
 Persists one Hub env value. In an interactive terminal, omit `value` to enter it securely at a prompt. In non-interactive mode, `value` is required.
+
+### `sandcastle auth show`
+
+Summarizes provider auth for Hub flows. Each provider reports whether auth is satisfied by `process.env`, the Hub env file, a Hub-owned auth directory/session, or is missing. Providers without first-pass login support, such as Cursor and OpenCode, show `sandcastle env set ...` guidance.
+
+### `sandcastle auth path <provider>`
+
+Prints the Hub-owned auth directory for login-capable providers. `sandcastle auth path codex` prints the `CODEX_HOME` directory; `sandcastle auth path github` prints the `GH_CONFIG_DIR` directory. Both live under the Sandcastle user data directory and are reusable across Hub projects.
+
+### `sandcastle auth login codex`
+
+Runs `codex login` with `CODEX_HOME` set to Sandcastle's Hub-owned Codex auth directory. This configures a Codex/ChatGPT CLI login session. It is distinct from `OPENAI_KEY`, which remains available through `sandcastle env set OPENAI_KEY <value>` and uses OpenAI API billing.
+
+### `sandcastle auth login github`
+
+Runs `gh auth login --insecure-storage` with `GH_CONFIG_DIR` set to Sandcastle's Hub-owned GitHub auth directory for GitHub Issues task sync. In non-interactive mode, both auth login commands fail with the exact command to run from an interactive shell instead of waiting for browser auth.
 
 ### `sandcastle tasks list`
 

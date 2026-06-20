@@ -35,12 +35,12 @@ const isGhAuthFailure = (command: string, stderr: string): boolean =>
 const formatGhAuthFailureMessage = (command: string, stderr: string): string =>
   [
     `GitHub authentication failed while expanding prompt shell expression \`${command}\`.`,
-    "Sandbox `gh` uses credentials from `.sandcastle/auth/gh` (mounted to `~/.config/gh`), not your host keyring.",
+    "Sandbox `gh` uses Sandcastle Hub auth (`sandcastle auth login github`) or `GH_TOKEN`, not your host keyring.",
     "A successful host `gh auth status` does not mean sandbox auth is valid.",
     "",
     "Fix one of:",
     "- Set a non-empty `GH_TOKEN` in `.sandcastle/.env`",
-    "- Run `GH_CONFIG_DIR=.sandcastle/auth/gh gh auth login --insecure-storage`",
+    "- Run `sandcastle auth login github`",
     "",
     "See `docs/agents/issue-tracker.md` for fork/default-repo setup.",
     "",

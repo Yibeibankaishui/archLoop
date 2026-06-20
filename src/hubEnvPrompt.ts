@@ -34,6 +34,9 @@ export const promptInitHubEnv = async (
   options: HubEnvStoreOptions = {},
 ): Promise<Record<string, string>> => {
   clack.intro("Configure Hub environment variables");
+  clack.log.info(
+    "Codex users can use `sandcastle auth login codex` for Codex/ChatGPT CLI session auth. `OPENAI_KEY` uses OpenAI API billing.",
+  );
 
   const { created } = ensureHubEnvFile(options);
   if (created) {

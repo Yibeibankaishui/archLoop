@@ -41,6 +41,7 @@ import {
   DEFAULT_PROJECT_PROFILE,
   type ProjectProfileEntry,
 } from "./projectProfiles.js";
+import { resolveHubAuthDir } from "./hubAuthPaths.js";
 import { PINNED_BEADS_VERSION } from "./resolveBdExecutable.js";
 import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import { SCAFFOLD_TEMPLATES } from "./initTemplates.js";
@@ -714,6 +715,19 @@ GH_TOKEN=`,
 export const listBacklogManagers = (): BacklogManagerEntry[] =>
   BACKLOG_MANAGER_REGISTRY;
 
+const resolveHubAuthMounts = (
+  mounts: readonly AuthMountEntry[],
+): readonly AuthMountEntry[] =>
+  mounts.map((mount) => {
+    if (mount.hostPath === ".sandcastle/auth/codex") {
+      return { ...mount, hostPath: resolveHubAuthDir("codex") };
+    }
+    if (mount.hostPath === ".sandcastle/auth/gh") {
+      return { ...mount, hostPath: resolveHubAuthDir("github") };
+    }
+    return mount;
+  });
+
 export const getBacklogManager = (
   name: string,
 ): BacklogManagerEntry | undefined =>
@@ -731,7 +745,7 @@ export const collectAuthRequirements = ({
       id: runtime.name,
       label: runtime.label,
       envVars: runtime.envVars,
-      authMounts: runtime.authMounts ?? [],
+      authMounts: resolveHubAuthMounts(runtime.authMounts ?? []),
     }),
   );
 
@@ -739,7 +753,7 @@ export const collectAuthRequirements = ({
     id: backlogManager.name,
     label: backlogManager.label,
     envVars: backlogManager.envVars,
-    authMounts: backlogManager.authMounts ?? [],
+    authMounts: resolveHubAuthMounts(backlogManager.authMounts ?? []),
     ...(backlogManager.name === "github-issues"
       ? { githubLoginSupported: true }
       : {}),
