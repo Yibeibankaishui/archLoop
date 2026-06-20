@@ -405,6 +405,15 @@ if (command === "update") {
     task.metadata = JSON.parse(args[metadataIndex + 1]);
   }
   for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      task.labels = [];
+    }
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      const label = args[index + 1];
+      task.labels = [...new Set([...(task.labels ?? []), label])];
+    }
     if (args[index] === "--add-label") {
       const label = args[index + 1];
       task.labels = [...new Set([...(task.labels ?? []), label])];
@@ -696,8 +705,8 @@ describe("applyTriageProposal", () => {
 
       const updateArgs = await readFileAsync(updateArgsFile, "utf8");
       expect(updateArgs).toContain("bd-42");
-      expect(updateArgs).toContain("--add-label ready-for-human");
-      expect(updateArgs).not.toMatch(/--add-label ready-for-agent/);
+      expect(updateArgs).toContain("--set-labels ready-for-human");
+      expect(updateArgs).not.toMatch(/--set-labels ready-for-agent/);
     } finally {
       process.env.PATH = previousPath;
       process.env.SANDCASTLE_BD_PATH = previousBdPath;

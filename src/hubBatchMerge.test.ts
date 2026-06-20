@@ -120,6 +120,15 @@ if (command === "update" && id) {
     task.status = args[statusIndex + 1];
   }
   for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      task.labels = [];
+    }
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      const label = args[index + 1];
+      if (!task.labels.includes(label)) task.labels.push(label);
+    }
     if (args[index] === "--add-label") {
       const label = args[index + 1];
       if (!task.labels.includes(label)) task.labels.push(label);

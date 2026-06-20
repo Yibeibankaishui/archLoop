@@ -26,6 +26,15 @@ export const appendBdRemoveLabelArgs = (
   }
 };
 
+export const appendBdSetLabelsArgs = (
+  args: string[],
+  labels: readonly string[] | string,
+): void => {
+  for (const label of normalizeBdLabels(labels)) {
+    args.push("--set-labels", label);
+  }
+};
+
 export const appendBdMetadataArg = (
   args: string[],
   metadata: Record<string, unknown>,

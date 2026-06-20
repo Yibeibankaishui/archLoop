@@ -238,6 +238,18 @@ const reviewFailureOutcome = (
   return "agent_failed";
 };
 
+const materializeClaimMetadata = (
+  claim: HubTaskClaimMetadata,
+): Readonly<Record<string, unknown>> =>
+  Object.keys(claim.raw).length > 0
+    ? claim.raw
+    : {
+        runId: claim.runId,
+        batchId: claim.batchId,
+        branch: claim.branch,
+        claimedAt: claim.claimedAt,
+      };
+
 const recordImplementationOutcome = (
   input: RecordImplementationOutcomeInput,
   outcome: ImplementationOutcomeEvent,
@@ -270,7 +282,10 @@ const recordImplementationOutcome = (
     cwd: input.cwd,
     taskId: input.taskId,
     hubStatus: outcome.hubStatus,
-    metadata: input.metadata,
+    metadata: {
+      ...input.metadata,
+      claim: materializeClaimMetadata(input.claim),
+    },
     ...(failureReason ? { failureReason } : {}),
     env: input.env,
   });
@@ -336,7 +351,10 @@ export const recordHubTaskReviewSuccess = (
     cwd: input.cwd,
     taskId: input.taskId,
     hubStatus: "waiting_for_merge",
-    metadata: input.taskMetadata,
+    metadata: {
+      ...input.taskMetadata,
+      claim: materializeClaimMetadata(input.claim),
+    },
     env: input.env,
   });
   recordHubTaskStatusAdvanced(input.runDir, {
@@ -638,7 +656,6 @@ const persistHubTaskWithStrippedClaim = (input: {
     taskId: input.taskId,
     hubStatus: input.hubStatus,
     metadata: stripClaimMetadata(input.metadata),
-    replaceMetadata: true,
     env: input.env,
   });
 

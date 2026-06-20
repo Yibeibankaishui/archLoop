@@ -1506,6 +1506,14 @@ if (command === "update") {
     task.metadata = JSON.parse(args[metadataIndex + 1]);
   }
   for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      task.labels = [];
+    }
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      task.labels = [...new Set([...(task.labels ?? []), args[index + 1]])];
+    }
     if (args[index] === "--add-label") {
       task.labels = [...new Set([...(task.labels ?? []), args[index + 1]])];
     }

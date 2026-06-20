@@ -130,6 +130,17 @@ if (command === "update" && id === "bd-69") {
   const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
   state[0].status = args[statusIndex + 1];
   state[0].metadata = JSON.parse(args[metadataIndex + 1]);
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      state[0].labels = [];
+    }
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      const label = args[index + 1];
+      if (!state[0].labels.includes(label)) state[0].labels.push(label);
+    }
+  }
   fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
   process.exit(0);
 }

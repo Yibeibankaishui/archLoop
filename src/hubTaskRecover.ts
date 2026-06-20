@@ -299,7 +299,6 @@ const recoverGenericFailedTask = async (
       taskId: input.taskId,
       hubStatus: targetStatus,
       metadata: { ...task.metadata },
-      replaceMetadata: true,
       env: input.env,
     });
     appendRecoveryComment(input, summary);

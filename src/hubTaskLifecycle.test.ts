@@ -112,6 +112,15 @@ if (command === "update" && id) {
     task.status = args[statusIndex + 1];
   }
   for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      task.labels = [];
+    }
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      const label = args[index + 1];
+      if (!task.labels.includes(label)) task.labels.push(label);
+    }
     if (args[index] === "--add-label") {
       const label = args[index + 1];
       if (!task.labels.includes(label)) task.labels.push(label);
@@ -911,6 +920,144 @@ describe("Hub task lifecycle review outcomes", () => {
     expect(taskEvents[0]).toMatchObject({
       status: "waiting_for_merge",
       commitCount: 2,
+    });
+  });
+
+  it("records review success from a fresh task read so stale implementation metadata cannot reset status or claim", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-lifecycle-review-success-fresh-"),
+    );
+    await initRepo(repoDir);
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const claim = createHubTaskClaimMetadata({
+      runId: "run-review-fresh",
+      batchId: "batch-review-fresh",
+      branch: "sandcastle/bd-fresh-review-task",
+      claimedAt: "2026-06-19T10:00:00.000Z",
+    });
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-fresh",
+        title: "Review task with stale caller metadata",
+        status: "in_progress",
+        labels: ["reviewing", "user-owned"],
+        metadata: {
+          hubStatus: "reviewing",
+          claim: claim.raw,
+          remote_refs: ["github#129"],
+        },
+      },
+    ]);
+
+    const context = createHubRunContext({
+      cwd: repoDir,
+      branch: "flow/with-review",
+      runId: "run-review-fresh",
+      batchId: "batch-review-fresh",
+      hubProjectDir: join(repoDir, "hub-project"),
+      env,
+    });
+
+    const result = recordHubTaskReviewSuccess({
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId: context.batchId,
+      taskId: "bd-fresh",
+      branch: claim.branch!,
+      taskMetadata: {
+        hubStatus: "ready_for_agent",
+        claim: {
+          runId: "run-review-fresh",
+          branch: "sandcastle/bd-fresh-review-task",
+          claimedAt: "2026-06-19T10:00:00.000Z",
+        },
+      },
+      claim,
+      commitCount: 1,
+      createdAt: "2026-06-19T10:08:00.000Z",
+      env,
+    });
+
+    expect(result.hubStatus).toBe("waiting_for_merge");
+    expect(result.task.claim).toMatchObject({
+      runId: "run-review-fresh",
+      batchId: "batch-review-fresh",
+      branch: "sandcastle/bd-fresh-review-task",
+    });
+    expect(result.task.remoteRefs).toEqual(["github#129"]);
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(finalState[0]?.labels).toEqual(["user-owned", "waiting-for-merge"]);
+    expect(finalState[0]?.metadata).toMatchObject({
+      hubStatus: "waiting_for_merge",
+      remote_refs: ["github#129"],
+      claim: {
+        runId: "run-review-fresh",
+        batchId: "batch-review-fresh",
+        branch: "sandcastle/bd-fresh-review-task",
+      },
+    });
+  });
+
+  it("records review success with the lifecycle claim when the fresh task has no stored claim", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-lifecycle-review-success-claim-intent-"),
+    );
+    await initRepo(repoDir);
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const claim = createHubTaskClaimMetadata({
+      runId: "run-review-claim-intent",
+      batchId: "batch-review-claim-intent",
+      branch: "sandcastle/bd-review-claim-intent-task",
+      claimedAt: "2026-06-19T10:00:00.000Z",
+    });
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-claim-intent",
+        title: "Review task with missing stored claim",
+        status: "in_progress",
+        labels: ["reviewing"],
+        metadata: {
+          hubStatus: "reviewing",
+        },
+      },
+    ]);
+
+    const context = createHubRunContext({
+      cwd: repoDir,
+      branch: "flow/with-review",
+      runId: "run-review-claim-intent",
+      batchId: "batch-review-claim-intent",
+      hubProjectDir: join(repoDir, "hub-project"),
+      env,
+    });
+
+    const result = recordHubTaskReviewSuccess({
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId: context.batchId,
+      taskId: "bd-claim-intent",
+      branch: claim.branch!,
+      taskMetadata: {
+        hubStatus: "ready_for_agent",
+      },
+      claim,
+      commitCount: 1,
+      createdAt: "2026-06-19T10:08:00.000Z",
+      env,
+    });
+
+    expect(result.hubStatus).toBe("waiting_for_merge");
+    expect(result.task.claim).toMatchObject({
+      runId: "run-review-claim-intent",
+      batchId: "batch-review-claim-intent",
+      branch: "sandcastle/bd-review-claim-intent-task",
     });
   });
 
