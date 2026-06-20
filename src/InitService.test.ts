@@ -1811,6 +1811,32 @@ describe("InitService scaffold", () => {
       expect(mainTs).not.toContain("completedBranches.length === 1");
     });
 
+    it("main.mts derives deterministic issue branches from issue ids", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "parallel-planner" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("canonicalizeIssueBranch");
+      expect(mainTs).toContain("canonicalizePlannedIssues");
+      expect(mainTs).toContain("`sandcastle/issue-${");
+    });
+
+    it("plan-prompt.md does not ask the planner for title-derived branch slugs", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "parallel-planner" });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "plan-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).not.toContain("sandcastle/issue-{id}-{slug}");
+      expect(prompt).toMatch(/do \*\*not\*\* assign branch names/i);
+      expect(prompt).toContain("sandcastle/issue-{id}");
+    });
+
     it("common files are still generated with parallel-planner template", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner" });
@@ -2137,6 +2163,32 @@ describe("InitService scaffold", () => {
       expect(prompt).not.toContain("# EXISTING BRANCHES");
       expect(prompt).not.toContain("git rev-list <base>..refs/heads/<branch>");
       expect(prompt).toMatch(/do \*\*not\*\* inspect git branches/i);
+    });
+
+    it("plan-prompt.md does not ask the planner for title-derived branch slugs", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "plan-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).not.toContain("sandcastle/issue-{id}-{slug}");
+      expect(prompt).toMatch(/do \*\*not\*\* assign branch names/i);
+      expect(prompt).toContain("sandcastle/issue-{id}");
+    });
+
+    it("main.mts derives deterministic issue branches from issue ids", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("canonicalizeIssueBranch");
+      expect(mainTs).toContain("canonicalizePlannedIssues");
+      expect(mainTs).toContain("`sandcastle/issue-${");
     });
 
     it("main.mts skips fresh implementation when the local branch is already ahead", async () => {

@@ -6,7 +6,7 @@ Four-phase workflow for parallel issue execution with per-branch review.
 
 Each issue moves through these phases:
 
-1. **Plan** — The planner selects unblocked issues and assigns branch names (`sandcastle/issue-{id}-{slug}`).
+1. **Plan** — The planner selects unblocked issues; the template assigns stable branch names (`sandcastle/issue-{id}`).
 2. **Implement** — The implementer completes the work on the issue branch. The issue stays **open**.
 3. **Review** — When the implementer produces commits, or the branch already has unmerged commits ahead of the base branch, a reviewer refines the branch.
 4. **Merge & close** — The merger merges completed branches into the current branch, runs tests, and closes each issue **only after** its branch is merged successfully.

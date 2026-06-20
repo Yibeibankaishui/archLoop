@@ -75,6 +75,25 @@ function assertPlanUsesAllowedIssues(
   }
 }
 
+/** Stable per-issue branch; ignores any slug the planner may emit. */
+function canonicalizeIssueBranch(issueId: string): string {
+  const id = String(issueId).trim();
+  if (!id) {
+    throw new Error("Cannot canonicalize branch: issue id is empty.");
+  }
+  return `sandcastle/issue-${id}`;
+}
+
+function canonicalizePlannedIssues(
+  issues: Array<{ id: string; title: string; branch?: string }>,
+): PlannedIssue[] {
+  return issues.map((issue) => ({
+    id: String(issue.id),
+    title: issue.title,
+    branch: canonicalizeIssueBranch(issue.id),
+  }));
+}
+
 /** Host repo branch that issue branches merge into (current HEAD). */
 async function getCurrentBranch(): Promise<string> {
   const { stdout } = await execFileAsync("git", [
@@ -298,10 +317,13 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     continue;
   }
 
-  // The plan JSON contains an array of issues, each with id, title, branch.
-  const { issues } = JSON.parse(planMatch[1]!) as {
-    issues: PlannedIssue[];
+  // The plan JSON lists unblocked issues (id + title). Branch names are derived
+  // deterministically below so slug drift across planner iterations cannot spawn
+  // orphan worktrees.
+  const { issues: rawIssues } = JSON.parse(planMatch[1]!) as {
+    issues: Array<{ id: string; title: string; branch?: string }>;
   };
+  const issues = canonicalizePlannedIssues(rawIssues);
   assertPlanUsesAllowedIssues(issues, allowedIssueIds);
 
   if (issues.length === 0) {
