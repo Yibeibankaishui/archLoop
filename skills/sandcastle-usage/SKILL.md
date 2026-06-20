@@ -122,8 +122,8 @@ Key APIs: `run()`, `interactive()`, `createSandbox()`, `createWorktree()`; sandb
 | `sandcastle agent-config configure`              | Alias for `agent-config init`                                           |
 | `sandcastle agent-config set-role <role>`        | Save a Hub agent role provider/model                                    |
 | `sandcastle env path`                            | Show Hub env file path                                                  |
-| `sandcastle env show`                            | Show configured Hub env keys                                            |
-| `sandcastle env init`                            | Interactive Hub credential setup                                        |
+| `sandcastle env show`                            | Show configured Hub env keys (hints for empty keys)                     |
+| `sandcastle env init`                            | Interactive Hub credential setup with per-key guidance                  |
 | `sandcastle env configure`                       | Alias for `env init`                                                    |
 | `sandcastle env set <key> [value]`               | Save one Hub env value                                                  |
 | `sandcastle auth show`                           | Show provider auth source/status                                        |

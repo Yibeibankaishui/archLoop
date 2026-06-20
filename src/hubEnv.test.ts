@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   collectHubEnvKeysForAgentConfig,
   ensureHubEnvFile,
+  formatHubEnvShowLines,
   mergeHubAndProjectEnv,
   readHubEnvFile,
   resolveHubEnv,
@@ -101,5 +102,25 @@ describe("hubEnv", () => {
     const { env } = await makeStore();
     upsertHubEnvKey("CURSOR_API_KEY", "saved-key", { env });
     expect(readHubEnvFile({ env }).CURSOR_API_KEY).toBe("saved-key");
+  });
+
+  it("shows acquisition hints for empty known keys", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "hub-env-show-hints-"));
+    const dataDir = join(homeDir, "xdg-data");
+    await mkdir(dataDir, { recursive: true });
+    const env: NodeJS.ProcessEnv = { XDG_DATA_HOME: dataDir };
+    ensureHubEnvFile({ env });
+    writeHubEnvFile({ CURSOR_API_KEY: "saved-key" }, { env });
+
+    const lines = formatHubEnvShowLines({ env });
+    const joined = lines.join("\n");
+    expect(joined).toContain("CURSOR_API_KEY");
+    expect(joined).not.toMatch(/CURSOR_API_KEY:.*\n\s+hint:/);
+    expect(joined).toMatch(/OPENAI_KEY: \(empty\)/);
+    expect(joined).toMatch(/hint:.*OpenAI API/);
+    expect(joined).toMatch(/https:\/\/platform\.openai\.com\/api-keys/);
+    expect(joined).toContain(
+      "Run `sandcastle env init` for guided credential setup.",
+    );
   });
 });

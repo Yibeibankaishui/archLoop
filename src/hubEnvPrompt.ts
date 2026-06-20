@@ -1,5 +1,6 @@
 import * as clack from "@clack/prompts";
 
+import { maskEnvValue } from "./envFile.js";
 import {
   collectHubEnvKeysForSetup,
   ensureHubEnvFile,
@@ -8,18 +9,25 @@ import {
   type HubEnvStoreOptions,
   writeHubEnvFile,
 } from "./hubEnv.js";
-import { maskEnvValue } from "./envFile.js";
+import {
+  formatHubEnvKeyGuidanceLines,
+  HUB_ENV_BLANK_INPUT_NOTE,
+} from "./hubEnvKeyGuidance.js";
 
 const promptHubEnvValue = async (
   key: HubEnvKnownKey,
   currentValue: string,
 ): Promise<string | null> => {
+  for (const line of formatHubEnvKeyGuidanceLines(key)) {
+    clack.log.info(line);
+  }
+
   const status =
     currentValue.length > 0
       ? `current: ${maskEnvValue(key, currentValue)}`
       : "not set";
   const value = await clack.password({
-    message: `${key} (${status}). Leave blank to keep unchanged.`,
+    message: `${key} (${status}). ${HUB_ENV_BLANK_INPUT_NOTE}`,
   });
   if (clack.isCancel(value)) {
     clack.cancel("Hub env setup cancelled.");
@@ -34,9 +42,7 @@ export const promptInitHubEnv = async (
   options: HubEnvStoreOptions = {},
 ): Promise<Record<string, string>> => {
   clack.intro("Configure Hub environment variables");
-  clack.log.info(
-    "Codex users can use `sandcastle auth login codex` for Codex/ChatGPT CLI session auth. `OPENAI_KEY` uses OpenAI API billing.",
-  );
+  clack.log.info(HUB_ENV_BLANK_INPUT_NOTE);
 
   const { created } = ensureHubEnvFile(options);
   if (created) {

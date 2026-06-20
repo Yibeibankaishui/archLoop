@@ -9,6 +9,10 @@ import {
 } from "./envFile.js";
 import type { HubAgentConfig } from "./hubAgentConfig.js";
 import { readHubAgentConfig } from "./hubAgentConfig.js";
+import {
+  formatHubEnvKeyAcquisitionHint,
+  getHubEnvKeyGuidance,
+} from "./hubEnvKeyGuidance.js";
 import { resolveSandcastleUserDataDir } from "./projectStatus.js";
 
 export const HUB_ENV_KNOWN_KEYS = [
@@ -188,26 +192,35 @@ export const formatHubEnvShowLines = (
   const envPath = resolveHubEnvPath(options);
   const fileEnv = readHubEnvFile(options);
   const resolved = resolveHubEnv(options);
+  const runtimeEnv = options.env ?? process.env;
   const keys =
     Object.keys(fileEnv).length > 0
       ? [...new Set([...HUB_ENV_KNOWN_KEYS, ...Object.keys(fileEnv)])].sort()
       : [...HUB_ENV_KNOWN_KEYS];
 
   const lines = [`Hub env file: ${envPath}`, ""];
+  let hasEmptyKnownKey = false;
+
   for (const key of keys) {
     const fileValue = fileEnv[key] ?? "";
     const effectiveValue = resolved[key] ?? "";
+    const runtimeValue = runtimeEnv[key];
     const runtimeOverride =
-      (options.env ?? process.env)[key] &&
-      (options.env ?? process.env)[key]!.length > 0 &&
+      runtimeValue &&
+      runtimeValue.length > 0 &&
       fileValue.length > 0 &&
-      (options.env ?? process.env)[key] !== fileValue;
+      runtimeValue !== fileValue;
 
     lines.push(
       `  ${key}: ${maskEnvValue(key, effectiveValue)}${
         runtimeOverride ? " (overridden by process.env)" : ""
       }`,
     );
+
+    if (effectiveValue.length === 0 && isHubEnvKnownKey(key)) {
+      hasEmptyKnownKey = true;
+      lines.push(`    hint: ${formatHubEnvKeyAcquisitionHint(key)}`);
+    }
   }
 
   if (Object.keys(fileEnv).length === 0) {
@@ -215,6 +228,8 @@ export const formatHubEnvShowLines = (
       "",
       "No Hub env file yet. Run `sandcastle env init` to create one.",
     );
+  } else if (hasEmptyKnownKey) {
+    lines.push("", "Run `sandcastle env init` for guided credential setup.");
   }
 
   return lines;
@@ -228,10 +243,11 @@ export const listHubEnvKeyDescriptions = (): readonly {
     const agent = listAgents().find((entry) =>
       getAgentRuntime(entry.name)?.envVars.includes(key),
     );
+    const guidance = getHubEnvKeyGuidance(key);
     const backlogLabel =
       key === "GH_TOKEN" ? "GitHub Issues / gh CLI" : undefined;
     return {
       key,
-      label: agent?.label ?? backlogLabel ?? key,
+      label: agent?.label ?? backlogLabel ?? guidance.service,
     };
   });
