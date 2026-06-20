@@ -32,6 +32,9 @@ export const formatHubTaskStoreBdUnavailableMessage = (
 ): string =>
   `sandcastle ${failureLabel} requires the Sandcastle task runtime. Install dependencies, set SANDCASTLE_BD_PATH, or ensure the bundled Beads runtime is available.`;
 
+const readErrorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : "unable to execute the task store";
+
 const isTaskStoreInitError = (message: string): boolean =>
   /no beads database found/i.test(message) || /\bbd init\b/i.test(message);
 
@@ -40,19 +43,25 @@ export const formatHubTaskStoreCommandFailure = (
   error: unknown,
   cwd: string,
 ): string => {
-  if (
-    !isHubTaskStoreInitialized(cwd) ||
-    isTaskStoreInitError(readErrorMessage(error))
-  ) {
+  const message = readErrorMessage(error);
+  if (!isHubTaskStoreInitialized(cwd) || isTaskStoreInitError(message)) {
     return formatHubTaskStoreNotInitializedMessage(failureLabel);
   }
 
-  const message = readErrorMessage(error);
   return `sandcastle ${failureLabel} failed: ${message}`;
 };
 
-const readErrorMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : "unable to execute the task store";
+const execBdText = (
+  cwd: string,
+  args: readonly string[],
+  env: NodeJS.ProcessEnv,
+): string =>
+  execFileSync(resolveBdExecutable(env), [...args], {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    env,
+  });
 
 export const assertHubTaskStoreInitialized = (
   cwd: string,
@@ -67,9 +76,6 @@ export const assertHubTaskStoreInitialized = (
   });
 };
 
-const shouldSkipTaskStoreInitCheck = (args: readonly string[]): boolean =>
-  args[0] === "init";
-
 export const runBdTextForHubTaskStore = (
   cwd: string,
   args: readonly string[],
@@ -82,17 +88,10 @@ export const runBdTextForHubTaskStore = (
     });
   }
 
-  if (!shouldSkipTaskStoreInitCheck(args)) {
-    assertHubTaskStoreInitialized(cwd, failureLabel);
-  }
+  assertHubTaskStoreInitialized(cwd, failureLabel);
 
   try {
-    return execFileSync(resolveBdExecutable(env), [...args], {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      env,
-    });
+    return execBdText(cwd, args, env);
   } catch (error) {
     throw new TaskBoardError({
       message: formatHubTaskStoreCommandFailure(failureLabel, error, cwd),
@@ -120,16 +119,7 @@ export const initHubTaskStore = (
   }
 
   try {
-    const output = execFileSync(
-      resolveBdExecutable(env),
-      ["init", "--non-interactive"],
-      {
-        cwd,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-        env,
-      },
-    );
+    const output = execBdText(cwd, ["init", "--non-interactive"], env);
 
     if (!isHubTaskStoreInitialized(cwd)) {
       throw new TaskBoardError({

@@ -682,14 +682,7 @@ export const substituteTriageDraftPrompt = (
     )
     .replaceAll("{{TASK_DETAILS}}", context.taskDetails);
 
-const runBdText = (
-  cwd: string,
-  args: readonly string[],
-  failureLabel: string,
-  env: NodeJS.ProcessEnv,
-): void => {
-  runBdTextForHubTaskStore(cwd, args, failureLabel, env);
-};
+const runBdText = runBdTextForHubTaskStore;
 
 const addHubTaskLabels = (
   cwd: string,

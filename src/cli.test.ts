@@ -93,8 +93,6 @@ const cliFailureOutput = (err: unknown): string => {
   throw err;
 };
 
-const seedHubTaskStore = seedHubTaskStoreMetadata;
-
 const withBdEnv = (
   bdPath: string,
   repoDirOrEnv?: string | NodeJS.ProcessEnv,
@@ -111,7 +109,7 @@ const withBdEnv = (
   }
 
   if (repoDir) {
-    seedHubTaskStore(repoDir);
+    seedHubTaskStoreMetadata(repoDir);
   }
 
   return {
