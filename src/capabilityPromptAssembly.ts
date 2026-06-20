@@ -16,6 +16,24 @@ export const MINIPROGRAM_VERIFICATION_PROMPT_MARKER =
 export const MINIPROGRAM_RUNTIME_DEBUG_PROMPT_MARKER =
   "<!-- sandcastle:capability:miniprogram:runtime-debug -->";
 
+/** Marker for the Python project profile venv disclosure (issue #96). */
+export const PYTHON_VENV_PROMPT_MARKER =
+  "<!-- sandcastle:profile:python:venv -->";
+
+/**
+ * Brief prompt fragment telling agents that a Python venv is bootstrapped at
+ * `.venv/` and that `.venv/bin` is on PATH, so they should call `python` /
+ * `pytest` directly rather than reaching for the host system interpreter.
+ *
+ * See issue #96: without this hint agents can default to `python3` and pull in
+ * unrelated globally-installed pytest plugins (e.g. ROS launch_testing) that
+ * stall iteration.
+ */
+const PYTHON_VENV_PROMPT_BODY =
+  "## Python environment\n" +
+  "\n" +
+  "A Python venv is bootstrapped at `.venv/`. Use `python` / `pytest` directly — `.venv/bin` is on PATH, so bare invocations resolve to the venv interpreter. Avoid `python3` from the host: it can pick up unrelated globally-installed packages (e.g. ROS `launch_testing` plugins) and hang.\n";
+
 const PROMPT_FILES_BY_TEMPLATE: Readonly<Record<string, readonly string[]>> = {
   blank: ["prompt.md"],
   "simple-loop": ["prompt.md"],
@@ -111,6 +129,24 @@ export function appendMiniprogramRuntimeDebugToPrompt(content: string): string {
     MINIPROGRAM_RUNTIME_DEBUG_PROMPT_MARKER,
     getMiniprogramRuntimeDebugPromptSection(),
   );
+}
+
+/**
+ * Append the Python venv disclosure (issue #96) once per prompt file. Idempotent
+ * via `PYTHON_VENV_PROMPT_MARKER`.
+ */
+export function appendPythonVenvNoteToPrompt(content: string): string {
+  if (content.includes(PYTHON_VENV_PROMPT_MARKER)) {
+    return content;
+  }
+  const section = `${PYTHON_VENV_PROMPT_MARKER}\n\n${PYTHON_VENV_PROMPT_BODY}`;
+  const trimmed = content.trimEnd();
+  return trimmed.length === 0 ? section : `${trimmed}\n\n${section}`;
+}
+
+/** Whether init should append the Python venv prompt fragment for this profile. */
+export function shouldAppendPythonVenvNote(profileName: string): boolean {
+  return profileName === "python";
 }
 
 /** Whether init should assemble Mini Program verification guidance into template prompts. */

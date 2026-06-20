@@ -1,226 +1,386 @@
-# 1 功能概述
+# Sandcastle Unified Interface 用户使用指南
 
-## Sandcastle
+## 1 功能概述
 
-Sandcastle 是一个用于编排 AI 编程工具的 TypeScript 工具包。它把代码代理的执行过程放进独立的 sandbox 中，并负责串起提示词、分支策略、提交收集和运行日志。
+Sandcastle unified interface 是 Sandcastle 的新主入口。它把项目管理、共享凭据、agent role 配置、任务表、PRD 拆解、任务 triage 和 flow 执行集中到 `sandcastle` CLI 中。
 
-## 解决的问题
+首版主仓库为：
 
-Sandcastle 主要用于解决以下场景中的重复工作：
+```text
+https://github.com/Yibeibankaishui/sandcastle.git
+```
 
-- 在隔离环境中运行 AI 编程工具，避免直接污染当前工作目录
-- 为代码修改自动创建分支或 worktree，并在运行结束后回收结果
-- 把提示词、环境变量、sandbox 配置和任务来源集中到同一套配置目录
-- 支持单次执行、交互式会话、复用 sandbox、多轮迭代和并行流水线
+旧的 `sandcastle init` 方式仍然保留。已经使用 `.sandcastle/main.ts` 或 `.sandcastle/main.mts` 的项目可以继续按原流程运行；新的主要使用方式推荐直接使用 Hub / task board / flow 命令。
 
-## 核心能力
+## 2 使用边界
 
-- 通过 `run()` 发起一次或多次迭代执行
-- 通过 `interactive()` 启动交互式代理会话
-- 通过 `createSandbox()` 复用同一个 sandbox 连续运行多个阶段
-- 通过 `createWorktree()` 创建独立 worktree 后再执行任务
-- 支持 Docker、Podman、Vercel 和自定义 sandbox provider
-- 支持 Claude Code、Codex、Cursor、OpenCode、Pi 等内置 agent provider
-- 支持 `head`、`merge-to-head`、`branch` 三类分支策略
-- 支持模板化初始化，快速生成 `.sandcastle/` 配置目录
+Unified interface 面向一个已有 Git 项目运行。目标项目需要满足：
 
-## 使用边界或前置条件
+| 条件             | 说明                                                             |
+| ---------------- | ---------------------------------------------------------------- |
+| Git 仓库         | 仓库至少已有一个 commit                                          |
+| Sandcastle CLI   | 示例统一使用 `sandcastle`，没有全局命令时可改用 `npx sandcastle` |
+| Beads task store | Hub task board 使用 Beads 保存本地任务                           |
+| Agent runtime    | 需要至少一个可用的 agent provider 和模型                         |
+| Hub credentials  | 共享凭据保存在 Sandcastle user data directory 中                 |
 
-- 目标目录需要是一个 Git 仓库，且当前分支至少已有一个提交（仅 `git init` 尚未提交时无法运行 Sandcastle）
-- 需要至少一种可用的 sandbox provider
-- 需要为所选 agent runtime 和任务来源准备可用凭据
-- sandbox 环境需要能运行当前任务涉及的关键命令，例如测试、格式检查或项目启动命令
+Hub flow 使用 Sandcastle 自带的 flow prompt，不读取目标项目里的 `.sandcastle/main.ts` 或 `.sandcastle` prompt。目标项目不需要先执行 `sandcastle init`。
 
----
+## 3 首次配置
 
-# 2 配置参数
+### 3.1 检查项目状态
 
-## 配置目录
-
-初始化后，仓库根目录下会生成 `.sandcastle/`。常见文件包括：
-
-| 文件                                            | 说明                |
-| ----------------------------------------------- | ------------------- |
-| `.sandcastle/.env`                              | 运行时环境变量      |
-| `.sandcastle/.env.example`                      | 环境变量模板        |
-| `.sandcastle/main.ts` 或 `.sandcastle/main.mts` | 入口脚本            |
-| `.sandcastle/prompt.md` 或其他提示词文件        | 传给 agent 的提示词 |
-| `.sandcastle/Dockerfile` 或 `Containerfile`     | sandbox 镜像模板    |
-
-## 常用运行参数
-
-下表列出使用者最常调整的公开参数：
-
-| 参数名               | 默认值                   | 说明                                                           |
-| -------------------- | ------------------------ | -------------------------------------------------------------- |
-| `agent`              | 无                       | 选择具体 agent provider，例如 `claudeCode(...)`、`codex(...)`  |
-| `sandbox`            | 无                       | 选择 sandbox provider，例如 `docker()`、`podman()`、`vercel()` |
-| `promptFile`         | 无                       | 指向提示词文件                                                 |
-| `prompt`             | 无                       | 直接提供内联提示词，和 `promptFile` 二选一                     |
-| `promptArgs`         | `{}`                     | 替换提示词中的 `{{KEY}}` 占位符                                |
-| `maxIterations`      | `1`                      | 最大迭代次数                                                   |
-| `branchStrategy`     | provider 决定            | 控制结果落在哪个分支                                           |
-| `logging`            | 写入 `.sandcastle/logs/` | 控制日志输出方式                                               |
-| `hooks`              | 无                       | 在 host 或 sandbox 中运行准备命令                              |
-| `copyToWorktree`     | 无                       | 在进入 sandbox 前复制指定路径到 worktree                       |
-| `idleTimeoutSeconds` | `600`                    | 代理长时间无输出时的超时时间                                   |
-
-## 常见环境变量
-
-具体变量取决于所选 runtime 和任务来源。常见项如下：
-
-| 变量名              | 默认值 | 说明                         |
-| ------------------- | ------ | ---------------------------- |
-| `ANTHROPIC_API_KEY` | 无     | Claude Code 或 Pi 常用凭据   |
-| `OPENAI_KEY`        | 无     | Codex 常用凭据               |
-| `CURSOR_API_KEY`    | 无     | Cursor 常用凭据              |
-| `OPENCODE_API_KEY`  | 无     | OpenCode 常用凭据            |
-| `GH_TOKEN`          | 无     | GitHub Issues 任务源常用凭据 |
-
----
-
-# 3 外部接口
-
-## 输入
-
-- Git 仓库
-- 提示词文件或内联提示词
-- `.sandcastle/.env` 中的运行时变量
-- sandbox provider 配置
-- agent provider 配置
-
-## 输出
-
-- 代理生成的 Git 提交
-- 运行日志
-- 目标分支名
-- 可选的结构化输出结果
-
-## CLI 接口
-
-| 命令                       | 说明                          |
-| -------------------------- | ----------------------------- |
-| `sandcastle init`          | 生成 `.sandcastle/` 配置目录  |
-| `sandcastle --help`        | 查看命令帮助                  |
-| `sandcastle docker --help` | 查看 Docker provider 相关命令 |
-| `sandcastle podman --help` | 查看 Podman provider 相关命令 |
-
-## JavaScript / TypeScript API
-
-| 接口                                                            | 说明                         |
-| --------------------------------------------------------------- | ---------------------------- |
-| `run()`                                                         | 一次性执行代理任务           |
-| `interactive()`                                                 | 启动交互式代理会话           |
-| `createSandbox()`                                               | 创建可复用 sandbox           |
-| `createWorktree()`                                              | 创建独立 worktree 后继续运行 |
-| `docker()` / `podman()` / `vercel()` / `noSandbox()`            | 创建 sandbox provider        |
-| `claudeCode()` / `codex()` / `cursor()` / `opencode()` / `pi()` | 创建 agent provider          |
-
----
-
-# 4 使用示例
-
-## 初始化项目
+在目标项目根目录运行：
 
 ```bash
-npx sandcastle init
+sandcastle project status
 ```
 
-执行后会生成 `.sandcastle/` 目录，并根据所选模板写入入口脚本、提示词和运行配置。
+这个命令用于确认：
 
-## 运行生成的入口脚本
+| 输出项                         | 用途                                         |
+| ------------------------------ | -------------------------------------------- |
+| Repo root                      | Sandcastle 识别到的目标项目根目录            |
+| Sandcastle user data directory | Hub 状态、共享凭据、运行记录所在位置         |
+| Hub project directory          | 当前项目的 Hub 运行状态目录                  |
+| Beads availability             | Beads 是否可用                               |
+| Task summary                   | 当前任务表、失败任务、运行批次、同步状态摘要 |
+
+### 3.2 配置 agent roles
+
+Hub flow 使用统一的 role 配置，配置对所有项目生效。
 
 ```bash
-npm install
-npm run sandcastle
+sandcastle agent-config init
 ```
 
-如果初始化生成的是 `main.ts`，把文件名替换为 `main.ts` 即可。
+也可以单独设置某个 role：
 
-## 直接通过 API 发起一次执行
-
-```ts
-import { run, claudeCode } from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
-
-await run({
-  agent: claudeCode("claude-opus-4-6"),
-  sandbox: docker(),
-  promptFile: ".sandcastle/prompt.md",
-});
+```bash
+sandcastle agent-config set-role planning --provider cursor --model gpt-5.4
+sandcastle agent-config set-role triage --provider cursor --model gpt-5.4
+sandcastle agent-config set-role implementation --provider cursor --model gpt-5.4
+sandcastle agent-config set-role review --provider cursor --model gpt-5.4
+sandcastle agent-config set-role merge --provider cursor --model gpt-5.4
+sandcastle agent-config set-role recovery --provider cursor --model gpt-5.4
 ```
 
-## 启动交互式会话
+查看当前配置：
 
-```ts
-import { interactive, claudeCode } from "@ai-hero/sandcastle";
-import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
-
-await interactive({
-  agent: claudeCode("claude-opus-4-6"),
-  sandbox: noSandbox(),
-  prompt: "Review the current changes.",
-});
+```bash
+sandcastle agent-config show
+sandcastle agent-config path
 ```
 
-## 验证方法
+支持的 role：
 
-- 检查运行后是否产生新提交
-- 检查 `.sandcastle/logs/` 中是否生成对应日志
-- 检查目标分支是否符合预期
-- 如使用结构化输出，检查返回结果是否包含目标字段
+| Role             | 用途                        |
+| ---------------- | --------------------------- |
+| `planning`       | PRD 拆解与任务规划          |
+| `triage`         | inbox / needs_info 任务分析 |
+| `implementation` | 实现 ready_for_agent 任务   |
+| `review`         | 审核实现分支                |
+| `merge`          | 合并任务分支并关闭本地任务  |
+| `recovery`       | 修复失败或卡住的任务状态    |
 
----
+### 3.3 配置共享凭据
 
-# 5 工作流程
+Hub v1 使用 Sandcastle user data directory 下的本地明文 `.env` 文件保存共享凭据。它不是 secret vault；请按本地敏感文件管理。
 
-## 主流程
+```bash
+sandcastle env init
+```
 
-1. 使用者初始化项目，生成 `.sandcastle/` 配置目录
-2. 使用者配置环境变量、提示词和入口脚本
-3. 入口脚本创建 agent provider 与 sandbox provider
-4. Sandcastle 根据分支策略直接使用当前目录，或创建临时分支 / worktree
-5. Sandcastle 启动 sandbox，并把提示词交给 agent
-6. agent 在 sandbox 内完成任务并产出提交
-7. Sandcastle 收集提交，并按分支策略返回结果或合并结果
+也可以单独设置：
 
-## 关键机制
+```bash
+sandcastle env set CURSOR_API_KEY
+sandcastle env set ANTHROPIC_API_KEY
+sandcastle env set OPENAI_KEY
+sandcastle env set OPENCODE_API_KEY
+sandcastle env set GH_TOKEN
+```
 
-### 分支策略
+查看配置：
 
-- `head`：直接在当前工作目录运行
-- `merge-to-head`：在临时分支上工作，完成后合并回当前分支
-- `branch`：在指定分支上工作，结果保留在该分支
+```bash
+sandcastle env show
+sandcastle env path
+```
 
-### sandbox 模式
+`process.env` 中的同名变量会覆盖 Hub `.env` 中的值。
 
-- Docker / Podman：本地 bind-mount sandbox
-- Vercel：独立文件系统的隔离 sandbox
-- no-sandbox：仅用于交互式场景，直接在 host 上运行
+## 4 任务表使用
 
-### 模板模式
+### 4.1 初始化或查看 Beads
 
-初始化时可选择不同模板：
+如果目标项目还没有 Beads 数据，可以先初始化：
 
-- `blank`：最小入口，适合自行编排
-- `simple-loop`：单代理循环处理任务
-- `sequential-reviewer`：实现后再评审
-- `parallel-planner`：规划后并行执行再合并
-- `parallel-planner-with-review`：并行执行、逐分支评审后再合并
+```bash
+bd init
+```
 
----
+查看 Sandcastle 投影后的任务表：
 
----
+```bash
+sandcastle tasks list
+```
 
-# 6 Agent skill
+任务选择器支持三种写法：
 
-仓库附带可移植 agent skill：`skills/sandcastle-usage/SKILL.md`，指导 AI 代理在目标项目中接入并运行 Sandcastle。该 skill 不会自动安装，需复制到对应代理的 skills 目录（`~/.agents/skills`、`~/.cursor/skills`、`~/.claude/skills`、`~/.codex/skills`）后启用，详见 `README.md` / `readme_cn.md` 的 Agent skill 章节。
+| 写法                  | 示例                   |
+| --------------------- | ---------------------- |
+| Beads id              | `todo-list-demo-mv2`   |
+| 任务标题              | `"Fix login redirect"` |
+| `tasks list` 中的序号 | `1`                    |
 
----
+查看任务详情：
+
+```bash
+sandcastle tasks show 1
+sandcastle tasks show "Fix login redirect"
+sandcastle tasks show todo-list-demo-mv2
+```
+
+### 4.2 创建任务
+
+创建普通 inbox 任务：
+
+```bash
+sandcastle tasks create "Fix login redirect"
+```
+
+创建用户反馈任务：
+
+```bash
+sandcastle tasks create "Improve empty state copy" --origin user-feedback --kind ux
+```
+
+附带描述：
+
+```bash
+sandcastle tasks create "Handle expired token" --description "User is redirected to a blank page after token expiry."
+```
+
+### 4.3 追加评论
+
+```bash
+sandcastle tasks comment 1 --body "QA reproduced this on a fresh checkout."
+```
+
+不传 `--body` 时会进入交互输入。
+
+### 4.4 删除本地任务
+
+删除只影响本地 Beads task，不删除 GitHub Issue。
+
+```bash
+sandcastle tasks delete 1 --dry-run
+sandcastle tasks delete 1 --yes
+```
+
+## 5 PRD 拆解与 Triage
+
+### 5.1 从 PRD 生成本地任务
+
+推荐入口：
+
+```bash
+sandcastle tasks from-prd docs/prd/example.md
+```
+
+这个命令会启动 agent-driven proposal session。你可以在会话里要求 agent 拆分、合并、重排、调整依赖、补充验收标准，确认后才会写入本地 Beads。
+
+非交互一轮模式：
+
+```bash
+sandcastle tasks from-prd docs/prd/example.md --yes
+```
+
+`--yes` 仍会调用 agent 并校验结构化输出，默认创建 inbox 任务，不会静默创建 ready 状态任务。
+
+等价 flow 入口：
+
+```bash
+sandcastle run . --flow prd-decomposition --input docs/prd/example.md
+```
+
+### 5.2 Triage inbox / needs_info 任务
+
+交互选择任务：
+
+```bash
+sandcastle tasks triage
+```
+
+指定单个任务：
+
+```bash
+sandcastle tasks triage todo-list-demo-mv2
+```
+
+按状态查询：
+
+```bash
+sandcastle tasks triage --query inbox,needs_info
+```
+
+非交互高置信自动应用：
+
+```bash
+sandcastle tasks triage --yes
+```
+
+`triage --yes` 只自动应用高置信、非关闭、非依赖变更的决策。需要人工确认的决策会被跳过并记录为未确认。
+
+等价 flow 入口：
+
+```bash
+sandcastle run . --flow triage --input inbox,needs_info
+```
+
+## 6 执行 Flow
+
+### 6.1 无 reviewer flow
+
+```bash
+sandcastle run . --flow no-review
+```
+
+适合先验证最短闭环：读取 `ready_for_agent` 队列，执行实现任务，成功后进入 `waiting_for_merge`，再按批次合并并关闭本地任务。
+
+### 6.2 带 reviewer flow
+
+```bash
+sandcastle run . --flow with-review
+```
+
+适合需要实现后审核的流程：实现成功后进入 `reviewing`，review 完成后进入 `waiting_for_merge`，再进入 merge 阶段。
+
+### 6.3 Flow 状态
+
+Hub task board 使用这些状态：
+
+| 状态                | 含义                                        |
+| ------------------- | ------------------------------------------- |
+| `inbox`             | 新任务，等待 triage                         |
+| `needs_info`        | 需要补充信息                                |
+| `ready_for_agent`   | 可以交给 agent 实现                         |
+| `ready_for_human`   | 等待人工处理                                |
+| `blocked`           | 被依赖任务阻塞                              |
+| `implementing`      | agent 正在实现                              |
+| `reviewing`         | reviewer 正在审核                           |
+| `waiting_for_merge` | 当前任务已实现/审核，等待同批任务进入 merge |
+| `merging`           | 正在合并                                    |
+| `done`              | 已合并、验证通过、本地任务已关闭            |
+| `wontfix`           | 确认不处理                                  |
+| `failed`            | 执行、sandbox、merge、验证或关闭失败        |
+| `sync_conflict`     | 本地和远端同步语义冲突                      |
+
+查看当前进度：
+
+```bash
+sandcastle project status
+sandcastle tasks list
+```
+
+## 7 GitHub Issues 同步
+
+Hub task board 的本地任务源是 Beads。GitHub Issues 是远端协作表，通过同步命令 pull / push。
+
+```bash
+sandcastle tasks sync
+```
+
+同步规则：
+
+| 方向             | 行为                                                                               |
+| ---------------- | ---------------------------------------------------------------------------------- |
+| GitHub -> Beads  | 拉取带 Sandcastle 协作标签的 issue                                                 |
+| Beads -> GitHub  | 推送协作标签、关闭 `done` / `wontfix` 任务                                         |
+| Proposal flows   | 只写本地 Beads，不直接改 GitHub                                                    |
+| Execution states | `implementing`、`reviewing`、`waiting_for_merge`、`merging`、`failed` 保持本地状态 |
+
+如果同步失败，本地已完成任务不会被重新打开；任务会保留 `push_pending` 或 `conflict` 元数据，供后续处理。
+
+## 8 Recovery
+
+任务卡在失败或中间态时，使用 recovery 命令修复。
+
+```bash
+sandcastle tasks recover 1
+```
+
+常见用途：
+
+| 场景                 | 结果                                       |
+| -------------------- | ------------------------------------------ |
+| agent / sandbox 失败 | 释放 stale claim，回到可重试状态           |
+| merge conflict       | 保留失败原因，允许人工处理后恢复           |
+| verification failure | 修复验证问题后重新进入可恢复路径           |
+| close_failed         | 如果分支已合并且验证通过，重试关闭本地任务 |
+
+## 9 Legacy Init 兼容路径
+
+`sandcastle init` 继续存在，适用于需要项目内脚手架和自定义 TypeScript 编排的场景。
+
+```bash
+sandcastle init
+```
+
+运行旧流程：
+
+```bash
+npx tsx ./.sandcastle/main.ts
+```
+
+如果生成的是 `main.mts`：
+
+```bash
+npx tsx ./.sandcastle/main.mts
+```
+
+一旦使用：
+
+```bash
+sandcastle run . --flow no-review
+```
+
+就会使用 Sandcastle Hub 自带的 flow prompt，而不是项目 `.sandcastle/` 中生成的 main 脚本或 prompt。
+
+## 10 QA 建议路径
+
+建议按下面顺序做首轮 QA：
+
+1. 在目标 Git 项目中运行 `sandcastle project status`，确认不需要 `.sandcastle/`。
+2. 运行 `sandcastle agent-config init`，配置 `planning`、`triage`、`implementation`、`review`、`merge`、`recovery`。
+3. 运行 `sandcastle env init`，配置 agent 和 GitHub 所需凭据。
+4. 运行 `bd init`，再用 `sandcastle tasks create` 创建 2 到 3 个测试任务。
+5. 用 `sandcastle tasks list` 确认任务带序号，用 `tasks show` 分别测试 id、标题、序号选择。
+6. 用 `sandcastle tasks comment` 追加评论，再用 `tasks show` 验证评论可见。
+7. 准备一个 PRD 文件，运行 `sandcastle tasks from-prd <prd-file>`，人工调整 proposal 后确认写入。
+8. 运行 `sandcastle tasks triage`，确认 agent 能给出状态建议并写入本地 Beads。
+9. 将至少一个任务变为 `ready_for_agent`，运行 `sandcastle run . --flow no-review`。
+10. 再准备一轮任务，运行 `sandcastle run . --flow with-review`。
+11. 运行 `sandcastle tasks sync`，验证 GitHub Issues pull / push 行为。
+12. 人工制造一个失败或 stale 状态，运行 `sandcastle tasks recover <selector>`。
+13. 运行 legacy `sandcastle init`，确认旧的 `.sandcastle/main.ts` 或 `.sandcastle/main.mts` 路径仍可用。
+
+## 11 验收指标
+
+| 指标                          | 通过标准                                                                       |
+| ----------------------------- | ------------------------------------------------------------------------------ |
+| Unified interface 不依赖 init | `project status`、`tasks list`、`run --flow` 不要求目标项目已有 `.sandcastle/` |
+| 共享配置可复用                | 不同项目读取同一套 Hub agent config 和 Hub env                                 |
+| Task selector 易用            | id、标题、列表序号都可选中任务                                                 |
+| Proposal flow 有人工确认      | PRD 拆解和 triage 都能反复讨论后再 apply                                       |
+| Proposal flow 不直接改远端    | `from-prd` / `triage` 只写本地 Beads                                           |
+| Flow prompt 来源正确          | `run --flow` 使用 Sandcastle Hub 自带 prompt                                   |
+| Merge 结果可追踪              | 每个任务能区分合并成功、失败或未处理                                           |
+| Legacy init 兼容              | 旧项目仍可运行生成的 main 脚本                                                 |
 
 ## 文档修改记录
 
-| 修改日期   | 修改项                                                                 |
-| ---------- | ---------------------------------------------------------------------- |
-| 2026-05-17 | 初始创建用户指南，补充功能概述、配置参数、外部接口、使用示例与工作流程 |
-| 2026-06-07 | 补充 Agent skill 章节，说明 `skills/sandcastle-usage` 的复制安装方式   |
+| 修改日期   | 修改项                                                                                                                                       |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-06-19 | 更新为 unified-interface 首版用户使用指南，补充 Hub 配置、任务表、PRD 拆解、triage、flow 执行、GitHub 同步、recovery 和 legacy init 兼容说明 |

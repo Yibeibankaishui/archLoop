@@ -497,6 +497,32 @@ describe("InitService scaffold", () => {
     expect(envExample).not.toContain("POETRY_");
   });
 
+  it("python profile appends the venv disclosure to scaffolded prompt files (issue #96)", async () => {
+    const dir = await makeDir();
+    const pythonProfile = getProjectProfile("python")!;
+    await runScaffold(dir, { projectProfile: pythonProfile });
+
+    const prompt = await readFile(
+      join(dir, ".sandcastle", "prompt.md"),
+      "utf-8",
+    );
+    expect(prompt).toContain("sandcastle:profile:python:venv");
+    expect(prompt).toContain(".venv/");
+    expect(prompt).toContain("PATH");
+  });
+
+  it("non-python profiles do not inject the Python venv disclosure", async () => {
+    const dir = await makeDir();
+    await runScaffold(dir, { projectProfile: NODE_PROJECT_PROFILE });
+
+    const prompt = await readFile(
+      join(dir, ".sandcastle", "prompt.md"),
+      "utf-8",
+    );
+    expect(prompt).not.toContain("sandcastle:profile:python:venv");
+    expect(prompt).not.toContain("Python venv is bootstrapped");
+  });
+
   it("uses default runtime Dockerfile metadata for Dockerfile (with templateArgs substitution)", async () => {
     const dir = await makeDir();
     await runScaffold(dir);
