@@ -32,6 +32,21 @@ const resolveCodexOptions = (
   return {};
 };
 
+const resolveClaudeCodeOptions = (
+  options: HubAgentRoleEntry["options"],
+): { readonly effort?: "low" | "medium" | "high" | "max" } => {
+  const effort = options?.effort;
+  if (
+    effort === "low" ||
+    effort === "medium" ||
+    effort === "high" ||
+    effort === "max"
+  ) {
+    return { effort };
+  }
+  return {};
+};
+
 const resolveCursorOptions = (
   options: HubAgentRoleEntry["options"],
 ): { readonly mode?: "plan" | "ask" } => {
@@ -58,7 +73,7 @@ export const resolveHubAgentProvider = (
     case "codex":
       return codex(entry.model, resolveCodexOptions(entry.options));
     case "claude-code":
-      return claudeCode(entry.model);
+      return claudeCode(entry.model, resolveClaudeCodeOptions(entry.options));
     case "opencode":
       return opencode(entry.model, resolveOpenCodeOptions(entry.options));
     case "pi":

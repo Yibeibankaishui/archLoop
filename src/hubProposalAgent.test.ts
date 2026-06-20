@@ -2,7 +2,27 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createHubProposalAgentInvoker } from "./hubProposalAgent.js";
+import {
+  createHubProposalAgentInvoker,
+  resolveHubAgentProvider,
+} from "./hubProposalAgent.js";
+
+describe("resolveHubAgentProvider", () => {
+  it("passes claude-code effort options from Hub role config", () => {
+    const provider = resolveHubAgentProvider({
+      provider: "claude-code",
+      model: "claude-opus-4-6",
+      options: { effort: "high" },
+    });
+
+    expect(
+      provider.buildPrintCommand({
+        prompt: "test",
+        dangerouslySkipPermissions: true,
+      }).command,
+    ).toContain("--effort high");
+  });
+});
 
 describe("createHubProposalAgentInvoker", () => {
   let originalXdgDataHome: string | undefined;

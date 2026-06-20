@@ -3,12 +3,99 @@ import * as clack from "@clack/prompts";
 import { TaskBoardError } from "./errors.js";
 import { getAgent, listAgents } from "./InitService.js";
 import {
+  buildHubAgentModelSelectOptions,
+  buildHubAgentRoleOptionsFromSelections,
+  HUB_AGENT_CUSTOM_MODEL_WARNING,
+  isHubAgentCustomModelSelection,
+  listHubAgentRoleOptionPrompts,
+} from "./hubAgentCatalog.js";
+import {
   initHubAgentConfig,
   type HubAgentConfig,
   type HubAgentConfigStoreOptions,
   type HubAgentRole,
   type HubAgentRoleEntry,
 } from "./hubAgentConfig.js";
+
+const promptHubAgentModel = async (providerName: string): Promise<string> => {
+  const selectedAgent = getAgent(providerName);
+  const modelOptions = buildHubAgentModelSelectOptions(providerName);
+  const defaultModel = selectedAgent?.defaultModel;
+  const initialValue =
+    defaultModel && modelOptions.some((option) => option.value === defaultModel)
+      ? defaultModel
+      : modelOptions[0]?.value;
+
+  const modelSelection = await clack.select({
+    message: "Model",
+    initialValue,
+    options: modelOptions.map((option) => ({
+      value: option.value,
+      label: option.label,
+      hint: option.hint,
+    })),
+  });
+  if (clack.isCancel(modelSelection)) {
+    throw new TaskBoardError({
+      message: "Hub agent role setup cancelled.",
+    });
+  }
+
+  if (!isHubAgentCustomModelSelection(String(modelSelection))) {
+    return String(modelSelection);
+  }
+
+  clack.log.warn(HUB_AGENT_CUSTOM_MODEL_WARNING);
+  const customModel = await clack.text({
+    message: "Custom model name",
+    placeholder: selectedAgent?.defaultModel ?? "model",
+    validate: (value) => {
+      const trimmed = value?.trim() ?? "";
+      return trimmed.length === 0 ? "Model is required" : undefined;
+    },
+  });
+  if (clack.isCancel(customModel)) {
+    throw new TaskBoardError({
+      message: "Hub agent role setup cancelled.",
+    });
+  }
+
+  return String(customModel).trim();
+};
+
+const promptHubAgentRoleOptions = async (
+  providerName: string,
+): Promise<HubAgentRoleEntry["options"]> => {
+  const selections: Record<string, string | undefined> = {};
+
+  for (const optionPrompt of listHubAgentRoleOptionPrompts(providerName)) {
+    const selected = await clack.select({
+      message: optionPrompt.message,
+      options: [
+        ...optionPrompt.choices.map((choice) => ({
+          value: choice.value,
+          label: choice.label,
+          hint: choice.hint,
+        })),
+        ...(optionPrompt.skipLabel
+          ? [{ value: "", label: optionPrompt.skipLabel }]
+          : []),
+      ],
+    });
+    if (clack.isCancel(selected)) {
+      throw new TaskBoardError({
+        message: "Hub agent role setup cancelled.",
+      });
+    }
+
+    const value = String(selected);
+    if (value.length > 0) {
+      selections[optionPrompt.key] = value;
+    }
+  }
+
+  return buildHubAgentRoleOptionsFromSelections(providerName, selections);
+};
 
 export const promptHubAgentRoleEntry = async (
   role: HubAgentRole,
@@ -19,6 +106,7 @@ export const promptHubAgentRoleEntry = async (
     options: providers.map((provider) => ({
       value: provider.name,
       label: provider.label,
+      hint: `default model: ${provider.defaultModel}`,
     })),
   });
   if (clack.isCancel(providerSelection)) {
@@ -27,19 +115,14 @@ export const promptHubAgentRoleEntry = async (
     });
   }
 
-  const model = await clack.text({
-    message: `Model for ${role} role:`,
-    defaultValue: "auto",
-  });
-  if (clack.isCancel(model)) {
-    throw new TaskBoardError({
-      message: "Hub agent role setup cancelled.",
-    });
-  }
+  const providerName = String(providerSelection);
+  const model = await promptHubAgentModel(providerName);
+  const options = await promptHubAgentRoleOptions(providerName);
 
   return {
-    provider: String(providerSelection),
-    model: String(model),
+    provider: providerName,
+    model,
+    ...(options ? { options } : {}),
   };
 };
 
@@ -61,25 +144,15 @@ export const promptHubAgentRoleSetup = async (
     process.exit(0);
   }
 
-  const selectedAgent = getAgent(String(provider));
-  const model = await clack.text({
-    message: "Model",
-    placeholder: selectedAgent?.defaultModel ?? "model",
-    defaultValue: selectedAgent?.defaultModel,
-    validate: (value) => {
-      const trimmed = value?.trim() ?? "";
-      return trimmed.length === 0 ? "Model is required" : undefined;
-    },
-  });
-  if (clack.isCancel(model)) {
-    clack.cancel("Hub agent role setup cancelled.");
-    process.exit(0);
-  }
+  const providerName = String(provider);
+  const model = await promptHubAgentModel(providerName);
+  const options = await promptHubAgentRoleOptions(providerName);
 
   clack.outro(`Saved ${role} provider settings.`);
   return {
-    provider: String(provider),
-    model: String(model).trim(),
+    provider: providerName,
+    model,
+    ...(options ? { options } : {}),
   };
 };
 
