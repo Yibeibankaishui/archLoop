@@ -3,7 +3,8 @@
 // This template drives a multi-phase workflow:
 //   Phase 1 (Plan):             An opus agent analyzes open issues, builds a
 //                               dependency graph, and outputs a <plan> JSON
-//                               listing unblocked issues with branch names.
+//                               listing unblocked issues. Branch names are
+//                               derived deterministically from issue ids.
 //   Phase 2 (Execute + Review): For each issue, a sandbox is created via
 //                               createSandbox(). The implementer runs first
 //                               (100 iterations). If it produces commits or
@@ -158,6 +159,25 @@ function assertPlanUsesAllowedIssues(
         .join(", ")}`,
     );
   }
+}
+
+/** Stable per-issue branch; ignores any slug the planner may emit. */
+function canonicalizeIssueBranch(issueId: string): string {
+  const id = String(issueId).trim();
+  if (!id) {
+    throw new Error("Cannot canonicalize branch: issue id is empty.");
+  }
+  return `sandcastle/issue-${id}`;
+}
+
+function canonicalizePlannedIssues(
+  issues: Array<{ id: string; title: string; branch?: string }>,
+): PlannedIssue[] {
+  return issues.map((issue) => ({
+    id: String(issue.id),
+    title: issue.title,
+    branch: canonicalizeIssueBranch(issue.id),
+  }));
 }
 
 /** Host repo branch that issue branches merge into (current HEAD). */
@@ -385,10 +405,13 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     continue;
   }
 
-  // The plan JSON contains an array of issues, each with id, title, branch.
-  const { issues } = JSON.parse(planMatch[1]!) as {
-    issues: PlannedIssue[];
+  // The plan JSON lists unblocked issues (id + title). Branch names are derived
+  // deterministically below so slug drift across planner iterations cannot spawn
+  // orphan worktrees.
+  const { issues: rawIssues } = JSON.parse(planMatch[1]!) as {
+    issues: Array<{ id: string; title: string; branch?: string }>;
   };
+  const issues = canonicalizePlannedIssues(rawIssues);
   assertPlanUsesAllowedIssues(issues, allowedIssueIds);
 
   if (issues.length === 0) {

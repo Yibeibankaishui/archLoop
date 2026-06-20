@@ -715,17 +715,22 @@ GH_TOKEN=`,
 export const listBacklogManagers = (): BacklogManagerEntry[] =>
   BACKLOG_MANAGER_REGISTRY;
 
+const LEGACY_AUTH_MOUNT_HOST_PATHS = {
+  ".sandcastle/auth/codex": "codex",
+  ".sandcastle/auth/gh": "github",
+} as const satisfies Record<string, "codex" | "github">;
+
 const resolveHubAuthMounts = (
   mounts: readonly AuthMountEntry[],
 ): readonly AuthMountEntry[] =>
   mounts.map((mount) => {
-    if (mount.hostPath === ".sandcastle/auth/codex") {
-      return { ...mount, hostPath: resolveHubAuthDir("codex") };
-    }
-    if (mount.hostPath === ".sandcastle/auth/gh") {
-      return { ...mount, hostPath: resolveHubAuthDir("github") };
-    }
-    return mount;
+    const provider =
+      LEGACY_AUTH_MOUNT_HOST_PATHS[
+        mount.hostPath as keyof typeof LEGACY_AUTH_MOUNT_HOST_PATHS
+      ];
+    return provider
+      ? { ...mount, hostPath: resolveHubAuthDir(provider) }
+      : mount;
   });
 
 export const getBacklogManager = (
