@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -7,6 +7,8 @@ import { assertAgentCredentialsConfigured } from "./agentAuthGuidance.js";
 import {
   appendHubBatchEvent,
   appendHubTaskEvent,
+  resolveHubRunEventsPaths,
+  type HubTaskEvent,
   type HubTaskClaimMetadata,
 } from "./hubExecution.js";
 import { readHubAgentConfig } from "./hubAgentConfig.js";
@@ -26,6 +28,7 @@ import {
   type HubTaskLifecycleContext,
 } from "./hubTaskLifecycle.js";
 import {
+  isCompletedHubStatus,
   loadHubTaskBoard,
   resolveHubTaskBranch,
   type HubFailureReason,
@@ -112,7 +115,8 @@ export type HubBatchMergeSelectionReason =
   | "missing_branch"
   | "no_unmerged_work"
   | "dirty_worktree"
-  | "task_store_dirty";
+  | "task_store_dirty"
+  | "state_inconsistent";
 
 export interface HubBatchMergeSelectionDiagnostic {
   readonly taskId: string;
@@ -125,6 +129,11 @@ export interface HubBatchMergeSelectionDiagnostic {
   readonly message?: string;
   readonly taskStoreDirtyFiles?: readonly string[];
   readonly taskStoreBranchFiles?: readonly string[];
+  readonly observedProjectedStatus?: HubTaskStatus;
+  readonly missingClaimFields?: readonly string[];
+  readonly staleClaimFields?: Readonly<Record<string, string>>;
+  readonly suggestedRecovery?: string;
+  readonly mergeReadyEventType?: string;
 }
 
 export interface HubMergeBranchState {
@@ -496,6 +505,11 @@ const buildSelectionDiagnostic = (
     | "message"
     | "taskStoreDirtyFiles"
     | "taskStoreBranchFiles"
+    | "observedProjectedStatus"
+    | "missingClaimFields"
+    | "staleClaimFields"
+    | "suggestedRecovery"
+    | "mergeReadyEventType"
   >,
 ): HubBatchMergeSelectionDiagnostic => ({
   taskId: task.id,
@@ -505,8 +519,133 @@ const buildSelectionDiagnostic = (
   ...input,
 });
 
+const parseHubTaskEvents = (runDir: string): readonly HubTaskEvent[] => {
+  const { taskEventsPath } = resolveHubRunEventsPaths(runDir);
+  if (!existsSync(taskEventsPath)) {
+    return [];
+  }
+
+  return readFileSync(taskEventsPath, "utf8")
+    .split(/\r?\n/)
+    .filter((line) => line.trim().length > 0)
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line) as HubTaskEvent];
+      } catch {
+        return [];
+      }
+    });
+};
+
+const isMergeReadyTaskEvent = (event: HubTaskEvent): boolean =>
+  event.type === "task_review_succeeded" ||
+  (event.type === "task_implementation_succeeded" &&
+    event.status === "waiting_for_merge");
+
+const resolveMergeReadyEventsByTask = (
+  runDir: string,
+  batchId: string,
+): ReadonlyMap<string, HubTaskEvent> => {
+  const eventsByTask = new Map<string, HubTaskEvent>();
+
+  for (const event of parseHubTaskEvents(runDir)) {
+    if (event.batchId !== batchId || !isMergeReadyTaskEvent(event)) {
+      continue;
+    }
+    eventsByTask.set(event.taskId, event);
+  }
+
+  return eventsByTask;
+};
+
+const collectMissingClaimFields = (
+  task: HubTaskProjection,
+): readonly string[] => {
+  if (!task.claim) {
+    return ["runId", "batchId", "branch"];
+  }
+
+  return (["runId", "batchId", "branch"] as const).filter(
+    (field) => !task.claim?.[field],
+  );
+};
+
+const collectStaleClaimFields = (
+  task: HubTaskProjection,
+  event: HubTaskEvent,
+): Readonly<Record<string, string>> | undefined => {
+  if (!task.claim) {
+    return undefined;
+  }
+
+  const stale: Record<string, string> = {};
+  const expected = {
+    runId: event.runId,
+    batchId: event.batchId,
+    branch: event.branch,
+  };
+
+  for (const field of ["runId", "batchId", "branch"] as const) {
+    const actualValue = task.claim[field];
+    const expectedValue = expected[field];
+    if (actualValue && expectedValue && actualValue !== expectedValue) {
+      stale[field] = `${actualValue} != ${expectedValue}`;
+    }
+  }
+
+  return Object.keys(stale).length > 0 ? stale : undefined;
+};
+
+const hasClaimDriftFromEvent = (
+  task: HubTaskProjection,
+  event: HubTaskEvent | undefined,
+): boolean =>
+  event !== undefined &&
+  (collectMissingClaimFields(task).length > 0 ||
+    collectStaleClaimFields(task, event) !== undefined);
+
+const maybeBuildStateInconsistentDiagnostic = async (input: {
+  readonly cwd: string;
+  readonly task: HubTaskProjection;
+  readonly event: HubTaskEvent | undefined;
+  readonly branchInspector: HubMergeBranchInspector;
+}): Promise<HubBatchMergeSelectionDiagnostic | undefined> => {
+  const event = input.event;
+  if (!event) {
+    return undefined;
+  }
+  if (
+    isCompletedHubStatus(input.task.hubStatus) ||
+    input.task.beadsStatus === "closed"
+  ) {
+    return undefined;
+  }
+
+  const branch = event.branch;
+  const branchState = await input.branchInspector(branch, input.cwd);
+  if (!branchState.exists || !branchState.hasUnmergedWork) {
+    return undefined;
+  }
+  const missingClaimFields = collectMissingClaimFields(input.task);
+  const staleClaimFields = collectStaleClaimFields(input.task, event);
+
+  return buildSelectionDiagnostic(input.task, {
+    decision: "blocked",
+    reason: "state_inconsistent",
+    branch,
+    observedProjectedStatus: input.task.hubStatus,
+    missingClaimFields:
+      missingClaimFields.length > 0 ? missingClaimFields : undefined,
+    staleClaimFields,
+    suggestedRecovery: `sandcastle tasks repair-state ${input.task.id}`,
+    mergeReadyEventType: event.type,
+    message: `Hub run events show ${event.type} for ${branch}, but the projected task status is ${input.task.hubStatus}. Repair Beads labels/metadata before merging: sandcastle tasks repair-state ${input.task.id}. If the task is failed or has stale execution state, sandcastle tasks recover ${input.task.id} may also apply.`,
+  });
+};
+
 const evaluateHubBatchMergeSelection = async (input: {
   readonly cwd: string;
+  readonly runDir: string;
   readonly batchId: string;
   readonly tasks: readonly HubTaskProjection[];
   readonly branchInspector: HubMergeBranchInspector;
@@ -517,9 +656,26 @@ const evaluateHubBatchMergeSelection = async (input: {
 }> => {
   const selectedTasks: HubTaskProjection[] = [];
   const diagnostics: HubBatchMergeSelectionDiagnostic[] = [];
+  const mergeReadyEvents = resolveMergeReadyEventsByTask(
+    input.runDir,
+    input.batchId,
+  );
 
   for (const task of input.tasks) {
+    const mergeReadyEvent = mergeReadyEvents.get(task.id);
     if (task.hubStatus !== "waiting_for_merge") {
+      const stateInconsistentDiagnostic =
+        await maybeBuildStateInconsistentDiagnostic({
+          cwd: input.cwd,
+          task,
+          event: mergeReadyEvent,
+          branchInspector: input.branchInspector,
+        });
+      if (stateInconsistentDiagnostic) {
+        diagnostics.push(stateInconsistentDiagnostic);
+        continue;
+      }
+
       if (task.claim?.batchId === input.batchId) {
         diagnostics.push(
           buildSelectionDiagnostic(task, {
@@ -531,6 +687,20 @@ const evaluateHubBatchMergeSelection = async (input: {
         );
       }
       continue;
+    }
+
+    if (hasClaimDriftFromEvent(task, mergeReadyEvent)) {
+      const stateInconsistentDiagnostic =
+        await maybeBuildStateInconsistentDiagnostic({
+          cwd: input.cwd,
+          task,
+          event: mergeReadyEvent,
+          branchInspector: input.branchInspector,
+        });
+      if (stateInconsistentDiagnostic) {
+        diagnostics.push(stateInconsistentDiagnostic);
+        continue;
+      }
     }
 
     if (!task.claim) {
@@ -615,7 +785,7 @@ const evaluateHubBatchMergeSelection = async (input: {
           decision: "blocked",
           reason: "dirty_worktree",
           branch,
-          message: `Clean or stash dirty source files before merging: ${input.worktreeState.dirtySourceFiles.join(", ")}`,
+          message: `Git safety gate: commit, stash, or revert dirty source files (${input.worktreeState.dirtySourceFiles.join(", ")}), then rerun the same flow so the batch resumes.`,
         }),
       );
       continue;
@@ -801,6 +971,7 @@ export const runHubBatchMerge = async (
   )(input.cwd);
   const selection = await evaluateHubBatchMergeSelection({
     cwd: input.cwd,
+    runDir: input.runDir,
     batchId: input.batchId,
     tasks: board.tasks,
     branchInspector: input.branchInspector ?? defaultBranchInspector,

@@ -260,6 +260,8 @@ sandcastle run . --flow with-review
 
 适合需要实现后审核的流程：实现成功后进入 `reviewing`，review 完成后进入 `waiting_for_merge`，再进入 merge 阶段。
 
+Merge 阶段会在真正合并前输出 selected / skipped / blocked 诊断。若 Hub 事件显示任务已实现或审核完成、分支仍有未合并工作，但 Beads 投影状态或 claim 元数据已经过期，诊断会显示 `state_inconsistent` 并提示运行 `sandcastle tasks repair-state <selector>`；若任务处于 failed 或 stale execution 状态，`sandcastle tasks recover <selector>` 也可能适用。若被 `dirty_worktree` 阻塞，这是 Git 安全门而不是任务状态不一致；提交、stash 或 revert 列出的脏文件后，重新运行同一个 flow 即可恢复批次。
+
 ### 6.3 Flow 状态
 
 Hub task board 使用这些状态：
