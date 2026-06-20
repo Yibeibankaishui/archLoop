@@ -808,6 +808,7 @@ describe("runTriageProposalFlow", () => {
     try {
       const result = await runTriageProposalFlow({
         cwd: hostDir,
+        hubProjectDir: join(hostDir, "hub-project"),
         taskIds: ["bd-1", "bd-2"],
         yes: true,
         agentInvoker: createFakeInvoker(proposal),
@@ -882,6 +883,7 @@ describe("runTriageProposalFlow", () => {
     try {
       const result = await runTriageProposalFlow({
         cwd: hostDir,
+        hubProjectDir: join(hostDir, "hub-project"),
         taskIds: ["bd-1"],
         approve: false,
         agentInvoker: createFakeInvoker(
@@ -948,6 +950,7 @@ describe("runTriageProposalFlow", () => {
     try {
       const result = await runTriageProposalFlow({
         cwd: hostDir,
+        hubProjectDir: join(hostDir, "hub-project"),
         taskIds: ["bd-1"],
         yes: true,
         agentInvoker: createFakeInvoker(
@@ -1061,6 +1064,7 @@ describe("runTriageProposalFlow", () => {
     try {
       const result = await runTriageProposalFlow({
         cwd: hostDir,
+        hubProjectDir: join(hostDir, "hub-project"),
         taskIds: ["g9z"],
         yes: true,
         applyConfirmation: async () => true,

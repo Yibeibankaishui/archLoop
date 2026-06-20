@@ -593,6 +593,7 @@ exit 1
     try {
       const result = await runPrdDecompositionFlow({
         cwd: hostDir,
+        hubProjectDir: join(hostDir, "hub-project"),
         prdRef: "docs/prd/feature.md",
         yes: true,
         agentInvoker: createFakeInvoker(sampleProposal()),
@@ -671,6 +672,7 @@ exit 1
     try {
       await runPrdDecompositionFlow({
         cwd: hostDir,
+        hubProjectDir: join(hostDir, "hub-project"),
         prdRef: "docs/prd/feature.md",
         yes: true,
         agentInvoker: invoker,
