@@ -5,8 +5,8 @@ MAX_ITERATIONS="${MAX_ITERATIONS:-10}"
 MAX_PARALLEL="${MAX_PARALLEL:-4}"
 BASE_BRANCH="$(git branch --show-current)"
 REPO_ROOT="$(pwd)"
-LOG_DIR="$REPO_ROOT/.sandcastle/logs/local-$(date +%Y%m%d-%H%M%S)"
-WORKTREE_ROOT="$REPO_ROOT/.sandcastle/local-worktrees"
+LOG_DIR="$REPO_ROOT/.archloop/logs/local-$(date +%Y%m%d-%H%M%S)"
+WORKTREE_ROOT="$REPO_ROOT/.archloop/local-worktrees"
 
 mkdir -p "$LOG_DIR"
 mkdir -p "$WORKTREE_ROOT"
@@ -165,7 +165,7 @@ work_issue() {
 
   local implement_prompt
   implement_prompt="$(
-    render_prompt "$REPO_ROOT/.sandcastle/implement-prompt.md" \
+    render_prompt "$REPO_ROOT/.archloop/implement-prompt.md" \
       "$worktree" \
       "$issue_number" \
       "$issue_title" \
@@ -176,7 +176,7 @@ work_issue() {
   if branch_has_new_commit "$branch"; then
     local review_prompt
     review_prompt="$(
-      render_prompt "$REPO_ROOT/.sandcastle/review-prompt.md" \
+      render_prompt "$REPO_ROOT/.archloop/review-prompt.md" \
         "$worktree" \
         "$issue_number" \
         "$issue_title" \
@@ -193,7 +193,7 @@ for ((iteration = 1; iteration <= MAX_ITERATIONS; iteration++)); do
   echo "=== Iteration $iteration/$MAX_ITERATIONS ==="
   echo
 
-  plan_prompt="$(render_prompt "$REPO_ROOT/.sandcastle/plan-prompt.md" "$REPO_ROOT")"
+  plan_prompt="$(render_prompt "$REPO_ROOT/.archloop/plan-prompt.md" "$REPO_ROOT")"
   plan_log="$LOG_DIR/planner-$iteration.jsonl"
   run_codex "Planner" "gpt-5.5" "high" "$plan_prompt" "$plan_log" "$REPO_ROOT"
 
@@ -255,7 +255,7 @@ for ((iteration = 1; iteration <= MAX_ITERATIONS; iteration++)); do
   branches_arg="$(cut -f3 "$completed_tsv" | sed 's/^/- /')"
   issues_arg="$(awk -F '\t' '{ print "- #" $1 ": " $2 }' "$completed_tsv")"
   merge_prompt="$(
-    render_prompt "$REPO_ROOT/.sandcastle/merge-prompt.md" \
+    render_prompt "$REPO_ROOT/.archloop/merge-prompt.md" \
       "$REPO_ROOT" \
       "" \
       "" \

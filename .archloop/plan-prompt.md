@@ -4,7 +4,7 @@ Here are the open issues in the repo:
 
 <issues-json>
 
-!`gh issue list --state open -l Sandcastle --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`
+!`gh issue list --state open -l archLoop --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`
 
 </issues-json>
 
@@ -22,7 +22,7 @@ An issue B is **blocked by** issue A if:
 
 An issue is **unblocked** if it has zero blocking dependencies on other open issues.
 
-For each unblocked issue, assign a branch name using the format `sandcastle/issue-{id}-{slug}`.
+For each unblocked issue, assign a branch name using the format `archloop/issue-{id}-{slug}`.
 
 Include every unblocked issue in your plan. Do **not** inspect git branches or
 try to detect existing implementation work — the template handles that
@@ -35,7 +35,7 @@ implementation and goes straight to review and merge.
 Output your plan as a JSON object wrapped in `<plan>` tags:
 
 <plan>
-{"issues": [{"id": "42", "title": "Fix auth bug", "branch": "sandcastle/issue-42-fix-auth-bug"}]}
+{"issues": [{"id": "42", "title": "Fix auth bug", "branch": "archloop/issue-42-fix-auth-bug"}]}
 </plan>
 
 Include only unblocked issues. If every issue is blocked, include the single highest-priority candidate (the one with the fewest or weakest dependencies).

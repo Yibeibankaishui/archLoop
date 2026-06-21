@@ -19,13 +19,13 @@
 // issues are picked up after each round of merges.
 //
 // Usage:
-//   npm run sandcastle
-// Or directly: tsx .sandcastle/main.ts
+//   npm run archloop
+// Or directly: tsx .archloop/main.ts
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import * as sandcastle from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import * as archloop from "@yibeibankaishui/archloop";
+import { docker } from "@yibeibankaishui/archloop/sandboxes/docker";
 
 const execFileAsync = promisify(execFile);
 
@@ -77,7 +77,7 @@ const hooks = {
   sandbox: {
     onSandboxReady: [
       {
-        command: "bash .sandcastle/bootstrap.sh",
+        command: "bash .archloop/bootstrap.sh",
         timeoutMs: 300_000,
       },
     ],
@@ -86,8 +86,8 @@ const hooks = {
 
 const sandboxProvider = docker({
   mounts: [
-    { hostPath: ".sandcastle/auth/codex", sandboxPath: "/home/agent/.codex" },
-    { hostPath: ".sandcastle/auth/gh", sandboxPath: "/home/agent/.config/gh" },
+    { hostPath: ".archloop/auth/codex", sandboxPath: "/home/agent/.codex" },
+    { hostPath: ".archloop/auth/gh", sandboxPath: "/home/agent/.config/gh" },
   ],
 });
 
@@ -154,7 +154,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   //
   // It outputs a <plan> JSON block — we parse that to drive Phase 2.
   // -------------------------------------------------------------------------
-  const plan = await sandcastle.run({
+  const plan = await archloop.run({
     hooks,
     sandbox: sandboxProvider,
     name: "planner",
@@ -162,8 +162,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     // not write code.
     maxIterations: 1,
     // Opus for planning: dependency analysis benefits from deeper reasoning.
-    agent: sandcastle.cursor("auto"),
-    promptFile: "./.sandcastle/plan-prompt.md",
+    agent: archloop.cursor("auto"),
+    promptFile: "./.archloop/plan-prompt.md",
   });
 
   // Extract the <plan>…</plan> block from the agent's stdout.
@@ -216,7 +216,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
 
   const settled = await Promise.allSettled(
     activeIssues.map(async (issue) => {
-      const sandbox = await sandcastle.createSandbox({
+      const sandbox = await archloop.createSandbox({
         branch: issue.branch,
         sandbox: sandboxProvider,
         hooks,
@@ -242,8 +242,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           implement = await sandbox.run({
             name: "implementer",
             maxIterations: 100,
-            agent: sandcastle.cursor("auto"),
-            promptFile: "./.sandcastle/implement-prompt.md",
+            agent: archloop.cursor("auto"),
+            promptFile: "./.archloop/implement-prompt.md",
             promptArgs: {
               TASK_ID: issue.id,
               ISSUE_TITLE: issue.title,
@@ -272,8 +272,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           const review = await sandbox.run({
             name: "reviewer",
             maxIterations: 1,
-            agent: sandcastle.cursor("auto"),
-            promptFile: "./.sandcastle/review-prompt.md",
+            agent: archloop.cursor("auto"),
+            promptFile: "./.archloop/review-prompt.md",
             promptArgs: {
               BRANCH: issue.branch,
             },
@@ -338,13 +338,13 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // The {{BRANCHES}} and {{ISSUES}} prompt arguments are lists that the agent
   // uses to know which branches to merge and which issues to close.
   // -------------------------------------------------------------------------
-  await sandcastle.run({
+  await archloop.run({
     hooks,
     sandbox: sandboxProvider,
     name: "merger",
     maxIterations: 1,
-    agent: sandcastle.cursor("auto"),
-    promptFile: "./.sandcastle/merge-prompt.md",
+    agent: archloop.cursor("auto"),
+    promptFile: "./.archloop/merge-prompt.md",
     promptArgs: {
       // A markdown list of branch names, one per line.
       BRANCHES: completedBranches.map((b) => `- ${b}`).join("\n"),

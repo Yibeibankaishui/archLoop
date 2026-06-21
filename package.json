@@ -44,10 +44,10 @@
     "format:check": "prettier --check .",
     "prepare": "husky",
     "release": "changeset publish",
-    "archloop": "npm run build && tsx .archloop/run.ts",
-    "test-podman": "npm run build && tsx --env-file=.archloop/.env .archloop/test-podman.ts",
-    "test-vercel": "npm run build && tsx --env-file=.archloop/.env .archloop/test-vercel.ts",
-    "test-interactive": "npm run build && tsx --env-file=.archloop/.env .archloop/test-interactive.ts"
+    "archloop": "npm run build && tsx .archloop/main.ts",
+    "test-podman": "npm run build && tsx --env-file=old_archloop/.env old_archloop/test-podman.ts",
+    "test-vercel": "npm run build && tsx --env-file=old_archloop/.env old_archloop/test-vercel.ts",
+    "test-interactive": "npm run build && tsx --env-file=old_archloop/.env old_archloop/test-interactive.ts"
   },
   "keywords": [
     "cli",

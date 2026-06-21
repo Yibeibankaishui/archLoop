@@ -1,6 +1,6 @@
-# Sandcastle Templates Agent 编排模式
+# archLoop Templates Agent 编排模式
 
-本文整理 Sandcastle 现有 workflow templates 对应的 agent 编排框架图。这里的 template 指 `sandcastle init` 复制到 `.sandcastle/` 的工作流模板；它定义 agent 如何协作，不定义项目语言或构建系统。项目语言和 bootstrap 假设由 Project profile 负责。
+本文整理 archLoop 现有 workflow templates 对应的 agent 编排框架图。这里的 template 指 `archloop init` 复制到 `.archloop/` 的工作流模板；它定义 agent 如何协作，不定义项目语言或构建系统。项目语言和 bootstrap 假设由 Project profile 负责。
 
 ## 总览
 
@@ -14,14 +14,14 @@ flowchart LR
 
 ## blank
 
-`blank` 是最小脚手架：一个 prompt、一个 agent、一次 `sandcastle.run()`。它适合从空白处自定义 orchestration。
+`blank` 是最小脚手架：一个 prompt、一个 agent、一次 `archloop.run()`。它适合从空白处自定义 orchestration。
 
 ```mermaid
 flowchart TD
-    User["User runs .sandcastle/main.mts"] --> Run["sandcastle.run"]
+    User["User runs .archloop/main.mts"] --> Run["archloop.run"]
     Run --> Sandbox["Sandbox Provider<br/>docker or no-sandbox"]
     Run --> Agent["Single Agent<br/>default: claude-opus-4-6"]
-    Run --> Prompt[".sandcastle/prompt.md"]
+    Run --> Prompt[".archloop/prompt.md"]
 
     Sandbox --> Agent
     Prompt --> Agent
@@ -34,7 +34,7 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    Start["Run simple-loop"] --> Bootstrap["sandbox.onSandboxReady<br/>bash .sandcastle/bootstrap.sh"]
+    Start["Run simple-loop"] --> Bootstrap["sandbox.onSandboxReady<br/>bash .archloop/bootstrap.sh"]
     Bootstrap --> Worker["Worker Agent<br/>claude-sonnet-4-6"]
     Worker --> Prompt["prompt.md<br/>list tasks + recent commits"]
 
@@ -58,9 +58,9 @@ flowchart TD
 ```mermaid
 flowchart TD
     Start["Run sequential-reviewer"] --> Loop["Outer loop<br/>MAX_ITERATIONS: 10"]
-    Loop --> Branch["Create branch<br/>sandcastle/sequential-reviewer/timestamp"]
+    Loop --> Branch["Create branch<br/>archloop/sequential-reviewer/timestamp"]
     Branch --> Sandbox["createSandbox<br/>shared sandbox + shared branch"]
-    Sandbox --> Bootstrap["sandbox.onSandboxReady<br/>bash .sandcastle/bootstrap.sh"]
+    Sandbox --> Bootstrap["sandbox.onSandboxReady<br/>bash .archloop/bootstrap.sh"]
 
     Bootstrap --> Implementer["Implementer Agent<br/>claude-sonnet-4-6<br/>maxIterations: 100"]
     Implementer --> ImplementPrompt["implement-prompt.md"]
@@ -140,7 +140,7 @@ flowchart TD
     FanOut --> PipelineN["Issue Pipeline N"]
 
     subgraph OnePipeline["Per-issue pipeline"]
-        CreateSandbox["createSandbox<br/>dedicated branch"] --> Bootstrap["sandbox.onSandboxReady<br/>bash .sandcastle/bootstrap.sh"]
+        CreateSandbox["createSandbox<br/>dedicated branch"] --> Bootstrap["sandbox.onSandboxReady<br/>bash .archloop/bootstrap.sh"]
         Bootstrap --> Implementer["Implementer Agent<br/>claude-sonnet-4-6<br/>maxIterations: 100"]
         Implementer --> ImplementPrompt["implement-prompt.md<br/>TASK_ID + ISSUE_TITLE + BRANCH"]
         ImplementPrompt --> CommitCheck{"Commits produced?"}

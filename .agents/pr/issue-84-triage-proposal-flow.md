@@ -8,36 +8,36 @@ Implement agent-driven triage proposal flow (#84)
 
 ### Summary
 
-- Replaces deterministic `sandcastle tasks triage` with an agent-driven **triage proposal flow** that gathers inbox/needs_info context, produces structured recommendations, and applies them only after user approval.
-- Adds Sandcastle-owned triage prompts (`draft` + `finalization`), a validated `triage-proposal` structured output schema, and a proposal applicator for Beads status, labels, comments, dependencies, and wontfix closure.
+- Replaces deterministic `archloop tasks triage` with an agent-driven **triage proposal flow** that gathers inbox/needs_info context, produces structured recommendations, and applies them only after user approval.
+- Adds archLoop-owned triage prompts (`draft` + `finalization`), a validated `triage-proposal` structured output schema, and a proposal applicator for Beads status, labels, comments, dependencies, and wontfix closure.
 - Interactive sessions support multi-turn refinement with the agent, per-decision confirmation for risky outcomes, and multi-select task picking (including an **All inbox and needs_info tasks** option).
-- `sandcastle tasks triage --yes` auto-applies only **high-confidence, low-risk, non-closing** decisions; wontfix, dependency changes, and medium/low confidence decisions are skipped unless explicitly confirmed in interactive mode.
-- Wires `sandcastle run . --flow triage --input <task-id|statuses>` through the same proposal flow path as the tasks shortcut.
+- `archloop tasks triage --yes` auto-applies only **high-confidence, low-risk, non-closing** decisions; wontfix, dependency changes, and medium/low confidence decisions are skipped unless explicitly confirmed in interactive mode.
+- Wires `archloop run . --flow triage --input <task-id|statuses>` through the same proposal flow path as the tasks shortcut.
 
 ### What changed (user-facing)
 
-| Before                                                                                     | After                                                                                                                       |
-| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `sandcastle tasks triage` ran deterministic heuristics and immediately wrote Beads updates | Runs a proposal session with a real agent (Hub **triage** role), shows recommendations, and applies only approved decisions |
-| No task selection UX                                                                       | Interactive TTY mode opens a multi-select picker with an **All inbox and needs_info tasks** sentinel                        |
-| No refinement loop                                                                         | User can refine recommendations across multiple agent turns before final approval                                           |
-| `--yes` not available on triage                                                            | `--yes` / `--approve` runs one-shot and auto-applies safe high-confidence decisions only                                    |
-| `sandcastle run . --flow triage` validated input but did not execute                       | Executes the triage proposal flow end-to-end                                                                                |
+| Before                                                                                   | After                                                                                                                       |
+| ---------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `archloop tasks triage` ran deterministic heuristics and immediately wrote Beads updates | Runs a proposal session with a real agent (Hub **triage** role), shows recommendations, and applies only approved decisions |
+| No task selection UX                                                                     | Interactive TTY mode opens a multi-select picker with an **All inbox and needs_info tasks** sentinel                        |
+| No refinement loop                                                                       | User can refine recommendations across multiple agent turns before final approval                                           |
+| `--yes` not available on triage                                                          | `--yes` / `--approve` runs one-shot and auto-applies safe high-confidence decisions only                                    |
+| `archloop run . --flow triage` validated input but did not execute                       | Executes the triage proposal flow end-to-end                                                                                |
 
 **New / updated CLI surfaces**
 
-- `sandcastle tasks triage [task-id]` — triage one task by Beads id (e.g. `bd-42`)
-- `sandcastle tasks triage --query inbox,needs_info` — triage by Hub status filter
-- `sandcastle tasks triage` (TTY) — interactive task multi-select
-- `sandcastle tasks triage --yes` — unattended mode; defaults query to `inbox,needs_info` when no task id/query given
-- `sandcastle run . --flow triage --input bd-42` — triage a single task via flow registry
-- `sandcastle run . --flow triage --input inbox,needs_info` — triage by status query (defaults to inbox + needs_info when `--input` omitted)
+- `archloop tasks triage [task-id]` — triage one task by Beads id (e.g. `bd-42`)
+- `archloop tasks triage --query inbox,needs_info` — triage by Hub status filter
+- `archloop tasks triage` (TTY) — interactive task multi-select
+- `archloop tasks triage --yes` — unattended mode; defaults query to `inbox,needs_info` when no task id/query given
+- `archloop run . --flow triage --input bd-42` — triage a single task via flow registry
+- `archloop run . --flow triage --input inbox,needs_info` — triage by status query (defaults to inbox + needs_info when `--input` omitted)
 
 **Write boundary**
 
 - Triage applies **local Beads** status, labels, comments, and dependency edges only.
 - Applied comments are prefixed with the AI triage disclaimer: `> *This was generated by AI during triage.*`
-- No direct GitHub issue mutation from the flow; remote sync remains `sandcastle tasks sync`.
+- No direct GitHub issue mutation from the flow; remote sync remains `archloop tasks sync`.
 
 ### Test plan
 
@@ -73,8 +73,8 @@ See **Part 2** below. Issue #84 acceptance criteria explicitly require human ver
 
 ### Links
 
-- Parent PRD: https://github.com/Yibeibankaishui/sandcastle/issues/78
-- Closes https://github.com/Yibeibankaishui/sandcastle/issues/84
+- Parent PRD: https://github.com/yibeibankaishui/archloop/issues/78
+- Closes https://github.com/yibeibankaishui/archloop/issues/84
 
 ---
 
@@ -82,12 +82,12 @@ See **Part 2** below. Issue #84 acceptance criteria explicitly require human ver
 
 **Environment prerequisites**
 
-- Sandcastle built/linked from this branch (`npm run build` or `npm link` as usual for local CLI testing).
+- archLoop built/linked from this branch (`npm run build` or `npm link` as usual for local CLI testing).
 - A target repo with Beads initialized and at least a few **inbox** and **needs_info** tasks with varied bodies (vague bug report, well-specified feature, duplicate candidate, HITL/design task).
-- Hub agent **triage** role configured (`sandcastle hub agent show` — provider authenticated and model available).
-- **Do not run `sandcastle tasks sync`** during QA if you want to verify local-only writes; optionally note a control task's remote GitHub issue state before/after to confirm no direct mutation.
+- Hub agent **triage** role configured (`archloop hub agent show` — provider authenticated and model available).
+- **Do not run `archloop tasks sync`** during QA if you want to verify local-only writes; optionally note a control task's remote GitHub issue state before/after to confirm no direct mutation.
 
-**Recording results:** Mark each item `[x]` pass or `[ ]` fail. Capture run dirs under `.sandcastle/runs/` and Beads comment bodies for any failures.
+**Recording results:** Mark each item `[x]` pass or `[ ]` fail. Capture run dirs under `.archloop/runs/` and Beads comment bodies for any failures.
 
 ---
 
@@ -98,7 +98,7 @@ See **Part 2** below. Issue #84 acceptance criteria explicitly require human ver
 **Steps**
 
 1. Pick 3–4 tasks with deliberately different ambiguity levels (under-specified bug, clear AFK feature, design/HITL work, possible duplicate/wontfix).
-2. Run `sandcastle tasks triage <task-id>` for one task at a time (or batch via multi-select) in interactive mode.
+2. Run `archloop tasks triage <task-id>` for one task at a time (or batch via multi-select) in interactive mode.
 3. Read the agent's draft reasoning and the final structured proposal summary before approving.
 4. Compare each recommended outcome (`needs_info`, `ready_for_agent`, `ready_for_human`, `wontfix`) against task body, comments, and dependencies.
 
@@ -109,7 +109,7 @@ See **Part 2** below. Issue #84 acceptance criteria explicitly require human ver
 - Agent does not claim to have mutated Beads/GitHub during the session.
 
 - [ ] Pass
-- [ ] Fail — notes: ********\_\_\_\_********
+- [ ] Fail — notes: **\*\*\*\***\_\_\_\_**\*\*\*\***
 
 ---
 
@@ -119,7 +119,7 @@ See **Part 2** below. Issue #84 acceptance criteria explicitly require human ver
 
 **Steps**
 
-1. Run `sandcastle tasks triage` on a task where the first draft outcome is intentionally wrong or too aggressive (e.g. `ready_for_agent` on a vague report).
+1. Run `archloop tasks triage` on a task where the first draft outcome is intentionally wrong or too aggressive (e.g. `ready_for_agent` on a vague report).
 2. When prompted **Refine the triage recommendations further?**, choose yes.
 3. Enter feedback such as: "Change bd-XX to needs_info — missing repro steps" or "Lower confidence and rewrite the comment."
 4. Repeat refinement at least once, then decline further refinement and proceed to approval.
@@ -132,7 +132,7 @@ See **Part 2** below. Issue #84 acceptance criteria explicitly require human ver
 - Cancellation surfaces a clear message (e.g. "Triage proposal cancelled during refinement") without partial Beads writes.
 
 - [ ] Pass
-- [ ] Fail — notes: ********\_\_\_\_********
+- [ ] Fail — notes: **\*\*\*\***\_\_\_\_**\*\*\*\***
 
 ---
 
@@ -143,7 +143,7 @@ See **Part 2** below. Issue #84 acceptance criteria explicitly require human ver
 **Steps**
 
 1. Complete an interactive triage session and apply at least one decision.
-2. Inspect the task in Beads: `sandcastle tasks show <task-id>` (or `bd show <task-id>`).
+2. Inspect the task in Beads: `archloop tasks show <task-id>` (or `bd show <task-id>`).
 3. Read the newest comment body.
 
 **Expected result**
@@ -153,7 +153,7 @@ See **Part 2** below. Issue #84 acceptance criteria explicitly require human ver
 - Disclaimer appears **only in the stored Beads comment**, not duplicated inside the agent's draft JSON comment field.
 
 - [ ] Pass
-- [ ] Fail — notes: ********\_\_\_\_********
+- [ ] Fail — notes: **\*\*\*\***\_\_\_\_**\*\*\*\***
 
 ---
 
@@ -164,7 +164,7 @@ See **Part 2** below. Issue #84 acceptance criteria explicitly require human ver
 **Steps**
 
 1. Seed or identify a mixed batch: at least one task suitable for high-confidence `ready_for_agent` or `needs_info`, plus tasks that should trigger skips (wontfix candidate, dependency suggestion, medium/low confidence if the agent assigns them).
-2. Run `sandcastle tasks triage --yes --query inbox,needs_info`.
+2. Run `archloop tasks triage --yes --query inbox,needs_info`.
 3. Review CLI summary: applied vs skipped counts and per-task lines.
 4. Inspect Beads state for applied and skipped tasks.
 
@@ -175,7 +175,7 @@ See **Part 2** below. Issue #84 acceptance criteria explicitly require human ver
 - No wontfix closures or new dependency edges occur without interactive per-decision confirmation.
 
 - [ ] Pass
-- [ ] Fail — notes: ********\_\_\_\_********
+- [ ] Fail — notes: **\*\*\*\***\_\_\_\_**\*\*\*\***
 
 ---
 
@@ -185,7 +185,7 @@ See **Part 2** below. Issue #84 acceptance criteria explicitly require human ver
 
 **Steps**
 
-1. Run `sandcastle tasks triage` interactively on a batch that includes (or is steered via refinement to include):
+1. Run `archloop tasks triage` interactively on a batch that includes (or is steered via refinement to include):
    - a **wontfix** recommendation,
    - at least one **dependency suggestion**,
    - a **medium** or **low** confidence decision.
@@ -200,7 +200,7 @@ See **Part 2** below. Issue #84 acceptance criteria explicitly require human ver
 - Low-confidence prompts default to **No** (`initialValue: false`); medium defaults to Yes.
 
 - [ ] Pass
-- [ ] Fail — notes: ********\_\_\_\_********
+- [ ] Fail — notes: **\*\*\*\***\_\_\_\_**\*\*\*\***
 
 ---
 
@@ -211,7 +211,7 @@ See **Part 2** below. Issue #84 acceptance criteria explicitly require human ver
 **Steps**
 
 1. Ensure the board has multiple inbox and needs_info tasks.
-2. Run `sandcastle tasks triage` with no arguments in a TTY.
+2. Run `archloop tasks triage` with no arguments in a TTY.
 3. In the multi-select, choose **All inbox and needs_info tasks** and proceed through the session (approve or cancel after verifying task count in the proposal).
 4. Re-run and select an explicit subset of individual task ids instead of All.
 
@@ -223,21 +223,21 @@ See **Part 2** below. Issue #84 acceptance criteria explicitly require human ver
 - Cancelling selection shows "Triage task selection cancelled." with no Beads writes.
 
 - [ ] Pass
-- [ ] Fail — notes: ********\_\_\_\_********
+- [ ] Fail — notes: **\*\*\*\***\_\_\_\_**\*\*\*\***
 
 ---
 
-### 7. `sandcastle run . --flow triage --input` variants
+### 7. `archloop run . --flow triage --input` variants
 
 **Goal:** Verify the generic flow entry point matches the tasks shortcut behavior.
 
 **Steps**
 
 1. From a Hub-enabled project directory, run:
-   - `sandcastle run . --flow triage --input bd-<id>` (single task)
-   - `sandcastle run . --flow triage --input inbox,needs_info` (status query)
-   - `sandcastle run . --flow triage` (omit `--input`; should default to inbox + needs_info)
-2. Complete or cancel each session; compare behavior to `sandcastle tasks triage` with equivalent selection.
+   - `archloop run . --flow triage --input bd-<id>` (single task)
+   - `archloop run . --flow triage --input inbox,needs_info` (status query)
+   - `archloop run . --flow triage` (omit `--input`; should default to inbox + needs_info)
+2. Complete or cancel each session; compare behavior to `archloop tasks triage` with equivalent selection.
 
 **Expected result**
 
@@ -246,7 +246,7 @@ See **Part 2** below. Issue #84 acceptance criteria explicitly require human ver
 - Default input when omitted resolves to `inbox,needs_info`.
 
 - [ ] Pass
-- [ ] Fail — notes: ********\_\_\_\_********
+- [ ] Fail — notes: **\*\*\*\***\_\_\_\_**\*\*\*\***
 
 ---
 
@@ -258,18 +258,18 @@ See **Part 2** below. Issue #84 acceptance criteria explicitly require human ver
 
 1. Note the open/closed state, labels, and latest comment on a linked GitHub issue for a task you will triage (if task sync is configured).
 2. Run an interactive triage session and apply a visible local change (status move + AI disclaimer comment).
-3. Confirm local Beads state updated (`sandcastle tasks show <id>`).
+3. Confirm local Beads state updated (`archloop tasks show <id>`).
 4. **Without running sync**, re-check the GitHub issue in the browser or via `gh issue view`.
-5. Optionally run `sandcastle tasks sync` separately and confirm sync is the path that updates GitHub.
+5. Optionally run `archloop tasks sync` separately and confirm sync is the path that updates GitHub.
 
 **Expected result**
 
 - Beads/local Hub task state and comments change immediately after apply.
 - Remote GitHub issue is **unchanged** until an explicit sync command is run.
-- Proposal run artifacts are written under `.sandcastle/runs/` (transcript, final proposal, apply result) — not pasted wholesale into task comments.
+- Proposal run artifacts are written under `.archloop/runs/` (transcript, final proposal, apply result) — not pasted wholesale into task comments.
 
 - [ ] Pass
-- [ ] Fail — notes: ********\_\_\_\_********
+- [ ] Fail — notes: **\*\*\*\***\_\_\_\_**\*\*\*\***
 
 ---
 
@@ -279,4 +279,4 @@ See **Part 2** below. Issue #84 acceptance criteria explicitly require human ver
 | -------- | ---- | ------------------------------------------------------------------------------- |
 |          |      | [ ] All items pass — ready to merge &nbsp;&nbsp; [ ] Blocked — see failed items |
 
-**Failed items to file as follow-ups:** ********\_\_\_\_********
+**Failed items to file as follow-ups:** **\*\*\*\***\_\_\_\_**\*\*\*\***
