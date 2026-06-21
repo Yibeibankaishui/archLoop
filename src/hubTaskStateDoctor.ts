@@ -7,7 +7,7 @@ import type { HubTaskEvent } from "./hubExecution.js";
 import {
   resolveGitRepoRoot,
   resolveHubProjectDir,
-  resolveSandcastleUserDataDir,
+  resolveArchloopUserDataDir,
 } from "./projectStatus.js";
 import {
   isCompletedHubStatus,
@@ -68,7 +68,7 @@ export interface HubTaskStateDiagnostic {
 export interface DoctorHubTaskStateInput {
   readonly cwd: string;
   readonly env?: NodeJS.ProcessEnv;
-  readonly sandcastleUserDataDir?: string;
+  readonly archloopUserDataDir?: string;
   readonly branchInspector?: HubTaskStateBranchInspector;
   readonly worktreeInspector?: HubTaskStateWorktreeInspector;
 }
@@ -139,7 +139,7 @@ const normalizeLabel = (value: string): string =>
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
 
-const SANDCASTLE_STATUS_LABELS = new Set(
+const ARCHLOOP_STATUS_LABELS = new Set(
   Object.values(HUB_STATUS_LABELS).map(normalizeLabel),
 );
 const CLAIM_REQUIRED_STATUSES = new Set<HubTaskStatus>([
@@ -348,7 +348,7 @@ const buildStateInconsistentDiagnostic = (
     branch: event.branch,
     claimedAt: event.createdAt,
   },
-  nextAction: `sandcastle tasks repair-state ${task.id}`,
+  nextAction: `archloop tasks repair-state ${task.id}`,
   message: `Hub run events show ${event.type} for ${event.branch}, but Beads projects ${task.hubStatus}. Repair local task state before rerunning the flow.`,
 });
 
@@ -378,8 +378,8 @@ const buildMultipleStatusLabelsDiagnostic = (
   currentStatus: task.hubStatus,
   targetStatus: task.hubStatus,
   branch: task.claim?.branch,
-  nextAction: `sandcastle tasks repair-state ${task.id}`,
-  message: `Beads labels contain multiple Sandcastle status labels (${statusLabels.join(", ")}). Repair rewrites only Sandcastle-managed status labels and preserves user labels.`,
+  nextAction: `archloop tasks repair-state ${task.id}`,
+  message: `Beads labels contain multiple archLoop status labels (${statusLabels.join(", ")}). Repair rewrites only archLoop-managed status labels and preserves user labels.`,
 });
 
 const buildStaleHubStatusMetadataDiagnostic = (
@@ -393,8 +393,8 @@ const buildStaleHubStatusMetadataDiagnostic = (
   currentStatus: task.hubStatus,
   targetStatus: task.hubStatus,
   branch: task.claim?.branch,
-  nextAction: `sandcastle tasks repair-state ${task.id}`,
-  message: `Beads metadata.hubStatus is ${metadataStatus}, but the Hub task board projects ${task.hubStatus}. Repair rewrites Sandcastle-managed metadata only.`,
+  nextAction: `archloop tasks repair-state ${task.id}`,
+  message: `Beads metadata.hubStatus is ${metadataStatus}, but the Hub task board projects ${task.hubStatus}. Repair rewrites archLoop-managed metadata only.`,
 });
 
 const buildMissingClaimFieldsDiagnostic = (
@@ -421,7 +421,7 @@ const buildFailedBranchWorkDiagnostic = (
   repairable: false,
   currentStatus: task.hubStatus,
   branch: task.claim?.branch,
-  nextAction: `sandcastle tasks recover ${task.id}`,
+  nextAction: `archloop tasks recover ${task.id}`,
   message: `Failed task still has unmerged branch work on ${task.claim?.branch ?? "<missing>"}. Use recovery policy rather than repair-state.`,
 });
 
@@ -435,7 +435,7 @@ const buildTerminalStaleExecutionMetadataDiagnostic = (
   currentStatus: task.hubStatus,
   targetStatus: task.hubStatus,
   branch: task.claim?.branch,
-  nextAction: `sandcastle tasks repair-state ${task.id}`,
+  nextAction: `archloop tasks repair-state ${task.id}`,
   message: `Terminal task ${task.hubStatus} still has execution claim metadata. Repair clears stale execution metadata without changing completion state.`,
 });
 
@@ -447,16 +447,16 @@ const buildTaskSyncPushPendingDiagnostic = (
   reason: "task_sync_push_pending",
   repairable: false,
   currentStatus: task.hubStatus,
-  nextAction: "sandcastle tasks push",
+  nextAction: "archloop tasks push",
   message:
     "Local task state is pending remote sync. Use task sync push; doctor and repair-state do not mutate remote GitHub issues.",
 });
 
-const collectSandcastleStatusLabels = (
+const collectarchLoopStatusLabels = (
   task: HubTaskProjection,
 ): readonly string[] =>
   task.labels.filter((label) =>
-    SANDCASTLE_STATUS_LABELS.has(normalizeLabel(label)),
+    ARCHLOOP_STATUS_LABELS.has(normalizeLabel(label)),
   );
 
 export const doctorHubTaskState = async (
@@ -464,8 +464,8 @@ export const doctorHubTaskState = async (
 ): Promise<DoctorHubTaskStateResult> => {
   const repoRoot = resolveGitRepoRoot(input.cwd);
   const hubProjectDir = resolveHubProjectDir(
-    input.sandcastleUserDataDir ??
-      resolveSandcastleUserDataDir(input.env ?? process.env),
+    input.archloopUserDataDir ??
+      resolveArchloopUserDataDir(input.env ?? process.env),
     repoRoot,
   );
   const board = loadHubTaskBoard(repoRoot, input.env);
@@ -479,7 +479,7 @@ export const doctorHubTaskState = async (
 
   const diagnostics: HubTaskStateDiagnostic[] = [];
   for (const task of board.tasks) {
-    const statusLabels = collectSandcastleStatusLabels(task);
+    const statusLabels = collectarchLoopStatusLabels(task);
     if (statusLabels.length > 1) {
       diagnostics.push(buildMultipleStatusLabelsDiagnostic(task, statusLabels));
     }
@@ -602,13 +602,13 @@ export const repairHubTaskState = async (
 };
 
 const actionLabel = (diagnostic: HubTaskStateDiagnostic): string => {
-  if (diagnostic.nextAction.startsWith("sandcastle tasks repair-state")) {
+  if (diagnostic.nextAction.startsWith("archloop tasks repair-state")) {
     return "repair state";
   }
-  if (diagnostic.nextAction.startsWith("sandcastle tasks recover")) {
+  if (diagnostic.nextAction.startsWith("archloop tasks recover")) {
     return "recover failed task";
   }
-  if (diagnostic.nextAction.startsWith("sandcastle tasks push")) {
+  if (diagnostic.nextAction.startsWith("archloop tasks push")) {
     return "push task sync";
   }
   return "rerun flow";

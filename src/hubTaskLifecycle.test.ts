@@ -147,7 +147,7 @@ process.exit(1);
     env: {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      SANDCASTLE_BD_PATH: bdPath,
+      ARCHLOOP_BD_PATH: bdPath,
       BD_STATE_FILE: stateFile,
       BD_ARGS_FILE: argsFile,
     },
@@ -174,7 +174,7 @@ describe("Hub task lifecycle", () => {
     const hubProjectDir = join(
       repoDir,
       "data",
-      "sandcastle",
+      "archloop",
       "hub",
       "projects",
       "abc",
@@ -182,7 +182,7 @@ describe("Hub task lifecycle", () => {
     const result = claimHubTaskForImplementation({
       cwd: repoDir,
       taskId: "bd-claim",
-      branch: "sandcastle/bd-claim-claim-me",
+      branch: "archloop/bd-claim-claim-me",
       hubProjectDir,
       env,
     });
@@ -192,7 +192,7 @@ describe("Hub task lifecycle", () => {
     expect(result.claim).toMatchObject({
       runId: result.runId,
       batchId: result.batchId,
-      branch: "sandcastle/bd-claim-claim-me",
+      branch: "archloop/bd-claim-claim-me",
     });
 
     const taskEvents = await readJsonl(
@@ -216,12 +216,12 @@ describe("Hub task lifecycle", () => {
         runDir,
       },
       taskId: "bd-started",
-      branch: "sandcastle/bd-started-started-task",
+      branch: "archloop/bd-started-started-task",
       hubStatus: "implementing",
       claim: {
         runId: "run-started",
         batchId: "batch-started",
-        branch: "sandcastle/bd-started-started-task",
+        branch: "archloop/bd-started-started-task",
         claimedAt: "2026-06-19T10:00:00Z",
         raw: {},
       },
@@ -235,13 +235,13 @@ describe("Hub task lifecycle", () => {
         runId: "run-started",
         batchId: "batch-started",
         taskId: "bd-started",
-        branch: "sandcastle/bd-started-started-task",
+        branch: "archloop/bd-started-started-task",
         createdAt: "2026-06-19T10:01:00Z",
         status: "implementing",
         claim: {
           runId: "run-started",
           batchId: "batch-started",
-          branch: "sandcastle/bd-started-started-task",
+          branch: "archloop/bd-started-started-task",
           claimedAt: "2026-06-19T10:00:00Z",
           raw: {},
         },
@@ -265,7 +265,7 @@ describe("Hub task lifecycle", () => {
           claim: {
             runId: "run-1",
             batchId: "batch-1",
-            branch: "sandcastle/bd-success-success-task",
+            branch: "archloop/bd-success-success-task",
             claimedAt: "2026-06-19T10:00:00Z",
           },
         },
@@ -275,7 +275,7 @@ describe("Hub task lifecycle", () => {
     const hubProjectDir = join(
       repoDir,
       "data",
-      "sandcastle",
+      "archloop",
       "hub",
       "projects",
       "abc",
@@ -291,19 +291,19 @@ describe("Hub task lifecycle", () => {
         runDir,
       },
       taskId: "bd-success",
-      branch: "sandcastle/bd-success-success-task",
+      branch: "archloop/bd-success-success-task",
       metadata: {
         claim: {
           runId: "run-1",
           batchId: "batch-1",
-          branch: "sandcastle/bd-success-success-task",
+          branch: "archloop/bd-success-success-task",
           claimedAt: "2026-06-19T10:00:00Z",
         },
       },
       claim: {
         runId: "run-1",
         batchId: "batch-1",
-        branch: "sandcastle/bd-success-success-task",
+        branch: "archloop/bd-success-success-task",
         claimedAt: "2026-06-19T10:00:00Z",
         raw: {},
       },
@@ -350,12 +350,12 @@ describe("Hub task lifecycle", () => {
         runDir: join(repoDir, "runs", "run-2"),
       },
       taskId: "bd-review",
-      branch: "sandcastle/bd-review-review-task",
+      branch: "archloop/bd-review-review-task",
       metadata: {},
       claim: {
         runId: "run-2",
         batchId: "batch-2",
-        branch: "sandcastle/bd-review-review-task",
+        branch: "archloop/bd-review-review-task",
         claimedAt: "2026-06-19T10:00:00Z",
         raw: {},
       },
@@ -396,12 +396,12 @@ describe("Hub task lifecycle", () => {
         runDir: join(repoDir, "runs", "run-3"),
       },
       taskId: "bd-agent-fail",
-      branch: "sandcastle/bd-agent-fail-agent-fail",
+      branch: "archloop/bd-agent-fail-agent-fail",
       metadata: {},
       claim: {
         runId: "run-3",
         batchId: "batch-3",
-        branch: "sandcastle/bd-agent-fail-agent-fail",
+        branch: "archloop/bd-agent-fail-agent-fail",
         claimedAt: "2026-06-19T10:00:00Z",
         raw: {},
       },
@@ -446,12 +446,12 @@ describe("Hub task lifecycle", () => {
         runDir: join(repoDir, "runs", "run-4"),
       },
       taskId: "bd-sandbox-fail",
-      branch: "sandcastle/bd-sandbox-fail-sandbox-fail",
+      branch: "archloop/bd-sandbox-fail-sandbox-fail",
       metadata: {},
       claim: {
         runId: "run-4",
         batchId: "batch-4",
-        branch: "sandcastle/bd-sandbox-fail-sandbox-fail",
+        branch: "archloop/bd-sandbox-fail-sandbox-fail",
         claimedAt: "2026-06-19T10:00:00Z",
         raw: {},
       },
@@ -501,7 +501,7 @@ const waitingForMergeTask = (
     claim: {
       runId: "run-merge",
       batchId,
-      branch: `sandcastle/${id}-${title.toLowerCase().replace(/\s+/g, "-")}`,
+      branch: `archloop/${id}-${title.toLowerCase().replace(/\s+/g, "-")}`,
       claimedAt: "2026-06-19T10:00:00Z",
     },
   },
@@ -539,11 +539,11 @@ describe("Hub task lifecycle merge outcomes", () => {
     recordTaskMergeStarted({
       context,
       taskId: "bd-merge",
-      branch: "sandcastle/bd-merge-merge-task",
+      branch: "archloop/bd-merge-merge-task",
       claim: {
         runId: "run-merge",
         batchId: "batch-merge",
-        branch: "sandcastle/bd-merge-merge-task",
+        branch: "archloop/bd-merge-merge-task",
         claimedAt: "2026-06-19T10:00:00Z",
         raw: {},
       },
@@ -582,7 +582,7 @@ describe("Hub task lifecycle merge outcomes", () => {
       env,
       context,
       taskId: "bd-conflict",
-      branch: "sandcastle/bd-conflict-conflict-task",
+      branch: "archloop/bd-conflict-conflict-task",
       metadata: waitingForMergeTask(
         "bd-conflict",
         "Conflict task",
@@ -591,7 +591,7 @@ describe("Hub task lifecycle merge outcomes", () => {
       claim: {
         runId: "run-merge",
         batchId: "batch-merge",
-        branch: "sandcastle/bd-conflict-conflict-task",
+        branch: "archloop/bd-conflict-conflict-task",
         claimedAt: "2026-06-19T10:00:00Z",
         raw: {},
       },
@@ -633,7 +633,7 @@ describe("Hub task lifecycle merge outcomes", () => {
       env,
       context,
       taskId: "bd-merge-fail",
-      branch: "sandcastle/bd-merge-fail-merge-fail-task",
+      branch: "archloop/bd-merge-fail-merge-fail-task",
       metadata: waitingForMergeTask(
         "bd-merge-fail",
         "Merge fail task",
@@ -642,7 +642,7 @@ describe("Hub task lifecycle merge outcomes", () => {
       claim: {
         runId: "run-merge",
         batchId: "batch-merge",
-        branch: "sandcastle/bd-merge-fail-merge-fail-task",
+        branch: "archloop/bd-merge-fail-merge-fail-task",
         claimedAt: "2026-06-19T10:00:00Z",
         raw: {},
       },
@@ -682,13 +682,13 @@ describe("Hub task lifecycle merge outcomes", () => {
       env,
       context,
       taskId: "bd-verify",
-      branch: "sandcastle/bd-verify-verify-task",
+      branch: "archloop/bd-verify-verify-task",
       metadata: waitingForMergeTask("bd-verify", "Verify task", "batch-merge")
         .metadata,
       claim: {
         runId: "run-merge",
         batchId: "batch-merge",
-        branch: "sandcastle/bd-verify-verify-task",
+        branch: "archloop/bd-verify-verify-task",
         claimedAt: "2026-06-19T10:00:00Z",
         raw: {},
       },
@@ -726,13 +726,13 @@ describe("Hub task lifecycle merge outcomes", () => {
       env,
       context,
       taskId: "bd-close",
-      branch: "sandcastle/bd-close-close-task",
+      branch: "archloop/bd-close-close-task",
       metadata: waitingForMergeTask("bd-close", "Close task", "batch-merge")
         .metadata,
       claim: {
         runId: "run-merge",
         batchId: "batch-merge",
-        branch: "sandcastle/bd-close-close-task",
+        branch: "archloop/bd-close-close-task",
         claimedAt: "2026-06-19T10:00:00Z",
         raw: {},
       },
@@ -772,13 +772,13 @@ describe("Hub task lifecycle merge outcomes", () => {
       env,
       context,
       taskId: "bd-done",
-      branch: "sandcastle/bd-done-done-task",
+      branch: "archloop/bd-done-done-task",
       metadata: waitingForMergeTask("bd-done", "Done task", "batch-merge")
         .metadata,
       claim: {
         runId: "run-merge",
         batchId: "batch-merge",
-        branch: "sandcastle/bd-done-done-task",
+        branch: "archloop/bd-done-done-task",
         claimedAt: "2026-06-19T10:00:00Z",
         raw: {},
       },
@@ -815,7 +815,7 @@ describe("Hub task lifecycle merge outcomes", () => {
           claim: {
             runId: "run-merge",
             batchId: "batch-merge",
-            branch: "sandcastle/bd-revert-revert-task",
+            branch: "archloop/bd-revert-revert-task",
             claimedAt: "2026-06-19T10:00:00Z",
           },
         },
@@ -833,7 +833,7 @@ describe("Hub task lifecycle merge outcomes", () => {
           claim: {
             runId: "run-merge",
             batchId: "batch-merge",
-            branch: "sandcastle/bd-revert-revert-task",
+            branch: "archloop/bd-revert-revert-task",
             claimedAt: "2026-06-19T10:00:00Z",
           },
         },
@@ -860,7 +860,7 @@ describe("Hub task lifecycle review outcomes", () => {
     const claim = createHubTaskClaimMetadata({
       runId: "run-review-success",
       batchId: "batch-review-success",
-      branch: "sandcastle/bd-1-review-task",
+      branch: "archloop/bd-1-review-task",
       claimedAt: "2026-06-19T10:00:00.000Z",
     });
     const { env } = await writeMockBd(repoDir, stateFile, [
@@ -933,7 +933,7 @@ describe("Hub task lifecycle review outcomes", () => {
     const claim = createHubTaskClaimMetadata({
       runId: "run-review-fresh",
       batchId: "batch-review-fresh",
-      branch: "sandcastle/bd-fresh-review-task",
+      branch: "archloop/bd-fresh-review-task",
       claimedAt: "2026-06-19T10:00:00.000Z",
     });
     const { env } = await writeMockBd(repoDir, stateFile, [
@@ -970,7 +970,7 @@ describe("Hub task lifecycle review outcomes", () => {
         hubStatus: "ready_for_agent",
         claim: {
           runId: "run-review-fresh",
-          branch: "sandcastle/bd-fresh-review-task",
+          branch: "archloop/bd-fresh-review-task",
           claimedAt: "2026-06-19T10:00:00.000Z",
         },
       },
@@ -984,7 +984,7 @@ describe("Hub task lifecycle review outcomes", () => {
     expect(result.task.claim).toMatchObject({
       runId: "run-review-fresh",
       batchId: "batch-review-fresh",
-      branch: "sandcastle/bd-fresh-review-task",
+      branch: "archloop/bd-fresh-review-task",
     });
     expect(result.task.remoteRefs).toEqual(["github#129"]);
 
@@ -998,7 +998,7 @@ describe("Hub task lifecycle review outcomes", () => {
       claim: {
         runId: "run-review-fresh",
         batchId: "batch-review-fresh",
-        branch: "sandcastle/bd-fresh-review-task",
+        branch: "archloop/bd-fresh-review-task",
       },
     });
   });
@@ -1013,7 +1013,7 @@ describe("Hub task lifecycle review outcomes", () => {
     const claim = createHubTaskClaimMetadata({
       runId: "run-review-claim-intent",
       batchId: "batch-review-claim-intent",
-      branch: "sandcastle/bd-review-claim-intent-task",
+      branch: "archloop/bd-review-claim-intent-task",
       claimedAt: "2026-06-19T10:00:00.000Z",
     });
     const { env } = await writeMockBd(repoDir, stateFile, [
@@ -1057,7 +1057,7 @@ describe("Hub task lifecycle review outcomes", () => {
     expect(result.task.claim).toMatchObject({
       runId: "run-review-claim-intent",
       batchId: "batch-review-claim-intent",
-      branch: "sandcastle/bd-review-claim-intent-task",
+      branch: "archloop/bd-review-claim-intent-task",
     });
   });
 
@@ -1071,7 +1071,7 @@ describe("Hub task lifecycle review outcomes", () => {
     const claim = createHubTaskClaimMetadata({
       runId: "run-review-agent-fail",
       batchId: "batch-review-agent-fail",
-      branch: "sandcastle/bd-2-review-task",
+      branch: "archloop/bd-2-review-task",
     });
     const { env } = await writeMockBd(repoDir, stateFile, [
       {
@@ -1146,7 +1146,7 @@ describe("Hub task lifecycle review outcomes", () => {
     const claim = createHubTaskClaimMetadata({
       runId: "run-review-sandbox-fail",
       batchId: "batch-review-sandbox-fail",
-      branch: "sandcastle/bd-3-review-task",
+      branch: "archloop/bd-3-review-task",
     });
     const { env } = await writeMockBd(repoDir, stateFile, [
       {
@@ -1350,7 +1350,7 @@ describe("Hub task lifecycle recovery", () => {
           claim: {
             runId: "run-old",
             batchId: "batch-old",
-            branch: "sandcastle/bd-stale-ready",
+            branch: "archloop/bd-stale-ready",
             claimedAt: "2026-06-11T10:00:00Z",
           },
         },
@@ -1366,7 +1366,7 @@ describe("Hub task lifecycle recovery", () => {
         claim: {
           runId: "run-old",
           batchId: "batch-old",
-          branch: "sandcastle/bd-stale-ready",
+          branch: "archloop/bd-stale-ready",
           claimedAt: "2026-06-11T10:00:00Z",
         },
       },
@@ -1401,7 +1401,7 @@ describe("Hub task lifecycle recovery", () => {
           claim: {
             runId: "run-failed",
             batchId: "batch-failed",
-            branch: "sandcastle/bd-failed-agent-failed-task",
+            branch: "archloop/bd-failed-agent-failed-task",
             claimedAt: "2026-06-12T10:00:00Z",
           },
         },
@@ -1419,7 +1419,7 @@ describe("Hub task lifecycle recovery", () => {
         claim: {
           runId: "run-failed",
           batchId: "batch-failed",
-          branch: "sandcastle/bd-failed-agent-failed-task",
+          branch: "archloop/bd-failed-agent-failed-task",
           claimedAt: "2026-06-12T10:00:00Z",
         },
       },
@@ -1457,7 +1457,7 @@ describe("Hub task lifecycle recovery", () => {
           claim: {
             runId: "run-close",
             batchId: "batch-close",
-            branch: "sandcastle/bd-close-close-failed-task",
+            branch: "archloop/bd-close-close-failed-task",
             claimedAt: "2026-06-12T10:00:00Z",
           },
         },
@@ -1474,7 +1474,7 @@ describe("Hub task lifecycle recovery", () => {
         claim: {
           runId: "run-close",
           batchId: "batch-close",
-          branch: "sandcastle/bd-close-close-failed-task",
+          branch: "archloop/bd-close-close-failed-task",
           claimedAt: "2026-06-12T10:00:00Z",
         },
       },

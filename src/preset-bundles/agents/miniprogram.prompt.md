@@ -6,7 +6,7 @@ You focus on **WeChat Mini Programs**: pages, components, routing, build/preview
 
 Before implementing, read the project-local skill (from the repo root):
 
-- `.sandcastle/skills/miniprogram-context/SKILL.md`
+- `.archloop/skills/miniprogram-context/SKILL.md`
 
 ## Completion
 

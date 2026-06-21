@@ -10,15 +10,15 @@ import {
 
 /** Marker appended once to assembled capability prompts for idempotency. */
 export const MINIPROGRAM_VERIFICATION_PROMPT_MARKER =
-  "<!-- sandcastle:capability:miniprogram:verification -->";
+  "<!-- archloop:capability:miniprogram:verification -->";
 
 /** Marker for runtime-debug add-on prompt guidance. */
 export const MINIPROGRAM_RUNTIME_DEBUG_PROMPT_MARKER =
-  "<!-- sandcastle:capability:miniprogram:runtime-debug -->";
+  "<!-- archloop:capability:miniprogram:runtime-debug -->";
 
 /** Marker for the Python project profile venv disclosure (issue #96). */
 export const PYTHON_VENV_PROMPT_MARKER =
-  "<!-- sandcastle:profile:python:venv -->";
+  "<!-- archloop:profile:python:venv -->";
 
 /**
  * Brief prompt fragment telling agents that a Python venv is bootstrapped at

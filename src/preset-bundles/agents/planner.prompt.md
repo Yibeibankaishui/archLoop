@@ -6,7 +6,7 @@ You focus on **planning and decomposition**: turning goals into ordered, paralle
 
 Before planning, read the project-local skill (from the repo root):
 
-- `.sandcastle/skills/role-guidance/SKILL.md`
+- `.archloop/skills/role-guidance/SKILL.md`
 
 ## Completion
 

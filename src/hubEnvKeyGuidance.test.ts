@@ -38,7 +38,7 @@ describe("hubEnvKeyGuidance", () => {
     const lines = formatHubEnvKeyGuidanceLines("GH_TOKEN");
     const joined = lines.join("\n");
     expect(joined).toMatch(/GitHub/i);
-    expect(joined).toMatch(/gh auth token|sandcastle auth login github/i);
+    expect(joined).toMatch(/gh auth token|archloop auth login github/i);
     expect(joined).toMatch(/repo|issue/i);
   });
 
@@ -50,7 +50,7 @@ describe("hubEnvKeyGuidance", () => {
   it("clarifies OPENAI_KEY API billing vs Codex CLI login", () => {
     const joined = formatHubEnvKeyGuidanceLines("OPENAI_KEY").join("\n");
     expect(joined).toMatch(/OpenAI API/i);
-    expect(joined).toMatch(/sandcastle auth login codex/i);
+    expect(joined).toMatch(/archloop auth login codex/i);
   });
 
   it("formats a short acquisition hint for env show", () => {

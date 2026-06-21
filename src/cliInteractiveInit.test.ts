@@ -33,7 +33,7 @@ vi.mock("@clack/prompts", async (importOriginal) => {
 import { cli } from "./cli.js";
 import { RUNTIME_DEBUG_ADDON_ID } from "./capabilityPacks.js";
 
-describe("sandcastle init interactive runtime selection", () => {
+describe("archloop init interactive runtime selection", () => {
   let hostDir: string;
   let originalCwd: string;
   let originalXdgDataHome: string | undefined;
@@ -116,7 +116,7 @@ describe("sandcastle init interactive runtime selection", () => {
     );
     mockMultiselect.mockResolvedValue(["cursor"]);
     mockConfirm.mockImplementation(async (opts: { message: string }) => {
-      if (opts.message.startsWith('Create a "Sandcastle" GitHub label?'))
+      if (opts.message.startsWith('Create a "archLoop" GitHub label?'))
         return false;
       if (opts.message.startsWith("Add preset agent roles")) return false;
       if (opts.message.startsWith("Build the default Docker image now"))
@@ -127,7 +127,7 @@ describe("sandcastle init interactive runtime selection", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const ref = yield* Ref.make<ReadonlyArray<DisplayEntry>>([]);
-        yield* cli(["node", "sandcastle", "init"]).pipe(
+        yield* cli(["node", "archloop", "init"]).pipe(
           Effect.provide(SilentDisplay.layer(ref)),
           Effect.provide(NodeContext.layer),
         );
@@ -140,7 +140,7 @@ describe("sandcastle init interactive runtime selection", () => {
     expect(profileIndex).toBeGreaterThan(templateIndex);
 
     const bootstrap = await readFile(
-      join(hostDir, ".sandcastle", "bootstrap.sh"),
+      join(hostDir, ".archloop", "bootstrap.sh"),
       "utf-8",
     );
     expect(bootstrap).toContain("exit 0");
@@ -172,7 +172,7 @@ describe("sandcastle init interactive runtime selection", () => {
     const entries = await Effect.runPromise(
       Effect.gen(function* () {
         const ref = yield* Ref.make<ReadonlyArray<DisplayEntry>>([]);
-        yield* cli(["node", "sandcastle", "init"]).pipe(
+        yield* cli(["node", "archloop", "init"]).pipe(
           Effect.provide(SilentDisplay.layer(ref)),
           Effect.provide(NodeContext.layer),
         );
@@ -181,7 +181,7 @@ describe("sandcastle init interactive runtime selection", () => {
     );
 
     const dockerfile = await readFile(
-      join(hostDir, ".sandcastle", "Dockerfile"),
+      join(hostDir, ".archloop", "Dockerfile"),
       "utf-8",
     );
 
@@ -193,7 +193,7 @@ describe("sandcastle init interactive runtime selection", () => {
       expect.objectContaining({
         _tag: "status",
         message:
-          "Init complete! Run `sandcastle docker build-image` to build the Docker image later.",
+          "Init complete! Run `archloop docker build-image` to build the Docker image later.",
       }),
     );
   });
@@ -215,7 +215,7 @@ describe("sandcastle init interactive runtime selection", () => {
           expect(opts.options).toEqual([
             {
               value: "env",
-              label: "Use CURSOR_API_KEY in .sandcastle/.env",
+              label: "Use CURSOR_API_KEY in .archloop/.env",
             },
             {
               value: "skip",
@@ -238,7 +238,7 @@ describe("sandcastle init interactive runtime selection", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const ref = yield* Ref.make<ReadonlyArray<DisplayEntry>>([]);
-        yield* cli(["node", "sandcastle", "init"]).pipe(
+        yield* cli(["node", "archloop", "init"]).pipe(
           Effect.provide(SilentDisplay.layer(ref)),
           Effect.provide(NodeContext.layer),
         );
@@ -260,7 +260,7 @@ describe("sandcastle init interactive runtime selection", () => {
     });
     mockMultiselect.mockResolvedValue(["codex"]);
     mockConfirm.mockImplementation(async (opts: { message: string }) => {
-      if (opts.message.startsWith('Create a "Sandcastle" GitHub label?'))
+      if (opts.message.startsWith('Create a "archLoop" GitHub label?'))
         return false;
       if (opts.message.startsWith("Add preset agent roles")) return false;
       if (opts.message.startsWith("Build the default Docker image now"))
@@ -271,7 +271,7 @@ describe("sandcastle init interactive runtime selection", () => {
     const entries = await Effect.runPromise(
       Effect.gen(function* () {
         const ref = yield* Ref.make<ReadonlyArray<DisplayEntry>>([]);
-        yield* cli(["node", "sandcastle", "init"]).pipe(
+        yield* cli(["node", "archloop", "init"]).pipe(
           Effect.provide(SilentDisplay.layer(ref)),
           Effect.provide(NodeContext.layer),
         );
@@ -286,21 +286,21 @@ describe("sandcastle init interactive runtime selection", () => {
     expect(entries).toContainEqual(
       expect.objectContaining({
         _tag: "status",
-        message: expect.stringContaining("Add GH_TOKEN to .sandcastle/.env"),
+        message: expect.stringContaining("Add GH_TOKEN to .archloop/.env"),
       }),
     );
     expect(entries).toContainEqual(
       expect.objectContaining({
         _tag: "text",
         message: expect.stringContaining(
-          "Add GH_TOKEN to .sandcastle/.env before running GitHub Issues templates.",
+          "Add GH_TOKEN to .archloop/.env before running GitHub Issues templates.",
         ),
       }),
     );
     expect(entries).toContainEqual(
       expect.objectContaining({
         _tag: "status",
-        message: expect.stringContaining("Add OPENAI_KEY to .sandcastle/.env"),
+        message: expect.stringContaining("Add OPENAI_KEY to .archloop/.env"),
       }),
     );
   });
@@ -320,7 +320,7 @@ describe("sandcastle init interactive runtime selection", () => {
     });
     mockMultiselect.mockResolvedValue(["codex", "cursor"]);
     mockConfirm.mockImplementation(async (opts: { message: string }) => {
-      if (opts.message.startsWith('Create a "Sandcastle" GitHub label?'))
+      if (opts.message.startsWith('Create a "archLoop" GitHub label?'))
         return false;
       if (opts.message.startsWith("Add preset agent roles")) return false;
       if (opts.message.startsWith("Build the default Docker image now"))
@@ -331,7 +331,7 @@ describe("sandcastle init interactive runtime selection", () => {
     const entries = await Effect.runPromise(
       Effect.gen(function* () {
         const ref = yield* Ref.make<ReadonlyArray<DisplayEntry>>([]);
-        yield* cli(["node", "sandcastle", "init"]).pipe(
+        yield* cli(["node", "archloop", "init"]).pipe(
           Effect.provide(SilentDisplay.layer(ref)),
           Effect.provide(NodeContext.layer),
         );
@@ -344,7 +344,7 @@ describe("sandcastle init interactive runtime selection", () => {
       expect.objectContaining({
         env: expect.objectContaining({
           GH_CONFIG_DIR: expect.stringContaining(
-            join("sandcastle", "hub", "auth", "github"),
+            join("archloop", "hub", "auth", "github"),
           ),
         }),
       }),
@@ -354,7 +354,7 @@ describe("sandcastle init interactive runtime selection", () => {
       expect.objectContaining({
         env: expect.objectContaining({
           CODEX_HOME: expect.stringContaining(
-            join("sandcastle", "hub", "auth", "codex"),
+            join("archloop", "hub", "auth", "codex"),
           ),
         }),
       }),
@@ -366,7 +366,7 @@ describe("sandcastle init interactive runtime selection", () => {
     expect(entries).toContainEqual(
       expect.objectContaining({
         _tag: "text",
-        message: expect.stringContaining("Run `npm run sandcastle`"),
+        message: expect.stringContaining("Run `npm run archloop`"),
       }),
     );
     expect(entries).toContainEqual(
@@ -394,7 +394,7 @@ describe("sandcastle init interactive runtime selection", () => {
     });
     mockMultiselect.mockResolvedValue(["codex"]);
     mockConfirm.mockImplementation(async (opts: { message: string }) => {
-      if (opts.message.startsWith('Create a "Sandcastle" GitHub label?'))
+      if (opts.message.startsWith('Create a "archLoop" GitHub label?'))
         return false;
       if (opts.message.startsWith("Add preset agent roles")) return false;
       if (opts.message.startsWith("Build the default Docker image now"))
@@ -405,7 +405,7 @@ describe("sandcastle init interactive runtime selection", () => {
     const entries = await Effect.runPromise(
       Effect.gen(function* () {
         const ref = yield* Ref.make<ReadonlyArray<DisplayEntry>>([]);
-        yield* cli(["node", "sandcastle", "init"]).pipe(
+        yield* cli(["node", "archloop", "init"]).pipe(
           Effect.provide(SilentDisplay.layer(ref)),
           Effect.provide(NodeContext.layer),
         );
@@ -423,7 +423,7 @@ describe("sandcastle init interactive runtime selection", () => {
       expect.objectContaining({
         _tag: "text",
         message: expect.stringContaining(
-          "Set up GitHub auth later with GH_TOKEN in .sandcastle/.env",
+          "Set up GitHub auth later with GH_TOKEN in .archloop/.env",
         ),
       }),
     );
@@ -431,7 +431,7 @@ describe("sandcastle init interactive runtime selection", () => {
       expect.objectContaining({
         _tag: "text",
         message: expect.stringContaining(
-          "Set up Codex auth later with OPENAI_KEY in .sandcastle/.env",
+          "Set up Codex auth later with OPENAI_KEY in .archloop/.env",
         ),
       }),
     );
@@ -448,7 +448,7 @@ describe("sandcastle init interactive runtime selection", () => {
         const ref = yield* Ref.make<ReadonlyArray<DisplayEntry>>([]);
         yield* cli([
           "node",
-          "sandcastle",
+          "archloop",
           "init",
           "--agent",
           "codex",
@@ -462,7 +462,7 @@ describe("sandcastle init interactive runtime selection", () => {
           "blank",
           "--preset-agents",
           "none",
-          "--create-sandcastle-label",
+          "--create-archloop-label",
           "false",
           "--build-image",
           "false",
@@ -507,7 +507,7 @@ describe("sandcastle init interactive runtime selection", () => {
         const ref = yield* Ref.make<ReadonlyArray<DisplayEntry>>([]);
         yield* cli([
           "node",
-          "sandcastle",
+          "archloop",
           "init",
           "--agent",
           "cursor",
@@ -554,7 +554,7 @@ describe("sandcastle init interactive runtime selection", () => {
   });
 });
 
-describe("sandcastle init interactive capability add-ons", () => {
+describe("archloop init interactive capability add-ons", () => {
   let hostDir: string;
   let originalCwd: string;
   let originalXdgDataHome: string | undefined;
@@ -597,7 +597,7 @@ describe("sandcastle init interactive capability add-ons", () => {
     );
 
     mockConfirm.mockImplementation(async (opts: { message: string }) => {
-      if (opts.message.startsWith('Create a "Sandcastle" GitHub label?'))
+      if (opts.message.startsWith('Create a "archLoop" GitHub label?'))
         return false;
       if (opts.message.startsWith("Add preset agent roles")) return false;
       if (opts.message.startsWith("Build the default Docker image now"))
@@ -615,7 +615,7 @@ describe("sandcastle init interactive capability add-ons", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const ref = yield* Ref.make<ReadonlyArray<DisplayEntry>>([]);
-        yield* cli(["node", "sandcastle", "init"]).pipe(
+        yield* cli(["node", "archloop", "init"]).pipe(
           Effect.provide(SilentDisplay.layer(ref)),
           Effect.provide(NodeContext.layer),
         );
@@ -669,14 +669,14 @@ describe("sandcastle init interactive capability add-ons", () => {
     );
 
     const runtimeDebugContext = await readFile(
-      join(hostDir, ".sandcastle", "context", "miniprogram-runtime-debug.md"),
+      join(hostDir, ".archloop", "context", "miniprogram-runtime-debug.md"),
       "utf-8",
     );
     expect(runtimeDebugContext).toContain("WaterTian");
     expect(runtimeDebugContext).toMatch(/does not replace.*verify\.sh/is);
 
     const manifest = JSON.parse(
-      await readFile(join(hostDir, ".sandcastle", "capability.json"), "utf-8"),
+      await readFile(join(hostDir, ".archloop", "capability.json"), "utf-8"),
     ) as { addons: string[] };
     expect(manifest.addons).toEqual([RUNTIME_DEBUG_ADDON_ID]);
   });
@@ -709,7 +709,7 @@ describe("sandcastle init interactive capability add-ons", () => {
 
     await expect(
       readFile(
-        join(hostDir, ".sandcastle", "context", "miniprogram-runtime-debug.md"),
+        join(hostDir, ".archloop", "context", "miniprogram-runtime-debug.md"),
         "utf-8",
       ),
     ).rejects.toThrow();

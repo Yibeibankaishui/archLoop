@@ -26,11 +26,11 @@ const parseEnvFile = (
   });
 
 /**
- * Resolve env vars for Sandcastle runs from Hub env, project env, and process.env.
+ * Resolve env vars for archLoop runs from Hub env, project env, and process.env.
  *
  * Precedence:
  * - Keys declared only in the Hub env file: `process.env` overrides file values.
- * - Keys declared in `.sandcastle/.env`: project file value, then `process.env`,
+ * - Keys declared in `.archloop/.env`: project file value, then `process.env`,
  *   then Hub file value.
  * - Hub auth session env such as `CODEX_HOME` and `GH_CONFIG_DIR` is added
  *   when the Hub auth directory contains login state and no explicit env value
@@ -42,9 +42,7 @@ export const resolveEnv = (
   options: ResolveEnvOptions = {},
 ): Effect.Effect<Record<string, string>, never, FileSystem.FileSystem> =>
   Effect.gen(function* () {
-    const projectEnv = yield* parseEnvFile(
-      join(repoDir, ".sandcastle", ".env"),
-    );
+    const projectEnv = yield* parseEnvFile(join(repoDir, ".archloop", ".env"));
 
     const mergedEnv = mergeHubAndProjectEnv({
       hubFileEnv: readHubEnvFile(options),

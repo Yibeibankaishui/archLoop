@@ -80,7 +80,7 @@ export interface InteractiveOptions {
    *   immediately without doing any setup work.
    * - Aborting during an active session kills the agent subprocess.
    * - The rejected promise surfaces `signal.reason` via
-   *   `signal.throwIfAborted()` — no Sandcastle-specific wrapping.
+   *   `signal.throwIfAborted()` — no archLoop-specific wrapping.
    * - The worktree is preserved on disk after abort (error-path behavior).
    */
   readonly signal?: AbortSignal;
@@ -103,7 +103,7 @@ export interface InteractiveResult {
  * Launch an interactive agent session inside a sandbox.
  *
  * The user sees the agent's TUI directly. When the session ends,
- * Sandcastle collects commits and handles branch merging, just like run().
+ * archLoop collects commits and handles branch merging, just like run().
  *
  * Full prompt preprocessing pipeline: PromptResolver -> PromptArgumentSubstitution
  * -> PromptPreprocessor (shell expressions inside sandbox).
@@ -237,7 +237,7 @@ export const interactive = async (
     const lifecycleBranch = isHeadMode ? currentHostBranch : branch;
 
     // Display intro and summary
-    yield* d.intro(options.name ?? "sandcastle interactive");
+    yield* d.intro(options.name ?? "archloop interactive");
     yield* d.summary("Interactive Session", {
       Agent: options.name ?? provider.name,
       Sandbox: sandboxProvider.name,

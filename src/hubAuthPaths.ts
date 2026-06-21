@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-import { resolveSandcastleUserDataDir } from "./projectStatus.js";
+import { resolveArchloopUserDataDir } from "./projectStatus.js";
 
 export type HubLoginProviderId = "codex" | "github";
 
@@ -20,7 +20,7 @@ export const resolveHubAuthDir = (
   options: HubAuthPathOptions = {},
 ): string =>
   join(
-    resolveSandcastleUserDataDir(options.env, options.homeDir),
+    resolveArchloopUserDataDir(options.env, options.homeDir),
     "hub",
     "auth",
     HUB_AUTH_DIR_NAMES[providerId],

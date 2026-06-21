@@ -121,20 +121,20 @@ describe("docker()", () => {
   it("creates missing scaffold auth mount host directories at construction time", async () => {
     const repoDir = mkdtempSync(join(tmpdir(), "docker-scaffold-auth-"));
     const previousCwd = process.cwd();
-    mkdirSync(join(repoDir, ".sandcastle"), { recursive: true });
+    mkdirSync(join(repoDir, ".archloop"), { recursive: true });
     process.chdir(repoDir);
 
     try {
       const provider = docker({
         mounts: [
           {
-            hostPath: ".sandcastle/auth/codex",
+            hostPath: ".archloop/auth/codex",
             sandboxPath: "/home/agent/.codex",
           },
         ],
       });
       expect(provider.tag).toBe("bind-mount");
-      await access(join(repoDir, ".sandcastle/auth/codex"));
+      await access(join(repoDir, ".archloop/auth/codex"));
     } finally {
       process.chdir(previousCwd);
       rmSync(repoDir, { recursive: true, force: true });
@@ -307,7 +307,7 @@ describe("docker()", () => {
         env: {},
       }),
     ).rejects.toThrow(
-      "Image 'my-app:latest' not found locally. Build it first with 'sandcastle docker build-image'.",
+      "Image 'my-app:latest' not found locally. Build it first with 'archloop docker build-image'.",
     );
   });
 
@@ -401,7 +401,7 @@ describe("docker()", () => {
     const cpArgs = cpCall![1] as string[];
     expect(cpArgs[0]).toBe("cp");
     expect(cpArgs[1]).toBe("/host/file.txt");
-    expect(cpArgs[2]).toMatch(/^sandcastle-.*:\/sandbox\/file\.txt$/);
+    expect(cpArgs[2]).toMatch(/^archloop-.*:\/sandbox\/file\.txt$/);
 
     await handle.close();
   });
@@ -437,7 +437,7 @@ describe("docker()", () => {
     expect(cpCall).toBeDefined();
     const cpArgs = cpCall![1] as string[];
     expect(cpArgs[0]).toBe("cp");
-    expect(cpArgs[1]).toMatch(/^sandcastle-.*:\/sandbox\/output\.txt$/);
+    expect(cpArgs[1]).toMatch(/^archloop-.*:\/sandbox\/output\.txt$/);
     expect(cpArgs[2]).toBe("/host/output.txt");
 
     await handle.close();

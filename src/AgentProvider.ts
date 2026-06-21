@@ -237,10 +237,10 @@ const cursorTransportFailureDetail = (failure: AgentExecFailure): string => {
 };
 
 const cursorTransportRecoveryGuidance = [
-  "Sandcastle did not capture a completed agent result, so this iteration cannot be treated as successful.",
+  "archLoop did not capture a completed agent result, so this iteration cannot be treated as successful.",
   "",
   "Recovery:",
-  "- Re-run the sandcastle command",
+  "- Re-run the archloop command",
   "- For parallel workflows, reduce concurrent Cursor agents or stagger review runs",
   "- Inspect the agent run log for this role",
   "- If implementation already completed on a branch, retry review/merge for that branch",

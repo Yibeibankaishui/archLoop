@@ -9,12 +9,12 @@ export const DOCKER_DESKTOP_MACOS_BIN =
  * Resolve the docker CLI binary.
  *
  * Priority:
- * 1) SANDCASTLE_DOCKER_BIN override
+ * 1) ARCHLOOP_DOCKER_BIN override
  * 2) `docker` from PATH
  * 3) macOS Docker Desktop bundled CLI path
  */
 export const dockerCommand = (): string => {
-  const override = process.env.SANDCASTLE_DOCKER_BIN?.trim();
+  const override = process.env.ARCHLOOP_DOCKER_BIN?.trim();
   if (override) return override;
 
   const macDockerDesktop = join(DOCKER_DESKTOP_MACOS_BIN, "docker");

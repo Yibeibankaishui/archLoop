@@ -82,9 +82,7 @@ describe("encodeProjectPath", () => {
   });
 
   it("strips multiple trailing backslashes", () => {
-    expect(encodeProjectPath("D:\\projekts\\app\\\\")).toBe(
-      "D-projekts-app",
-    );
+    expect(encodeProjectPath("D:\\projekts\\app\\\\")).toBe("D-projekts-app");
   });
 });
 
@@ -200,7 +198,7 @@ describe("hostSessionStore", () => {
   let tempDir: string;
 
   const setup = async () => {
-    tempDir = await mkdtemp(join(tmpdir(), "sandcastle-session-test-"));
+    tempDir = await mkdtemp(join(tmpdir(), "archloop-session-test-"));
     return tempDir;
   };
 
@@ -268,7 +266,7 @@ describe("hostSessionStore", () => {
 
 describe("sandboxSessionStore", () => {
   it("uses copyFileOut for readSession", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "sandcastle-sbx-store-"));
+    const tempDir = await mkdtemp(join(tmpdir(), "archloop-sbx-store-"));
     try {
       const jsonl = JSON.stringify({ type: "init", cwd: "/workspace" });
 
@@ -313,7 +311,7 @@ describe("sandboxSessionStore", () => {
   });
 
   it("uses copyFileIn for writeSession", async () => {
-    const tempDir = await mkdtemp(join(tmpdir(), "sandcastle-sbx-store-"));
+    const tempDir = await mkdtemp(join(tmpdir(), "archloop-sbx-store-"));
     try {
       const jsonl = JSON.stringify({ type: "init" });
 

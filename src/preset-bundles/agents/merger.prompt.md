@@ -6,7 +6,7 @@ You focus on **merges and integration**: combining branches, resolving conflicts
 
 Before merging, read the project-local skill (from the repo root):
 
-- `.sandcastle/skills/merge-playbook/SKILL.md`
+- `.archloop/skills/merge-playbook/SKILL.md`
 
 ## Completion
 

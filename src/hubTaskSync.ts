@@ -12,7 +12,7 @@ import {
   type HubTaskStatus,
 } from "./taskBoard.js";
 
-export const GITHUB_ISSUE_SYNC_LABEL = "Sandcastle";
+export const GITHUB_ISSUE_SYNC_LABEL = "archLoop";
 
 export const HUB_EXECUTION_STATUSES = new Set<HubTaskStatus>([
   "implementing",
@@ -637,7 +637,7 @@ const runGhJson = (
     const message =
       error instanceof Error ? error.message : "unable to execute gh";
     throw new TaskBoardError({
-      message: `sandcastle tasks sync requires GitHub CLI access: ${message}`,
+      message: `archloop tasks sync requires GitHub CLI access: ${message}`,
     });
   }
 };

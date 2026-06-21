@@ -9,13 +9,13 @@ import type {
 import { MissingSandboxHookScriptError } from "./errors.js";
 import type { SandboxHooks } from "./SandboxLifecycle.js";
 
-/** Paths like `.sandcastle/bootstrap.sh` referenced by sandbox hook commands. */
-const SANDCASTLE_SCRIPT_PATH_PATTERN =
-  /(?:^|\s)(?:bash\s+)?((?:\.\/)?\.sandcastle\/[\w./-]+\.sh)\b/g;
+/** Paths like `.archloop/bootstrap.sh` referenced by sandbox hook commands. */
+const ARCHLOOP_SCRIPT_PATH_PATTERN =
+  /(?:^|\s)(?:bash\s+)?((?:\.\/)?\.archloop\/[\w./-]+\.sh)\b/g;
 
-export const extractSandcastleScriptPaths = (command: string): string[] => {
+export const extractarchLoopScriptPaths = (command: string): string[] => {
   const paths = new Set<string>();
-  for (const match of command.matchAll(SANDCASTLE_SCRIPT_PATH_PATTERN)) {
+  for (const match of command.matchAll(ARCHLOOP_SCRIPT_PATH_PATTERN)) {
     const raw = match[1]!;
     paths.add(raw.startsWith("./") ? raw.slice(2) : raw);
   }
@@ -26,7 +26,7 @@ export const collectSandboxHookScriptPaths = (
   hooks: SandboxHooks | undefined,
 ): string[] => [
   ...new Set(
-    collectSandboxHookCommands(hooks).flatMap(extractSandcastleScriptPaths),
+    collectSandboxHookCommands(hooks).flatMap(extractarchLoopScriptPaths),
   ),
 ];
 
@@ -49,26 +49,23 @@ export const formatMissingSandboxHookScriptMessage = (
   command: string,
 ): string =>
   `Sandbox hook references missing script \`${relativePath}\` (command: \`${command}\`).\n\n` +
-  "Non-blank templates expect this file under \`.sandcastle/\` on the host worktree. That directory is local agent orchestration scaffold from \`sandcastle init\` — it is not part of the application repo and should not be committed to git.\n\n" +
+  "Non-blank templates expect this file under \`.archloop/\` on the host worktree. That directory is local agent orchestration scaffold from \`archloop init\` — it is not part of the application repo and should not be committed to git.\n\n" +
   "Fix:\n" +
-  `- Ensure \`${relativePath}\` exists locally (re-run \`sandcastle init\` for your project profile, or copy the script from init output).\n` +
-  "- If a merge agent stashed it with \`git stash push -u\`, run \`git stash pop\` to restore local \`.sandcastle/\` files.\n" +
-  "- After changing \`.sandcastle/main.ts\` hooks, restart the long-lived \`main.ts\` process so it reloads configuration.";
+  `- Ensure \`${relativePath}\` exists locally (re-run \`archloop init\` for your project profile, or copy the script from init output).\n` +
+  "- If a merge agent stashed it with \`git stash push -u\`, run \`git stash pop\` to restore local \`.archloop/\` files.\n" +
+  "- After changing \`.archloop/main.ts\` hooks, restart the long-lived \`main.ts\` process so it reloads configuration.";
 
 /**
- * Copy hook-referenced `.sandcastle/*.sh` scripts from the host repo into an
+ * Copy hook-referenced `.archloop/*.sh` scripts from the host repo into an
  * issue worktree when they exist on the host but not in the worktree (typical
- * when `.sandcastle/` is gitignored init scaffold).
+ * when `.archloop/` is gitignored init scaffold).
  */
 export const syncSandboxHookScriptsToWorktree = (
   hostRepoDir: string,
   worktreePath: string,
   hooks: SandboxHooks | undefined,
   timeoutMs?: number,
-): Effect.Effect<
-  void,
-  CopyToWorktreeTimeoutError | CopyToWorktreeError
-> =>
+): Effect.Effect<void, CopyToWorktreeTimeoutError | CopyToWorktreeError> =>
   Effect.gen(function* () {
     if (hostRepoDir === worktreePath) return;
 
@@ -110,7 +107,7 @@ export const prepareSandboxHookScripts = (
 
 /**
  * Fail before sandbox hook execution when a hook command references a
- * `.sandcastle/*.sh` script that is absent from the worktree.
+ * `.archloop/*.sh` script that is absent from the worktree.
  */
 export const validateSandboxHookScripts = (
   worktreePath: string,
@@ -118,7 +115,7 @@ export const validateSandboxHookScripts = (
 ): Effect.Effect<void, MissingSandboxHookScriptError> =>
   Effect.gen(function* () {
     for (const command of collectSandboxHookCommands(hooks)) {
-      for (const relativePath of extractSandcastleScriptPaths(command)) {
+      for (const relativePath of extractarchLoopScriptPaths(command)) {
         const absolutePath = join(worktreePath, relativePath);
         if (!existsSync(absolutePath)) {
           return yield* Effect.fail(

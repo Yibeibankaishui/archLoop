@@ -1,11 +1,11 @@
 # GIT SAFETY (required)
 
-Sandcastle may run many iterations from one long-lived `main.ts` process. `.sandcastle/` is **local agent orchestration** (from `sandcastle init`) — not application source and not for version control. The merge phase must not remove or stash those runtime files.
+archLoop may run many iterations from one long-lived `main.ts` process. `.archloop/` is **local agent orchestration** (from `archloop init`) — not application source and not for version control. The merge phase must not remove or stash those runtime files.
 
-- Do **not** run `git stash push -u` (never stash untracked files — this can swallow local `.sandcastle/bootstrap.sh` and other init scaffold).
+- Do **not** run `git stash push -u` (never stash untracked files — this can swallow local `.archloop/bootstrap.sh` and other init scaffold).
 - If you must stash **tracked** application changes, use `git stash push -m "..."` **without** `-u`, then run **`git stash pop`** before you finish.
-- Do not stash, delete, move, or `git add` `.sandcastle/` orchestration files (`bootstrap.sh`, `main.ts`, prompts, auth dirs).
-- Prefer merging with a clean worktree on **tracked** application files only; leave local `.sandcastle/` on disk.
+- Do not stash, delete, move, or `git add` `.archloop/` orchestration files (`bootstrap.sh`, `main.ts`, prompts, auth dirs).
+- Prefer merging with a clean worktree on **tracked** application files only; leave local `.archloop/` on disk.
 
 # TASK
 

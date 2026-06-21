@@ -14,7 +14,7 @@ describe("composeVenvPathEnv", () => {
   let workdir: string;
 
   beforeEach(() => {
-    workdir = mkdtempSync(join(tmpdir(), "sandcastle-venv-path-"));
+    workdir = mkdtempSync(join(tmpdir(), "archloop-venv-path-"));
   });
 
   afterEach(() => {

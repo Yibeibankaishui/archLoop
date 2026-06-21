@@ -5,7 +5,7 @@ import { join } from "node:path";
 import {
   resolveGitRepoRoot,
   resolveHubProjectDir,
-  resolveSandcastleUserDataDir,
+  resolveArchloopUserDataDir,
 } from "./projectStatus.js";
 
 export interface HubRunContext {
@@ -248,7 +248,7 @@ export const createHubRunContext = (
       : resolveGitRepoRoot(process.cwd());
   const hubProjectDir =
     options.hubProjectDir ??
-    resolveHubProjectDir(resolveSandcastleUserDataDir(options.env), repoRoot);
+    resolveHubProjectDir(resolveArchloopUserDataDir(options.env), repoRoot);
   const identifiers = createHubRunIdentifiers();
   const ids = {
     runId: options.runId ?? identifiers.runId,

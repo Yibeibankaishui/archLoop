@@ -138,7 +138,7 @@ RUN apt-get update && apt-get install -y \\
 
 {{PROJECT_PROFILE_TOOLS}}
 
-# Build-args for UID/GID alignment: sandcastle docker build-image
+# Build-args for UID/GID alignment: archloop docker build-image
 # defaults these to the host user's UID/GID so image-built files
 # and bind-mounted files share an owner without runtime chown.
 ARG AGENT_UID=1000
@@ -164,7 +164,7 @@ ENV PATH="/home/agent/.local/bin:$PATH"
 
 WORKDIR /home/agent
 
-# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at ${SANDBOX_REPO_DIR}
+# In worktree sandbox mode, archLoop bind-mounts the git worktree at ${SANDBOX_REPO_DIR}
 # and overrides the working directory to ${SANDBOX_REPO_DIR} at container start.
 # Structure your Dockerfile so that ${SANDBOX_REPO_DIR} can serve as the project root.
 ENTRYPOINT ["sleep", "infinity"]
@@ -183,7 +183,7 @@ RUN apt-get update && apt-get install -y \\
 
 {{PROJECT_PROFILE_TOOLS}}
 
-# Build-args for UID/GID alignment: sandcastle docker build-image
+# Build-args for UID/GID alignment: archloop docker build-image
 # defaults these to the host user's UID/GID so image-built files
 # and bind-mounted files share an owner without runtime chown.
 ARG AGENT_UID=1000
@@ -206,7 +206,7 @@ ENV HOME="/home/agent"
 
 WORKDIR /home/agent
 
-# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at ${SANDBOX_REPO_DIR}
+# In worktree sandbox mode, archLoop bind-mounts the git worktree at ${SANDBOX_REPO_DIR}
 # and overrides the working directory to ${SANDBOX_REPO_DIR} at container start.
 # Structure your Dockerfile so that ${SANDBOX_REPO_DIR} can serve as the project root.
 ENTRYPOINT ["sleep", "infinity"]
@@ -229,7 +229,7 @@ RUN apt-get update && apt-get install -y \\
 
 {{PROJECT_PROFILE_TOOLS}}
 
-# Build-args for UID/GID alignment: sandcastle docker build-image
+# Build-args for UID/GID alignment: archloop docker build-image
 # defaults these to the host user's UID/GID so image-built files
 # and bind-mounted files share an owner without runtime chown.
 ARG AGENT_UID=1000
@@ -251,7 +251,7 @@ ENV HOME="/home/agent"
 
 WORKDIR /home/agent
 
-# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at ${SANDBOX_REPO_DIR}
+# In worktree sandbox mode, archLoop bind-mounts the git worktree at ${SANDBOX_REPO_DIR}
 # and overrides the working directory to ${SANDBOX_REPO_DIR} at container start.
 # Structure your Dockerfile so that ${SANDBOX_REPO_DIR} can serve as the project root.
 ENTRYPOINT ["sleep", "infinity"]
@@ -270,7 +270,7 @@ RUN apt-get update && apt-get install -y \\
 
 {{PROJECT_PROFILE_TOOLS}}
 
-# Build-args for UID/GID alignment: sandcastle docker build-image
+# Build-args for UID/GID alignment: archloop docker build-image
 # defaults these to the host user's UID/GID so image-built files
 # and bind-mounted files share an owner without runtime chown.
 ARG AGENT_UID=1000
@@ -297,7 +297,7 @@ ENV PATH="/home/agent/.local/bin:$PATH"
 
 WORKDIR /home/agent
 
-# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at ${SANDBOX_REPO_DIR}
+# In worktree sandbox mode, archLoop bind-mounts the git worktree at ${SANDBOX_REPO_DIR}
 # and overrides the working directory to ${SANDBOX_REPO_DIR} at container start.
 # Structure your Dockerfile so that ${SANDBOX_REPO_DIR} can serve as the project root.
 ENTRYPOINT ["sleep", "infinity"]
@@ -316,7 +316,7 @@ RUN apt-get update && apt-get install -y \\
 
 {{PROJECT_PROFILE_TOOLS}}
 
-# Build-args for UID/GID alignment: sandcastle docker build-image
+# Build-args for UID/GID alignment: archloop docker build-image
 # defaults these to the host user's UID/GID so image-built files
 # and bind-mounted files share an owner without runtime chown.
 ARG AGENT_UID=1000
@@ -339,7 +339,7 @@ ENV HOME="/home/agent"
 
 WORKDIR /home/agent
 
-# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at \${SANDBOX_REPO_DIR}
+# In worktree sandbox mode, archLoop bind-mounts the git worktree at \${SANDBOX_REPO_DIR}
 # and overrides the working directory to \${SANDBOX_REPO_DIR} at container start.
 # Structure your Dockerfile so that \${SANDBOX_REPO_DIR} can serve as the project root.
 ENTRYPOINT ["sleep", "infinity"]
@@ -392,7 +392,7 @@ RUN curl -fsSL https://claude.ai/install.sh | bash`,
     dockerfileTemplate: CLAUDE_CODE_DOCKERFILE,
     envVars: ["ANTHROPIC_API_KEY"],
     envExample: `# Anthropic API key
-# If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191
+# If you want to use your Claude subscription instead of an API key, see https://github.com/yibeibankaishui/archloop/issues/191
 ANTHROPIC_API_KEY=`,
   },
   {
@@ -418,7 +418,7 @@ ANTHROPIC_API_KEY=`,
     envExample: `# OpenAI API key
 OPENAI_KEY=`,
     authMounts: [
-      { hostPath: ".sandcastle/auth/codex", sandboxPath: "/home/agent/.codex" },
+      { hostPath: ".archloop/auth/codex", sandboxPath: "/home/agent/.codex" },
     ],
   },
   {
@@ -611,9 +611,9 @@ const renderAuthMount = (mount: AuthMountEntry): string => {
 
 const EMPTY_AUTH_MOUNTS_PROPERTY = "  mounts: [],";
 const DOCKER_IMPORT_LINE =
-  'import { docker } from "@ai-hero/sandcastle/sandboxes/docker";';
+  'import { docker } from "@yibeibankaishui/archloop/sandboxes/docker";';
 const NO_SANDBOX_IMPORT_LINE =
-  'import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";';
+  'import { noSandbox } from "@yibeibankaishui/archloop/sandboxes/no-sandbox";';
 const DOCKER_PROVIDER_SNIPPET = `const sandboxProvider = docker({
   mounts: [],
 });`;
@@ -683,9 +683,9 @@ const BACKLOG_MANAGER_REGISTRY: BacklogManagerEntry[] = [
     name: "github-issues",
     label: "GitHub Issues",
     templateArgs: {
-      LIST_TASKS_COMMAND: `gh issue list --state open -l Sandcastle -l ready-for-agent --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
+      LIST_TASKS_COMMAND: `gh issue list --state open -l archLoop -l ready-for-agent --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`,
       VIEW_TASK_COMMAND: "gh issue view <ID>",
-      CLOSE_TASK_COMMAND: `gh issue close <ID> --comment "Completed by Sandcastle"`,
+      CLOSE_TASK_COMMAND: `gh issue close <ID> --comment "Completed by archLoop"`,
       BACKLOG_MANAGER_TOOLS: GITHUB_CLI_TOOLS,
     },
     envVars: ["GH_TOKEN"],
@@ -693,7 +693,7 @@ const BACKLOG_MANAGER_REGISTRY: BacklogManagerEntry[] = [
 GH_TOKEN=`,
     authMounts: [
       {
-        hostPath: ".sandcastle/auth/gh",
+        hostPath: ".archloop/auth/gh",
         sandboxPath: "/home/agent/.config/gh",
       },
     ],
@@ -704,7 +704,7 @@ GH_TOKEN=`,
     templateArgs: {
       LIST_TASKS_COMMAND: "bd ready --json",
       VIEW_TASK_COMMAND: "bd show <ID>",
-      CLOSE_TASK_COMMAND: `bd close <ID> "Completed by Sandcastle"`,
+      CLOSE_TASK_COMMAND: `bd close <ID> "Completed by archLoop"`,
       BACKLOG_MANAGER_TOOLS: BEADS_TOOLS,
     },
     envVars: [],
@@ -716,8 +716,8 @@ export const listBacklogManagers = (): BacklogManagerEntry[] =>
   BACKLOG_MANAGER_REGISTRY;
 
 const LEGACY_AUTH_MOUNT_HOST_PATHS = {
-  ".sandcastle/auth/codex": "codex",
-  ".sandcastle/auth/gh": "github",
+  ".archloop/auth/codex": "codex",
+  ".archloop/auth/gh": "github",
 } as const satisfies Record<string, "codex" | "github">;
 
 const resolveHubAuthMounts = (
@@ -777,7 +777,7 @@ export const getAgent = (name: string): AgentEntry | undefined =>
 export interface SandboxProviderEntry {
   readonly name: string;
   readonly label: string;
-  /** Filename written to .sandcastle/ (e.g. "Dockerfile" or "Containerfile") */
+  /** Filename written to .archloop/ (e.g. "Dockerfile" or "Containerfile") */
   readonly containerfileName: string;
   /** CLI namespace for build/remove commands (e.g. "docker" or "podman") */
   readonly cliNamespace: string;
@@ -832,7 +832,7 @@ export const getInitSandboxProvider = (
 // ---------------------------------------------------------------------------
 
 const PRESET_AGENT_NEXT_STEP =
-  "Preset agent roles are in .sandcastle/agents/ with bundled skills under .sandcastle/skills/. See .sandcastle/agent-profiles.json for recommended provider/model; compose prompts from main.mts using run() as needed. Recommendations may require matching installed runtimes.";
+  "Preset agent roles are in .archloop/agents/ with bundled skills under .archloop/skills/. See .archloop/agent-profiles.json for recommended provider/model; compose prompts from main.mts using run() as needed. Recommendations may require matching installed runtimes.";
 
 /** Default sandbox bootstrap hook timeout (5 minutes) for dependency installs. */
 export const BOOTSTRAP_HOOK_TIMEOUT_MS = 300_000;
@@ -850,24 +850,24 @@ if (
 }
 
 const BOOTSTRAP_SCAFFOLD_NOTE =
-  "`.sandcastle/bootstrap.sh` was generated from your Project profile during init (user-editable scaffold; init does not run or validate it)";
+  "`.archloop/bootstrap.sh` was generated from your Project profile during init (user-editable scaffold; init does not run or validate it)";
 
 const blankBootstrapNextStep = `${BOOTSTRAP_SCAFFOLD_NOTE}. The blank template does not run bootstrap unless you wire \`sandbox.onSandboxReady\` yourself`;
 
 const nonBlankBootstrapNextStep = `${BOOTSTRAP_SCAFFOLD_NOTE}. Non-blank templates run it from \`sandbox.onSandboxReady\` with a 5-minute default hook timeout (${BOOTSTRAP_HOOK_TIMEOUT_MS_LITERAL} ms) after the worktree is mounted and before the agent starts — not during image build. Customize the script for your stack; raise \`timeoutMs\` in \`main.mts\` if installs need longer`;
 
 export const runMainCommand = (mainFilename: string): string =>
-  `tsx .sandcastle/${mainFilename}`;
+  `tsx .archloop/${mainFilename}`;
 
-const sandcastleNpmScript = (mainFilename: string): string =>
-  `tsx .sandcastle/${mainFilename}`;
+const archloopNpmScript = (mainFilename: string): string =>
+  `tsx .archloop/${mainFilename}`;
 
 const require = createRequire(import.meta.url);
-const SANDCASTLE_PACKAGE_VERSION = (
+const ARCHLOOP_PACKAGE_VERSION = (
   require("../package.json") as { version: string }
 ).version;
 
-export const SANDCASTLE_NPM_PACKAGE = "@ai-hero/sandcastle";
+export const ARCHLOOP_NPM_PACKAGE = "@yibeibankaishui/archloop";
 export const TSX_NPM_PACKAGE = "tsx";
 const TSX_VERSION_RANGE = "^4.21.0";
 
@@ -879,7 +879,7 @@ export type ProjectPackageSetup =
 
 export interface EnsureProjectPackageOptions {
   mainFilename: string;
-  sandcastleVersion?: string;
+  archloopVersion?: string;
 }
 
 export interface EnsureProjectPackageResult {
@@ -891,10 +891,10 @@ const defaultPackageName = (repoDir: string): string => {
   const raw = basename(repoDir)
     .replace(/[^a-z0-9-_.]/gi, "-")
     .toLowerCase();
-  return raw.length > 0 ? raw : "sandcastle-project";
+  return raw.length > 0 ? raw : "archloop-project";
 };
 
-const sandcastleDevDependencyRange = (version: string): string => `^${version}`;
+const archloopDevDependencyRange = (version: string): string => `^${version}`;
 
 const copyPackageJsonRecord = (value: unknown): Record<string, string> =>
   typeof value === "object" && value !== null
@@ -943,11 +943,10 @@ export const ensureProjectPackage = (
 ): Effect.Effect<EnsureProjectPackageResult, Error, FileSystem.FileSystem> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const sandcastleVersion =
-      options.sandcastleVersion ?? SANDCASTLE_PACKAGE_VERSION;
+    const archloopVersion = options.archloopVersion ?? ARCHLOOP_PACKAGE_VERSION;
     const pkgPath = join(repoDir, "package.json");
-    const script = sandcastleNpmScript(options.mainFilename);
-    const sandcastleRange = sandcastleDevDependencyRange(sandcastleVersion);
+    const script = archloopNpmScript(options.mainFilename);
+    const archloopRange = archloopDevDependencyRange(archloopVersion);
     const parsed = yield* readPackageJson(fs, pkgPath);
 
     if (parsed.tag === "invalid") {
@@ -958,9 +957,9 @@ export const ensureProjectPackage = (
       const pkg: Record<string, unknown> = {
         name: defaultPackageName(repoDir),
         private: true,
-        scripts: { sandcastle: script },
+        scripts: { archloop: script },
         devDependencies: {
-          [SANDCASTLE_NPM_PACKAGE]: sandcastleRange,
+          [ARCHLOOP_NPM_PACKAGE]: archloopRange,
           [TSX_NPM_PACKAGE]: TSX_VERSION_RANGE,
         },
       };
@@ -971,14 +970,14 @@ export const ensureProjectPackage = (
     const pkg = parsed.pkg;
     let changed = false;
     const scripts = copyPackageJsonRecord(pkg.scripts);
-    if (scripts.sandcastle === undefined) {
-      scripts.sandcastle = script;
+    if (scripts.archloop === undefined) {
+      scripts.archloop = script;
       changed = true;
     }
 
     const devDependencies = copyPackageJsonRecord(pkg.devDependencies);
-    if (devDependencies[SANDCASTLE_NPM_PACKAGE] === undefined) {
-      devDependencies[SANDCASTLE_NPM_PACKAGE] = sandcastleRange;
+    if (devDependencies[ARCHLOOP_NPM_PACKAGE] === undefined) {
+      devDependencies[ARCHLOOP_NPM_PACKAGE] = archloopRange;
       changed = true;
     }
     if (devDependencies[TSX_NPM_PACKAGE] === undefined) {
@@ -1017,12 +1016,12 @@ const packageScriptNextStep = (
   mainFilename: string,
 ): string => {
   if (packageSetup === "created" || packageSetup === "updated") {
-    return `package.json was configured with ${SANDCASTLE_NPM_PACKAGE}, ${TSX_NPM_PACKAGE}, and a "sandcastle" script during init`;
+    return `package.json was configured with ${ARCHLOOP_NPM_PACKAGE}, ${TSX_NPM_PACKAGE}, and a "archloop" script during init`;
   }
   if (packageSetup === "invalid-skipped") {
-    return `Fix package.json (invalid JSON), then run: npm init -y && npm install --save-dev ${SANDCASTLE_NPM_PACKAGE} ${TSX_NPM_PACKAGE} && add "sandcastle": "${runMainCommand(mainFilename)}" to scripts`;
+    return `Fix package.json (invalid JSON), then run: npm init -y && npm install --save-dev ${ARCHLOOP_NPM_PACKAGE} ${TSX_NPM_PACKAGE} && add "archloop": "${runMainCommand(mainFilename)}" to scripts`;
   }
-  return `Add "sandcastle": "${runMainCommand(mainFilename)}" to your package.json scripts`;
+  return `Add "archloop": "${runMainCommand(mainFilename)}" to your package.json scripts`;
 };
 
 const DEPENDENCY_INSTALL_NEXT_STEP =
@@ -1068,10 +1067,10 @@ export function getNextStepsLines(
     let step = 1;
     const lines: string[] = [
       "Next steps:",
-      `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
-      "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
-      `${step++}. Read and customize .sandcastle/prompt.md to describe what you want the agent to do`,
-      `${step++}. Customize .sandcastle/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs and can mix installed agent providers after init`,
+      `${step++}. Set the required env vars in .archloop/.env (see .archloop/.env.example)`,
+      "   If you want to use your Claude subscription instead of an API key, see https://github.com/yibeibankaishui/archloop/issues/191",
+      `${step++}. Read and customize .archloop/prompt.md to describe what you want the agent to do`,
+      `${step++}. Customize .archloop/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs and can mix installed agent providers after init`,
       `${step++}. ${packageScriptStep}`,
     ];
     lines.push(`${step++}. ${blankBootstrapNextStep}`);
@@ -1088,7 +1087,7 @@ export function getNextStepsLines(
       lines.push(`${step++}. ${line}`);
     }
     step = appendOptionalNumberedStep(lines, step, dependencyInstallStep);
-    lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
+    lines.push(`${step++}. Run \`npm run archloop\` to start the agent`);
     return lines;
   }
 
@@ -1096,16 +1095,16 @@ export function getNextStepsLines(
   let step = 1;
   const lines: string[] = [
     "Next steps:",
-    `${step++}. Set the required env vars in .sandcastle/.env (see .sandcastle/.env.example)`,
-    "   If you want to use your Claude subscription instead of an API key, see https://github.com/mattpocock/sandcastle/issues/191",
+    `${step++}. Set the required env vars in .archloop/.env (see .archloop/.env.example)`,
+    "   If you want to use your Claude subscription instead of an API key, see https://github.com/yibeibankaishui/archloop/issues/191",
     `${step++}. ${packageScriptStep}`,
-    `${step++}. Edit .sandcastle/${mainFilename} to mix installed agent providers after init; the selected default agent only seeds the scaffolded example`,
+    `${step++}. Edit .archloop/${mainFilename} to mix installed agent providers after init; the selected default agent only seeds the scaffolded example`,
     `${step++}. ${nonBlankBootstrapNextStep}`,
-    `${step++}. Read and customize the prompt files in .sandcastle/ — they shape what the agent does`,
+    `${step++}. Read and customize the prompt files in .archloop/ — they shape what the agent does`,
   ];
   if (hasReviewer) {
     lines.push(
-      `${step++}. Customize .sandcastle/CODING_STANDARDS.md with your project's standards — the reviewer agent loads it during review`,
+      `${step++}. Customize .archloop/CODING_STANDARDS.md with your project's standards — the reviewer agent loads it during review`,
     );
   }
   if (presetHintText) {
@@ -1118,7 +1117,7 @@ export function getNextStepsLines(
     lines.push(`${step++}. ${line}`);
   }
   step = appendOptionalNumberedStep(lines, step, dependencyInstallStep);
-  lines.push(`${step++}. Run \`npm run sandcastle\` to start the agent`);
+  lines.push(`${step++}. Run \`npm run archloop\` to start the agent`);
   return lines;
 }
 
@@ -1360,8 +1359,8 @@ const rewriteMainFile = (
   });
 
 const PRESET_COPY_TO_WORKTREE_PATHS = [
-  ".sandcastle/agents",
-  ".sandcastle/skills",
+  ".archloop/agents",
+  ".archloop/skills",
 ] as const;
 
 const parseQuotedArrayItems = (raw: string): string[] =>
@@ -1412,9 +1411,9 @@ const rewriteMainCopyToWorktreeForPresets = (
   });
 
 /**
- * When the user opted out of the Sandcastle label, strip ` --label Sandcastle`
- * and ` -l Sandcastle` from scaffolded text files so that `gh issue list`
- * commands work without a Sandcastle label filter.
+ * When the user opted out of the archLoop label, strip ` --label archLoop`
+ * and ` -l archLoop` from scaffolded text files so that `gh issue list`
+ * commands work without a archLoop label filter.
  */
 const rewritePromptFiles = (
   configDir: string,
@@ -1433,8 +1432,8 @@ const rewritePromptFiles = (
             .readFileString(filePath)
             .pipe(Effect.mapError((e) => new Error(e.message)));
           const updated = content
-            .replace(/ --label Sandcastle/g, "")
-            .replace(/ -l Sandcastle/g, "");
+            .replace(/ --label archLoop/g, "")
+            .replace(/ -l archLoop/g, "");
           if (updated !== content) {
             yield* fs
               .writeFileString(filePath, updated)
@@ -1591,8 +1590,8 @@ export interface ScaffoldOptions {
   presetAgentIds?: readonly string[];
   /** Resolved capability pack selection from `resolveCapabilityInitOptions`. */
   capabilityInit?: ResolvedCapabilityInit;
-  /** Sandcastle package version for generated devDependency (defaults to this CLI's version). */
-  sandcastleVersion?: string;
+  /** archLoop package version for generated devDependency (defaults to this CLI's version). */
+  archloopVersion?: string;
   /** Skip `npm install` after package.json changes (tests). */
   skipDependencyInstall?: boolean;
   /** When set, controls user-approved project-local miniprogram-ci installation during Mini Program init. */
@@ -1653,7 +1652,7 @@ export const scaffold = (
       miniprogramCiInstallApproved,
     } = options;
     const fs = yield* FileSystem.FileSystem;
-    const configDir = join(repoDir, ".sandcastle");
+    const configDir = join(repoDir, ".archloop");
     const capabilityBlankTemplateWarning =
       resolveCapabilityBlankTemplateWarning(capabilityInit, templateName);
 
@@ -1663,7 +1662,7 @@ export const scaffold = (
     if (exists) {
       yield* Effect.fail(
         new Error(
-          ".sandcastle/ directory already exists. Remove it first if you want to re-initialize.",
+          ".archloop/ directory already exists. Remove it first if you want to re-initialize.",
         ),
       );
     }
@@ -1745,7 +1744,7 @@ export const scaffold = (
       ...buildProjectProfileTemplateArgs(projectProfile),
     });
 
-    // Strip --label Sandcastle from prompt files when the user declined label creation
+    // Strip --label archLoop from prompt files when the user declined label creation
     if (!createLabel) {
       yield* rewritePromptFiles(configDir);
     }
@@ -1802,7 +1801,7 @@ export const scaffold = (
 
     const packageResult = yield* ensureProjectPackage(repoDir, {
       mainFilename,
-      sandcastleVersion: options.sandcastleVersion,
+      archloopVersion: options.archloopVersion,
     });
     const shouldInstallDependencies =
       packageResult.needsInstall && !skipDependencyInstall;

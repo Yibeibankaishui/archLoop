@@ -20,13 +20,13 @@
 // issues are picked up after each round of merges.
 //
 // Usage:
-//   npm run sandcastle
-// Or directly: tsx .sandcastle/main.mts
+//   npm run archloop
+// Or directly: tsx .archloop/main.mts
 
 import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
-import * as sandcastle from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import * as archloop from "@yibeibankaishui/archloop";
+import { docker } from "@yibeibankaishui/archloop/sandboxes/docker";
 import {
   enrichReadyIssuesWithBlockers,
   type BlockerRef,
@@ -167,7 +167,7 @@ function canonicalizeIssueBranch(issueId: string): string {
   if (!id) {
     throw new Error("Cannot canonicalize branch: issue id is empty.");
   }
-  return `sandcastle/issue-${id}`;
+  return `archloop/issue-${id}`;
 }
 
 function canonicalizePlannedIssues(
@@ -222,26 +222,26 @@ const EMPTY_RUN_CIRCUIT_BREAKER_THRESHOLD = 3;
 
 // Per-role idle-timeout defaults (seconds). Planner is short and API-bound,
 // implementers can legitimately go quiet for many minutes while a test suite
-// runs. SANDCASTLE_IDLE_TIMEOUT is the shared fallback. See issue #97.
+// runs. ARCHLOOP_IDLE_TIMEOUT is the shared fallback. See issue #97.
 const FALLBACK_IDLE_TIMEOUT_SECONDS = parseIntEnv(
-  "SANDCASTLE_IDLE_TIMEOUT",
+  "ARCHLOOP_IDLE_TIMEOUT",
   undefined,
 );
 const PLANNER_IDLE_TIMEOUT_SECONDS = parseIntEnv(
-  "SANDCASTLE_PLANNER_IDLE_TIMEOUT",
+  "ARCHLOOP_PLANNER_IDLE_TIMEOUT",
   FALLBACK_IDLE_TIMEOUT_SECONDS ?? 300,
 );
 const IMPLEMENTER_IDLE_TIMEOUT_SECONDS = parseIntEnv(
-  "SANDCASTLE_IMPLEMENTER_IDLE_TIMEOUT",
+  "ARCHLOOP_IMPLEMENTER_IDLE_TIMEOUT",
   FALLBACK_IDLE_TIMEOUT_SECONDS ?? 1500,
 );
 
 // Planner auto-retries once on AgentIdleTimeoutError. Implementers do NOT
 // auto-retry — their work may be partially committed and re-running would
-// duplicate effort. Set SANDCASTLE_NO_PLANNER_RETRY=1 to opt out.
+// duplicate effort. Set ARCHLOOP_NO_PLANNER_RETRY=1 to opt out.
 const PLANNER_RETRY_ON_IDLE =
-  process.env.SANDCASTLE_NO_PLANNER_RETRY !== "1" &&
-  process.env.SANDCASTLE_NO_PLANNER_RETRY !== "true";
+  process.env.ARCHLOOP_NO_PLANNER_RETRY !== "1" &&
+  process.env.ARCHLOOP_NO_PLANNER_RETRY !== "true";
 
 function parseIntEnv(name: string, fallback: number): number;
 function parseIntEnv(name: string, fallback: undefined): number | undefined;
@@ -267,7 +267,7 @@ const hooks = {
   sandbox: {
     onSandboxReady: [
       {
-        command: "bash .sandcastle/bootstrap.sh",
+        command: "bash .archloop/bootstrap.sh",
         timeoutMs: 300_000,
       },
     ],
@@ -281,15 +281,15 @@ const sandboxProvider = docker({
 // Run the planner with a single retry on AgentIdleTimeoutError. See issue #97.
 async function runPlanner(
   readyIssuesJson: string,
-): Promise<Awaited<ReturnType<typeof sandcastle.run>>> {
-  const attempt = (): Promise<Awaited<ReturnType<typeof sandcastle.run>>> =>
-    sandcastle.run({
+): Promise<Awaited<ReturnType<typeof archloop.run>>> {
+  const attempt = (): Promise<Awaited<ReturnType<typeof archloop.run>>> =>
+    archloop.run({
       hooks,
       sandbox: sandboxProvider,
       name: "planner",
       maxIterations: 1,
-      agent: sandcastle.claudeCode("claude-opus-4-6"),
-      promptFile: "./.sandcastle/plan-prompt.md",
+      agent: archloop.claudeCode("claude-opus-4-6"),
+      promptFile: "./.archloop/plan-prompt.md",
       promptArgs: {
         ISSUES_JSON: readyIssuesJson,
       },
@@ -299,7 +299,7 @@ async function runPlanner(
   try {
     return await attempt();
   } catch (err) {
-    if (PLANNER_RETRY_ON_IDLE && sandcastle.isAgentIdleTimeoutError(err)) {
+    if (PLANNER_RETRY_ON_IDLE && archloop.isAgentIdleTimeoutError(err)) {
       console.warn(
         `[planner] Idle timeout after ${PLANNER_IDLE_TIMEOUT_SECONDS}s — retrying once.`,
       );
@@ -375,18 +375,18 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // A planner failure (including AgentIdleTimeoutError after retry) is logged
   // and the iteration is skipped, mirroring how implementer failures are
   // already handled below. This prevents a single planner stall from killing
-  // the whole multi-iteration run. See sandcastle issue #97.
+  // the whole multi-iteration run. See archloop issue #97.
   // -------------------------------------------------------------------------
   const readyIssuesJson = await enrichReadyIssuesJson(
     await listReadyIssuesJson(),
   );
   const allowedIssueIds = extractAllowedIssueIds(readyIssuesJson);
 
-  let plan: Awaited<ReturnType<typeof sandcastle.run>>;
+  let plan: Awaited<ReturnType<typeof archloop.run>>;
   try {
     plan = await runPlanner(readyIssuesJson);
   } catch (err) {
-    if (sandcastle.isAgentIdleTimeoutError(err)) {
+    if (archloop.isAgentIdleTimeoutError(err)) {
       console.error(
         `  ✗ planner failed: AgentIdleTimeoutError after ${PLANNER_IDLE_TIMEOUT_SECONDS}s${PLANNER_RETRY_ON_IDLE ? " (and one retry)" : ""}. Skipping iteration ${iteration}.`,
       );
@@ -451,7 +451,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
 
   const settled = await Promise.allSettled(
     activeIssues.map(async (issue) => {
-      const sandbox = await sandcastle.createSandbox({
+      const sandbox = await archloop.createSandbox({
         branch: issue.branch,
         sandbox: sandboxProvider,
         hooks,
@@ -477,8 +477,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           implement = await sandbox.run({
             name: "implementer",
             maxIterations: 100,
-            agent: sandcastle.claudeCode("claude-sonnet-4-6"),
-            promptFile: "./.sandcastle/implement-prompt.md",
+            agent: archloop.claudeCode("claude-sonnet-4-6"),
+            promptFile: "./.archloop/implement-prompt.md",
             promptArgs: {
               TASK_ID: issue.id,
               ISSUE_TITLE: issue.title,
@@ -508,8 +508,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           const review = await sandbox.run({
             name: "reviewer",
             maxIterations: 1,
-            agent: sandcastle.claudeCode("claude-sonnet-4-6"),
-            promptFile: "./.sandcastle/review-prompt.md",
+            agent: archloop.claudeCode("claude-sonnet-4-6"),
+            promptFile: "./.archloop/review-prompt.md",
             promptArgs: {
               BRANCH: issue.branch,
             },
@@ -575,13 +575,13 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   // The {{BRANCHES}} and {{ISSUES}} prompt arguments are lists that the agent
   // uses to know which branches to merge and which issues to close.
   // -------------------------------------------------------------------------
-  await sandcastle.run({
+  await archloop.run({
     hooks,
     sandbox: sandboxProvider,
     name: "merger",
     maxIterations: 1,
-    agent: sandcastle.claudeCode("claude-sonnet-4-6"),
-    promptFile: "./.sandcastle/merge-prompt.md",
+    agent: archloop.claudeCode("claude-sonnet-4-6"),
+    promptFile: "./.archloop/merge-prompt.md",
     promptArgs: {
       // A markdown list of branch names, one per line.
       BRANCHES: completedBranches.map((b) => `- ${b}`).join("\n"),

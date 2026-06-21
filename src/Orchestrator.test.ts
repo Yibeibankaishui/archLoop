@@ -127,7 +127,7 @@ const makeTestSandboxFactory = (
         // Acquire: create fresh worktree from host repo
         Effect.promise(async () => {
           await rm(sandboxBaseDir, { recursive: true, force: true });
-          const branchName = `sandcastle/test-${++branchCounter}`;
+          const branchName = `archloop/test-${++branchCounter}`;
           await execAsync(
             `git worktree add -b "${branchName}" "${sandboxBaseDir}" HEAD`,
             { cwd: hostRepoDir },
@@ -791,7 +791,7 @@ describe("OrchestrateResult", () => {
         Effect.acquireUseRelease(
           Effect.promise(async () => {
             await rm(sandboxBaseDir, { recursive: true, force: true });
-            const branchName = `sandcastle/test-${++branchCounter}`;
+            const branchName = `archloop/test-${++branchCounter}`;
             await execAsync(
               `git worktree add -b "${branchName}" "${sandboxBaseDir}" HEAD`,
               { cwd: hostDir },
@@ -1907,7 +1907,7 @@ describe("Orchestrator error handling", () => {
     }
   });
 
-  it("enriches cursor auth stderr with sandcastle env guidance", async () => {
+  it("enriches cursor auth stderr with archloop env guidance", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "orch-cursor-auth-guidance-"));
     const cursorProvider = cursorFactory("auto");
     const authMessage =
@@ -1938,8 +1938,8 @@ describe("Orchestrator error handling", () => {
       expect(err).toBeInstanceOf(AgentError);
       if (err instanceof AgentError) {
         expect(err.message).toContain("cursor exited with code 1:");
-        expect(err.message).toContain("sandcastle env init");
-        expect(err.message).toContain("sandcastle env set CURSOR_API_KEY");
+        expect(err.message).toContain("archloop env init");
+        expect(err.message).toContain("archloop env set CURSOR_API_KEY");
         expect(err.message).toContain(`Original error: ${authMessage}`);
       }
     }
@@ -3493,7 +3493,7 @@ describe("Session capture integration", () => {
         Effect.acquireUseRelease(
           Effect.promise(async () => {
             await rm(sandboxBaseDir, { recursive: true, force: true });
-            const branchName = `sandcastle/test-${++branchCounter}`;
+            const branchName = `archloop/test-${++branchCounter}`;
             await execAsync(
               `git worktree add -b "${branchName}" "${sandboxBaseDir}" HEAD`,
               { cwd: hostRepoDir },

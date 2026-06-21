@@ -1,6 +1,6 @@
 # Mini Program runtime debugging (optional add-on)
 
-This context applies only when the **runtime-debug** capability add-on was selected during init. It supplements — but does not replace — the core verification loop in `.sandcastle/verify.sh`.
+This context applies only when the **runtime-debug** capability add-on was selected during init. It supplements — but does not replace — the core verification loop in `.archloop/verify.sh`.
 
 ## When to use runtime debugging
 
@@ -12,9 +12,9 @@ Use WeChat Developer Tools / MCP guidance **only when the task needs runtime evi
 - screenshots or page-state inspection
 - mocked `wx.*` interactions in the IDE
 
-Do **not** start WeChat Developer Tools for every task. Prefer `.sandcastle/verify.sh` and `debug/wx-check.log` for the default completion loop unless the user or task explicitly requires runtime debugging evidence.
+Do **not** start WeChat Developer Tools for every task. Prefer `.archloop/verify.sh` and `debug/wx-check.log` for the default completion loop unless the user or task explicitly requires runtime debugging evidence.
 
-Runtime debugging is **not a completion standard** unless the task explicitly asks for simulator, debugger, screenshot, console, or page-state proof. It does not replace `.sandcastle/verify.sh` or the final verification summary contract.
+Runtime debugging is **not a completion standard** unless the task explicitly asks for simulator, debugger, screenshot, console, or page-state proof. It does not replace `.archloop/verify.sh` or the final verification summary contract.
 
 ## Recommended MCP toolchain
 
@@ -22,7 +22,7 @@ Runtime debugging is **not a completion standard** unless the task explicitly as
 
 **Experimental fallback only:** [FliPPeDround `wechat-devtools-mcp`](https://github.com/FliPPeDround/wechat-devtools-mcp) — lightweight alternative; do not treat it as the default workflow.
 
-Sandcastle init does **not** install either package, generate MCP server configuration, or start DevTools. Configure MCP and DevTools on the host when runtime evidence is needed.
+archLoop init does **not** install either package, generate MCP server configuration, or start DevTools. Configure MCP and DevTools on the host when runtime evidence is needed.
 
 ## WeChat Developer Tools prerequisites
 
@@ -48,10 +48,10 @@ Use the normal DevTools CLI **open / auto** flow when MCP cannot attach because 
 
 ## Layering reminder
 
-| Layer               | Tooling                                              | Role                                                    |
-| ------------------- | ---------------------------------------------------- | ------------------------------------------------------- |
-| Local checks        | `.sandcastle/verify.sh`, `wx:check`, native verifier | Default completion loop                                 |
-| Platform validation | `miniprogram-ci` preview/upload                      | Optional CI-style platform truth                        |
-| Runtime debugging   | WaterTian `wechat-devtools-mcp` + DevTools           | Optional simulator/runtime truth when explicitly needed |
+| Layer               | Tooling                                            | Role                                                    |
+| ------------------- | -------------------------------------------------- | ------------------------------------------------------- |
+| Local checks        | `.archloop/verify.sh`, `wx:check`, native verifier | Default completion loop                                 |
+| Platform validation | `miniprogram-ci` preview/upload                    | Optional CI-style platform truth                        |
+| Runtime debugging   | WaterTian `wechat-devtools-mcp` + DevTools         | Optional simulator/runtime truth when explicitly needed |
 
 Keep runtime debugging separate from `miniprogram-ci` preview/upload automation — use the right layer for each question.

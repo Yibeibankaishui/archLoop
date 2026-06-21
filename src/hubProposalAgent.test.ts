@@ -44,7 +44,7 @@ describe("createHubProposalAgentInvoker", () => {
     else process.env.CURSOR_API_KEY = originalCursorApiKey;
   });
 
-  it("fails fast with sandcastle env guidance when credentials are missing", async () => {
+  it("fails fast with archloop env guidance when credentials are missing", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "hub-proposal-preflight-"));
     const invoker = createHubProposalAgentInvoker({
       cwd,
@@ -64,6 +64,6 @@ describe("createHubProposalAgentInvoker", () => {
         preparedContext: {},
         runDir: cwd,
       }),
-    ).rejects.toThrow(/sandcastle env init/);
+    ).rejects.toThrow(/archloop env init/);
   });
 });

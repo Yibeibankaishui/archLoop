@@ -113,7 +113,7 @@ process.exit(1);
     env: {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      SANDCASTLE_BD_PATH: bdPath,
+      ARCHLOOP_BD_PATH: bdPath,
       BD_STATE_FILE: stateFile,
       XDG_DATA_HOME: join(repoDir, ".test-xdg-data"),
     },
@@ -150,7 +150,7 @@ describe("doctorHubTaskState", () => {
         runId: context.runId,
         batchId: context.batchId,
         taskId: "bd-qa",
-        branch: "sandcastle/bd-qa-qa-incident",
+        branch: "archloop/bd-qa-qa-incident",
         createdAt: "2026-06-20T10:15:00.000Z",
         status: "waiting_for_merge",
         commitCount: 1,
@@ -176,7 +176,7 @@ describe("doctorHubTaskState", () => {
         reason: "state_inconsistent",
         repairable: true,
         targetStatus: "waiting_for_merge",
-        nextAction: "sandcastle tasks repair-state bd-qa",
+        nextAction: "archloop tasks repair-state bd-qa",
       }),
     );
     expect(JSON.parse(await readFile(stateFile, "utf8"))).toEqual(initialTasks);
@@ -210,7 +210,7 @@ describe("doctorHubTaskState", () => {
         runId: context.runId,
         batchId: context.batchId,
         taskId: "bd-preview",
-        branch: "sandcastle/bd-preview-preview-repair",
+        branch: "archloop/bd-preview-preview-repair",
         createdAt: "2026-06-20T10:15:00.000Z",
         status: "waiting_for_merge",
         commitCount: 1,
@@ -269,7 +269,7 @@ describe("doctorHubTaskState", () => {
         runId: context.runId,
         batchId: context.batchId,
         taskId: "bd-apply",
-        branch: "sandcastle/bd-apply-apply-repair",
+        branch: "archloop/bd-apply-apply-repair",
         createdAt: "2026-06-20T10:15:00.000Z",
         status: "waiting_for_merge",
         commitCount: 1,
@@ -305,7 +305,7 @@ describe("doctorHubTaskState", () => {
         claim: {
           runId: "run-apply",
           batchId: "batch-apply",
-          branch: "sandcastle/bd-apply-apply-repair",
+          branch: "archloop/bd-apply-apply-repair",
         },
       },
     });
@@ -328,7 +328,7 @@ describe("doctorHubTaskState", () => {
           claim: {
             runId: "run-old",
             batchId: "batch-old",
-            branch: "sandcastle/old-branch",
+            branch: "archloop/old-branch",
             claimedAt: "2026-06-19T10:00:00.000Z",
           },
         },
@@ -348,7 +348,7 @@ describe("doctorHubTaskState", () => {
         runId: context.runId,
         batchId: context.batchId,
         taskId: "bd-stale-claim",
-        branch: "sandcastle/bd-stale-claim-stale-claim",
+        branch: "archloop/bd-stale-claim-stale-claim",
         createdAt: "2026-06-20T10:15:00.000Z",
         status: "waiting_for_merge",
         commitCount: 1,
@@ -376,7 +376,7 @@ describe("doctorHubTaskState", () => {
     expect(task.metadata.claim).toMatchObject({
       runId: "run-new",
       batchId: "batch-new",
-      branch: "sandcastle/bd-stale-claim-stale-claim",
+      branch: "archloop/bd-stale-claim-stale-claim",
     });
   });
 
@@ -395,7 +395,7 @@ describe("doctorHubTaskState", () => {
           claim: {
             runId: "run-dirty",
             batchId: "batch-dirty",
-            branch: "sandcastle/bd-dirty-dirty-worktree",
+            branch: "archloop/bd-dirty-dirty-worktree",
             claimedAt: "2026-06-20T10:00:00.000Z",
           },
         },
@@ -445,7 +445,7 @@ describe("doctorHubTaskState", () => {
     expect(JSON.parse(await readFile(stateFile, "utf8"))).toEqual(initialTasks);
   });
 
-  it("repairs multiple Sandcastle status labels while preserving user labels", async () => {
+  it("repairs multiple archLoop status labels while preserving user labels", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-task-repair-labels-"));
     await initRepo(repoDir);
 
@@ -460,7 +460,7 @@ describe("doctorHubTaskState", () => {
           claim: {
             runId: "run-labels",
             batchId: "batch-labels",
-            branch: "sandcastle/bd-labels-label-pollution",
+            branch: "archloop/bd-labels-label-pollution",
             claimedAt: "2026-06-20T10:00:00.000Z",
           },
         },
@@ -526,7 +526,7 @@ describe("doctorHubTaskState", () => {
           claim: {
             runId: "run-metadata",
             batchId: "batch-metadata",
-            branch: "sandcastle/bd-metadata-metadata-pollution",
+            branch: "archloop/bd-metadata-metadata-pollution",
             claimedAt: "2026-06-20T10:00:00.000Z",
           },
         },
@@ -653,7 +653,7 @@ describe("doctorHubTaskState", () => {
           claim: {
             runId: "run-failed",
             batchId: "batch-failed",
-            branch: "sandcastle/bd-failed-failed-with-work",
+            branch: "archloop/bd-failed-failed-with-work",
             claimedAt: "2026-06-20T10:00:00.000Z",
           },
         },
@@ -678,7 +678,7 @@ describe("doctorHubTaskState", () => {
         taskId: "bd-failed",
         reason: "failed_branch_work",
         repairable: false,
-        nextAction: "sandcastle tasks recover bd-failed",
+        nextAction: "archloop tasks recover bd-failed",
       }),
     );
   });
@@ -702,7 +702,7 @@ describe("doctorHubTaskState", () => {
           claim: {
             runId: "run-empty",
             batchId: "batch-empty",
-            branch: "sandcastle/bd-failed-empty-failed-empty",
+            branch: "archloop/bd-failed-empty-failed-empty",
             claimedAt: "2026-06-20T10:00:00.000Z",
           },
         },
@@ -723,7 +723,7 @@ describe("doctorHubTaskState", () => {
         runId: context.runId,
         batchId: context.batchId,
         taskId: "bd-failed-empty",
-        branch: "sandcastle/bd-failed-empty-failed-empty",
+        branch: "archloop/bd-failed-empty-failed-empty",
         createdAt: "2026-06-20T10:15:00.000Z",
         status: "failed",
         failureReason: "agent_failed",
@@ -767,7 +767,7 @@ describe("doctorHubTaskState", () => {
           claim: {
             runId: "run-done",
             batchId: "batch-done",
-            branch: "sandcastle/bd-done-done-task",
+            branch: "archloop/bd-done-done-task",
             claimedAt: "2026-06-20T10:00:00.000Z",
           },
         },

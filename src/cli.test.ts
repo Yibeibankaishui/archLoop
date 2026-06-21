@@ -39,7 +39,7 @@ const commitFile = async (
   await execAsync(`git commit -m "${message}"`, { cwd: dir });
 };
 
-const seedSandcastlePackage = async (dir: string) => {
+const seedArchloopPackage = async (dir: string) => {
   const { version } = JSON.parse(
     await readFile(join(process.cwd(), "package.json"), "utf-8"),
   ) as { version: string };
@@ -51,10 +51,10 @@ const seedSandcastlePackage = async (dir: string) => {
         name: "cli-host",
         private: true,
         scripts: {
-          sandcastle: "tsx .sandcastle/main.mts",
+          archloop: "tsx .archloop/main.mts",
         },
         devDependencies: {
-          "@ai-hero/sandcastle": `^${version}`,
+          "@yibeibankaishui/archloop": `^${version}`,
           tsx: "^4.21.0",
         },
       },
@@ -117,14 +117,14 @@ const withBdEnv = (
     ...process.env,
     ...mergedEnv,
     PATH: `${dirname(bdPath)}:${mergedEnv.PATH ?? process.env.PATH ?? ""}`,
-    SANDCASTLE_BD_PATH: bdPath,
+    ARCHLOOP_BD_PATH: bdPath,
   };
 };
 
-describe("sandcastle CLI", () => {
+describe("archloop CLI", () => {
   it("shows help with --help flag", async () => {
     const { stdout } = await runCli("--help", process.cwd());
-    expect(stdout).toContain("sandcastle");
+    expect(stdout).toContain("archloop");
     expect(stdout).toContain("docker");
     expect(stdout).toContain("init");
     expect(stdout).toContain("run");
@@ -145,7 +145,7 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("remove-image");
   });
 
-  it("docker build-image errors when .sandcastle/ is missing", async () => {
+  it("docker build-image errors when .archloop/ is missing", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
@@ -154,7 +154,7 @@ describe("sandcastle CLI", () => {
       await runCli("docker build-image", hostDir);
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
-      expect(cliFailureOutput(err)).toContain("No .sandcastle/ found");
+      expect(cliFailureOutput(err)).toContain("No .archloop/ found");
     }
   });
 
@@ -232,7 +232,7 @@ describe("sandcastle CLI", () => {
       ...process.env,
       XDG_DATA_HOME: dataDir,
     });
-    expect(stdout).toContain(join(dataDir, "sandcastle", ".env"));
+    expect(stdout).toContain(join(dataDir, "archloop", ".env"));
   });
 
   it("env show reports missing Hub env file guidance", async () => {
@@ -243,7 +243,7 @@ describe("sandcastle CLI", () => {
       XDG_DATA_HOME: dataDir,
     });
     expect(stdout).toContain("CURSOR_API_KEY");
-    expect(stdout).toContain("sandcastle env init");
+    expect(stdout).toContain("archloop env init");
     expect(stdout).toMatch(/hint:.*Cursor/i);
     expect(stdout).toContain(
       "https://cursor.com/docs/cli/reference/authentication",
@@ -281,8 +281,8 @@ describe("sandcastle CLI", () => {
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       const output = cliFailureOutput(err);
-      expect(output).toContain("sandcastle env set <key> <value>");
-      expect(output).toContain("sandcastle auth login codex");
+      expect(output).toContain("archloop env set <key> <value>");
+      expect(output).toContain("archloop auth login codex");
       expect(output).toMatch(/OPENAI_KEY.*API billing/i);
     }
   });
@@ -294,23 +294,23 @@ describe("sandcastle CLI", () => {
 
     const codex = await runCli("auth path codex", hostDir, env);
     expect(codex.stdout).toContain(
-      join(dataDir, "sandcastle", "hub", "auth", "codex"),
+      join(dataDir, "archloop", "hub", "auth", "codex"),
     );
 
     const github = await runCli("auth path github", hostDir, env);
     expect(github.stdout).toContain(
-      join(dataDir, "sandcastle", "hub", "auth", "github"),
+      join(dataDir, "archloop", "hub", "auth", "github"),
     );
   });
 
   it("auth show reports process env, Hub env file, Hub auth session, and missing guidance", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-hub-auth-"));
     const dataDir = join(hostDir, "xdg-data");
-    const authDir = join(dataDir, "sandcastle", "hub", "auth", "github");
+    const authDir = join(dataDir, "archloop", "hub", "auth", "github");
     await mkdir(authDir, { recursive: true });
     await writeFile(join(authDir, "hosts.yml"), "github.com: {}\n");
     await writeFile(
-      join(dataDir, "sandcastle", ".env"),
+      join(dataDir, "archloop", ".env"),
       "CURSOR_API_KEY=hub-cursor-key\n",
     );
 
@@ -326,10 +326,10 @@ describe("sandcastle CLI", () => {
 
     expect(stdout).toContain("codex: process env OPENAI_KEY=");
     expect(stdout).toContain("github: Hub auth dir/session");
-    expect(stdout).toContain(join(dataDir, "sandcastle", "hub", "auth"));
+    expect(stdout).toContain(join(dataDir, "archloop", "hub", "auth"));
     expect(stdout).toContain("cursor: Hub env file CURSOR_API_KEY=");
     expect(stdout).toContain("opencode: missing");
-    expect(stdout).toContain("sandcastle env set OPENCODE_API_KEY <value>");
+    expect(stdout).toContain("archloop env set OPENCODE_API_KEY <value>");
   });
 
   it("auth login fails with actionable commands in non-interactive mode", async () => {
@@ -344,9 +344,9 @@ describe("sandcastle CLI", () => {
       const output = cliFailureOutput(err);
       expect(output).toMatch(/Interactive codex login requires a TTY/i);
       expect(output).toContain(
-        `CODEX_HOME=${join(dataDir, "sandcastle", "hub", "auth", "codex")} codex login`,
+        `CODEX_HOME=${join(dataDir, "archloop", "hub", "auth", "codex")} codex login`,
       );
-      expect(output).toContain("sandcastle env set OPENAI_KEY <value>");
+      expect(output).toContain("archloop env set OPENAI_KEY <value>");
       expect(output).toMatch(/API billing|Codex\/ChatGPT CLI login/i);
     }
 
@@ -357,9 +357,9 @@ describe("sandcastle CLI", () => {
       const output = cliFailureOutput(err);
       expect(output).toMatch(/Interactive github login requires a TTY/i);
       expect(output).toContain(
-        `GH_CONFIG_DIR=${join(dataDir, "sandcastle", "hub", "auth", "github")} gh auth login --insecure-storage`,
+        `GH_CONFIG_DIR=${join(dataDir, "archloop", "hub", "auth", "github")} gh auth login --insecure-storage`,
       );
-      expect(output).toContain("sandcastle env set GH_TOKEN <value>");
+      expect(output).toContain("archloop env set GH_TOKEN <value>");
     }
   });
 
@@ -371,7 +371,7 @@ describe("sandcastle CLI", () => {
       XDG_DATA_HOME: dataDir,
     });
     expect(stdout).toContain(
-      join(dataDir, "sandcastle", "hub", "agent-roles.json"),
+      join(dataDir, "archloop", "hub", "agent-roles.json"),
     );
   });
 
@@ -434,7 +434,7 @@ describe("sandcastle CLI", () => {
       const output = cliFailureOutput(err);
       expect(output).toMatch(/non-interactive/i);
       expect(output).toMatch(
-        /sandcastle agent-config set-role planning --provider/i,
+        /archloop agent-config set-role planning --provider/i,
       );
     }
   });
@@ -480,7 +480,7 @@ describe("sandcastle CLI", () => {
     const runTriage = vi.fn().mockResolvedValue({
       outcome: "applied",
       runId: "run-triage-42",
-      runDir: join(hostDir, ".sandcastle", "runs", "run-triage-42"),
+      runDir: join(hostDir, ".archloop", "runs", "run-triage-42"),
       proposal: {
         summary: "Single task triage.",
         decisions: [
@@ -519,7 +519,7 @@ describe("sandcastle CLI", () => {
           const ref = yield* Ref.make([] as ReadonlyArray<DisplayEntry>);
           yield* cli([
             "node",
-            "sandcastle",
+            "archloop",
             "run",
             ".",
             "--flow",
@@ -687,14 +687,14 @@ exit 1
 
     expect(stdout).toContain("Hub project status");
     expect(stdout).toContain(hostDir);
-    expect(stdout).toContain("xdg-data/sandcastle");
+    expect(stdout).toContain("xdg-data/archloop");
     expect(stdout).toContain("Beads available");
     expect(stdout).toContain("Task store initialized");
     expect(stdout).toContain("Task board ready");
     expect(stdout).toContain("Task board total");
   });
 
-  it("tasks list points to sandcastle tasks init when the task store is missing", async () => {
+  it("tasks list points to archloop tasks init when the task store is missing", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
@@ -717,11 +717,11 @@ process.exit(1);
       await runCli("tasks list", hostDir, {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        SANDCASTLE_BD_PATH: bdPath,
+        ARCHLOOP_BD_PATH: bdPath,
       });
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
-      expect(cliFailureOutput(err)).toContain("sandcastle tasks init");
+      expect(cliFailureOutput(err)).toContain("archloop tasks init");
       expect(cliFailureOutput(err)).not.toContain("bd init");
     }
   });
@@ -743,7 +743,7 @@ process.exit(1);
 
     const { stdout: initStdout } = await runCli("tasks init", hostDir, {
       ...process.env,
-      SANDCASTLE_BD_PATH: bundledBd,
+      ARCHLOOP_BD_PATH: bundledBd,
       PATH: `${join(hostDir, "bin")}:${process.env.PATH ?? ""}`,
     });
     expect(initStdout).toContain("Initialized local Hub task store");
@@ -1377,9 +1377,9 @@ exit 1
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
     const dataHome = await mkdtemp(join(tmpdir(), "cli-xdg-data-"));
-    await mkdir(join(dataHome, "sandcastle", "hub"), { recursive: true });
+    await mkdir(join(dataHome, "archloop", "hub"), { recursive: true });
     await writeFile(
-      join(dataHome, "sandcastle", "hub", "agent-roles.json"),
+      join(dataHome, "archloop", "hub", "agent-roles.json"),
       `${JSON.stringify(
         {
           roles: {
@@ -1584,7 +1584,7 @@ gh_args_file=${JSON.stringify(ghArgsFile)}
 printf '%s\\n' "$*" >> "$gh_args_file"
 if [ "$1" = "issue" ] && [ "$2" = "list" ]; then
   cat <<'JSON'
-[{"number":68,"title":"Sync Hub task state","body":"Implement tasks sync","state":"OPEN","labels":[{"name":"Sandcastle"},{"name":"ready-for-agent"}],"updatedAt":"2026-06-11T12:00:00Z"}]
+[{"number":68,"title":"Sync Hub task state","body":"Implement tasks sync","state":"OPEN","labels":[{"name":"archLoop"},{"name":"ready-for-agent"}],"updatedAt":"2026-06-11T12:00:00Z"}]
 JSON
   exit 0
 fi
@@ -1691,7 +1691,7 @@ gh_args_file=${JSON.stringify(ghArgsFile)}
 printf '%s\\n' "$*" >> "$gh_args_file"
 if [ "$1" = "issue" ] && [ "$2" = "list" ]; then
   cat <<'JSON'
-[{"number":68,"title":"Sync Hub task state","body":"Implement tasks sync","state":"OPEN","labels":[{"name":"Sandcastle"},{"name":"ready-for-agent"}],"updatedAt":"2026-06-11T12:00:00Z"}]
+[{"number":68,"title":"Sync Hub task state","body":"Implement tasks sync","state":"OPEN","labels":[{"name":"archLoop"},{"name":"ready-for-agent"}],"updatedAt":"2026-06-11T12:00:00Z"}]
 JSON
   exit 0
 fi
@@ -1763,7 +1763,7 @@ gh_args_file=${JSON.stringify(ghArgsFile)}
 printf '%s\\n' "$*" >> "$gh_args_file"
 if [ "$1" = "issue" ] && [ "$2" = "list" ]; then
   cat <<'JSON'
-[{"number":68,"title":"Open issue","body":"Keep me","state":"OPEN","labels":[{"name":"Sandcastle"},{"name":"ready-for-agent"}],"updatedAt":"2026-06-11T12:00:00Z"},{"number":69,"title":"Closed history","body":"Import me too","state":"CLOSED","labels":[{"name":"Sandcastle"}],"updatedAt":"2026-06-11T13:00:00Z"}]
+[{"number":68,"title":"Open issue","body":"Keep me","state":"OPEN","labels":[{"name":"archLoop"},{"name":"ready-for-agent"}],"updatedAt":"2026-06-11T12:00:00Z"},{"number":69,"title":"Closed history","body":"Import me too","state":"CLOSED","labels":[{"name":"archLoop"}],"updatedAt":"2026-06-11T13:00:00Z"}]
 JSON
   exit 0
 fi
@@ -1847,7 +1847,7 @@ gh_args_file=${JSON.stringify(ghArgsFile)}
 printf '%s\\n' "$*" >> "$gh_args_file"
 if [ "$1" = "issue" ] && [ "$2" = "list" ]; then
   cat <<'JSON'
-[{"number":11,"title":"Done task","body":"Already done","state":"OPEN","labels":[{"name":"Sandcastle"},{"name":"ready-for-agent"}],"updatedAt":"2026-06-11T12:00:00Z"},{"number":12,"title":"Remote-only issue","state":"OPEN","labels":[{"name":"Sandcastle"},{"name":"ready-for-agent"}],"updatedAt":"2026-06-11T13:00:00Z"}]
+[{"number":11,"title":"Done task","body":"Already done","state":"OPEN","labels":[{"name":"archLoop"},{"name":"ready-for-agent"}],"updatedAt":"2026-06-11T12:00:00Z"},{"number":12,"title":"Remote-only issue","state":"OPEN","labels":[{"name":"archLoop"},{"name":"ready-for-agent"}],"updatedAt":"2026-06-11T13:00:00Z"}]
 JSON
   exit 0
 fi
@@ -1944,9 +1944,9 @@ process.exit(1);
     );
 
     const dataHome = await mkdtemp(join(tmpdir(), "cli-xdg-data-"));
-    await mkdir(join(dataHome, "sandcastle", "hub"), { recursive: true });
+    await mkdir(join(dataHome, "archloop", "hub"), { recursive: true });
     await writeFile(
-      join(dataHome, "sandcastle", "hub", "agent-roles.json"),
+      join(dataHome, "archloop", "hub", "agent-roles.json"),
       `${JSON.stringify(
         {
           roles: {
@@ -2202,7 +2202,7 @@ exit 1
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
-    await execAsync("git checkout -b sandcastle/bd-cli-doctor", {
+    await execAsync("git checkout -b archloop/bd-cli-doctor", {
       cwd: hostDir,
     });
     await commitFile(hostDir, "doctor.txt", "doctor", "doctor work");
@@ -2261,7 +2261,7 @@ exit 1
         runId: context.runId,
         batchId: context.batchId,
         taskId: "bd-cli",
-        branch: "sandcastle/bd-cli-doctor",
+        branch: "archloop/bd-cli-doctor",
         createdAt: "2026-06-20T10:15:00.000Z",
         status: "waiting_for_merge",
         commitCount: 1,
@@ -2272,7 +2272,7 @@ exit 1
 
     expect(stdout).toContain("Hub task state doctor");
     expect(stdout).toContain("bd-cli: state_inconsistent");
-    expect(stdout).toContain("sandcastle tasks repair-state bd-cli");
+    expect(stdout).toContain("archloop tasks repair-state bd-cli");
     expect(JSON.parse(await readFile(stateFile, "utf-8"))[0]).toMatchObject({
       labels: ["ready-for-agent", "customer-label"],
       metadata: { hubStatus: "ready_for_agent" },
@@ -2283,7 +2283,7 @@ exit 1
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
-    await execAsync("git checkout -b sandcastle/bd-cli-repair", {
+    await execAsync("git checkout -b archloop/bd-cli-repair", {
       cwd: hostDir,
     });
     await commitFile(hostDir, "repair.txt", "repair", "repair work");
@@ -2383,7 +2383,7 @@ process.exit(1);
         runId: context.runId,
         batchId: context.batchId,
         taskId: "bd-cli",
-        branch: "sandcastle/bd-cli-repair",
+        branch: "archloop/bd-cli-repair",
         createdAt: "2026-06-20T10:15:00.000Z",
         status: "waiting_for_merge",
         commitCount: 1,
@@ -2411,7 +2411,7 @@ process.exit(1);
         claim: {
           runId: "run-cli-repair",
           batchId: "batch-cli-repair",
-          branch: "sandcastle/bd-cli-repair",
+          branch: "archloop/bd-cli-repair",
         },
       },
     });
@@ -2657,7 +2657,7 @@ process.exit(1);
     expect(stdout).toContain("--image-name");
   });
 
-  it("podman build-image errors when .sandcastle/ is missing", async () => {
+  it("podman build-image errors when .archloop/ is missing", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
@@ -2666,7 +2666,7 @@ process.exit(1);
       await runCli("podman build-image", hostDir);
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
-      expect(cliFailureOutput(err)).toContain("No .sandcastle/ found");
+      expect(cliFailureOutput(err)).toContain("No .archloop/ found");
     }
   });
 
@@ -2701,7 +2701,7 @@ process.exit(1);
   it("init --sandbox no-sandbox --backlog beads succeeds when bundled bd is available", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
-    await seedSandcastlePackage(hostDir);
+    await seedArchloopPackage(hostDir);
 
     const { stdout } = await runCli(
       "init --sandbox no-sandbox --backlog beads --template blank --project-profile generic --preset-agents none --build-image false --agent claude-code",
@@ -2710,7 +2710,7 @@ process.exit(1);
     );
 
     const mainTs = await readFile(
-      join(hostDir, ".sandcastle", "main.mts"),
+      join(hostDir, ".archloop", "main.mts"),
       "utf-8",
     );
 
@@ -2722,7 +2722,7 @@ process.exit(1);
   it("init --sandbox no-sandbox --backlog beads succeeds when bd exists on the host and explains the host requirement", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
-    await seedSandcastlePackage(hostDir);
+    await seedArchloopPackage(hostDir);
 
     const binDir = join(hostDir, "test-bin");
     await mkdir(binDir, { recursive: true });
@@ -2740,28 +2740,28 @@ process.exit(1);
     );
 
     const mainTs = await readFile(
-      join(hostDir, ".sandcastle", "main.mts"),
+      join(hostDir, ".archloop", "main.mts"),
       "utf-8",
     );
 
     expect(mainTs).toContain("noSandbox()");
     expect(stdout).toContain("bundled @beads/bd install");
-    expect(stdout).toContain("SANDCASTLE_BD_PATH");
+    expect(stdout).toContain("ARCHLOOP_BD_PATH");
     expect(stdout).toContain("no-sandbox + beads");
   });
 
   it("init --sandbox no-sandbox --project-profile python explains host Python prerequisites", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
-    await seedSandcastlePackage(hostDir);
+    await seedArchloopPackage(hostDir);
 
     const { stdout } = await runCli(
-      "init --sandbox no-sandbox --backlog github-issues --template blank --project-profile python --preset-agents none --build-image false --create-sandcastle-label false --agent claude-code",
+      "init --sandbox no-sandbox --backlog github-issues --template blank --project-profile python --preset-agents none --build-image false --create-archloop-label false --agent claude-code",
       hostDir,
     );
 
     const bootstrap = await readFile(
-      join(hostDir, ".sandcastle", "bootstrap.sh"),
+      join(hostDir, ".archloop", "bootstrap.sh"),
       "utf-8",
     );
 
@@ -2773,16 +2773,16 @@ process.exit(1);
   it("init with --agent and omitted runtimes installs the selected agent runtime", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
-    await seedSandcastlePackage(hostDir);
+    await seedArchloopPackage(hostDir);
 
     await runNonInteractiveInit(hostDir, "--agent cursor");
 
     const dockerfile = await readFile(
-      join(hostDir, ".sandcastle", "Dockerfile"),
+      join(hostDir, ".archloop", "Dockerfile"),
       "utf-8",
     );
     const mainTs = await readFile(
-      join(hostDir, ".sandcastle", "main.mts"),
+      join(hostDir, ".archloop", "main.mts"),
       "utf-8",
     );
     expect(dockerfile).toContain("cursor.com/install");
@@ -2794,7 +2794,7 @@ process.exit(1);
   it("init --installed-runtimes scaffolds a Dockerfile with selected runtimes", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
-    await seedSandcastlePackage(hostDir);
+    await seedArchloopPackage(hostDir);
 
     await runNonInteractiveInit(
       hostDir,
@@ -2802,7 +2802,7 @@ process.exit(1);
     );
 
     const dockerfile = await readFile(
-      join(hostDir, ".sandcastle", "Dockerfile"),
+      join(hostDir, ".archloop", "Dockerfile"),
       "utf-8",
     );
     expect(dockerfile).toContain("npm install -g @openai/codex");
@@ -2819,7 +2819,7 @@ process.exit(1);
   it("init --runtimes scaffolds a Dockerfile with selected runtimes", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
-    await seedSandcastlePackage(hostDir);
+    await seedArchloopPackage(hostDir);
 
     await runNonInteractiveInit(
       hostDir,
@@ -2827,11 +2827,11 @@ process.exit(1);
     );
 
     const dockerfile = await readFile(
-      join(hostDir, ".sandcastle", "Dockerfile"),
+      join(hostDir, ".archloop", "Dockerfile"),
       "utf-8",
     );
     const envExample = await readFile(
-      join(hostDir, ".sandcastle", ".env.example"),
+      join(hostDir, ".archloop", ".env.example"),
       "utf-8",
     );
     expect(dockerfile).toContain("@openai/codex");
@@ -2845,7 +2845,7 @@ process.exit(1);
   it("init --project-profile cpp scaffolds C++ Dockerfile tools and bootstrap.sh", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
-    await seedSandcastlePackage(hostDir);
+    await seedArchloopPackage(hostDir);
 
     await runNonInteractiveInit(
       hostDir,
@@ -2853,11 +2853,11 @@ process.exit(1);
     );
 
     const dockerfile = await readFile(
-      join(hostDir, ".sandcastle", "Dockerfile"),
+      join(hostDir, ".archloop", "Dockerfile"),
       "utf-8",
     );
     const bootstrap = await readFile(
-      join(hostDir, ".sandcastle", "bootstrap.sh"),
+      join(hostDir, ".archloop", "bootstrap.sh"),
       "utf-8",
     );
     expect(dockerfile).toContain("cmake");
@@ -2869,7 +2869,7 @@ process.exit(1);
   it("init --project-profile generic scaffolds bootstrap.sh", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
-    await seedSandcastlePackage(hostDir);
+    await seedArchloopPackage(hostDir);
 
     await runNonInteractiveInit(
       hostDir,
@@ -2877,7 +2877,7 @@ process.exit(1);
     );
 
     const bootstrap = await readFile(
-      join(hostDir, ".sandcastle", "bootstrap.sh"),
+      join(hostDir, ".archloop", "bootstrap.sh"),
       "utf-8",
     );
     expect(bootstrap).toContain("#!/usr/bin/env bash");
@@ -2887,7 +2887,7 @@ process.exit(1);
   it("init --project-profile node scaffolds lockfile-aware bootstrap.sh", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
-    await seedSandcastlePackage(hostDir);
+    await seedArchloopPackage(hostDir);
 
     await runNonInteractiveInit(
       hostDir,
@@ -2895,7 +2895,7 @@ process.exit(1);
     );
 
     const bootstrap = await readFile(
-      join(hostDir, ".sandcastle", "bootstrap.sh"),
+      join(hostDir, ".archloop", "bootstrap.sh"),
       "utf-8",
     );
     expect(bootstrap).toContain("pnpm-lock.yaml");
@@ -2906,7 +2906,7 @@ process.exit(1);
   it("init --project-profile python scaffolds Python bootstrap and image tools", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
-    await seedSandcastlePackage(hostDir);
+    await seedArchloopPackage(hostDir);
 
     await runNonInteractiveInit(
       hostDir,
@@ -2914,14 +2914,14 @@ process.exit(1);
     );
 
     const bootstrap = await readFile(
-      join(hostDir, ".sandcastle", "bootstrap.sh"),
+      join(hostDir, ".archloop", "bootstrap.sh"),
       "utf-8",
     );
     expect(bootstrap).toContain("uv sync");
     expect(bootstrap).toContain("Poetry");
 
     const dockerfile = await readFile(
-      join(hostDir, ".sandcastle", "Dockerfile"),
+      join(hostDir, ".archloop", "Dockerfile"),
       "utf-8",
     );
     expect(dockerfile).toContain("python3-venv");
@@ -2940,7 +2940,7 @@ process.exit(1);
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       expect(cliFailureOutput(err)).toContain('Unknown project profile "rust"');
-      await expect(access(join(hostDir, ".sandcastle"))).rejects.toThrow();
+      await expect(access(join(hostDir, ".archloop"))).rejects.toThrow();
     }
   });
 
@@ -2958,7 +2958,7 @@ process.exit(1);
       expect(cliFailureOutput(err)).toContain(
         'Unknown agent runtime "not-a-runtime"',
       );
-      await expect(access(join(hostDir, ".sandcastle"))).rejects.toThrow();
+      await expect(access(join(hostDir, ".archloop"))).rejects.toThrow();
     }
   });
 });

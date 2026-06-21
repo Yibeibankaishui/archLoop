@@ -36,7 +36,7 @@ const runDetect = (
   pyScript: string,
   pyprojectContents: string | null,
 ): string => {
-  const dir = mkdtempSync(join(tmpdir(), "sandcastle-extras-"));
+  const dir = mkdtempSync(join(tmpdir(), "archloop-extras-"));
   try {
     if (pyprojectContents !== null) {
       writeFileSync(join(dir, "pyproject.toml"), pyprojectContents);
@@ -55,7 +55,6 @@ const runDetect = (
     rmSync(dir, { recursive: true, force: true });
   }
 };
-
 
 describe("Project profile registry", () => {
   it("defaults to generic", () => {
@@ -163,8 +162,7 @@ describe("Project profile registry", () => {
     });
 
     describe("detect_optional_extra (embedded Python helper)", () => {
-      const pyHelper = () =>
-        extractDetectExtraPython(python().bootstrapScript);
+      const pyHelper = () => extractDetectExtraPython(python().bootstrapScript);
       const tomllibAvailable = probeTomllibAvailable();
       const itIfTomllib = tomllibAvailable ? it : it.skip;
 
@@ -215,21 +213,18 @@ describe("Project profile registry", () => {
         },
       );
 
-      itIfTomllib(
-        "prints nothing when no preferred extras are present",
-        () => {
-          const toml = [
-            "[project]",
-            'name = "demo"',
-            'version = "0.0.0"',
-            "",
-            "[project.optional-dependencies]",
-            'docs = ["sphinx"]',
-            "",
-          ].join("\n");
-          expect(runDetect(pyHelper(), toml)).toBe("");
-        },
-      );
+      itIfTomllib("prints nothing when no preferred extras are present", () => {
+        const toml = [
+          "[project]",
+          'name = "demo"',
+          'version = "0.0.0"',
+          "",
+          "[project.optional-dependencies]",
+          'docs = ["sphinx"]',
+          "",
+        ].join("\n");
+        expect(runDetect(pyHelper(), toml)).toBe("");
+      });
 
       itIfTomllib(
         "prints nothing when no optional-dependencies table exists",

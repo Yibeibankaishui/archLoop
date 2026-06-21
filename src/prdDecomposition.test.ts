@@ -21,7 +21,7 @@ const samplePrd = `# PRD: Sample Hub Feature
 
 ### Tasks
 
-- [ ] Implement sandcastle tasks from-prd command with Beads output
+- [ ] Implement archloop tasks from-prd command with Beads output
 - [ ] Confirm dependency graph with the user before creating tasks
 - [ ] Add tests for PRD slice creation with dependency output
 `;
@@ -33,7 +33,7 @@ describe("prdDecomposition", () => {
     expect(plan.prdTitle).toBe("Sample Hub Feature");
     expect(plan.slices).toHaveLength(3);
     expect(plan.slices.map((slice) => slice.title)).toEqual([
-      "Implement sandcastle tasks from-prd command with Beads output",
+      "Implement archloop tasks from-prd command with Beads output",
       "Confirm dependency graph with the user before creating tasks",
       "Add tests for PRD slice creation with dependency output",
     ]);
@@ -105,9 +105,9 @@ exit 1
 
     const plan = draftPrdSlices(samplePrd, "docs/prd/sample.md");
     const previousPath = process.env.PATH;
-    const previousBdPath = process.env.SANDCASTLE_BD_PATH;
+    const previousBdPath = process.env.ARCHLOOP_BD_PATH;
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
-    process.env.SANDCASTLE_BD_PATH = bdPath;
+    process.env.ARCHLOOP_BD_PATH = bdPath;
 
     try {
       const result = publishPrdDraftPlan({
@@ -129,7 +129,7 @@ exit 1
       ]);
     } finally {
       process.env.PATH = previousPath;
-      process.env.SANDCASTLE_BD_PATH = previousBdPath;
+      process.env.ARCHLOOP_BD_PATH = previousBdPath;
     }
   });
 });

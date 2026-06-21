@@ -1,14 +1,14 @@
 /**
  * Helper for detecting AgentIdleTimeoutError at template / consumer call sites.
  *
- * `sandcastle.run()` is implemented on top of Effect, and its rejection shape
+ * `archloop.run()` is implemented on top of Effect, and its rejection shape
  * varies: the rejected value may be an `AgentIdleTimeoutError` instance, an
  * Effect `FiberFailure` whose `cause` holds the typed error, or any object
  * with the `_tag: "AgentIdleTimeoutError"` discriminator. Templates calling
- * `sandcastle.run()` would otherwise have to know all of those shapes — this
+ * `archloop.run()` would otherwise have to know all of those shapes — this
  * helper centralises the duck-typing in one place.
  *
- * See sandcastle issue #97.
+ * See archloop issue #97.
  */
 import { AgentIdleTimeoutError } from "./errors.js";
 

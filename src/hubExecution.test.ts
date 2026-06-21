@@ -44,7 +44,7 @@ describe("Hub run storage", () => {
     const hubProjectDir = join(
       repoDir,
       "data",
-      "sandcastle",
+      "archloop",
       "hub",
       "projects",
       "abc",
@@ -152,7 +152,7 @@ process.exit(1);
     const hubProjectDir = join(
       repoDir,
       "data",
-      "sandcastle",
+      "archloop",
       "hub",
       "projects",
       "abc",
@@ -165,7 +165,7 @@ process.exit(1);
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        SANDCASTLE_BD_PATH: bdPath,
+        ARCHLOOP_BD_PATH: bdPath,
         BD_STATE_FILE: stateFile,
         BD_ARGS_FILE: argsFile,
       },
@@ -260,7 +260,7 @@ process.exit(1);
     const hubProjectDir = join(
       repoDir,
       "data",
-      "sandcastle",
+      "archloop",
       "hub",
       "projects",
       "abc",
@@ -273,7 +273,7 @@ process.exit(1);
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        SANDCASTLE_BD_PATH: bdPath,
+        ARCHLOOP_BD_PATH: bdPath,
         BD_STATE_FILE: stateFile,
         BD_ARGS_FILE: argsFile,
       },

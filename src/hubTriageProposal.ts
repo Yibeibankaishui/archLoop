@@ -263,7 +263,7 @@ const parseTriageProposal = (value: unknown): TriageProposal => {
 const triageProposalSchema = (): StandardSchemaV1<unknown, TriageProposal> => ({
   "~standard": {
     version: 1,
-    vendor: "sandcastle",
+    vendor: "archloop",
     validate: (value: unknown) => {
       try {
         return { value: parseTriageProposal(value) };

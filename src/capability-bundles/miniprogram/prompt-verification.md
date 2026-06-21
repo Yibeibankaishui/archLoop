@@ -2,13 +2,13 @@
 
 After changing WeChat Mini Program code, run the verification entrypoint before reporting task completion:
 
-- **Entrypoint:** `.sandcastle/verify.sh`
+- **Entrypoint:** `.archloop/verify.sh`
 - **Diagnostic log:** `debug/wx-check.log`
 
 Read capability context when relevant:
 
-- `.sandcastle/context/miniprogram.md`
-- `.sandcastle/context/miniprogram-setup.md`
+- `.archloop/context/miniprogram.md`
+- `.archloop/context/miniprogram-setup.md`
 
 ## Final verification summary
 

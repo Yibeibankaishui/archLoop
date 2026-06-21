@@ -504,7 +504,7 @@ const prdDecompositionProposalSchema = (): StandardSchemaV1<
 > => ({
   "~standard": {
     version: 1,
-    vendor: "sandcastle",
+    vendor: "archloop",
     validate: (value: unknown) => {
       try {
         return { value: parsePrdDecompositionProposal(value) };

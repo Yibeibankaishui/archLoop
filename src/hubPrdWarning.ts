@@ -224,7 +224,7 @@ export const formatHighSeverityValidationMessage = (
   lines.push(
     "",
     "Try:",
-    "  · sandcastle tasks from-prd <prd> --status inbox",
+    "  · archloop tasks from-prd <prd> --status inbox",
     "  · or refine the decomposition to resolve these warnings",
   );
 

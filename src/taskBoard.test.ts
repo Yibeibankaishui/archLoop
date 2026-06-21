@@ -116,7 +116,7 @@ process.exit(1);
     env: {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      SANDCASTLE_BD_PATH: bdPath,
+      ARCHLOOP_BD_PATH: bdPath,
     },
     deleteArgsFile,
     stateFile,
@@ -317,7 +317,7 @@ fs.writeSync(1, JSON.stringify(tasks));
     const board = loadHubTaskBoard(repoDir, {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      SANDCASTLE_BD_PATH: bdPath,
+      ARCHLOOP_BD_PATH: bdPath,
     });
 
     expect(board.tasks).toHaveLength(56);
@@ -590,14 +590,14 @@ process.exit(1);
     const env = {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      SANDCASTLE_BD_PATH: bdPath,
+      ARCHLOOP_BD_PATH: bdPath,
     };
 
     const result = await claimHubTask({
       cwd: repoDir,
       taskId: "bd-claim",
-      branch: "sandcastle/bd-claim-claim-me",
-      hubProjectDir: join(repoDir, "data", "sandcastle", "hub"),
+      branch: "archloop/bd-claim-claim-me",
+      hubProjectDir: join(repoDir, "data", "archloop", "hub"),
       env,
     });
 
@@ -627,7 +627,7 @@ process.exit(1);
           claim: {
             runId: "run-1",
             batchId: "batch-1",
-            branch: "sandcastle/bd-reviewed-reviewed-task",
+            branch: "archloop/bd-reviewed-reviewed-task",
             claimedAt: "2026-06-12T10:00:00Z",
           },
         },
@@ -653,7 +653,7 @@ process.exit(1);
           claim: {
             runId: "run-1",
             batchId: "batch-1",
-            branch: "sandcastle/bd-failed-failed-task",
+            branch: "archloop/bd-failed-failed-task",
             claimedAt: "2026-06-12T10:00:00Z",
           },
         },
@@ -749,7 +749,7 @@ process.exit(1);
     const env = {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      SANDCASTLE_BD_PATH: bdPath,
+      ARCHLOOP_BD_PATH: bdPath,
     };
 
     expect(() =>
@@ -847,7 +847,7 @@ process.exit(1);
     const env = {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      SANDCASTLE_BD_PATH: bdPath,
+      ARCHLOOP_BD_PATH: bdPath,
     };
 
     expect(() =>

@@ -26,10 +26,10 @@ const tempHome = async () => {
 };
 
 describe("hub agent config store", () => {
-  it("resolves the config path under the Sandcastle user data directory", async () => {
+  it("resolves the config path under the archLoop user data directory", async () => {
     const { dataDir } = await tempHome();
     expect(resolveHubAgentConfigPath({ env: { XDG_DATA_HOME: dataDir } })).toBe(
-      join(dataDir, "sandcastle", "hub", "agent-roles.json"),
+      join(dataDir, "archloop", "hub", "agent-roles.json"),
     );
   });
 
@@ -202,7 +202,7 @@ describe("hub agent config store", () => {
         role: "merge",
         isTTY: false,
       }),
-    ).rejects.toThrow(/sandcastle agent-config set-role merge/i);
+    ).rejects.toThrow(/archloop agent-config set-role merge/i);
   });
 
   it("resolveHubAgentRoleEntry rejects partial provider/model flags", async () => {
@@ -224,12 +224,12 @@ describe("hub agent config store", () => {
         env,
         interactive: false,
       }),
-    ).rejects.toThrow(/sandcastle agent-config set-role planning/i);
+    ).rejects.toThrow(/archloop agent-config set-role planning/i);
 
     const message = formatMissingHubAgentRolesMessage(["planning", "triage"]);
     expect(message).toContain("planning");
     expect(message).toContain("triage");
-    expect(message).toContain("sandcastle agent-config set-role");
+    expect(message).toContain("archloop agent-config set-role");
   });
 
   it("uses a TTY configurator hook to fill missing roles", async () => {
@@ -260,7 +260,7 @@ describe("hub agent config store", () => {
   it("does not persist credential fields when reading manually edited config", async () => {
     const { env, dataDir } = await tempHome();
     const configPath = resolveHubAgentConfigPath({ env });
-    await mkdir(join(dataDir, "sandcastle", "hub"), { recursive: true });
+    await mkdir(join(dataDir, "archloop", "hub"), { recursive: true });
     await writeFile(
       configPath,
       `${JSON.stringify(

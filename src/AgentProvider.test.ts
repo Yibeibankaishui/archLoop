@@ -946,7 +946,7 @@ describe("cursor factory", () => {
         "not from your repository's tests or implementation",
       );
       expect(message).toContain("did not capture a completed agent result");
-      expect(message).toContain("Re-run the sandcastle command");
+      expect(message).toContain("Re-run the archloop command");
       expect(message).toContain("reduce concurrent Cursor agents");
       expect(message).toContain("retry review/merge");
     },

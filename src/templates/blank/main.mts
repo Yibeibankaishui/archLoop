@@ -1,9 +1,9 @@
-import { run, claudeCode } from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { run, claudeCode } from "@yibeibankaishui/archloop";
+import { docker } from "@yibeibankaishui/archloop/sandboxes/docker";
 
 // Blank template: customize this to build your own orchestration.
-// Run with: npm run sandcastle
-// Or directly: tsx .sandcastle/main.mts
+// Run with: npm run archloop
+// Or directly: tsx .archloop/main.mts
 
 const sandboxProvider = docker({
   mounts: [],
@@ -12,5 +12,5 @@ const sandboxProvider = docker({
 await run({
   agent: claudeCode("claude-opus-4-6"),
   sandbox: sandboxProvider,
-  promptFile: "./.sandcastle/prompt.md",
+  promptFile: "./.archloop/prompt.md",
 });

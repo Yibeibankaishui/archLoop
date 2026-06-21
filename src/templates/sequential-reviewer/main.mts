@@ -15,11 +15,11 @@
 // gate) and the parallel-planner (concurrent execution with a planning phase).
 //
 // Usage:
-//   npm run sandcastle
-// Or directly: tsx .sandcastle/main.mts
+//   npm run archloop
+// Or directly: tsx .archloop/main.mts
 
-import * as sandcastle from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import * as archloop from "@yibeibankaishui/archloop";
+import { docker } from "@yibeibankaishui/archloop/sandboxes/docker";
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -35,7 +35,7 @@ const hooks = {
   sandbox: {
     onSandboxReady: [
       {
-        command: "bash .sandcastle/bootstrap.sh",
+        command: "bash .archloop/bootstrap.sh",
         timeoutMs: 300_000,
       },
     ],
@@ -54,11 +54,11 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   console.log(`\n=== Iteration ${iteration}/${MAX_ITERATIONS} ===\n`);
 
   // Generate a unique branch name for this iteration.
-  const branch = `sandcastle/sequential-reviewer/${Date.now()}`;
+  const branch = `archloop/sequential-reviewer/${Date.now()}`;
 
   // Create a single sandbox that both the implementer and reviewer share.
   // This gives both agents a real, named branch that persists across phases.
-  const sandbox = await sandcastle.createSandbox({
+  const sandbox = await archloop.createSandbox({
     branch,
     sandbox: sandboxProvider,
     hooks,
@@ -77,8 +77,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     const implement = await sandbox.run({
       name: "implementer",
       maxIterations: 100,
-      agent: sandcastle.claudeCode("claude-sonnet-4-6"),
-      promptFile: "./.sandcastle/implement-prompt.md",
+      agent: archloop.claudeCode("claude-sonnet-4-6"),
+      promptFile: "./.archloop/implement-prompt.md",
     });
 
     if (!implement.commits.length) {
@@ -99,8 +99,8 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     await sandbox.run({
       name: "reviewer",
       maxIterations: 1,
-      agent: sandcastle.claudeCode("claude-sonnet-4-6"),
-      promptFile: "./.sandcastle/review-prompt.md",
+      agent: archloop.claudeCode("claude-sonnet-4-6"),
+      promptFile: "./.archloop/review-prompt.md",
       promptArgs: {
         BRANCH: branch,
       },

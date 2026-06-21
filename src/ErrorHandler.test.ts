@@ -87,13 +87,13 @@ describe("formatErrorMessage", () => {
         message:
           "GitHub authentication failed while expanding prompt shell expression `gh issue list`.\n" +
           "Fix one of:\n" +
-          "- Set a non-empty `GH_TOKEN` in `.sandcastle/.env`\n" +
-          "- Run `sandcastle auth login github`",
+          "- Set a non-empty `GH_TOKEN` in `.archloop/.env`\n" +
+          "- Run `archloop auth login github`",
       }),
     );
     expect(msg).toContain("GitHub authentication failed");
     expect(msg).toContain("GH_TOKEN");
-    expect(msg).toContain("sandcastle auth login github");
+    expect(msg).toContain("archloop auth login github");
   });
 
   it("AgentError includes message", () => {
@@ -106,11 +106,11 @@ describe("formatErrorMessage", () => {
   it("ConfigDirError passes through message (includes init hint)", () => {
     const msg = formatErrorMessage(
       new ConfigDirError({
-        message: "No .sandcastle/ found. Run `sandcastle init` first.",
+        message: "No .archloop/ found. Run `archloop init` first.",
       }),
     );
-    expect(msg).toContain("No .sandcastle/");
-    expect(msg).toContain("sandcastle init");
+    expect(msg).toContain("No .archloop/");
+    expect(msg).toContain("archloop init");
   });
 
   it("InitError passes through message", () => {
@@ -179,12 +179,12 @@ describe("withFriendlyErrors", () => {
       withFriendlyErrors(
         Effect.fail(
           new ConfigDirError({
-            message: "No .sandcastle/ found. Run `sandcastle init` first.",
+            message: "No .archloop/ found. Run `archloop init` first.",
           }),
         ),
       ),
     );
-    expect(statusOf(entries)!.message).toContain("No .sandcastle/");
+    expect(statusOf(entries)!.message).toContain("No .archloop/");
   });
 
   it("routes AgentIdleTimeoutError through Display with timeout seconds", async () => {

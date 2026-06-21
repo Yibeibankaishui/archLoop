@@ -178,7 +178,7 @@ export const buildContextWindowLines = (
     .map((it) => `Context window: ${formatContextWindowSize(it.usage)}`);
 
 /**
- * Controls where Sandcastle writes iteration progress and agent output.
+ * Controls where archLoop writes iteration progress and agent output.
  * Use `"file"` (log-to-file mode) to write to a log file on disk, or
  * `"stdout"` (terminal mode) to render an interactive UI in the terminal.
  */
@@ -207,12 +207,12 @@ export interface Timeouts {
 export interface RunOptions {
   /** Agent provider to use (e.g. claudeCode("claude-opus-4-6")) */
   readonly agent: AgentProvider;
-  /** Sandbox provider (e.g. docker({ imageName: "sandcastle:myrepo" })). */
+  /** Sandbox provider (e.g. docker({ imageName: "archloop:myrepo" })). */
   readonly sandbox: SandboxProvider;
   /**
    * Host repo directory. Replaces `process.cwd()` as the anchor for
-   * `.sandcastle/worktrees/`, `.sandcastle/.env`, `.sandcastle/logs/`,
-   * `.sandcastle/patches/`, and git operations.
+   * `.archloop/worktrees/`, `.archloop/.env`, `.archloop/logs/`,
+   * `.archloop/patches/`, and git operations.
    *
    * - Relative paths are resolved against `process.cwd()`.
    * - Absolute paths are used as-is.
@@ -235,7 +235,7 @@ export interface RunOptions {
   readonly hooks?: SandboxHooks;
   /** Key-value map for {{KEY}} placeholder substitution in prompts */
   readonly promptArgs?: PromptArgs;
-  /** Logging mode (default: { type: 'file' } with auto-generated path under .sandcastle/logs/) */
+  /** Logging mode (default: { type: 'file' } with auto-generated path under .archloop/logs/) */
   readonly logging?: LoggingOption;
   /** Substring(s) the agent emits to stop the iteration loop early. Matched via `includes` against agent output. (default: `"<promise>COMPLETE</promise>"`) */
   readonly completionSignal?: string | string[];
@@ -258,7 +258,7 @@ export interface RunOptions {
    * - Aborting mid-iteration kills the in-flight agent subprocess.
    * - Phase boundaries (between iterations) also check the signal.
    * - The rejected promise surfaces `signal.reason` via
-   *   `signal.throwIfAborted()` — no Sandcastle-specific wrapping.
+   *   `signal.throwIfAborted()` — no archLoop-specific wrapping.
    * - The worktree is preserved on disk after abort (error-path behavior).
    */
   readonly signal?: AbortSignal;
@@ -310,7 +310,9 @@ export function run(
 ): Promise<RunResult & { output: string }>;
 /** Overload: without `output`, returns the standard `RunResult`. */
 export function run(options: RunOptions): Promise<RunResult>;
-export async function run(options: RunOptions): Promise<RunResult & { output?: unknown }> {
+export async function run(
+  options: RunOptions,
+): Promise<RunResult & { output?: unknown }> {
   // If signal is already aborted, reject immediately without any setup
   options.signal?.throwIfAborted();
 
@@ -439,7 +441,7 @@ export async function run(options: RunOptions): Promise<RunResult & { output?: u
     type: "file",
     path: join(
       hostRepoDir,
-      ".sandcastle",
+      ".archloop",
       "logs",
       buildLogFilename(resolvedBranch, targetBranch, options.name),
     ),
@@ -493,7 +495,7 @@ export async function run(options: RunOptions): Promise<RunResult & { output?: u
 
   const baseEffect = Effect.gen(function* () {
     const d = yield* Display;
-    yield* d.intro(options.name ?? "sandcastle");
+    yield* d.intro(options.name ?? "archloop");
     const rows = buildRunSummaryRows({
       name: options.name,
       agentName,
@@ -501,7 +503,7 @@ export async function run(options: RunOptions): Promise<RunResult & { output?: u
       maxIterations,
       branch: resolvedBranch,
     });
-    yield* d.summary("Sandcastle Run", rows);
+    yield* d.summary("archLoop Run", rows);
 
     const userArgs = options.promptArgs ?? {};
 

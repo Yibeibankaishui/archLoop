@@ -8,7 +8,7 @@ import {
   resolveHubAuthDir,
   type HubLoginProviderId,
 } from "./hubAuthPaths.js";
-import { resolveSandcastleUserDataDir } from "./projectStatus.js";
+import { resolveArchloopUserDataDir } from "./projectStatus.js";
 
 export type HubAuthProviderId =
   | "codex"
@@ -98,7 +98,7 @@ export const resolveProviderHubAuthDir = (
   const provider = getHubAuthProvider(providerId);
   if (!provider.authDirName) {
     throw new Error(
-      `Provider "${providerId}" does not have a Hub auth directory. Use \`sandcastle env set ${provider.envKey} <value>\`.`,
+      `Provider "${providerId}" does not have a Hub auth directory. Use \`archloop env set ${provider.envKey} <value>\`.`,
     );
   }
 
@@ -137,7 +137,7 @@ export const formatHubAuthShowLines = (
   const env = options.env ?? process.env;
   const hubEnv = readHubEnvFile(options);
   const lines = [
-    `Hub auth directory: ${join(resolveSandcastleUserDataDir(env, options.homeDir), "hub", "auth")}`,
+    `Hub auth directory: ${join(resolveArchloopUserDataDir(env, options.homeDir), "hub", "auth")}`,
     "",
   ];
 
@@ -161,14 +161,14 @@ export const formatHubAuthShowLines = (
 
     if (status === "missing") {
       if (provider.loginSupported) {
-        lines.push(`    Login: sandcastle auth login ${provider.id}`);
+        lines.push(`    Login: archloop auth login ${provider.id}`);
       }
       lines.push(
-        `    API key/token: sandcastle env set ${provider.envKey} <value>`,
+        `    API key/token: archloop env set ${provider.envKey} <value>`,
       );
     } else if (!provider.loginSupported) {
       lines.push(
-        `    Provider login is not supported yet. Use \`sandcastle env set ${provider.envKey} <value>\`.`,
+        `    Provider login is not supported yet. Use \`archloop env set ${provider.envKey} <value>\`.`,
       );
     }
   }
