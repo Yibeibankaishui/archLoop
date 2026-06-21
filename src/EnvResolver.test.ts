@@ -3,10 +3,34 @@ import { Effect } from "effect";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolveEnv } from "./EnvResolver.js";
 
 const makeDir = () => mkdtemp(join(tmpdir(), "env-resolver-"));
+
+let originalXdgDataHome: string | undefined;
+let originalCodexHome: string | undefined;
+let originalGhConfigDir: string | undefined;
+
+beforeEach(async () => {
+  originalXdgDataHome = process.env.XDG_DATA_HOME;
+  originalCodexHome = process.env.CODEX_HOME;
+  originalGhConfigDir = process.env.GH_CONFIG_DIR;
+  process.env.XDG_DATA_HOME = await mkdtemp(
+    join(tmpdir(), "env-resolver-xdg-"),
+  );
+  delete process.env.CODEX_HOME;
+  delete process.env.GH_CONFIG_DIR;
+});
+
+afterEach(() => {
+  if (originalXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+  else process.env.XDG_DATA_HOME = originalXdgDataHome;
+  if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+  else process.env.CODEX_HOME = originalCodexHome;
+  if (originalGhConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
+  else process.env.GH_CONFIG_DIR = originalGhConfigDir;
+});
 
 const runResolveEnv = (dir: string) =>
   Effect.runPromise(resolveEnv(dir).pipe(Effect.provide(NodeContext.layer)));
@@ -278,6 +302,56 @@ describe("resolveEnv", () => {
       } else {
         process.env.XDG_DATA_HOME = orig;
       }
+    }
+  });
+
+  it("loads Hub auth session paths when provider auth directories contain login state", async () => {
+    const dir = await makeDir();
+    const dataDir = join(dir, "xdg-data");
+    const codexDir = join(dataDir, "sandcastle", "hub", "auth", "codex");
+    const githubDir = join(dataDir, "sandcastle", "hub", "auth", "github");
+    await mkdir(codexDir, { recursive: true });
+    await mkdir(githubDir, { recursive: true });
+    await writeFile(join(codexDir, "auth.json"), "{}\n");
+    await writeFile(join(githubDir, "hosts.yml"), "github.com: {}\n");
+
+    const orig = process.env.XDG_DATA_HOME;
+    const origCodexHome = process.env.CODEX_HOME;
+    const origGhConfigDir = process.env.GH_CONFIG_DIR;
+    try {
+      process.env.XDG_DATA_HOME = dataDir;
+      delete process.env.CODEX_HOME;
+      delete process.env.GH_CONFIG_DIR;
+      const env = await runResolveEnv(dir);
+      expect(env.CODEX_HOME).toBe(codexDir);
+      expect(env.GH_CONFIG_DIR).toBe(githubDir);
+    } finally {
+      if (orig === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = orig;
+      if (origCodexHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = origCodexHome;
+      if (origGhConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
+      else process.env.GH_CONFIG_DIR = origGhConfigDir;
+    }
+  });
+
+  it("does not override an explicitly declared CODEX_HOME with Hub auth session state", async () => {
+    const dir = await makeDir();
+    const dataDir = join(dir, "xdg-data");
+    const codexDir = join(dataDir, "sandcastle", "hub", "auth", "codex");
+    await mkdir(codexDir, { recursive: true });
+    await writeFile(join(codexDir, "auth.json"), "{}\n");
+    await mkdir(join(dir, ".sandcastle"));
+    await writeFile(join(dir, ".sandcastle", ".env"), "CODEX_HOME=/custom\n");
+
+    const orig = process.env.XDG_DATA_HOME;
+    try {
+      process.env.XDG_DATA_HOME = dataDir;
+      const env = await runResolveEnv(dir);
+      expect(env.CODEX_HOME).toBe("/custom");
+    } finally {
+      if (orig === undefined) delete process.env.XDG_DATA_HOME;
+      else process.env.XDG_DATA_HOME = orig;
     }
   });
 });

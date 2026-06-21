@@ -16,6 +16,8 @@ import { Effect, Ref } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 import { SilentDisplay, type DisplayEntry } from "./Display.js";
+import { createHubRunContext } from "./hubExecution.js";
+import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
 
 const execAsync = promisify(exec);
 vi.setConfig({ testTimeout: 60_000 });
@@ -65,7 +67,10 @@ const seedSandcastlePackage = async (dir: string) => {
 const cliPath = join(import.meta.dirname, "..", "dist", "main.js");
 
 const runCli = (args: string, cwd: string, env?: NodeJS.ProcessEnv) =>
-  execAsync(`"${process.execPath}" ${cliPath} ${args}`, { cwd, env });
+  execAsync(`"${process.execPath}" ${cliPath} ${args}`, {
+    cwd,
+    env: env ?? { ...process.env, XDG_DATA_HOME: join(cwd, ".test-xdg-data") },
+  });
 
 const runNonInteractiveInit = (cwd: string, args: string) =>
   runCli(
@@ -91,13 +96,30 @@ const cliFailureOutput = (err: unknown): string => {
 
 const withBdEnv = (
   bdPath: string,
-  env: NodeJS.ProcessEnv = {},
-): NodeJS.ProcessEnv => ({
-  ...process.env,
-  ...env,
-  PATH: `${dirname(bdPath)}:${process.env.PATH ?? ""}`,
-  SANDCASTLE_BD_PATH: bdPath,
-});
+  repoDirOrEnv?: string | NodeJS.ProcessEnv,
+  maybeEnv?: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv => {
+  let repoDir: string | undefined;
+  let mergedEnv: NodeJS.ProcessEnv = {};
+
+  if (typeof repoDirOrEnv === "string") {
+    repoDir = repoDirOrEnv;
+    mergedEnv = maybeEnv ?? {};
+  } else if (repoDirOrEnv) {
+    mergedEnv = repoDirOrEnv;
+  }
+
+  if (repoDir) {
+    seedHubTaskStoreMetadata(repoDir);
+  }
+
+  return {
+    ...process.env,
+    ...mergedEnv,
+    PATH: `${dirname(bdPath)}:${mergedEnv.PATH ?? process.env.PATH ?? ""}`,
+    SANDCASTLE_BD_PATH: bdPath,
+  };
+};
 
 describe("sandcastle CLI", () => {
   it("shows help with --help flag", async () => {
@@ -195,6 +217,14 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("env set");
   });
 
+  it("root help exposes the auth namespace", async () => {
+    const { stdout } = await runCli("--help", process.cwd());
+    expect(stdout).toContain("auth");
+    expect(stdout).toContain("auth show");
+    expect(stdout).toContain("auth path");
+    expect(stdout).toContain("auth login");
+  });
+
   it("env path prints the Hub env file path", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-hub-env-"));
     const dataDir = join(hostDir, "xdg-data");
@@ -214,6 +244,10 @@ describe("sandcastle CLI", () => {
     });
     expect(stdout).toContain("CURSOR_API_KEY");
     expect(stdout).toContain("sandcastle env init");
+    expect(stdout).toMatch(/hint:.*Cursor/i);
+    expect(stdout).toContain(
+      "https://cursor.com/docs/cli/reference/authentication",
+    );
   });
 
   it("env set persists a Hub env value", async () => {
@@ -227,9 +261,106 @@ describe("sandcastle CLI", () => {
     );
     expect(stdout).toContain("Saved CURSOR_API_KEY");
 
-    const show = await runCli("env show", hostDir, env);
+    const show = await runCli("env show", hostDir, {
+      ...env,
+      CURSOR_API_KEY: "",
+    });
     expect(show.stdout).toContain("CURSOR_API_KEY");
     expect(show.stdout).toContain("test");
+  });
+
+  it("env init non-interactive guidance points Codex users to auth login", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-hub-env-"));
+    const dataDir = join(hostDir, "xdg-data");
+
+    try {
+      await runCli("env init", hostDir, {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      });
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain("sandcastle env set <key> <value>");
+      expect(output).toContain("sandcastle auth login codex");
+      expect(output).toMatch(/OPENAI_KEY.*API billing/i);
+    }
+  });
+
+  it("auth path prints Hub-owned provider auth directories", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-hub-auth-"));
+    const dataDir = join(hostDir, "xdg-data");
+    const env = { ...process.env, XDG_DATA_HOME: dataDir };
+
+    const codex = await runCli("auth path codex", hostDir, env);
+    expect(codex.stdout).toContain(
+      join(dataDir, "sandcastle", "hub", "auth", "codex"),
+    );
+
+    const github = await runCli("auth path github", hostDir, env);
+    expect(github.stdout).toContain(
+      join(dataDir, "sandcastle", "hub", "auth", "github"),
+    );
+  });
+
+  it("auth show reports process env, Hub env file, Hub auth session, and missing guidance", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-hub-auth-"));
+    const dataDir = join(hostDir, "xdg-data");
+    const authDir = join(dataDir, "sandcastle", "hub", "auth", "github");
+    await mkdir(authDir, { recursive: true });
+    await writeFile(join(authDir, "hosts.yml"), "github.com: {}\n");
+    await writeFile(
+      join(dataDir, "sandcastle", ".env"),
+      "CURSOR_API_KEY=hub-cursor-key\n",
+    );
+
+    const { stdout } = await runCli("auth show", hostDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+      OPENAI_KEY: "runtime-openai-key",
+      GH_TOKEN: "",
+      CURSOR_API_KEY: "",
+      OPENCODE_API_KEY: "",
+      ANTHROPIC_API_KEY: "",
+    });
+
+    expect(stdout).toContain("codex: process env OPENAI_KEY=");
+    expect(stdout).toContain("github: Hub auth dir/session");
+    expect(stdout).toContain(join(dataDir, "sandcastle", "hub", "auth"));
+    expect(stdout).toContain("cursor: Hub env file CURSOR_API_KEY=");
+    expect(stdout).toContain("opencode: missing");
+    expect(stdout).toContain("sandcastle env set OPENCODE_API_KEY <value>");
+  });
+
+  it("auth login fails with actionable commands in non-interactive mode", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-hub-auth-"));
+    const dataDir = join(hostDir, "xdg-data");
+    const env = { ...process.env, XDG_DATA_HOME: dataDir };
+
+    try {
+      await runCli("auth login codex", hostDir, env);
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toMatch(/Interactive codex login requires a TTY/i);
+      expect(output).toContain(
+        `CODEX_HOME=${join(dataDir, "sandcastle", "hub", "auth", "codex")} codex login`,
+      );
+      expect(output).toContain("sandcastle env set OPENAI_KEY <value>");
+      expect(output).toMatch(/API billing|Codex\/ChatGPT CLI login/i);
+    }
+
+    try {
+      await runCli("auth login github", hostDir, env);
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toMatch(/Interactive github login requires a TTY/i);
+      expect(output).toContain(
+        `GH_CONFIG_DIR=${join(dataDir, "sandcastle", "hub", "auth", "github")} gh auth login --insecure-storage`,
+      );
+      expect(output).toContain("sandcastle env set GH_TOKEN <value>");
+    }
   });
 
   it("agent-config path prints the Hub agent config file path", async () => {
@@ -438,7 +569,7 @@ exit 1
     await chmod(bdPath, 0o755);
 
     try {
-      await runCli("run . --flow triage", hostDir, withBdEnv(bdPath));
+      await runCli("run . --flow triage", hostDir, withBdEnv(bdPath, hostDir));
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       expect(cliFailureOutput(err)).toMatch(
@@ -462,6 +593,7 @@ exit 1
   it("root help exposes the tasks namespace", async () => {
     const { stdout } = await runCli("--help", process.cwd());
     expect(stdout).toContain("tasks");
+    expect(stdout).toContain("tasks init");
     expect(stdout).toContain("tasks list");
     expect(stdout).toContain("tasks show");
     expect(stdout).toContain("tasks create");
@@ -469,6 +601,8 @@ exit 1
     expect(stdout).toContain("tasks from-prd");
     expect(stdout).toContain("tasks sync");
     expect(stdout).toContain("tasks comment");
+    expect(stdout).toContain("tasks doctor");
+    expect(stdout).toContain("tasks repair-state");
     expect(stdout).toContain("tasks delete");
   });
 
@@ -477,15 +611,20 @@ exit 1
     expect(stdout).toContain("status");
   });
 
-  it("tasks --help shows the list and show subcommands", async () => {
+  it("tasks --help shows the list, sync, pull, and push subcommands", async () => {
     const { stdout } = await runCli("tasks --help", process.cwd());
+    expect(stdout).toContain("init");
     expect(stdout).toContain("list");
     expect(stdout).toContain("show");
     expect(stdout).toContain("create");
     expect(stdout).toContain("triage");
     expect(stdout).toContain("from-prd");
+    expect(stdout).toContain("pull");
+    expect(stdout).toContain("push");
     expect(stdout).toContain("sync");
     expect(stdout).toContain("comment");
+    expect(stdout).toContain("doctor");
+    expect(stdout).toContain("repair-state");
     expect(stdout).toContain("delete");
   });
 
@@ -550,8 +689,87 @@ exit 1
     expect(stdout).toContain(hostDir);
     expect(stdout).toContain("xdg-data/sandcastle");
     expect(stdout).toContain("Beads available");
+    expect(stdout).toContain("Task store initialized");
     expect(stdout).toContain("Task board ready");
     expect(stdout).toContain("Task board total");
+  });
+
+  it("tasks list points to sandcastle tasks init when the task store is missing", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+process.stderr.write("Error: no beads database found\\n");
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    try {
+      await runCli("tasks list", hostDir, {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        SANDCASTLE_BD_PATH: bdPath,
+      });
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      expect(cliFailureOutput(err)).toContain("sandcastle tasks init");
+      expect(cliFailureOutput(err)).not.toContain("bd init");
+    }
+  });
+
+  it("tasks init initializes a fresh git repo and tasks list succeeds afterward", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const bundledBd = join(
+      process.cwd(),
+      "node_modules",
+      "@beads",
+      "bd",
+      "bin",
+      "bd",
+    );
+    await access(bundledBd);
+
+    const { stdout: initStdout } = await runCli("tasks init", hostDir, {
+      ...process.env,
+      SANDCASTLE_BD_PATH: bundledBd,
+      PATH: `${join(hostDir, "bin")}:${process.env.PATH ?? ""}`,
+    });
+    expect(initStdout).toContain("Initialized local Hub task store");
+
+    const boardJson = JSON.stringify([]);
+    const mockBdPath = join(hostDir, "bin", "bd");
+    await mkdir(join(hostDir, "bin"), { recursive: true });
+    await writeFile(
+      mockBdPath,
+      `#!/bin/sh
+if [ "$1" = "list" ]; then
+  printf '%s\\n' '${boardJson}'
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(mockBdPath, 0o755);
+
+    const { stdout } = await runCli(
+      "tasks list",
+      hostDir,
+      withBdEnv(mockBdPath, hostDir),
+    );
+    expect(stdout).toContain("Hub task board");
+    expect(stdout).toContain("No Beads tasks found");
   });
 
   it("tasks list groups representative Beads tasks by Hub status", async () => {
@@ -615,7 +833,11 @@ exit 1
     );
     await chmod(bdPath, 0o755);
 
-    const { stdout } = await runCli("tasks list", hostDir, withBdEnv(bdPath));
+    const { stdout } = await runCli(
+      "tasks list",
+      hostDir,
+      withBdEnv(bdPath, hostDir),
+    );
 
     expect(stdout).toContain("Hub task board");
     expect(stdout).toContain("Total tasks: 3");
@@ -676,7 +898,7 @@ exit 1
     const { stdout } = await runCli(
       "tasks list --warning high",
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
 
     expect(stdout).toContain("PRD warnings: 1 high · 0 medium · 0 low");
@@ -748,7 +970,7 @@ exit 1
     const { stdout } = await runCli(
       "tasks show bd-3",
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
 
     expect(stdout).toContain("Beads task bd-3");
@@ -827,14 +1049,14 @@ exit 1
     const titleResult = await runCli(
       'tasks show "Write docs"',
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
     expect(titleResult.stdout).toContain("Beads task bd-2");
 
     const indexResult = await runCli(
       "tasks show 2",
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
     expect(indexResult.stdout).toContain("Beads task bd-2");
 
@@ -911,7 +1133,7 @@ exit 1
     const { stdout } = await runCli(
       'tasks show "Write docs"',
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
 
     expect(stdout).toContain("Beads task bd-2");
@@ -951,7 +1173,11 @@ exit 1
     await chmod(bdPath, 0o755);
 
     try {
-      await runCli('tasks show "Duplicate task"', hostDir, withBdEnv(bdPath));
+      await runCli(
+        'tasks show "Duplicate task"',
+        hostDir,
+        withBdEnv(bdPath, hostDir),
+      );
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       const output = cliFailureOutput(err);
@@ -994,7 +1220,7 @@ exit 1
     await chmod(bdPath, 0o755);
 
     try {
-      await runCli("tasks show 3", hostDir, withBdEnv(bdPath));
+      await runCli("tasks show 3", hostDir, withBdEnv(bdPath, hostDir));
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       const output = cliFailureOutput(err);
@@ -1038,7 +1264,7 @@ exit 1
     const { stdout } = await runCli(
       'tasks create "Manual task" --description "Track local work"',
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
 
     const args = await readFile(argsFile, "utf-8");
@@ -1094,7 +1320,7 @@ exit 1
     await runCli(
       'tasks create "Feedback task" --origin user-feedback --kind enhancement',
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
 
     const args = await readFile(argsFile, "utf-8");
@@ -1138,7 +1364,7 @@ exit 1
     await runCli(
       'tasks create "Categorized task" --category enhancement',
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
 
     const args = await readFile(argsFile, "utf-8");
@@ -1218,7 +1444,7 @@ process.stdin.on("end", () => {
     );
     await chmod(fakeCodexPath, 0o755);
 
-    const boardJson = JSON.stringify([
+    const boardTasks = [
       {
         id: "bd-1",
         title: "Add retry to sync",
@@ -1236,44 +1462,80 @@ process.stdin.on("end", () => {
         metadata: { hubStatus: "needs_info" },
         description: "Need more details.",
       },
-    ]);
+    ];
+    const stateFile = join(hostDir, "triage-state.json");
+    await writeFile(stateFile, JSON.stringify(boardTasks, null, 2));
     const updateArgsFile = join(hostDir, "triage-update-args.txt");
     const commentArgsFile = join(hostDir, "triage-comment-args.txt");
     const bdPath = join(binDir, "bd");
     await writeFile(
       bdPath,
-      `#!/bin/sh
-if [ "$1" = "list" ]; then
-  printf '%s\n' '${boardJson}'
-  exit 0
-fi
-if [ "$1" = "show" ]; then
-  case "$2" in
-    bd-1)
-      cat <<'JSON'
-[{"id":"bd-1","title":"Add retry to sync","status":"open","labels":["needs-triage"],"metadata":{"hubStatus":"inbox"},"description":"When sync-out fails with ECONNRESET, retry up to three times before surfacing an error."}]
-JSON
-      ;;
-    bd-2)
-      cat <<'JSON'
-[{"id":"bd-2","title":"Need details","status":"open","labels":["needs-info"],"metadata":{"hubStatus":"needs_info"},"description":"Need more details."}]
-JSON
-      ;;
-    *)
-      exit 1
-      ;;
-  esac
-  exit 0
-fi
-if [ "$1" = "update" ]; then
-  printf '%s\n' "$@" >> "${updateArgsFile}"
-  exit 0
-fi
-if [ "$1" = "comments" ] && [ "$2" = "add" ]; then
-  printf '%s\n' "$@" >> "${commentArgsFile}"
-  exit 0
-fi
-exit 1
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = ${JSON.stringify(stateFile)};
+const updateArgsFile = ${JSON.stringify(updateArgsFile)};
+const commentArgsFile = ${JSON.stringify(commentArgsFile)};
+const args = process.argv.slice(2);
+const command = args[0];
+const readState = () => JSON.parse(fs.readFileSync(stateFile, "utf8"));
+const writeState = (state) =>
+  fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+
+if (command === "list") {
+  process.stdout.write(JSON.stringify(readState()));
+  process.exit(0);
+}
+
+if (command === "show") {
+  const task = readState().find((entry) => entry.id === args[1]);
+  if (!task) {
+    process.exit(1);
+  }
+  process.stdout.write(JSON.stringify([task]));
+  process.exit(0);
+}
+
+if (command === "update") {
+  fs.appendFileSync(updateArgsFile, args.join(" ") + "\\n");
+  const state = readState();
+  const task = state.find((entry) => entry.id === args[1]);
+  if (!task) {
+    process.exit(1);
+  }
+  const statusIndex = args.indexOf("--status");
+  if (statusIndex >= 0) {
+    task.status = args[statusIndex + 1];
+  }
+  const metadataIndex = args.indexOf("--metadata");
+  if (metadataIndex >= 0) {
+    task.metadata = JSON.parse(args[metadataIndex + 1]);
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      task.labels = [];
+    }
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      task.labels = [...new Set([...(task.labels ?? []), args[index + 1]])];
+    }
+    if (args[index] === "--add-label") {
+      task.labels = [...new Set([...(task.labels ?? []), args[index + 1]])];
+    }
+    if (args[index] === "--remove-label") {
+      task.labels = (task.labels ?? []).filter((label) => label !== args[index + 1]);
+    }
+  }
+  writeState(state);
+  process.exit(0);
+}
+
+if (command === "comments" && args[1] === "add") {
+  fs.appendFileSync(commentArgsFile, args.join(" ") + "\\n");
+  process.exit(0);
+}
+
+process.exit(1);
 `,
     );
     await chmod(bdPath, 0o755);
@@ -1281,7 +1543,7 @@ exit 1
     const { stdout } = await runCli(
       "tasks triage --yes --query inbox,needs_info",
       hostDir,
-      withBdEnv(bdPath, {
+      withBdEnv(bdPath, hostDir, {
         XDG_DATA_HOME: dataHome,
         OPENAI_KEY: "test-key",
       }),
@@ -1299,7 +1561,7 @@ exit 1
     expect(commentArgs).toContain("This was generated by AI during triage");
   });
 
-  it("tasks sync pulls GitHub issues into Beads and reports sync summary", async () => {
+  it("tasks sync previews changes and applies them with --yes", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
@@ -1311,11 +1573,15 @@ exit 1
 
     const stateFile = join(hostDir, "bd-state.json");
     await writeFile(stateFile, "[]");
+    const ghArgsFile = join(hostDir, "gh-args.txt");
+    await writeFile(ghArgsFile, "");
 
     const ghPath = join(binDir, "gh");
     await writeFile(
       ghPath,
       `#!/bin/sh
+gh_args_file=${JSON.stringify(ghArgsFile)}
+printf '%s\\n' "$*" >> "$gh_args_file"
 if [ "$1" = "issue" ] && [ "$2" = "list" ]; then
   cat <<'JSON'
 [{"number":68,"title":"Sync Hub task state","body":"Implement tasks sync","state":"OPEN","labels":[{"name":"Sandcastle"},{"name":"ready-for-agent"}],"updatedAt":"2026-06-11T12:00:00Z"}]
@@ -1390,15 +1656,272 @@ process.exit(1);
     await chmod(bdPath, 0o755);
 
     const { stdout } = await runCli(
-      "tasks sync",
+      "tasks sync --yes",
       hostDir,
-      withBdEnv(bdPath, { BD_STATE_FILE: stateFile }),
+      withBdEnv(bdPath, hostDir, { BD_STATE_FILE: stateFile }),
     );
 
+    expect(stdout).toContain("Hub task sync preview");
     expect(stdout).toContain("Synced Hub tasks with GitHub Issues");
     expect(stdout).toContain("1 created");
     const state = JSON.parse(await readFile(stateFile, "utf-8")) as unknown[];
     expect(state).toHaveLength(1);
+  });
+
+  it("tasks sync requires --yes or --dry-run in non-interactive mode", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const stateFile = join(hostDir, "bd-state.json");
+    await writeFile(stateFile, "[]");
+    const ghArgsFile = join(hostDir, "gh-args.txt");
+    await writeFile(ghArgsFile, "");
+
+    const ghPath = join(binDir, "gh");
+    await writeFile(
+      ghPath,
+      `#!/bin/sh
+gh_args_file=${JSON.stringify(ghArgsFile)}
+printf '%s\\n' "$*" >> "$gh_args_file"
+if [ "$1" = "issue" ] && [ "$2" = "list" ]; then
+  cat <<'JSON'
+[{"number":68,"title":"Sync Hub task state","body":"Implement tasks sync","state":"OPEN","labels":[{"name":"Sandcastle"},{"name":"ready-for-agent"}],"updatedAt":"2026-06-11T12:00:00Z"}]
+JSON
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(ghPath, 0o755);
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = process.env.BD_STATE_FILE;
+const args = process.argv.slice(2);
+if (args[0] === "list") {
+  process.stdout.write(fs.readFileSync(stateFile, "utf8"));
+  process.exit(0);
+}
+if (args[0] === "create") {
+  process.exit(0);
+}
+if (args[0] === "update") {
+  process.exit(0);
+}
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    try {
+      await runCli(
+        "tasks sync",
+        hostDir,
+        withBdEnv(bdPath, hostDir, { BD_STATE_FILE: stateFile }),
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain("--yes");
+      expect(output).toContain("--dry-run");
+    }
+
+    expect(await readFile(ghArgsFile, "utf-8")).toContain(
+      "issue list --state open",
+    );
+  });
+
+  it("tasks pull --dry-run previews open and closed issues when included", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const stateFile = join(hostDir, "bd-state.json");
+    await writeFile(stateFile, "[]");
+    const ghArgsFile = join(hostDir, "gh-args.txt");
+    await writeFile(ghArgsFile, "");
+
+    const ghPath = join(binDir, "gh");
+    await writeFile(
+      ghPath,
+      `#!/bin/sh
+gh_args_file=${JSON.stringify(ghArgsFile)}
+printf '%s\\n' "$*" >> "$gh_args_file"
+if [ "$1" = "issue" ] && [ "$2" = "list" ]; then
+  cat <<'JSON'
+[{"number":68,"title":"Open issue","body":"Keep me","state":"OPEN","labels":[{"name":"Sandcastle"},{"name":"ready-for-agent"}],"updatedAt":"2026-06-11T12:00:00Z"},{"number":69,"title":"Closed history","body":"Import me too","state":"CLOSED","labels":[{"name":"Sandcastle"}],"updatedAt":"2026-06-11T13:00:00Z"}]
+JSON
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(ghPath, 0o755);
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = process.env.BD_STATE_FILE;
+const args = process.argv.slice(2);
+if (args[0] === "list") {
+  process.stdout.write(fs.readFileSync(stateFile, "utf8"));
+  process.exit(0);
+}
+if (args[0] === "create" || args[0] === "update") {
+  process.exit(0);
+}
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const { stdout } = await runCli(
+      "tasks pull --include-closed --dry-run",
+      hostDir,
+      withBdEnv(bdPath, hostDir, { BD_STATE_FILE: stateFile }),
+    );
+
+    expect(stdout).toContain("Hub task sync preview");
+    expect(stdout).toContain("Pull:");
+    expect(await readFile(ghArgsFile, "utf-8")).toContain(
+      "issue list --state all",
+    );
+    expect(JSON.parse(await readFile(stateFile, "utf-8"))).toEqual([]);
+  });
+
+  it("tasks push closes linked done tasks without importing remote-only issues", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const stateFile = join(hostDir, "bd-state.json");
+    await writeFile(
+      stateFile,
+      JSON.stringify(
+        [
+          {
+            id: "bd-done",
+            title: "Done task",
+            status: "closed",
+            labels: ["done"],
+            metadata: {
+              hubStatus: "done",
+              remote_refs: ["github#11"],
+              sync_state: "push_pending",
+            },
+          },
+        ],
+        null,
+        2,
+      ),
+    );
+
+    const ghArgsFile = join(hostDir, "gh-args.txt");
+    await writeFile(ghArgsFile, "");
+    const ghPath = join(binDir, "gh");
+    await writeFile(
+      ghPath,
+      `#!/bin/sh
+gh_args_file=${JSON.stringify(ghArgsFile)}
+printf '%s\\n' "$*" >> "$gh_args_file"
+if [ "$1" = "issue" ] && [ "$2" = "list" ]; then
+  cat <<'JSON'
+[{"number":11,"title":"Done task","body":"Already done","state":"OPEN","labels":[{"name":"Sandcastle"},{"name":"ready-for-agent"}],"updatedAt":"2026-06-11T12:00:00Z"},{"number":12,"title":"Remote-only issue","state":"OPEN","labels":[{"name":"Sandcastle"},{"name":"ready-for-agent"}],"updatedAt":"2026-06-11T13:00:00Z"}]
+JSON
+  exit 0
+fi
+if [ "$1" = "issue" ] && [ "$2" = "close" ]; then
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(ghPath, 0o755);
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = process.env.BD_STATE_FILE;
+const args = process.argv.slice(2);
+const readState = () => JSON.parse(fs.readFileSync(stateFile, "utf8"));
+const writeState = (state) =>
+  fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+
+if (args[0] === "list") {
+  process.stdout.write(JSON.stringify(readState()));
+  process.exit(0);
+}
+
+if (args[0] === "show") {
+  const task = readState().find((entry) => entry.id === args[1]);
+  if (!task) {
+    process.exit(1);
+  }
+  process.stdout.write(JSON.stringify([task]));
+  process.exit(0);
+}
+
+if (args[0] === "update") {
+  const state = readState();
+  const task = state.find((entry) => entry.id === args[1]);
+  if (!task) {
+    process.exit(1);
+  }
+  const metadataIndex = args.indexOf("--metadata");
+  if (metadataIndex >= 0) {
+    task.metadata = JSON.parse(args[metadataIndex + 1]);
+  }
+  writeState(state);
+  process.exit(0);
+}
+
+if (args[0] === "create") {
+  process.exit(2);
+}
+
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const { stdout } = await runCli(
+      "tasks push",
+      hostDir,
+      withBdEnv(bdPath, hostDir, { BD_STATE_FILE: stateFile }),
+    );
+
+    expect(stdout).toContain("Pushed: 0 synced, 1 closed");
+    const ghArgs = await readFile(ghArgsFile, "utf-8");
+    expect(ghArgs).toContain("issue close 11");
+    expect(ghArgs).not.toContain("issue close 12");
+    const state = JSON.parse(await readFile(stateFile, "utf-8")) as Array<{
+      metadata: { sync_state?: string };
+    }>;
+    expect(state).toHaveLength(1);
+    expect(state[0]?.metadata.sync_state).toBe("synced");
   });
 
   it("tasks from-prd creates dependency-aware Beads tasks from a local PRD", async () => {
@@ -1537,7 +2060,7 @@ exit 1
     const { stdout } = await runCli(
       'tasks from-prd docs/prd/feature.md --yes --deps "2:1,3:2"',
       hostDir,
-      withBdEnv(bdPath, {
+      withBdEnv(bdPath, hostDir, {
         XDG_DATA_HOME: dataHome,
         OPENAI_KEY: "test-key",
       }),
@@ -1601,7 +2124,7 @@ exit 1
     const { stdout } = await runCli(
       'tasks comment bd-99 --body "Still needs a clear acceptance test"',
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
 
     const args = await readFile(argsFile, "utf-8");
@@ -1655,7 +2178,7 @@ exit 1
     const titleResult = await runCli(
       'tasks comment "Write docs" --body "Comment from title"',
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
     expect(titleResult.stdout).toContain(
       "Appended a comment to Beads task bd-2.",
@@ -1664,7 +2187,7 @@ exit 1
     const indexResult = await runCli(
       'tasks comment 2 --body "Comment from index"',
       hostDir,
-      withBdEnv(bdPath),
+      withBdEnv(bdPath, hostDir),
     );
     expect(indexResult.stdout).toContain(
       "Appended a comment to Beads task bd-2.",
@@ -1673,6 +2196,225 @@ exit 1
     const commentArgs = await readFile(commentArgsFile, "utf-8");
     expect(commentArgs).toContain("comments add bd-2 Comment from title");
     expect(commentArgs).toContain("comments add bd-2 Comment from index");
+  });
+
+  it("tasks doctor reports state-inconsistent merge-ready task state", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+    await execAsync("git checkout -b sandcastle/bd-cli-doctor", {
+      cwd: hostDir,
+    });
+    await commitFile(hostDir, "doctor.txt", "doctor", "doctor work");
+    await execAsync("git checkout main", { cwd: hostDir });
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const stateFile = join(hostDir, "bd-state.json");
+    await writeFile(
+      stateFile,
+      JSON.stringify(
+        [
+          {
+            id: "bd-cli",
+            title: "CLI repair task",
+            status: "open",
+            labels: ["ready-for-agent", "customer-label"],
+            metadata: { hubStatus: "ready_for_agent" },
+          },
+        ],
+        null,
+        2,
+      ),
+    );
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "list" ]; then
+  cat "${stateFile}"
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const env = withBdEnv(bdPath, hostDir, {
+      XDG_DATA_HOME: join(hostDir, ".test-xdg-data"),
+    });
+    const context = createHubRunContext({
+      cwd: hostDir,
+      env,
+      branch: "flow/with-review",
+      runId: "run-cli-doctor",
+      batchId: "batch-cli-doctor",
+    });
+    await writeFile(
+      join(context.runDir, "events", "task.jsonl"),
+      `${JSON.stringify({
+        type: "task_review_succeeded",
+        runId: context.runId,
+        batchId: context.batchId,
+        taskId: "bd-cli",
+        branch: "sandcastle/bd-cli-doctor",
+        createdAt: "2026-06-20T10:15:00.000Z",
+        status: "waiting_for_merge",
+        commitCount: 1,
+      })}\n`,
+    );
+
+    const { stdout } = await runCli("tasks doctor", hostDir, env);
+
+    expect(stdout).toContain("Hub task state doctor");
+    expect(stdout).toContain("bd-cli: state_inconsistent");
+    expect(stdout).toContain("sandcastle tasks repair-state bd-cli");
+    expect(JSON.parse(await readFile(stateFile, "utf-8"))[0]).toMatchObject({
+      labels: ["ready-for-agent", "customer-label"],
+      metadata: { hubStatus: "ready_for_agent" },
+    });
+  });
+
+  it("tasks repair-state applies confirmed local Beads repair through the CLI", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+    await execAsync("git checkout -b sandcastle/bd-cli-repair", {
+      cwd: hostDir,
+    });
+    await commitFile(hostDir, "repair.txt", "repair", "repair work");
+    await execAsync("git checkout main", { cwd: hostDir });
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const stateFile = join(hostDir, "bd-state.json");
+    const updateArgsFile = join(hostDir, "repair-update-args.txt");
+    await writeFile(
+      stateFile,
+      JSON.stringify(
+        [
+          {
+            id: "bd-cli",
+            title: "CLI repair task",
+            status: "open",
+            labels: ["ready-for-agent", "customer-label"],
+            metadata: { hubStatus: "ready_for_agent", owner: "platform" },
+          },
+        ],
+        null,
+        2,
+      ),
+    );
+    await writeFile(updateArgsFile, "");
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = ${JSON.stringify(stateFile)};
+const updateArgsFile = ${JSON.stringify(updateArgsFile)};
+const args = process.argv.slice(2);
+const command = args[0];
+const readState = () => JSON.parse(fs.readFileSync(stateFile, "utf8"));
+const writeState = (state) => fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+const findTask = (state, taskId) => state.find((task) => task.id === taskId);
+
+if (command === "list") {
+  process.stdout.write(JSON.stringify(readState()));
+  process.exit(0);
+}
+
+if (command === "show") {
+  const task = findTask(readState(), args[1]);
+  if (!task) process.exit(1);
+  process.stdout.write(JSON.stringify([task]));
+  process.exit(0);
+}
+
+if (command === "update") {
+  fs.appendFileSync(updateArgsFile, args.join(" ") + "\\n");
+  const state = readState();
+  const task = findTask(state, args[1]);
+  if (!task) process.exit(1);
+  const statusIndex = args.indexOf("--status");
+  if (statusIndex >= 0) task.status = args[statusIndex + 1];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") task.labels = [];
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      const label = args[index + 1];
+      if (!task.labels.includes(label)) task.labels.push(label);
+    }
+  }
+  const metadataIndex = args.indexOf("--metadata");
+  if (metadataIndex >= 0) task.metadata = JSON.parse(args[metadataIndex + 1]);
+  writeState(state);
+  process.exit(0);
+}
+
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const env = withBdEnv(bdPath, hostDir, {
+      XDG_DATA_HOME: join(hostDir, ".test-xdg-data"),
+    });
+    const context = createHubRunContext({
+      cwd: hostDir,
+      env,
+      branch: "flow/with-review",
+      runId: "run-cli-repair",
+      batchId: "batch-cli-repair",
+    });
+    await writeFile(
+      join(context.runDir, "events", "task.jsonl"),
+      `${JSON.stringify({
+        type: "task_review_succeeded",
+        runId: context.runId,
+        batchId: context.batchId,
+        taskId: "bd-cli",
+        branch: "sandcastle/bd-cli-repair",
+        createdAt: "2026-06-20T10:15:00.000Z",
+        status: "waiting_for_merge",
+        commitCount: 1,
+      })}\n`,
+    );
+
+    const { stdout } = await runCli(
+      "tasks repair-state bd-cli --yes",
+      hostDir,
+      env,
+    );
+
+    expect(stdout).toContain("Hub task state repair");
+    expect(stdout).toContain("Applied repairs");
+    expect(await readFile(updateArgsFile, "utf-8")).toContain(
+      "--set-labels waiting-for-merge",
+    );
+    const [task] = JSON.parse(await readFile(stateFile, "utf-8"));
+    expect(task).toMatchObject({
+      status: "in_progress",
+      labels: ["customer-label", "waiting-for-merge"],
+      metadata: {
+        hubStatus: "waiting_for_merge",
+        owner: "platform",
+        claim: {
+          runId: "run-cli-repair",
+          batchId: "batch-cli-repair",
+          branch: "sandcastle/bd-cli-repair",
+        },
+      },
+    });
   });
 
   it("tasks delete removes local Beads tasks with --yes", async () => {
@@ -1736,10 +2478,11 @@ process.exit(1);
     );
     await chmod(bdPath, 0o755);
 
-    const { stdout } = await runCli("tasks delete bd-1 bd-2 --yes", hostDir, {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH ?? ""}`,
-    });
+    const { stdout } = await runCli(
+      "tasks delete bd-1 bd-2 --yes",
+      hostDir,
+      withBdEnv(bdPath, hostDir),
+    );
 
     const deleteArgs = await readFile(deleteArgsFile, "utf-8");
     expect(deleteArgs).toContain("delete bd-1 bd-2 --force");
@@ -1780,10 +2523,7 @@ process.exit(1);
     await chmod(bdPath, 0o755);
 
     try {
-      await runCli("tasks delete bd-1", hostDir, {
-        ...process.env,
-        PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      });
+      await runCli("tasks delete bd-1", hostDir, withBdEnv(bdPath, hostDir));
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       expect(cliFailureOutput(err)).toContain("--yes");
@@ -1830,10 +2570,11 @@ process.exit(1);
     );
     await chmod(bdPath, 0o755);
 
-    const { stdout } = await runCli("tasks delete bd-1 --dry-run", hostDir, {
-      ...process.env,
-      PATH: `${binDir}:${process.env.PATH ?? ""}`,
-    });
+    const { stdout } = await runCli(
+      "tasks delete bd-1 --dry-run",
+      hostDir,
+      withBdEnv(bdPath, hostDir),
+    );
 
     const deleteArgs = await readFile(deleteArgsFile, "utf-8");
     expect(deleteArgs).toContain("delete bd-1 --dry-run");
@@ -1886,10 +2627,11 @@ process.exit(1);
     await chmod(bdPath, 0o755);
 
     try {
-      await runCli("tasks delete bd-1 --yes", hostDir, {
-        ...process.env,
-        PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      });
+      await runCli(
+        "tasks delete bd-1 --yes",
+        hostDir,
+        withBdEnv(bdPath, hostDir),
+      );
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       expect(cliFailureOutput(err)).toContain("dependents not in deletion set");

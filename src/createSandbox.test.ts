@@ -1,6 +1,6 @@
 import { exec } from "node:child_process";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -586,6 +586,47 @@ describe("createSandbox", () => {
         "utf-8",
       );
       expect(hookOutput.trim()).toBe("hook-ran");
+    } finally {
+      await sandbox.close();
+      await rm(hostDir, { recursive: true, force: true });
+    }
+  });
+
+  it("copies gitignored bootstrap.sh from host repo before hook preflight", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const bootstrapDir = join(hostDir, ".sandcastle");
+    await mkdir(bootstrapDir, { recursive: true });
+    await writeFile(
+      join(bootstrapDir, "bootstrap.sh"),
+      "#!/bin/bash\necho bootstrapped > bootstrap-ran.txt\n",
+    );
+
+    const sandbox = await createSandbox({
+      branch: "issue/bootstrap-sync",
+      sandbox: testSandbox,
+      hooks: {
+        sandbox: {
+          onSandboxReady: [{ command: "bash .sandcastle/bootstrap.sh" }],
+        },
+      },
+      cwd: hostDir,
+      _test: {
+        buildSandboxLayer: (sandboxDir) => makeLocalSandboxLayer(sandboxDir),
+      },
+    });
+
+    try {
+      expect(
+        existsSync(join(sandbox.worktreePath, ".sandcastle", "bootstrap.sh")),
+      ).toBe(true);
+      const marker = await readFile(
+        join(sandbox.worktreePath, "bootstrap-ran.txt"),
+        "utf-8",
+      );
+      expect(marker.trim()).toBe("bootstrapped");
     } finally {
       await sandbox.close();
       await rm(hostDir, { recursive: true, force: true });

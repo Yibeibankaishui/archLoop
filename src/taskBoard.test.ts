@@ -1,10 +1,12 @@
 import { exec } from "node:child_process";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import {
+  claimHubTask,
   deleteHubTasks,
   formatHubTaskBoardLines,
   formatHubTaskCommentLines,
@@ -14,9 +16,19 @@ import {
   projectHubTask,
   projectHubTaskBoard,
   resolveHubTaskSelectors,
+  selectHubBatchMergeTasks,
 } from "./taskBoard.js";
 
 const execAsync = promisify(exec);
+
+const seedHubTaskStore = (repoDir: string): void => {
+  const beadsDir = join(repoDir, ".beads");
+  mkdirSync(beadsDir, { recursive: true });
+  const metadataPath = join(beadsDir, "metadata.json");
+  if (!existsSync(metadataPath)) {
+    writeFileSync(metadataPath, JSON.stringify({ backend: "dolt" }));
+  }
+};
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
@@ -28,6 +40,7 @@ const writeMockBdDelete = async (
   repoDir: string,
   initialTasks: { id: string; title: string; status: string }[],
 ) => {
+  seedHubTaskStore(repoDir);
   const binDir = join(repoDir, "bin");
   await mkdir(binDir, { recursive: true });
   const gitPath = (await execAsync("command -v git")).stdout.trim();
@@ -103,6 +116,7 @@ process.exit(1);
     env: {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      SANDCASTLE_BD_PATH: bdPath,
     },
     deleteArgsFile,
     stateFile,
@@ -259,6 +273,105 @@ describe("task status projection", () => {
     ]);
   });
 
+  it("loads all Beads tasks including closed tasks beyond the default list page", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "taskboard-load-all-"));
+    seedHubTaskStore(repoDir);
+    const binDir = join(repoDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const argsFile = join(repoDir, "bd-list-args.txt");
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const args = process.argv.slice(2);
+fs.writeFileSync(${JSON.stringify(argsFile)}, args.join(" "));
+if (args[0] !== "list") {
+  process.exit(1);
+}
+const includeClosed = args.includes("--all");
+const limitIndex = args.indexOf("--limit");
+const limit = limitIndex >= 0 ? Number(args[limitIndex + 1]) : 50;
+let tasks = Array.from({ length: 55 }, (_, index) => ({
+  id: \`bd-open-\${index}\`,
+  title: \`Open \${index}\`,
+  status: "open",
+}));
+tasks.push({
+  id: "bd-closed-target",
+  title: "Closed target",
+  status: "closed",
+  labels: ["done"],
+});
+if (!includeClosed) {
+  tasks = tasks.filter((task) => task.status !== "closed");
+}
+if (limit > 0) {
+  tasks = tasks.slice(0, limit);
+}
+fs.writeSync(1, JSON.stringify(tasks));
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const board = loadHubTaskBoard(repoDir, {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      SANDCASTLE_BD_PATH: bdPath,
+    });
+
+    expect(board.tasks).toHaveLength(56);
+    expect(board.tasks.map((task) => task.id)).toContain("bd-closed-target");
+    expect(await readFile(argsFile, "utf-8")).toBe(
+      "list --json --all --limit 0",
+    );
+  });
+
+  it("projects remote and run refs stored in metadata", () => {
+    const task = projectHubTask({
+      id: "bd-43",
+      title: "Metadata refs task",
+      status: "closed",
+      metadata: {
+        hubStatus: "done",
+        remote_refs: ["github#102"],
+        run_refs: ["run-abc"],
+      },
+    });
+
+    expect(task.hubStatus).toBe("done");
+    expect(task.remoteRefs).toEqual(["github#102"]);
+    expect(task.runRefs).toEqual(["run-abc"]);
+  });
+
+  it("projects github_issue metadata into remote refs", () => {
+    const task = projectHubTask({
+      id: "bd-45",
+      title: "GitHub issue metadata task",
+      status: "open",
+      metadata: {
+        github_issue: 110,
+      },
+    });
+
+    expect(task.remoteRefs).toEqual(["github#110"]);
+  });
+
+  it("keeps done metadata authoritative over stale collaboration labels", () => {
+    const task = projectHubTask({
+      id: "bd-44",
+      title: "Completed task with stale label",
+      status: "closed",
+      labels: ["ready-for-agent"],
+      metadata: {
+        done: true,
+        remote_refs: ["github#106"],
+      },
+    });
+
+    expect(task.hubStatus).toBe("done");
+  });
+
   it("represents task claims in metadata without inventing a claimed status", () => {
     const task = projectHubTask({
       id: "bd-69",
@@ -381,6 +494,177 @@ describe("task status projection", () => {
   });
 });
 
+describe("task lifecycle transitions", () => {
+  it("claims ready tasks by aligning Beads status, labels, metadata, and projection", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "taskboard-claim-"));
+    await initRepo(repoDir);
+    seedHubTaskStore(repoDir);
+
+    const binDir = join(repoDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await execAsync(`ln -sf "${gitPath}" "${join(binDir, "git")}"`);
+
+    const stateFile = join(repoDir, "bd-state.json");
+    await writeFile(
+      stateFile,
+      JSON.stringify(
+        [
+          {
+            id: "bd-claim",
+            title: "Claim me",
+            status: "open",
+            labels: ["ready-for-agent"],
+            metadata: { hubStatus: "ready_for_agent" },
+          },
+        ],
+        null,
+        2,
+      ),
+    );
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = ${JSON.stringify(stateFile)};
+const args = process.argv.slice(2);
+const [command, id] = args;
+const readState = () => JSON.parse(fs.readFileSync(stateFile, "utf8"));
+const writeState = (state) => fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+const findTask = (state, taskId) => state.find((task) => task.id === taskId);
+
+if (command === "list") {
+  process.stdout.write(JSON.stringify(readState()));
+  process.exit(0);
+}
+
+if (command === "show" && id) {
+  const task = findTask(readState(), id);
+  if (!task) process.exit(1);
+  process.stdout.write(JSON.stringify([task]));
+  process.exit(0);
+}
+
+if (command === "update" && id) {
+  const state = readState();
+  const task = findTask(state, id);
+  if (!task) process.exit(1);
+  const statusIndex = args.indexOf("--status");
+  if (statusIndex >= 0) {
+    task.status = args[statusIndex + 1];
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      task.labels = [];
+    }
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      const label = args[index + 1];
+      if (!task.labels.includes(label)) task.labels.push(label);
+    }
+    if (args[index] === "--add-label") {
+      const label = args[index + 1];
+      if (!task.labels.includes(label)) task.labels.push(label);
+    }
+    if (args[index] === "--remove-label") {
+      const label = args[index + 1];
+      task.labels = task.labels.filter((entry) => entry !== label);
+    }
+  }
+  const metadataIndex = args.indexOf("--metadata");
+  if (metadataIndex >= 0) {
+    task.metadata = JSON.parse(args[metadataIndex + 1]);
+  }
+  writeState(state);
+  process.exit(0);
+}
+
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const env = {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      SANDCASTLE_BD_PATH: bdPath,
+    };
+
+    const result = await claimHubTask({
+      cwd: repoDir,
+      taskId: "bd-claim",
+      branch: "sandcastle/bd-claim-claim-me",
+      hubProjectDir: join(repoDir, "data", "sandcastle", "hub"),
+      env,
+    });
+
+    expect(result.task.hubStatus).toBe("implementing");
+    expect(result.task.metadata.hubStatus).toBe("implementing");
+    expect(result.task.labels).toContain("implementing");
+    expect(result.task.labels).not.toContain("ready-for-agent");
+    expect(result.task.beadsStatus).toBe("in_progress");
+
+    const board = loadHubTaskBoard(repoDir, env);
+    expect(board.tasks[0]).toMatchObject({
+      id: "bd-claim",
+      hubStatus: "implementing",
+      beadsStatus: "in_progress",
+    });
+  });
+
+  it("selects waiting_for_merge tasks even when old metadata lags behind the label", () => {
+    const board = projectHubTaskBoard([
+      {
+        id: "bd-reviewed",
+        title: "Reviewed task",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "ready_for_agent",
+          claim: {
+            runId: "run-1",
+            batchId: "batch-1",
+            branch: "sandcastle/bd-reviewed-reviewed-task",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    expect(board.tasks[0]?.hubStatus).toBe("waiting_for_merge");
+    expect(
+      selectHubBatchMergeTasks(board, "batch-1").map((task) => task.id),
+    ).toEqual(["bd-reviewed"]);
+  });
+
+  it("keeps metadata failure reasons authoritative over stale non-failed labels", () => {
+    const board = projectHubTaskBoard([
+      {
+        id: "bd-failed",
+        title: "Failed task",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "ready_for_agent",
+          failureReason: "merge_failed",
+          claim: {
+            runId: "run-1",
+            batchId: "batch-1",
+            branch: "sandcastle/bd-failed-failed-task",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    expect(board.tasks[0]?.hubStatus).toBe("failed");
+    expect(selectHubBatchMergeTasks(board, "batch-1")).toEqual([]);
+  });
+});
+
 describe("deleteHubTasks", () => {
   it("deletes a single local Beads task via bd delete --force", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "taskboard-delete-"));
@@ -415,6 +699,7 @@ describe("deleteHubTasks", () => {
       join(tmpdir(), "taskboard-delete-false-success-"),
     );
     await initRepo(repoDir);
+    seedHubTaskStore(repoDir);
 
     const binDir = join(repoDir, "bin");
     await mkdir(binDir, { recursive: true });
@@ -464,6 +749,7 @@ process.exit(1);
     const env = {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      SANDCASTLE_BD_PATH: bdPath,
     };
 
     expect(() =>
@@ -515,6 +801,7 @@ describe("deleteHubTasks dependency failures", () => {
   it("surfaces Beads dependency errors from bd delete", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "taskboard-delete-deps-"));
     await initRepo(repoDir);
+    seedHubTaskStore(repoDir);
 
     const binDir = join(repoDir, "bin");
     await mkdir(binDir, { recursive: true });
@@ -560,6 +847,7 @@ process.exit(1);
     const env = {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      SANDCASTLE_BD_PATH: bdPath,
     };
 
     expect(() =>

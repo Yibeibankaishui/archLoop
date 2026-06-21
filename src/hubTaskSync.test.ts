@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
 import {
   detectSemanticSyncConflict,
   formatGithubRemoteRef,
@@ -91,12 +92,19 @@ describe("remote collaboration mapping", () => {
 
 describe("semantic sync conflicts", () => {
   it("flags collaboration mismatches and protects completed local tasks", () => {
-    expect(detectSemanticSyncConflict("done", "ready_for_agent")).toContain(
-      "local done",
-    );
     expect(
       detectSemanticSyncConflict("ready_for_agent", "needs_info"),
     ).toContain("disagrees");
+    expect(
+      detectSemanticSyncConflict("done", "ready_for_agent"),
+    ).toBeUndefined();
+    expect(detectSemanticSyncConflict("wontfix", "blocked")).toBeUndefined();
+    expect(detectSemanticSyncConflict("done", "wontfix")).toContain(
+      "disagrees",
+    );
+    expect(detectSemanticSyncConflict("wontfix", "done")).toContain(
+      "disagrees",
+    );
     expect(
       detectSemanticSyncConflict("implementing", "ready_for_agent"),
     ).toBeUndefined();
@@ -108,6 +116,7 @@ describe("syncHubTasksWithGithub", () => {
     repoDir: string,
     initialState: Record<string, unknown>[],
   ) => {
+    seedHubTaskStoreMetadata(repoDir);
     const binDir = join(repoDir, "bin");
     await mkdir(binDir, { recursive: true });
     const gitPath = (await execAsync("command -v git")).stdout.trim();
@@ -115,9 +124,11 @@ describe("syncHubTasksWithGithub", () => {
 
     const stateFile = join(repoDir, "bd-state.json");
     const createArgsFile = join(repoDir, "bd-create-args.txt");
+    const showArgsFile = join(repoDir, "bd-show-args.txt");
     const updateArgsFile = join(repoDir, "bd-update-args.txt");
     await writeFile(stateFile, JSON.stringify(initialState, null, 2));
     await writeFile(createArgsFile, "");
+    await writeFile(showArgsFile, "");
     await writeFile(updateArgsFile, "");
 
     const bdPath = join(binDir, "bd");
@@ -132,11 +143,23 @@ const args = process.argv.slice(2);
 const [command, id] = args;
 
 if (command === "list") {
-  process.stdout.write(fs.readFileSync(stateFile, "utf8"));
+  const includeClosed = args.includes("--all");
+  const limitIndex = args.indexOf("--limit");
+  const limit =
+    limitIndex >= 0 ? Number(args[limitIndex + 1]) : 50;
+  let state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  if (!includeClosed) {
+    state = state.filter((entry) => entry.status !== "closed");
+  }
+  if (limit > 0) {
+    state = state.slice(0, limit);
+  }
+  fs.writeSync(1, JSON.stringify(state, null, 2));
   process.exit(0);
 }
 
 if (command === "show") {
+  fs.appendFileSync(${JSON.stringify(showArgsFile)}, args.join(" ") + "\\n");
   const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
   const task = state.find((entry) => entry.id === id);
   if (!task) {
@@ -226,6 +249,7 @@ process.exit(1);
       binDir,
       stateFile,
       createArgsFile,
+      showArgsFile,
       updateArgsFile,
     };
   };
@@ -274,6 +298,527 @@ process.exit(1);
     expect(createArgs).toContain("Sync Hub task state");
     expect(createArgs).toContain("ready-for-agent");
     expect(createArgs).toContain("github#68");
+  });
+
+  it("pulls only open GitHub issues by default", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-sync-open-only-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+    const { binDir, createArgsFile, stateFile } = await createFakeBd(
+      repoDir,
+      [],
+    );
+
+    const issues: GithubIssueRecord[] = [
+      {
+        number: 68,
+        title: "Open issue",
+        body: "Keep me",
+        state: "OPEN",
+        labels: ["Sandcastle", "ready-for-agent"],
+        updatedAt: "2026-06-11T12:00:00Z",
+      },
+      {
+        number: 69,
+        title: "Closed history",
+        body: "Do not import me",
+        state: "CLOSED",
+        labels: ["Sandcastle"],
+        updatedAt: "2026-06-11T13:00:00Z",
+      },
+    ];
+
+    const github: GithubIssueClient = {
+      listIssues: () => issues,
+      editIssue: () => {},
+      closeIssue: () => {},
+    };
+
+    const result = await syncHubTasksWithGithub({
+      cwd: repoDir,
+      github,
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        BD_STATE_FILE: stateFile,
+        BD_CREATE_ARGS_FILE: createArgsFile,
+        BD_UPDATE_ARGS_FILE: join(repoDir, "bd-update-args.txt"),
+      },
+    });
+
+    expect(result.pulled.created).toEqual(["bd-1"]);
+    expect(await readFile(createArgsFile, "utf-8")).toContain("Open issue");
+    expect(await readFile(createArgsFile, "utf-8")).not.toContain(
+      "Closed history",
+    );
+    const state = JSON.parse(await readFile(stateFile, "utf-8")) as Array<{
+      title: string;
+    }>;
+    expect(state).toHaveLength(1);
+    expect(state[0]?.title).toBe("Open issue");
+  });
+
+  it("includes closed GitHub issues when requested", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-sync-include-closed-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+    const { binDir, createArgsFile, stateFile } = await createFakeBd(
+      repoDir,
+      [],
+    );
+
+    const github: GithubIssueClient = {
+      listIssues: () => [
+        {
+          number: 68,
+          title: "Open issue",
+          body: "Keep me",
+          state: "OPEN",
+          labels: ["Sandcastle", "ready-for-agent"],
+          updatedAt: "2026-06-11T12:00:00Z",
+        },
+        {
+          number: 69,
+          title: "Closed history",
+          body: "Import me too",
+          state: "CLOSED",
+          labels: ["Sandcastle"],
+          updatedAt: "2026-06-11T13:00:00Z",
+        },
+      ],
+      editIssue: () => {},
+      closeIssue: () => {},
+    };
+
+    const result = await syncHubTasksWithGithub({
+      cwd: repoDir,
+      github,
+      includeClosed: true,
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        BD_STATE_FILE: stateFile,
+        BD_CREATE_ARGS_FILE: createArgsFile,
+        BD_UPDATE_ARGS_FILE: join(repoDir, "bd-update-args.txt"),
+      },
+    });
+
+    expect(result.pulled.created).toHaveLength(2);
+    expect(await readFile(createArgsFile, "utf-8")).toContain("Closed history");
+    const state = JSON.parse(await readFile(stateFile, "utf-8")) as Array<{
+      title: string;
+    }>;
+    expect(state.map((entry) => entry.title)).toEqual([
+      "Open issue",
+      "Closed history",
+    ]);
+  });
+
+  it("reports same-title GitHub issues as duplicate link candidates", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-sync-duplicate-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+    const { binDir, createArgsFile, stateFile } = await createFakeBd(repoDir, [
+      {
+        id: "bd-1",
+        title: "Duplicate candidate",
+        status: "open",
+      },
+    ]);
+
+    const github: GithubIssueClient = {
+      listIssues: () => [
+        {
+          number: 71,
+          title: "Duplicate candidate",
+          body: "Should not create a second task",
+          state: "OPEN",
+          labels: ["Sandcastle"],
+          updatedAt: "2026-06-11T14:00:00Z",
+        },
+      ],
+      editIssue: () => {},
+      closeIssue: () => {},
+    };
+
+    const result = await syncHubTasksWithGithub({
+      cwd: repoDir,
+      github,
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        BD_STATE_FILE: stateFile,
+        BD_CREATE_ARGS_FILE: createArgsFile,
+        BD_UPDATE_ARGS_FILE: join(repoDir, "bd-update-args.txt"),
+      },
+    });
+
+    expect(result.pulled.created).toEqual([]);
+    expect(result.pulled.updated).toEqual([]);
+    expect(result.pulled.conflicts).toEqual([]);
+    expect(result.pulled.duplicateCandidates).toEqual([
+      {
+        issueNumber: 71,
+        title: "Duplicate candidate",
+        localTaskIds: ["bd-1"],
+      },
+    ]);
+    expect(await readFile(createArgsFile, "utf-8")).toBe("");
+    const state = JSON.parse(await readFile(stateFile, "utf-8")) as Array<{
+      id: string;
+      title: string;
+    }>;
+    expect(state).toHaveLength(1);
+    expect(state[0]?.id).toBe("bd-1");
+  });
+
+  it("does not mutate local task metadata during a dry-run push preview", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-sync-push-dry-run-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+    const { binDir, stateFile, updateArgsFile } = await createFakeBd(repoDir, [
+      {
+        id: "bd-ready",
+        title: "Ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {
+          remote_refs: ["github#10"],
+          sync_state: "push_pending",
+          hubStatus: "ready_for_agent",
+        },
+        remoteRefs: [{ url: "github#10" }],
+      },
+    ]);
+
+    const github: GithubIssueClient = {
+      listIssues: () => [
+        {
+          number: 10,
+          title: "Ready task",
+          state: "OPEN",
+          labels: ["needs-triage"],
+          updatedAt: "2026-06-11T10:00:00Z",
+        },
+      ],
+      editIssue: () => {},
+      closeIssue: () => {},
+    };
+
+    const result = await syncHubTasksWithGithub({
+      cwd: repoDir,
+      github,
+      mode: "push",
+      dryRun: true,
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        BD_STATE_FILE: stateFile,
+        BD_UPDATE_ARGS_FILE: updateArgsFile,
+      },
+    });
+
+    expect(result.pulled.created).toEqual([]);
+    expect(result.pushed.synced).toEqual(["bd-ready"]);
+    expect(await readFile(updateArgsFile, "utf-8")).toBe("");
+    const state = JSON.parse(await readFile(stateFile, "utf-8")) as Array<{
+      metadata: { sync_state?: string };
+    }>;
+    expect(state[0]?.metadata.sync_state).toBe("push_pending");
+  });
+
+  it("does not preview already closed remote issues as newly closed", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-sync-push-dry-run-closed-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+    const { binDir, stateFile, updateArgsFile } = await createFakeBd(repoDir, [
+      {
+        id: "bd-done",
+        title: "Done task",
+        status: "closed",
+        labels: ["done"],
+        metadata: {
+          remote_refs: ["github#10"],
+          sync_state: "push_pending",
+          hubStatus: "done",
+        },
+      },
+    ]);
+
+    const github: GithubIssueClient = {
+      listIssues: () => [
+        {
+          number: 10,
+          title: "Done task",
+          state: "CLOSED",
+          labels: ["Sandcastle"],
+        },
+      ],
+      editIssue: () => {},
+      closeIssue: () => {},
+    };
+
+    const result = await syncHubTasksWithGithub({
+      cwd: repoDir,
+      github,
+      mode: "push",
+      dryRun: true,
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        BD_STATE_FILE: stateFile,
+        BD_UPDATE_ARGS_FILE: updateArgsFile,
+      },
+    });
+
+    expect(result.pushed.closed).toEqual([]);
+    expect(result.pushed.synced).toEqual(["bd-done"]);
+    expect(await readFile(updateArgsFile, "utf-8")).toBe("");
+  });
+
+  it("does not rewrite already synced local tasks when the remote issue is already closed", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-sync-push-already-synced-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+    const { binDir, stateFile, updateArgsFile } = await createFakeBd(repoDir, [
+      {
+        id: "bd-done",
+        title: "Done task",
+        status: "closed",
+        labels: ["done"],
+        metadata: {
+          remote_refs: ["github#10"],
+          sync_state: "synced",
+          hubStatus: "done",
+        },
+      },
+    ]);
+
+    const github: GithubIssueClient = {
+      listIssues: () => [
+        {
+          number: 10,
+          title: "Done task",
+          state: "CLOSED",
+          labels: ["Sandcastle"],
+        },
+      ],
+      editIssue: () => {},
+      closeIssue: () => {},
+    };
+
+    const result = await syncHubTasksWithGithub({
+      cwd: repoDir,
+      github,
+      mode: "push",
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        BD_STATE_FILE: stateFile,
+        BD_UPDATE_ARGS_FILE: updateArgsFile,
+      },
+    });
+
+    expect(result.pushed.closed).toEqual([]);
+    expect(result.pushed.synced).toEqual(["bd-done"]);
+    expect(await readFile(updateArgsFile, "utf-8")).toBe("");
+  });
+
+  it("push mode never imports remote-only GitHub issues", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-sync-push-only-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+    const { binDir, createArgsFile, stateFile, updateArgsFile } =
+      await createFakeBd(repoDir, [
+        {
+          id: "bd-done",
+          title: "Done task",
+          status: "closed",
+          labels: ["done"],
+          metadata: {
+            remote_refs: ["github#20"],
+            sync_state: "push_pending",
+            hubStatus: "done",
+          },
+          remoteRefs: [{ url: "github#20" }],
+        },
+      ]);
+
+    const closes: number[] = [];
+    const github: GithubIssueClient = {
+      listIssues: () => [
+        {
+          number: 20,
+          title: "Done task",
+          state: "OPEN",
+          labels: ["ready-for-agent"],
+        },
+        {
+          number: 21,
+          title: "Remote-only issue",
+          state: "OPEN",
+          labels: ["ready-for-agent"],
+        },
+      ],
+      editIssue: () => {},
+      closeIssue: (issueNumber) => {
+        closes.push(issueNumber);
+      },
+    };
+
+    const result = await syncHubTasksWithGithub({
+      cwd: repoDir,
+      github,
+      mode: "push",
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        BD_STATE_FILE: stateFile,
+        BD_CREATE_ARGS_FILE: createArgsFile,
+        BD_UPDATE_ARGS_FILE: updateArgsFile,
+      },
+    });
+
+    expect(result.pulled.created).toEqual([]);
+    expect(result.pushed.closed).toEqual(["bd-done"]);
+    expect(closes).toEqual([20]);
+    expect(await readFile(createArgsFile, "utf-8")).toBe("");
+  });
+
+  it("pushes completed tasks that are Beads-closed and beyond the default list page", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-sync-push-all-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+    const fillerTasks = Array.from({ length: 55 }, (_, index) => ({
+      id: `bd-filler-${index}`,
+      title: `Filler ${index}`,
+      status: "open",
+    }));
+    const { binDir, stateFile, showArgsFile, updateArgsFile } =
+      await createFakeBd(repoDir, [
+        ...fillerTasks,
+        {
+          id: "bd-closed-target",
+          title: "Closed target",
+          status: "closed",
+          labels: ["done"],
+          metadata: {
+            done: true,
+            hubStatus: "done",
+            sync_state: "push_pending",
+            remote_refs: ["github#102"],
+            github_issue: 102,
+          },
+        },
+      ]);
+
+    const closes: number[] = [];
+    const github: GithubIssueClient = {
+      listIssues: () => [
+        {
+          number: 102,
+          title: "Closed target",
+          state: "OPEN",
+          labels: ["Sandcastle", "ready-for-agent"],
+        },
+      ],
+      editIssue: () => {},
+      closeIssue: (issueNumber) => {
+        closes.push(issueNumber);
+      },
+    };
+
+    const result = await syncHubTasksWithGithub({
+      cwd: repoDir,
+      github,
+      mode: "push",
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        BD_STATE_FILE: stateFile,
+        BD_UPDATE_ARGS_FILE: updateArgsFile,
+      },
+    });
+
+    expect(closes).toEqual([102]);
+    expect(result.pushed.closed).toEqual(["bd-closed-target"]);
+    expect(result.pushed.synced).toEqual([]);
+    expect(await readFile(showArgsFile, "utf-8")).toBe("");
+  });
+
+  it("closes each linked GitHub issue at most once when duplicate local tasks share a remote ref", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-sync-push-duplicate-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+    const { binDir, stateFile, updateArgsFile } = await createFakeBd(repoDir, [
+      {
+        id: "bd-first",
+        title: "First local duplicate",
+        status: "closed",
+        labels: ["done"],
+        metadata: {
+          hubStatus: "done",
+          sync_state: "push_pending",
+          remote_refs: ["github#102"],
+        },
+      },
+      {
+        id: "bd-second",
+        title: "Second local duplicate",
+        status: "closed",
+        labels: ["done"],
+        metadata: {
+          hubStatus: "done",
+          sync_state: "push_pending",
+          remote_refs: ["github#102"],
+        },
+      },
+    ]);
+
+    const closes: number[] = [];
+    const github: GithubIssueClient = {
+      listIssues: () => [
+        {
+          number: 102,
+          title: "Remote issue",
+          state: "OPEN",
+          labels: ["Sandcastle", "ready-for-agent"],
+        },
+      ],
+      editIssue: () => {},
+      closeIssue: (issueNumber) => {
+        closes.push(issueNumber);
+      },
+    };
+
+    const result = await syncHubTasksWithGithub({
+      cwd: repoDir,
+      github,
+      mode: "push",
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        BD_STATE_FILE: stateFile,
+        BD_UPDATE_ARGS_FILE: updateArgsFile,
+      },
+    });
+
+    expect(closes).toEqual([102]);
+    expect(result.pushed.closed).toEqual(["bd-first"]);
+    expect(result.pushed.synced).toEqual(["bd-second"]);
   });
 
   it("pushes collaboration labels and closes done or wontfix issues remotely", async () => {
@@ -385,8 +930,8 @@ process.exit(1);
     ).toBe("done");
   });
 
-  it("marks semantic conflicts as sync_conflict without downgrading done tasks", async () => {
-    const repoDir = await mkdtemp(join(tmpdir(), "hub-sync-conflict-"));
+  it("uses metadata remote refs and pushes completed local tasks over open remote issues", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-sync-done-wins-"));
     await initRepo(repoDir);
     await commitFile(repoDir, "hello.txt", "hello", "initial commit");
     const { binDir, stateFile, updateArgsFile } = await createFakeBd(repoDir, [
@@ -399,11 +944,12 @@ process.exit(1);
           remote_refs: ["github#20"],
           sync_state: "synced",
           hubStatus: "done",
+          remote_updated_at: "2026-06-11T10:00:00Z",
         },
-        remoteRefs: [{ url: "github#20" }],
       },
     ]);
 
+    const closes: number[] = [];
     const github: GithubIssueClient = {
       listIssues: () => [
         {
@@ -415,7 +961,9 @@ process.exit(1);
         },
       ],
       editIssue: () => {},
-      closeIssue: () => {},
+      closeIssue: (issueNumber) => {
+        closes.push(issueNumber);
+      },
     };
 
     const result = await syncHubTasksWithGithub({
@@ -430,16 +978,18 @@ process.exit(1);
       },
     });
 
-    expect(result.pulled.conflicts).toEqual(["bd-done"]);
+    expect(result.pulled.created).toEqual([]);
+    expect(result.pulled.conflicts).toEqual([]);
+    expect(result.pushed.closed).toEqual(["bd-done"]);
+    expect(closes).toEqual([20]);
     const state = JSON.parse(await readFile(stateFile, "utf-8")) as Array<{
-      id: string;
       status: string;
-      labels: string[];
+      id: string;
       metadata: { hubStatus?: string; sync_state?: string };
     }>;
     const task = state.find((entry) => entry.id === "bd-done");
     expect(task?.metadata.hubStatus).toBe("done");
-    expect(task?.metadata.sync_state).toBe("conflict");
+    expect(task?.metadata.sync_state).toBe("synced");
     expect(task?.status).toBe("closed");
   });
 

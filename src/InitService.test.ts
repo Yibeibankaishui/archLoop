@@ -9,7 +9,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   buildCapabilityManifest,
   RUNTIME_DEBUG_ADDON_ID,
@@ -50,6 +50,20 @@ import { SANDBOX_REPO_DIR } from "./SandboxFactory.js";
 import { SKELETON_PROMPT } from "./templates.js";
 
 const makeDir = () => mkdtemp(join(tmpdir(), "init-service-"));
+
+let originalXdgDataHome: string | undefined;
+
+beforeEach(async () => {
+  originalXdgDataHome = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = await mkdtemp(
+    join(tmpdir(), "init-service-xdg-"),
+  );
+});
+
+afterEach(() => {
+  if (originalXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
+  else process.env.XDG_DATA_HOME = originalXdgDataHome;
+});
 
 const claudeCodeAgent = getAgent("claude-code")!;
 const piAgent = getAgent("pi")!;
@@ -98,6 +112,18 @@ const expectMainUsesInitBootstrapOnly = (mainTs: string) => {
   expect(mainTs).not.toContain("bootstrap-generator");
   expect(mainTs).not.toContain("npm install");
   expect(mainTs).not.toContain("node_modules");
+};
+
+const expectScaffoldedMainUsesDeterministicIssueBranches = (mainTs: string) => {
+  expect(mainTs).toContain("canonicalizeIssueBranch");
+  expect(mainTs).toContain("canonicalizePlannedIssues");
+  expect(mainTs).toContain("`sandcastle/issue-${");
+};
+
+const expectScaffoldedPlanPromptOmitsSlugBranches = (prompt: string) => {
+  expect(prompt).not.toContain("sandcastle/issue-{id}-{slug}");
+  expect(prompt).toMatch(/do \*\*not\*\* assign branch names/i);
+  expect(prompt).toContain("sandcastle/issue-{id}");
 };
 
 // ---------------------------------------------------------------------------
@@ -234,7 +260,9 @@ describe("Auth requirement collection", () => {
       envVars: ["OPENAI_KEY"],
       authMounts: [
         {
-          hostPath: ".sandcastle/auth/codex",
+          hostPath: expect.stringContaining(
+            join("sandcastle", "hub", "auth", "codex"),
+          ),
           sandboxPath: "/home/agent/.codex",
         },
       ],
@@ -245,7 +273,9 @@ describe("Auth requirement collection", () => {
       envVars: ["GH_TOKEN"],
       authMounts: [
         {
-          hostPath: ".sandcastle/auth/gh",
+          hostPath: expect.stringContaining(
+            join("sandcastle", "hub", "auth", "github"),
+          ),
           sandboxPath: "/home/agent/.config/gh",
         },
       ],
@@ -1023,29 +1053,44 @@ describe("InitService scaffold", () => {
 
   it("scaffolds auth mounts for selected runtimes and backlog manager only", async () => {
     const dir = await makeDir();
-    await runScaffold(dir, {
-      templateName: "simple-loop",
-      installedRuntimes: [getAgentRuntime("codex")!],
-      backlogManager: getBacklogManager("github-issues"),
-    });
+    const dataHome = join(dir, "data");
+    const originalXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = dataHome;
+    try {
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        installedRuntimes: [getAgentRuntime("codex")!],
+        backlogManager: getBacklogManager("github-issues"),
+      });
+    } finally {
+      if (originalXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = originalXdgDataHome;
+      }
+    }
 
     const mainTs = await readFile(
       join(dir, ".sandcastle", "main.mts"),
       "utf-8",
     );
 
-    expect(mainTs).toContain(".sandcastle/auth/codex");
+    expect(mainTs).toContain(
+      join(dataHome, "sandcastle", "hub", "auth", "codex"),
+    );
     expect(mainTs).toContain("/home/agent/.codex");
-    expect(mainTs).toContain(".sandcastle/auth/gh");
+    expect(mainTs).toContain(
+      join(dataHome, "sandcastle", "hub", "auth", "github"),
+    );
     expect(mainTs).toContain("/home/agent/.config/gh");
     expect(mainTs).not.toContain(".sandcastle/auth/cursor");
     expect(mainTs).not.toContain(".sandcastle/auth/cursor-config");
 
     await expect(
-      access(join(dir, ".sandcastle", "auth", "codex")),
+      access(join(dataHome, "sandcastle", "hub", "auth", "codex")),
     ).resolves.toBeUndefined();
     await expect(
-      access(join(dir, ".sandcastle", "auth", "gh")),
+      access(join(dataHome, "sandcastle", "hub", "auth", "github")),
     ).resolves.toBeUndefined();
     await expect(
       access(join(dir, ".sandcastle", "auth", "cursor")),
@@ -1057,21 +1102,34 @@ describe("InitService scaffold", () => {
 
   it("scaffolds combined auth mounts for multiple selected runtimes", async () => {
     const dir = await makeDir();
-    await runScaffold(dir, {
-      templateName: "simple-loop",
-      installedRuntimes: [
-        getAgentRuntime("codex")!,
-        getAgentRuntime("cursor")!,
-      ],
-      backlogManager: getBacklogManager("beads"),
-    });
+    const dataHome = join(dir, "data");
+    const originalXdgDataHome = process.env.XDG_DATA_HOME;
+    process.env.XDG_DATA_HOME = dataHome;
+    try {
+      await runScaffold(dir, {
+        templateName: "simple-loop",
+        installedRuntimes: [
+          getAgentRuntime("codex")!,
+          getAgentRuntime("cursor")!,
+        ],
+        backlogManager: getBacklogManager("beads"),
+      });
+    } finally {
+      if (originalXdgDataHome === undefined) {
+        delete process.env.XDG_DATA_HOME;
+      } else {
+        process.env.XDG_DATA_HOME = originalXdgDataHome;
+      }
+    }
 
     const mainTs = await readFile(
       join(dir, ".sandcastle", "main.mts"),
       "utf-8",
     );
 
-    expect(mainTs).toContain(".sandcastle/auth/codex");
+    expect(mainTs).toContain(
+      join(dataHome, "sandcastle", "hub", "auth", "codex"),
+    );
     expect(mainTs).toContain("/home/agent/.codex");
     expect(mainTs).not.toContain(".sandcastle/auth/cursor");
     expect(mainTs).not.toContain("/home/agent/.cursor");
@@ -1080,7 +1138,7 @@ describe("InitService scaffold", () => {
     expect(mainTs).not.toContain(".sandcastle/auth/gh");
 
     await expect(
-      access(join(dir, ".sandcastle", "auth", "codex")),
+      access(join(dataHome, "sandcastle", "hub", "auth", "codex")),
     ).resolves.toBeUndefined();
     await expect(
       access(join(dir, ".sandcastle", "auth", "cursor")),
@@ -1749,6 +1807,28 @@ describe("InitService scaffold", () => {
       expect(mainTs).not.toContain("completedBranches.length === 1");
     });
 
+    it("main.mts derives deterministic issue branches from issue ids", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "parallel-planner" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expectScaffoldedMainUsesDeterministicIssueBranches(mainTs);
+    });
+
+    it("plan-prompt.md does not ask the planner for title-derived branch slugs", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "parallel-planner" });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "plan-prompt.md"),
+        "utf-8",
+      );
+      expectScaffoldedPlanPromptOmitsSlugBranches(prompt);
+    });
+
     it("common files are still generated with parallel-planner template", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner" });
@@ -1980,6 +2060,20 @@ describe("InitService scaffold", () => {
       ).toBe(true);
     });
 
+    it("scaffolds blocker resolution helper for planner enrichment", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, {
+        templateName: "parallel-planner-with-review",
+        backlogManager: getBacklogManager("github-issues"),
+      });
+
+      const blockerResolution = await readFile(
+        join(dir, ".sandcastle", "blockerResolution.ts"),
+        "utf-8",
+      );
+      expect(blockerResolution).toContain("openBlockers");
+    });
+
     it("common files are still generated", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
@@ -2075,6 +2169,28 @@ describe("InitService scaffold", () => {
       expect(prompt).not.toContain("# EXISTING BRANCHES");
       expect(prompt).not.toContain("git rev-list <base>..refs/heads/<branch>");
       expect(prompt).toMatch(/do \*\*not\*\* inspect git branches/i);
+    });
+
+    it("plan-prompt.md does not ask the planner for title-derived branch slugs", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "plan-prompt.md"),
+        "utf-8",
+      );
+      expectScaffoldedPlanPromptOmitsSlugBranches(prompt);
+    });
+
+    it("main.mts derives deterministic issue branches from issue ids", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, { templateName: "parallel-planner-with-review" });
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.mts"),
+        "utf-8",
+      );
+      expectScaffoldedMainUsesDeterministicIssueBranches(mainTs);
     });
 
     it("main.mts skips fresh implementation when the local branch is already ahead", async () => {
@@ -2587,6 +2703,10 @@ describe("InitService scaffold", () => {
         "You may only choose issues from the provided `<issues-json>` list",
       );
       expect(planPrompt).toContain("If `<issues-json>` is an empty array");
+      expect(planPrompt).toContain("openBlockers");
+      expect(planPrompt).toContain(
+        "Primary source of truth for whether an issue is blocked",
+      );
       expect(planPrompt).not.toContain("!`gh issue list");
       expect(planPrompt).not.toContain("{{LIST_TASKS_COMMAND}}");
     });
@@ -2603,9 +2723,10 @@ describe("InitService scaffold", () => {
         "utf-8",
       );
       expect(main).toContain("-l Sandcastle -l ready-for-agent");
-      expect(main).toContain(
-        "const readyIssuesJson = await listReadyIssuesJson()",
-      );
+      expect(main).toContain("enrichReadyIssuesJson");
+      expect(main).toContain("blockerResolution.js");
+      expect(main).toContain('execFileAsync("gh"');
+      expect(main).toContain('"view"');
       expect(main).toContain("extractAllowedIssueIds");
       expect(main).toContain("assertPlanUsesAllowedIssues");
       expect(main).toContain("ISSUES_JSON: readyIssuesJson");

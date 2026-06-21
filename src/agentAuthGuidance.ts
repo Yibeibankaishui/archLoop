@@ -6,13 +6,14 @@ import { resolveEnv } from "./EnvResolver.js";
 type ProviderEnvConfig = {
   readonly envKey: string;
   readonly label: string;
+  readonly authEnvKey?: string;
 };
 
 const PROVIDER_ENV_CONFIG: Readonly<
   Record<string, ProviderEnvConfig | undefined>
 > = {
   cursor: { envKey: "CURSOR_API_KEY", label: "Cursor" },
-  codex: { envKey: "OPENAI_KEY", label: "Codex" },
+  codex: { envKey: "OPENAI_KEY", label: "Codex", authEnvKey: "CODEX_HOME" },
   "claude-code": { envKey: "ANTHROPIC_API_KEY", label: "Claude Code" },
   pi: { envKey: "ANTHROPIC_API_KEY", label: "Pi" },
   opencode: { envKey: "OPENCODE_API_KEY", label: "OpenCode" },
@@ -64,7 +65,7 @@ const buildSandcastleEnvGuidanceLines = (input: {
   const lines = [
     `${input.label} agent credentials are missing or invalid.`,
     "",
-    "Sandcastle expects agent credentials in its env stores — do not rely on agent login (for example `agent login` or `codex login`) for Sandcastle Hub or sandbox runs.",
+    "Sandcastle expects agent credentials in its env stores or Hub auth directories — do not rely on host-global provider login state.",
     "",
     "Fix one of:",
     "- Run `sandcastle env init` to set up shared Hub credentials",
@@ -76,7 +77,7 @@ const buildSandcastleEnvGuidanceLines = (input: {
   if (input.providerName === "codex") {
     return [
       ...lines,
-      "- For Codex sandbox only: `CODEX_HOME=.sandcastle/auth/codex codex login`",
+      "- For Codex CLI session auth: `sandcastle auth login codex`",
     ];
   }
 
@@ -126,12 +127,16 @@ export const assertAgentCredentialsConfigured = async (input: {
 
   const runtimeEnv = input.env ?? process.env;
   const resolvedEnv = await Effect.runPromise(
-    resolveEnv(input.cwd).pipe(Effect.provide(NodeContext.layer)),
+    resolveEnv(input.cwd, { env: runtimeEnv }).pipe(
+      Effect.provide(NodeContext.layer),
+    ),
   );
 
   const value =
     resolvedEnv[config.envKey]?.trim() ||
+    (config.authEnvKey ? resolvedEnv[config.authEnvKey]?.trim() : "") ||
     runtimeEnv[config.envKey]?.trim() ||
+    (config.authEnvKey ? runtimeEnv[config.authEnvKey]?.trim() : "") ||
     "";
 
   if (value.length === 0) {

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { Effect } from "effect";
 import {
   CopyToWorktreeError,
@@ -38,6 +38,10 @@ export const copyToWorktree = (
         continue;
       }
       const dest = join(worktreePath, relativePath);
+      const destParent = dirname(dest);
+      if (!existsSync(destParent)) {
+        mkdirSync(destParent, { recursive: true });
+      }
       yield* Effect.async<void, CopyToWorktreeError>((resume) => {
         execFile("cp", [...cowFlags, src, dest], (error) => {
           if (error) {

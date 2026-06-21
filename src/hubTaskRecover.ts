@@ -9,8 +9,12 @@ import {
 } from "./hubBatchMerge.js";
 import { TaskBoardError } from "./errors.js";
 import {
+  completeCloseFailedRecovery,
+  recoverFailedHubTask,
+  releaseStaleHubTaskClaim,
+} from "./hubTaskLifecycle.js";
+import {
   appendHubTaskComment,
-  closeHubTask,
   loadHubTask,
   resolveHubTaskBranch,
   updateHubTaskStatus,
@@ -58,6 +62,10 @@ export interface RecoverHubTaskInput {
   readonly closer?: HubTaskCloser;
   readonly merger?: HubFlowMerger;
   readonly isBranchMerged?: (cwd: string, branch: string) => Promise<boolean>;
+  readonly branchHasUnmergedWork?: (
+    cwd: string,
+    branch: string,
+  ) => Promise<boolean>;
 }
 
 export interface RecoverHubTaskResult {
@@ -86,6 +94,7 @@ const readFailureReason = (
     case "agent_failed":
     case "sandbox_failed":
     case "merge_conflict":
+    case "merge_failed":
     case "verification_failure":
     case "close_failed":
     case "unknown":
@@ -139,14 +148,6 @@ export const resolveFailedRecoveryTarget = (
   return "ready_for_agent";
 };
 
-const stripClaimMetadata = (
-  metadata: Readonly<Record<string, unknown>>,
-): Record<string, unknown> => {
-  const next = { ...metadata };
-  delete next.claim;
-  return next;
-};
-
 const appendRecoveryComment = (
   input: RecoverHubTaskInput,
   summary: string,
@@ -175,8 +176,51 @@ export const isBranchMergedIntoHead = async (
   }
 };
 
+export const hasBranchUnmergedWork = async (
+  cwd: string,
+  branch: string,
+): Promise<boolean> => {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["rev-list", "--count", `HEAD..${branch}`],
+      { cwd, encoding: "utf8" },
+    );
+    return Number(String(stdout).trim()) > 0;
+  } catch {
+    return false;
+  }
+};
+
 const resolveTaskBranch = (task: HubTaskProjection): string =>
   task.claim?.branch ?? resolveHubTaskBranch(task.id, task.title);
+
+const defaultCloseFailedRecoveryCloser: HubTaskCloser = async (closeInput) =>
+  completeCloseFailedRecovery(closeInput).task;
+
+const recoverToTargetStatus = (
+  input: RecoverHubTaskInput,
+  task: HubTaskProjection,
+  targetStatus: HubTaskStatus,
+  summary: string,
+): RecoverHubTaskResult => {
+  const { task: updatedTask } = recoverFailedHubTask({
+    cwd: input.cwd,
+    taskId: input.taskId,
+    targetStatus,
+    metadata: task.metadata,
+    env: input.env,
+  });
+  appendRecoveryComment(input, summary);
+
+  return {
+    outcome: "recovered_failed",
+    priorStatus: task.hubStatus,
+    hubStatus: updatedTask.hubStatus,
+    summary,
+    task: updatedTask,
+  };
+};
 
 const recoverCloseFailedTask = async (
   input: RecoverHubTaskInput,
@@ -213,20 +257,12 @@ const recoverCloseFailedTask = async (
     });
   }
 
-  const closer =
-    input.closer ??
-    (async (closeInput) =>
-      closeHubTask({
-        cwd: closeInput.cwd,
-        taskId: closeInput.taskId,
-        metadata: closeInput.metadata,
-        env: closeInput.env,
-      }));
+  const closer = input.closer ?? defaultCloseFailedRecoveryCloser;
 
   const closedTask = await closer({
     cwd: input.cwd,
     taskId: task.id,
-    metadata: stripClaimMetadata(task.metadata),
+    metadata: task.metadata,
     env: input.env,
   });
 
@@ -242,45 +278,58 @@ const recoverCloseFailedTask = async (
   };
 };
 
-const recoverGenericFailedTask = (
+const recoverGenericFailedTask = async (
   input: RecoverHubTaskInput,
   task: HubTaskProjection,
   failureReason: HubFailureReason | undefined,
-): RecoverHubTaskResult => {
+): Promise<RecoverHubTaskResult> => {
+  const branch = resolveTaskBranch(task);
+  const branchHasWork =
+    task.claim !== undefined &&
+    (await (input.branchHasUnmergedWork ?? hasBranchUnmergedWork)(
+      input.cwd,
+      branch,
+    ));
+
+  if (branchHasWork) {
+    const targetStatus = "waiting_for_merge";
+    const summary = `Moved failed task from failed to waiting_for_merge because ${branch} has existing unmerged work.`;
+    const updatedTask = updateHubTaskStatus({
+      cwd: input.cwd,
+      taskId: input.taskId,
+      hubStatus: targetStatus,
+      metadata: { ...task.metadata },
+      env: input.env,
+    });
+    appendRecoveryComment(input, summary);
+
+    return {
+      outcome: "recovered_failed",
+      priorStatus: task.hubStatus,
+      hubStatus: updatedTask.hubStatus,
+      summary,
+      task: updatedTask,
+    };
+  }
+
   const targetStatus = resolveFailedRecoveryTarget(task, failureReason);
-  const metadata = stripClaimMetadata(task.metadata);
-  const updatedTask = updateHubTaskStatus({
-    cwd: input.cwd,
-    taskId: input.taskId,
-    hubStatus: targetStatus,
-    metadata,
-    replaceMetadata: true,
-    env: input.env,
-  });
-
-  const summary = `Moved failed task from failed to ${targetStatus} and cleared execution failure metadata.`;
-  appendRecoveryComment(input, summary);
-
-  return {
-    outcome: "recovered_failed",
-    priorStatus: task.hubStatus,
-    hubStatus: updatedTask.hubStatus,
-    summary,
-    task: updatedTask,
-  };
+  return recoverToTargetStatus(
+    input,
+    task,
+    targetStatus,
+    `Moved failed task from failed to ${targetStatus} and cleared execution failure metadata.`,
+  );
 };
 
 const releaseStaleClaim = (
   input: RecoverHubTaskInput,
   task: HubTaskProjection,
 ): RecoverHubTaskResult => {
-  const metadata = stripClaimMetadata(task.metadata);
-  const updatedTask = updateHubTaskStatus({
+  const { task: updatedTask } = releaseStaleHubTaskClaim({
     cwd: input.cwd,
     taskId: input.taskId,
     hubStatus: task.hubStatus,
-    metadata,
-    replaceMetadata: true,
+    metadata: task.metadata,
     env: input.env,
   });
   const summary = `Released stale claim metadata while keeping hub status ${task.hubStatus}.`;
@@ -300,25 +349,12 @@ const recoverStaleExecutionStatus = (
   task: HubTaskProjection,
 ): RecoverHubTaskResult => {
   const targetStatus = resolveFailedRecoveryTarget(task, undefined);
-  const metadata = stripClaimMetadata(task.metadata);
-  const updatedTask = updateHubTaskStatus({
-    cwd: input.cwd,
-    taskId: input.taskId,
-    hubStatus: targetStatus,
-    metadata,
-    replaceMetadata: true,
-    env: input.env,
-  });
-  const summary = `Reset stale execution status ${task.hubStatus} to ${targetStatus} and released claim metadata.`;
-  appendRecoveryComment(input, summary);
-
-  return {
-    outcome: "recovered_failed",
-    priorStatus: task.hubStatus,
-    hubStatus: updatedTask.hubStatus,
-    summary,
-    task: updatedTask,
-  };
+  return recoverToTargetStatus(
+    input,
+    task,
+    targetStatus,
+    `Reset stale execution status ${task.hubStatus} to ${targetStatus} and released claim metadata.`,
+  );
 };
 
 export const recoverHubTask = async (

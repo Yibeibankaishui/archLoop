@@ -1,5 +1,7 @@
-import { mkdirSync } from "node:fs";
+import { execFile } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import { assertAgentCredentialsConfigured } from "./agentAuthGuidance.js";
 import {
@@ -24,14 +26,24 @@ import {
   resolveSandcastleUserDataDir,
 } from "./projectStatus.js";
 import {
-  claimHubTask,
+  claimHubTaskForImplementation,
+  recordImplementationFailure,
+  recordImplementationStarted,
+  recordImplementationSuccess,
+  recordHubTaskReviewFailure,
+  recordHubTaskReviewSuccess,
+  type HubTaskLifecycleContext,
+} from "./hubTaskLifecycle.js";
+import {
+  loadHubTaskBoard,
   resolveHubTaskBranch,
   selectHubFlowTasks,
   loadHubReadyQueue,
-  updateHubTaskStatus,
   type HubFailureReason,
   type HubTaskProjection,
 } from "./taskBoard.js";
+
+const execFileAsync = promisify(execFile);
 
 export interface HubImplementTaskInput {
   readonly flowId: string;
@@ -47,6 +59,7 @@ export interface HubImplementTaskResult {
   readonly outcome: "success" | "agent_failed" | "sandbox_failed";
   readonly commits: readonly { readonly sha: string }[];
   readonly completionSignal?: string;
+  readonly branchHasUnmergedWork?: boolean;
   readonly message?: string;
 }
 
@@ -102,6 +115,7 @@ export interface HubFlowTaskResult {
   readonly hubStatus: string;
   readonly failureReason?: HubFailureReason;
   readonly commitCount: number;
+  readonly implementationWork?: "new_commits" | "existing_unmerged_work";
 }
 
 export interface RunHubFlowResult {
@@ -109,23 +123,113 @@ export interface RunHubFlowResult {
   readonly runId: string;
   readonly batchId: string;
   readonly runDir: string;
+  readonly mode: "new_batch" | "resumed_batch" | "no_ready";
   readonly selectedTaskIds: readonly string[];
   readonly results: readonly HubFlowTaskResult[];
   readonly mergeResult?: RunHubBatchMergeResult;
+  readonly resumedBatchId?: string;
+  readonly unfinishedBatchIds: readonly string[];
+}
+
+interface ResumableHubFlowBatch {
+  readonly runId: string;
+  readonly batchId: string;
+  readonly createdAt: string | undefined;
 }
 
 const resolveFailureReason = (
   outcome: HubImplementTaskResult["outcome"],
-): HubFailureReason =>
+): Extract<HubFailureReason, "agent_failed" | "sandbox_failed"> =>
   outcome === "sandbox_failed" ? "sandbox_failed" : "agent_failed";
+
+const resolveImplementationWork = (
+  result: HubImplementTaskResult,
+): HubFlowTaskResult["implementationWork"] => {
+  if (result.commits.length > 0) {
+    return "new_commits";
+  }
+  return result.branchHasUnmergedWork ? "existing_unmerged_work" : undefined;
+};
 
 const isSuccessfulImplementation = (result: HubImplementTaskResult): boolean =>
   result.outcome === "success" &&
-  result.commits.length > 0 &&
-  result.completionSignal !== undefined;
+  result.completionSignal !== undefined &&
+  resolveImplementationWork(result) !== undefined;
 
 const isSuccessfulReview = (result: HubReviewTaskResult): boolean =>
   result.outcome === "success" && result.completionSignal !== undefined;
+
+const readJsonlRecords = (path: string): readonly Record<string, unknown>[] => {
+  if (!existsSync(path)) {
+    return [];
+  }
+
+  return readFileSync(path, "utf8")
+    .split("\n")
+    .flatMap((line) => {
+      if (line.trim().length === 0) {
+        return [];
+      }
+      try {
+        const parsed = JSON.parse(line) as unknown;
+        return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+          ? [parsed as Record<string, unknown>]
+          : [];
+      } catch {
+        return [];
+      }
+    });
+};
+
+const findResumableHubFlowBatches = (input: {
+  readonly hubProjectDir: string;
+  readonly flowId: string;
+  readonly tasks: readonly HubTaskProjection[];
+}): readonly ResumableHubFlowBatch[] => {
+  const batches = new Map<string, ResumableHubFlowBatch>();
+
+  for (const task of input.tasks) {
+    if (task.hubStatus !== "waiting_for_merge") {
+      continue;
+    }
+    const runId = task.claim?.runId;
+    const batchId = task.claim?.batchId;
+    if (!runId || !batchId) {
+      continue;
+    }
+
+    const batchEventsPath = join(
+      input.hubProjectDir,
+      "runs",
+      runId,
+      "events",
+      "batch.jsonl",
+    );
+    const planned = readJsonlRecords(batchEventsPath).find(
+      (event) =>
+        event.type === "batch_planned" &&
+        event.batchId === batchId &&
+        event.flowId === input.flowId,
+    );
+    if (!planned) {
+      continue;
+    }
+
+    batches.set(`${runId}:${batchId}`, {
+      runId,
+      batchId,
+      createdAt:
+        typeof planned.createdAt === "string" ? planned.createdAt : undefined,
+    });
+  }
+
+  return [...batches.values()].sort((left, right) => {
+    if (left.createdAt && right.createdAt) {
+      return left.createdAt.localeCompare(right.createdAt);
+    }
+    return left.batchId.localeCompare(right.batchId);
+  });
+};
 
 const SANDBOX_FAILURE_TAGS = new Set([
   "DockerError",
@@ -146,34 +250,6 @@ const getErrorTag = (error: unknown): string | undefined =>
 
 const isSandboxFailureTag = (tag: string | undefined): boolean =>
   tag !== undefined && SANDBOX_FAILURE_TAGS.has(tag);
-
-const recordTaskStatusAdvanced = (
-  runDir: string,
-  input: {
-    readonly runId: string;
-    readonly batchId: string;
-    readonly taskId: string;
-    readonly branch: string;
-    readonly createdAt: string;
-    readonly status: string;
-    readonly reason?: string;
-    readonly failureReason?: string;
-    readonly commitCount?: number;
-  },
-): void => {
-  appendHubTaskEvent(runDir, {
-    type: "task_status_advanced",
-    runId: input.runId,
-    batchId: input.batchId,
-    taskId: input.taskId,
-    branch: input.branch,
-    createdAt: input.createdAt,
-    status: input.status,
-    reason: input.reason,
-    failureReason: input.failureReason,
-    commitCount: input.commitCount,
-  });
-};
 
 const buildHubAgentPromptArgs = (
   input: Pick<HubImplementTaskInput, "taskId" | "title" | "branch">,
@@ -274,91 +350,38 @@ const reviewSelectedTask = async (
   }
 
   const finishedAt = new Date().toISOString();
-
-  if (isSuccessfulReview(reviewResult)) {
-    appendHubTaskEvent(context.runDir, {
-      type: "task_review_succeeded",
-      runId: context.runId,
-      batchId: context.batchId,
-      taskId: task.id,
-      branch,
-      createdAt: finishedAt,
-      status: "waiting_for_merge",
-      commitCount: reviewResult.commits.length,
-      claim,
-    });
-
-    const updatedTask = updateHubTaskStatus({
-      cwd,
-      taskId: task.id,
-      hubStatus: "waiting_for_merge",
-      metadata: taskMetadata,
-      env: input.env,
-    });
-    recordTaskStatusAdvanced(context.runDir, {
-      runId: context.runId,
-      batchId: context.batchId,
-      taskId: task.id,
-      branch,
-      createdAt: finishedAt,
-      status: updatedTask.hubStatus,
-      commitCount: reviewResult.commits.length,
-    });
-
-    return {
-      taskId: task.id,
-      title: task.title,
-      branch,
-      outcome: "reviewed",
-      hubStatus: updatedTask.hubStatus,
-      commitCount: reviewResult.commits.length,
-    };
-  }
-
-  const failureReason = resolveFailureReason(reviewResult.outcome);
-  appendHubTaskEvent(context.runDir, {
-    type: "task_review_failed",
-    runId: context.runId,
-    batchId: context.batchId,
-    taskId: task.id,
-    branch,
-    createdAt: finishedAt,
-    status: "failed",
-    failureReason,
-    commitCount: reviewResult.commits.length,
-    claim,
-  });
-
-  const updatedTask = updateHubTaskStatus({
+  const commitCount = reviewResult.commits.length;
+  const lifecycleBase = {
     cwd,
-    taskId: task.id,
-    hubStatus: "failed",
-    metadata: taskMetadata,
-    failureReason,
-    env: input.env,
-  });
-  recordTaskStatusAdvanced(context.runDir, {
+    runDir: context.runDir,
     runId: context.runId,
     batchId: context.batchId,
+    env: input.env,
     taskId: task.id,
     branch,
+    taskMetadata,
+    claim,
+    commitCount,
     createdAt: finishedAt,
-    status: updatedTask.hubStatus,
-    failureReason,
-    commitCount: reviewResult.commits.length,
-  });
+  };
+
+  const lifecycleResult = isSuccessfulReview(reviewResult)
+    ? recordHubTaskReviewSuccess(lifecycleBase)
+    : recordHubTaskReviewFailure({
+        ...lifecycleBase,
+        failureReason: resolveFailureReason(reviewResult.outcome),
+      });
 
   return {
     taskId: task.id,
     title: task.title,
     branch,
-    outcome:
-      reviewResult.outcome === "sandbox_failed"
-        ? "sandbox_failed"
-        : "agent_failed",
-    hubStatus: updatedTask.hubStatus,
-    failureReason,
-    commitCount: reviewResult.commits.length,
+    outcome: lifecycleResult.outcome,
+    hubStatus: lifecycleResult.hubStatus,
+    commitCount,
+    ...("failureReason" in lifecycleResult
+      ? { failureReason: lifecycleResult.failureReason }
+      : {}),
   };
 };
 
@@ -372,7 +395,7 @@ const implementSelectedTask = async (
 ): Promise<HubFlowTaskResult> => {
   const cwd = input.cwd ?? process.cwd();
   const branch = resolveHubTaskBranch(task.id, task.title);
-  const claimResult = claimHubTask({
+  const claimResult = claimHubTaskForImplementation({
     cwd,
     taskId: task.id,
     branch,
@@ -394,16 +417,26 @@ const implementSelectedTask = async (
     };
   }
 
+  const claim = claimResult.claim;
+  if (!claim) {
+    throw new Error(
+      `Hub task ${task.id} reached implementation without claim metadata`,
+    );
+  }
+
   const startedAt = (input.startedAt ?? new Date()).toISOString();
-  appendHubTaskEvent(context.runDir, {
-    type: "task_implementation_started",
+  const lifecycleContext: HubTaskLifecycleContext = {
     runId: context.runId,
     batchId: context.batchId,
+    runDir: context.runDir,
+  };
+  recordImplementationStarted({
+    context: lifecycleContext,
     taskId: task.id,
     branch,
+    hubStatus: claimResult.task.hubStatus,
+    claim,
     createdAt: startedAt,
-    status: claimResult.task.hubStatus,
-    claim: claimResult.claim,
   });
 
   let implementationResult: HubImplementTaskResult;
@@ -430,37 +463,21 @@ const implementSelectedTask = async (
   const finishedAt = new Date().toISOString();
 
   if (isSuccessfulImplementation(implementationResult)) {
-    const postImplementationStatus = hasReviewer
-      ? "reviewing"
-      : "waiting_for_merge";
-
-    appendHubTaskEvent(context.runDir, {
-      type: "task_implementation_succeeded",
-      runId: context.runId,
-      batchId: context.batchId,
-      taskId: task.id,
-      branch,
-      createdAt: finishedAt,
-      status: postImplementationStatus,
-      commitCount: implementationResult.commits.length,
-      claim: claimResult.claim,
-    });
-
-    const updatedTask = updateHubTaskStatus({
+    const implementationWork = resolveImplementationWork(implementationResult);
+    const { task: updatedTask } = recordImplementationSuccess({
       cwd,
-      taskId: task.id,
-      hubStatus: postImplementationStatus,
-      metadata: claimResult.task.metadata,
       env: input.env,
-    });
-    recordTaskStatusAdvanced(context.runDir, {
-      runId: context.runId,
-      batchId: context.batchId,
+      context: lifecycleContext,
       taskId: task.id,
       branch,
-      createdAt: finishedAt,
-      status: updatedTask.hubStatus,
+      metadata: claimResult.task.metadata,
+      claim,
       commitCount: implementationResult.commits.length,
+      hasReviewer,
+      branchHasUnmergedWork:
+        implementationResult.branchHasUnmergedWork === true,
+      implementationWork,
+      createdAt: finishedAt,
     });
 
     if (hasReviewer) {
@@ -469,7 +486,7 @@ const implementSelectedTask = async (
         context,
         task,
         branch,
-        claimResult.claim!,
+        claim,
         claimResult.task.metadata,
         reviewPromptFile!,
         implementationResult.commits.length,
@@ -483,40 +500,22 @@ const implementSelectedTask = async (
       outcome: "implemented",
       hubStatus: updatedTask.hubStatus,
       commitCount: implementationResult.commits.length,
+      implementationWork,
     };
   }
 
   const failureReason = resolveFailureReason(implementationResult.outcome);
-  appendHubTaskEvent(context.runDir, {
-    type: "task_implementation_failed",
-    runId: context.runId,
-    batchId: context.batchId,
-    taskId: task.id,
-    branch,
-    createdAt: finishedAt,
-    status: "failed",
-    failureReason,
-    commitCount: implementationResult.commits.length,
-    claim: claimResult.claim,
-  });
-
-  const updatedTask = updateHubTaskStatus({
+  const { task: updatedTask } = recordImplementationFailure({
     cwd,
-    taskId: task.id,
-    hubStatus: "failed",
-    metadata: claimResult.task.metadata,
-    failureReason,
     env: input.env,
-  });
-  recordTaskStatusAdvanced(context.runDir, {
-    runId: context.runId,
-    batchId: context.batchId,
+    context: lifecycleContext,
     taskId: task.id,
     branch,
-    createdAt: finishedAt,
-    status: updatedTask.hubStatus,
+    metadata: claimResult.task.metadata,
+    claim,
     failureReason,
     commitCount: implementationResult.commits.length,
+    createdAt: finishedAt,
   });
 
   return {
@@ -561,16 +560,32 @@ export const runHubFlow = async (
     ? resolveHubFlowPromptPath(input.flowId, "review")
     : undefined;
 
+  const hubProjectDir =
+    input.hubProjectDir ??
+    resolveHubProjectDir(resolveSandcastleUserDataDir(input.env), repoRoot);
   const readyBoard = loadHubReadyQueue(repoRoot, input.env);
   const selectedTasks = selectHubFlowTasks(readyBoard);
   const selectedTaskIds = selectedTasks.map((task) => task.id);
+  const unfinishedBatches = findResumableHubFlowBatches({
+    hubProjectDir,
+    flowId: input.flowId,
+    tasks: loadHubTaskBoard(repoRoot, input.env).tasks,
+  });
+  const unfinishedBatchIds = unfinishedBatches.map((batch) => batch.batchId);
+  const resumedBatchId =
+    selectedTasks.length === 0 ? unfinishedBatches[0]?.batchId : undefined;
+  const mode =
+    selectedTasks.length > 0
+      ? "new_batch"
+      : resumedBatchId
+        ? "resumed_batch"
+        : "no_ready";
   const startedAt = input.startedAt ?? new Date();
   const context = createHubRunContext({
     cwd: repoRoot,
-    hubProjectDir:
-      input.hubProjectDir ??
-      resolveHubProjectDir(resolveSandcastleUserDataDir(input.env), repoRoot),
+    hubProjectDir,
     branch: `flow/${input.flowId}`,
+    batchId: resumedBatchId,
     startedAt,
     env: input.env,
   });
@@ -608,9 +623,11 @@ export const runHubFlow = async (
       cwd: repoRoot,
       runDir: context.runDir,
       runId: context.runId,
-      batchId: context.batchId,
+      batchId: resumedBatchId ?? context.batchId,
       env: input.env,
-      merger: input.merger ?? createHubFlowRunMerger({ cwd: repoRoot }),
+      merger:
+        input.merger ??
+        createHubFlowRunMerger({ cwd: repoRoot, env: input.env }),
       verifier: input.verifier ?? createHubFlowRunVerifier({ cwd: repoRoot }),
     });
   }
@@ -620,9 +637,12 @@ export const runHubFlow = async (
     runId: context.runId,
     batchId: context.batchId,
     runDir: context.runDir,
+    mode,
     selectedTaskIds,
     results,
     mergeResult,
+    resumedBatchId,
+    unfinishedBatchIds,
   };
 };
 
@@ -634,18 +654,36 @@ export const formatHubFlowResultLines = (
     `Hub flow ${result.flowId}`,
     `Run id: ${result.runId}`,
     `Batch id: ${result.batchId}`,
+    `Mode: ${result.mode}`,
     `Selected tasks: ${selectedTaskCount}`,
   ];
+  if (result.resumedBatchId) {
+    lines.push(`Resumed batch id: ${result.resumedBatchId}`);
+  } else if (result.unfinishedBatchIds.length > 0) {
+    lines.push(
+      `Unfinished batches not resumed: ${result.unfinishedBatchIds.join(", ")}`,
+    );
+  }
 
   if (selectedTaskCount === 0) {
     lines.push("No ready tasks selected.");
-    return lines;
-  }
-
-  for (const taskResult of result.results) {
-    lines.push(
-      `  ${taskResult.taskId}: ${taskResult.outcome} -> ${taskResult.hubStatus}`,
-    );
+    if (!result.resumedBatchId) {
+      lines.push(`No unfinished ${result.flowId} batch found to resume.`);
+    }
+  } else {
+    for (const taskResult of result.results) {
+      const workSuffix =
+        taskResult.implementationWork === "existing_unmerged_work"
+          ? " (existing unmerged work)"
+          : taskResult.implementationWork === "new_commits"
+            ? ` (${taskResult.commitCount} new ${
+                taskResult.commitCount === 1 ? "commit" : "commits"
+              })`
+            : "";
+      lines.push(
+        `  ${taskResult.taskId}: ${taskResult.outcome} -> ${taskResult.hubStatus}${workSuffix}`,
+      );
+    }
   }
 
   if (result.mergeResult) {
@@ -656,6 +694,22 @@ export const formatHubFlowResultLines = (
   }
 
   return lines;
+};
+
+const hasBranchUnmergedWork = async (
+  cwd: string,
+  branch: string,
+): Promise<boolean> => {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["rev-list", "--count", `HEAD..${branch}`],
+      { cwd, encoding: "utf8" },
+    );
+    return Number(String(stdout).trim()) > 0;
+  } catch {
+    return false;
+  }
 };
 
 export const createHubFlowRunImplementer = (options: {
@@ -682,7 +736,12 @@ export const createHubFlowRunImplementer = (options: {
         };
       }
 
-      if (result.commits.length === 0) {
+      const branchHasUnmergedWork = await hasBranchUnmergedWork(
+        options.cwd,
+        input.branch,
+      );
+
+      if (result.commits.length === 0 && !branchHasUnmergedWork) {
         return {
           outcome: "agent_failed",
           commits: result.commits,
@@ -695,6 +754,7 @@ export const createHubFlowRunImplementer = (options: {
         outcome: "success",
         commits: result.commits,
         completionSignal: result.completionSignal,
+        branchHasUnmergedWork,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

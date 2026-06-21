@@ -1,5 +1,3 @@
-import { execFileSync } from "node:child_process";
-
 import type { PrdWarningSeverity } from "./hubPrdDecomposition.js";
 import {
   formatPrdWarningDetailsRow,
@@ -18,13 +16,9 @@ import {
   resolveHubTaskClaimState,
   type HubTaskClaimMetadata,
 } from "./hubExecution.js";
-import {
-  appendBdAddLabelArgs,
-  appendBdMetadataArg,
-  appendBdRemoveLabelArgs,
-} from "./bdCliArgs.js";
+import { appendBdMetadataArg, appendBdSetLabelsArgs } from "./bdCliArgs.js";
 import { TaskBoardError } from "./errors.js";
-import { resolveBdExecutable } from "./resolveBdExecutable.js";
+import { runBdTextForHubTaskStore } from "./hubTaskStore.js";
 
 export const HUB_TASK_STATUSES = [
   "inbox",
@@ -43,6 +37,19 @@ export const HUB_TASK_STATUSES = [
 ] as const;
 
 export type HubTaskStatus = (typeof HUB_TASK_STATUSES)[number];
+
+export const HUB_COLLABORATION_LABELS_TO_CLEAR = [
+  "needs-triage",
+  "needs-info",
+  "ready-for-agent",
+  "ready-for-human",
+  "blocked",
+  "wontfix",
+  "sync-conflict",
+] as const;
+
+export const isCompletedHubStatus = (status: HubTaskStatus): boolean =>
+  status === "done" || status === "wontfix";
 
 const HUB_TASK_STATUS_SET = new Set<string>(HUB_TASK_STATUSES);
 const BEADS_LIFECYCLE_STATUSES = new Set([
@@ -106,12 +113,25 @@ const METADATA_STATUS_RULES = [
     keys: ["wontfix", "wontFix", "rejected"] as const,
     status: "wontfix" as const,
   },
+  {
+    keys: ["done"] as const,
+    status: "done" as const,
+  },
 ] as const;
 const IMPLEMENTING_LABEL_STATUSES = new Set([
   "inbox",
   "needs_info",
   "ready_for_agent",
   "ready_for_human",
+]);
+const LABEL_AUTHORITATIVE_STATUSES = new Set<HubTaskStatus>([
+  "implementing",
+  "reviewing",
+  "waiting_for_merge",
+  "merging",
+  "failed",
+  "done",
+  "wontfix",
 ]);
 
 const STATUS_LABEL_TO_HUB_STATUS: Readonly<Record<string, HubTaskStatus>> = {
@@ -253,6 +273,23 @@ const readComments = (value: unknown): BeadsTaskComment[] => {
 const readRefs = (value: unknown): string[] =>
   readStringList(value, ["url", "ref", "name", "title", "id", "branch"]);
 
+const uniqueStrings = (values: readonly string[]): string[] => [
+  ...new Set(values),
+];
+
+const readGithubIssueRemoteRefs = (value: unknown): string[] => {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+    return [`github#${value}`];
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^\d+$/.test(trimmed)) {
+      return [`github#${Number(trimmed)}`];
+    }
+  }
+  return [];
+};
+
 const normalizeHubTaskStatus = (value: unknown): HubTaskStatus | undefined => {
   if (typeof value !== "string") {
     return undefined;
@@ -334,21 +371,34 @@ const resolveStatusFromTaskShape = (
     return directStatus;
   }
 
-  const metadataStatus = resolveMetadataStatus(metadata);
-  if (metadataStatus) {
-    return metadataStatus;
-  }
-
-  const reasonStatus = resolveStatusFromMetadataReasons(metadata);
-  if (reasonStatus) {
-    return reasonStatus;
-  }
-
   const beadsLifecycle = normalizeBeadsLifecycle(
     readFirstString(task, BEADS_LIFECYCLE_KEYS),
   );
 
   const labelStatus = resolveStatusFromLabels(labels);
+  const metadataStatus = resolveMetadataStatus(metadata);
+  const reasonStatus = resolveStatusFromMetadataReasons(metadata);
+  if (reasonStatus) {
+    if (
+      reasonStatus === "sync_conflict" &&
+      metadataStatus !== undefined &&
+      isCompletedHubStatus(metadataStatus)
+    ) {
+      return metadataStatus;
+    }
+    return reasonStatus;
+  }
+  if (
+    labelStatus &&
+    LABEL_AUTHORITATIVE_STATUSES.has(labelStatus) &&
+    metadataStatus !== labelStatus
+  ) {
+    return labelStatus;
+  }
+  if (metadataStatus) {
+    return metadataStatus;
+  }
+
   if (
     beadsLifecycle === "in_progress" &&
     labelStatus &&
@@ -381,10 +431,19 @@ export const projectHubTask = (task: BeadsTaskRecord): HubTaskProjection => {
   const comments = readComments(
     task.comments ?? task.comment_threads ?? task.commentThreads,
   );
-  const remoteRefs = readRefs(
-    task.remoteRefs ?? task.remote_refs ?? task.remoteReferences,
-  );
-  const runRefs = readRefs(task.runRefs ?? task.run_refs ?? task.runReferences);
+  const remoteRefs = uniqueStrings([
+    ...readRefs(task.remoteRefs ?? task.remote_refs ?? task.remoteReferences),
+    ...readRefs(
+      metadata.remoteRefs ?? metadata.remote_refs ?? metadata.remoteReferences,
+    ),
+    ...readGithubIssueRemoteRefs(metadata.github_issue),
+  ]);
+  const runRefs = uniqueStrings([
+    ...readRefs(task.runRefs ?? task.run_refs ?? task.runReferences),
+    ...readRefs(
+      metadata.runRefs ?? metadata.run_refs ?? metadata.runReferences,
+    ),
+  ]);
   const hubStatus = resolveStatusFromTaskShape(task, labels, metadata);
   const beadsStatus = readFirstString(task, BEADS_LIFECYCLE_KEYS) ?? undefined;
   const claim = readHubTaskClaim(metadata);
@@ -458,27 +517,7 @@ const parseBdJsonOutput = (output: string): unknown[] => {
   return [];
 };
 
-const runBdText = (
-  cwd: string,
-  args: readonly string[],
-  failureLabel: string,
-  env: NodeJS.ProcessEnv = process.env,
-): string => {
-  try {
-    return execFileSync(resolveBdExecutable(env), [...args], {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      env,
-    });
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "unable to execute bd";
-    throw new TaskBoardError({
-      message: `sandcastle ${failureLabel} requires Beads in the current repo: ${message}`,
-    });
-  }
-};
+const runBdText = runBdTextForHubTaskStore;
 
 const runBdJson = (
   cwd: string,
@@ -539,7 +578,12 @@ export const loadHubTaskBoard = (
   env: NodeJS.ProcessEnv = process.env,
 ): HubTaskBoard =>
   projectHubTaskBoard(
-    runBdJson(cwd, ["list", "--json"], "tasks list", env) as BeadsTaskRecord[],
+    runBdJson(
+      cwd,
+      ["list", "--json", "--all", "--limit", "0"],
+      "tasks list",
+      env,
+    ) as BeadsTaskRecord[],
   );
 
 export const getHubTaskBoardDisplayTasks = (
@@ -700,6 +744,7 @@ export type HubFailureReason =
   | "agent_failed"
   | "sandbox_failed"
   | "merge_conflict"
+  | "merge_failed"
   | "verification_failure"
   | "close_failed"
   | "unknown";
@@ -752,18 +797,25 @@ export const resolveHubTaskBranch = (taskId: string, title: string): string => {
   return `sandcastle/${normalizedId}-${slugifyHubTaskTitle(title)}`;
 };
 
-const HUB_STATUS_LABELS: Readonly<Partial<Record<HubTaskStatus, string>>> = {
+const HUB_STATUS_LABELS: Readonly<Record<HubTaskStatus, string>> = {
+  inbox: "needs-triage",
+  needs_info: "needs-info",
+  ready_for_agent: "ready-for-agent",
+  ready_for_human: "ready-for-human",
+  blocked: "blocked",
   implementing: "implementing",
   reviewing: "reviewing",
   waiting_for_merge: "waiting-for-merge",
   merging: "merging",
   failed: "failed",
-  ready_for_agent: "ready-for-agent",
-  ready_for_human: "ready-for-human",
-  needs_info: "needs-info",
-  inbox: "needs-triage",
+  done: "done",
+  wontfix: "wontfix",
   sync_conflict: "sync-conflict",
 };
+
+const SANDCASTLE_MANAGED_STATUS_LABELS = new Set<string>(
+  Object.values(HUB_STATUS_LABELS).map(normalizeKey),
+);
 
 const HUB_STATUS_BEADS_LIFECYCLE: Readonly<
   Partial<Record<HubTaskStatus, string>>
@@ -783,13 +835,237 @@ const HUB_STATUS_BEADS_LIFECYCLE: Readonly<
   sync_conflict: "blocked",
 };
 
-const EXECUTION_STATUS_LABELS = new Set([
+const FAILURE_METADATA_KEYS = [
+  "failureReason",
+  "failure_reason",
+  "failed",
+] as const;
+const BLOCKED_METADATA_KEYS = [
+  "blocked_reason",
+  "blockedReason",
+  "blocked_reason_kind",
+  "blockedReasonKind",
+  "blocked",
+] as const;
+const NEEDS_INFO_METADATA_KEYS = [
+  "needs_info",
+  "needsInfo",
+  "needs_info_reason",
+  "needsInfoReason",
+] as const;
+const SYNC_CONFLICT_METADATA_KEYS = [
+  "sync_conflict",
+  "syncConflict",
+  "sync_conflict_reason",
+  "syncConflictReason",
+] as const;
+const WONTFIX_METADATA_KEYS = ["wontfix", "wontFix", "rejected"] as const;
+const DONE_METADATA_KEYS = ["done"] as const;
+
+const labelsToSetForHubStatus = (
+  labels: readonly string[],
+  hubStatus: HubTaskStatus,
+  labelsToRemove: readonly string[] = [],
+): string[] => {
+  const canonicalLabel = HUB_STATUS_LABELS[hubStatus];
+  const labelsToRemoveSet = new Set(labelsToRemove);
+  const userLabels = labels.filter(
+    (label) =>
+      !SANDCASTLE_MANAGED_STATUS_LABELS.has(normalizeKey(label)) &&
+      !labelsToRemoveSet.has(label),
+  );
+
+  return uniqueStrings([...userLabels, canonicalLabel]);
+};
+
+const deleteMetadataKeys = (
+  metadata: Record<string, unknown>,
+  keys: readonly string[],
+): void => {
+  for (const key of keys) {
+    delete metadata[key];
+  }
+};
+
+const clearStaleHubStatusMetadata = (
+  metadata: Record<string, unknown>,
+  hubStatus: HubTaskStatus,
+): void => {
+  if (hubStatus !== "failed") {
+    deleteMetadataKeys(metadata, FAILURE_METADATA_KEYS);
+  }
+  if (hubStatus !== "blocked") {
+    deleteMetadataKeys(metadata, BLOCKED_METADATA_KEYS);
+  }
+  if (hubStatus !== "needs_info") {
+    deleteMetadataKeys(metadata, NEEDS_INFO_METADATA_KEYS);
+  }
+  if (hubStatus !== "sync_conflict" && metadata.sync_state !== "conflict") {
+    deleteMetadataKeys(metadata, SYNC_CONFLICT_METADATA_KEYS);
+  }
+  if (hubStatus !== "wontfix") {
+    deleteMetadataKeys(metadata, WONTFIX_METADATA_KEYS);
+  }
+  if (hubStatus !== "done") {
+    deleteMetadataKeys(metadata, DONE_METADATA_KEYS);
+  }
+};
+
+const assertProjectedHubStatus = (
+  task: HubTaskProjection,
+  expectedStatus: HubTaskStatus,
+): void => {
+  if (task.hubStatus !== expectedStatus) {
+    throw new TaskBoardError({
+      message: `sandcastle tasks update ${task.id} wrote ${expectedStatus}, but the projected Hub task board status is ${task.hubStatus}. Clear stale Beads labels/metadata and retry.`,
+    });
+  }
+};
+
+const assertCanonicalHubStatusLabel = (
+  task: HubTaskProjection,
+  expectedStatus: HubTaskStatus,
+): void => {
+  const statusLabels = task.labels.filter((label) =>
+    SANDCASTLE_MANAGED_STATUS_LABELS.has(normalizeKey(label)),
+  );
+  const expectedLabel = HUB_STATUS_LABELS[expectedStatus];
+  if (
+    statusLabels.length !== 1 ||
+    normalizeKey(statusLabels[0]!) !== normalizeKey(expectedLabel)
+  ) {
+    throw new TaskBoardError({
+      message: `sandcastle tasks update ${task.id} wrote ${expectedStatus}, but Beads labels contain ${statusLabels.length} Sandcastle status labels (${statusLabels.join(", ")}). Expected exactly ${expectedLabel}.`,
+    });
+  }
+};
+
+const CLAIM_PRESERVING_STATUSES = new Set<HubTaskStatus>([
   "implementing",
   "reviewing",
-  "waiting-for-merge",
+  "waiting_for_merge",
   "merging",
   "failed",
 ]);
+
+const CLAIM_REQUIRED_STATUSES = new Set<HubTaskStatus>([
+  "implementing",
+  "reviewing",
+  "waiting_for_merge",
+  "merging",
+]);
+
+const shouldClearClaimForStatus = (status: HubTaskStatus): boolean =>
+  !CLAIM_PRESERVING_STATUSES.has(status);
+
+const assertHubTaskClaimPolicy = (
+  task: HubTaskProjection,
+  expectedStatus: HubTaskStatus,
+): void => {
+  if (shouldClearClaimForStatus(expectedStatus) && task.claim !== undefined) {
+    throw new TaskBoardError({
+      message: `sandcastle tasks update ${task.id} wrote ${expectedStatus}, but claim metadata was not cleared.`,
+    });
+  }
+
+  if (
+    CLAIM_REQUIRED_STATUSES.has(expectedStatus) &&
+    (!task.claim?.runId || !task.claim.batchId || !task.claim.branch)
+  ) {
+    throw new TaskBoardError({
+      message: `sandcastle tasks update ${task.id} wrote ${expectedStatus}, but claim metadata is missing runId, batchId, or branch.`,
+    });
+  }
+};
+
+const assertHubFailureMetadataPolicy = (
+  task: HubTaskProjection,
+  expectedStatus: HubTaskStatus,
+): void => {
+  if (expectedStatus === "failed") {
+    if (
+      !task.metadata.failed ||
+      typeof task.metadata.failureReason !== "string"
+    ) {
+      throw new TaskBoardError({
+        message: `sandcastle tasks update ${task.id} wrote failed, but failure metadata is incomplete.`,
+      });
+    }
+    return;
+  }
+
+  if (
+    task.metadata.failed !== undefined ||
+    task.metadata.failureReason !== undefined ||
+    task.metadata.failure_reason !== undefined
+  ) {
+    throw new TaskBoardError({
+      message: `sandcastle tasks update ${task.id} wrote ${expectedStatus}, but stale failure metadata remains.`,
+    });
+  }
+};
+
+const assertHubTaskTransition = (
+  task: HubTaskProjection,
+  expectedStatus: HubTaskStatus,
+): void => {
+  assertProjectedHubStatus(task, expectedStatus);
+  assertCanonicalHubStatusLabel(task, expectedStatus);
+  assertHubTaskClaimPolicy(task, expectedStatus);
+  assertHubFailureMetadataPolicy(task, expectedStatus);
+};
+
+const STRUCTURED_METADATA_PATCH_KEYS = [
+  "claim",
+  "hubClaim",
+  "hub_claim",
+  "taskClaim",
+  "remoteRefs",
+  "remote_refs",
+  "remoteReferences",
+  "runRefs",
+  "run_refs",
+  "runReferences",
+] as const;
+
+const clearTransitionOwnedMetadataPatchKeys = (
+  metadata: Record<string, unknown>,
+): void => {
+  deleteMetadataKeys(metadata, TASK_STATUS_KEYS);
+  deleteMetadataKeys(metadata, STRUCTURED_METADATA_PATCH_KEYS);
+};
+
+const readPatchClaimRecord = (
+  metadata: Readonly<Record<string, unknown>> | undefined,
+): Record<string, unknown> | undefined => {
+  const value = metadata?.claim;
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+};
+
+const resolveTransitionClaim = (
+  task: HubTaskProjection,
+  hubStatus: HubTaskStatus,
+  metadataPatch: Readonly<Record<string, unknown>> | undefined,
+  replaceClaimMetadata: boolean = false,
+): Record<string, unknown> | undefined => {
+  if (shouldClearClaimForStatus(hubStatus)) {
+    return undefined;
+  }
+
+  const patchClaim = readPatchClaimRecord(metadataPatch);
+  if (replaceClaimMetadata && patchClaim) {
+    return { ...patchClaim };
+  }
+
+  const existingClaim = task.claim?.raw;
+  if (existingClaim && Object.keys(existingClaim).length > 0) {
+    return { ...existingClaim };
+  }
+
+  return patchClaim ? { ...patchClaim } : undefined;
+};
 
 export interface UpdateHubTaskStatusInput {
   readonly cwd: string;
@@ -797,27 +1073,42 @@ export interface UpdateHubTaskStatusInput {
   readonly hubStatus: HubTaskStatus;
   readonly metadata?: Readonly<Record<string, unknown>>;
   readonly failureReason?: HubFailureReason;
-  readonly replaceMetadata?: boolean;
+  readonly labelsToRemove?: readonly string[];
+  readonly replaceClaimMetadata?: boolean;
   readonly env?: NodeJS.ProcessEnv;
 }
 
 export const updateHubTaskStatus = (
   input: UpdateHubTaskStatusInput,
 ): HubTaskProjection => {
+  return transitionHubTaskStatus(input);
+};
+
+export const transitionHubTaskStatus = (
+  input: UpdateHubTaskStatusInput,
+): HubTaskProjection => {
   const task = loadHubTask(input.cwd, input.taskId, input.env);
-  const label = HUB_STATUS_LABELS[input.hubStatus];
   const beadsStatus = HUB_STATUS_BEADS_LIFECYCLE[input.hubStatus];
-  const labelKey = normalizeKey(label ?? "");
-  const metadata: Record<string, unknown> = input.replaceMetadata
-    ? {
-        ...(input.metadata ?? {}),
-        hubStatus: input.hubStatus,
-      }
-    : {
-        ...task.metadata,
-        ...(input.metadata ?? {}),
-        hubStatus: input.hubStatus,
-      };
+  const metadataPatch: Record<string, unknown> = { ...(input.metadata ?? {}) };
+  clearTransitionOwnedMetadataPatchKeys(metadataPatch);
+  const metadata: Record<string, unknown> = {
+    ...task.metadata,
+    ...metadataPatch,
+    hubStatus: input.hubStatus,
+  };
+
+  clearStaleHubStatusMetadata(metadata, input.hubStatus);
+  const claim = resolveTransitionClaim(
+    task,
+    input.hubStatus,
+    input.metadata,
+    input.replaceClaimMetadata === true,
+  );
+  if (claim) {
+    metadata.claim = claim;
+  } else {
+    delete metadata.claim;
+  }
 
   if (input.failureReason) {
     metadata.failureReason = input.failureReason;
@@ -831,23 +1122,17 @@ export const updateHubTaskStatus = (
   if (beadsStatus) {
     args.push("--status", beadsStatus);
   }
-  if (label) {
-    appendBdAddLabelArgs(args, label);
-  }
-
-  const labelsToRemove = task.labels.filter(
-    (existingLabel) =>
-      EXECUTION_STATUS_LABELS.has(existingLabel) &&
-      normalizeKey(existingLabel) !== labelKey,
+  appendBdSetLabelsArgs(
+    args,
+    labelsToSetForHubStatus(task.labels, input.hubStatus, input.labelsToRemove),
   );
-  if (labelsToRemove.length > 0) {
-    appendBdRemoveLabelArgs(args, labelsToRemove);
-  }
 
   appendBdMetadataArg(args, metadata);
   runBdText(input.cwd, args, `tasks update ${input.taskId}`, input.env);
 
-  return loadHubTask(input.cwd, input.taskId, input.env);
+  const updatedTask = loadHubTask(input.cwd, input.taskId, input.env);
+  assertHubTaskTransition(updatedTask, input.hubStatus);
+  return updatedTask;
 };
 
 export interface CloseHubTaskInput {
@@ -858,29 +1143,16 @@ export interface CloseHubTaskInput {
 }
 
 export const closeHubTask = (input: CloseHubTaskInput): HubTaskProjection => {
-  const task = loadHubTask(input.cwd, input.taskId, input.env);
-  const metadata: Record<string, unknown> = {
-    ...task.metadata,
-    ...(input.metadata ?? {}),
+  return transitionHubTaskStatus({
+    cwd: input.cwd,
+    taskId: input.taskId,
     hubStatus: "done",
-    done: true,
-  };
-  delete metadata.failureReason;
-  delete metadata.failed;
-
-  const labelsToRemove = task.labels.filter((existingLabel) =>
-    EXECUTION_STATUS_LABELS.has(existingLabel),
-  );
-  const args = ["update", input.taskId, "--status", "closed"];
-  appendBdMetadataArg(args, metadata);
-  appendBdAddLabelArgs(args, "done");
-  if (labelsToRemove.length > 0) {
-    appendBdRemoveLabelArgs(args, labelsToRemove);
-  }
-
-  runBdText(input.cwd, args, `tasks close ${input.taskId}`, input.env);
-
-  return loadHubTask(input.cwd, input.taskId, input.env);
+    metadata: {
+      ...(input.metadata ?? {}),
+      done: true,
+    },
+    env: input.env,
+  });
 };
 
 export interface DeleteHubTasksInput {
@@ -921,7 +1193,7 @@ const verifyHubTasksDeleted = (
   throw new TaskBoardError({
     message: [
       `sandcastle tasks delete reported success, but Beads still has: ${stillPresent.join(", ")}.`,
-      `Retry with: bd delete ${stillPresent.join(" ")} --force`,
+      `Retry with: sandcastle tasks delete ${stillPresent.join(" ")} --yes --force`,
     ].join(" "),
   });
 };
@@ -1006,17 +1278,16 @@ export const claimHubTask = (input: ClaimHubTaskInput): ClaimHubTaskResult => {
     branch: input.branch,
     claimedAt,
   });
-  const metadata = {
-    ...task.metadata,
-    claim: claim.raw,
-  };
-
-  const claimArgs = ["update", input.taskId, "--status", "in_progress"];
-  appendBdMetadataArg(claimArgs, metadata);
-  appendBdAddLabelArgs(claimArgs, "implementing");
-  runBdText(input.cwd, claimArgs, `tasks claim ${input.taskId}`, input.env);
-
-  const updatedTask = loadHubTask(input.cwd, input.taskId, input.env);
+  const updatedTask = updateHubTaskStatus({
+    cwd: input.cwd,
+    taskId: input.taskId,
+    hubStatus: "implementing",
+    metadata: {
+      ...task.metadata,
+      claim: claim.raw,
+    },
+    env: input.env,
+  });
   appendHubTaskEvent(context.runDir, {
     type: "task_claimed",
     runId: context.runId,

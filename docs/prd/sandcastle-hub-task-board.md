@@ -75,7 +75,7 @@ Default task creation states:
 - PRD-derived tasks enter `inbox` by default.
 - PRD-derived tasks may enter `ready_for_agent` or `ready_for_human` directly only after the user confirms slice granularity, dependencies, and AFK/HITL classification.
 
-Task triage follows the same proposal-flow model. The deterministic triage helper is superseded by the agent-driven `triage` proposal flow, which uses the triage role to recommend collaboration outcomes and applies approved status, label, dependency, and comment updates to local Beads only. Remote GitHub Issue changes remain the responsibility of task sync.
+Task triage follows the same proposal-flow model. The deterministic triage helper is superseded by the agent-driven `triage` proposal flow, which uses the triage role to recommend collaboration outcomes and applies approved status, label, dependency, and comment updates to local Beads only. Remote GitHub Issue changes remain the responsibility of explicit `tasks pull`, `tasks push`, or confirmed `tasks sync` commands.
 
 ## Local And Remote Task Model
 
@@ -369,7 +369,7 @@ TypeScript orchestration:
 - Advances task statuses.
 - Runs verification gates.
 - Closes local Beads tasks.
-- Starts task sync.
+- Leaves remote task exchange to explicit task pull/push/sync commands.
 
 ## Merge Semantics
 
@@ -450,6 +450,8 @@ sandcastle tasks show <task-selector>
 sandcastle tasks create
 sandcastle tasks from-prd <prd-ref>
 sandcastle tasks triage
+sandcastle tasks pull
+sandcastle tasks push
 sandcastle tasks sync
 sandcastle tasks comment <task-selector>
 sandcastle tasks recover <task-selector>
@@ -463,7 +465,9 @@ Command responsibilities:
 - `tasks create`: create a manual or feedback task.
 - `tasks from-prd`: run the `prd-decomposition` proposal flow and apply approved Beads tasks and dependencies locally.
 - `tasks triage`: run the `triage` proposal flow and apply approved collaboration-state updates locally.
-- `tasks sync`: pull/push remote task source changes.
+- `tasks pull`: import open remote task source issues into Beads by default, with explicit closed-history opt-in.
+- `tasks push`: push linked local collaboration labels and done/wontfix closures to the remote task source.
+- `tasks sync`: preview and confirm a bidirectional pull/push reconcile plan.
 - `tasks comment`: append a Beads comment.
 - `tasks recover`: repair failed or stale execution states and write a recovery comment.
 - `project status`: show project summary, credentials, active runs, and task board counts.

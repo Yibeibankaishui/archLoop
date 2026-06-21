@@ -1,15 +1,13 @@
 import { execFileSync } from "node:child_process";
 
-import {
-  appendBdAddLabelArgs,
-  appendBdMetadataArg,
-  appendBdRemoveLabelArgs,
-} from "./bdCliArgs.js";
+import { appendBdMetadataArg } from "./bdCliArgs.js";
 import { TaskBoardError } from "./errors.js";
-import { resolveBdExecutable } from "./resolveBdExecutable.js";
+import { recordHubTaskSyncConflict } from "./hubTaskLifecycle.js";
+import { runBdTextForHubTaskStore } from "./hubTaskStore.js";
 import {
+  HUB_COLLABORATION_LABELS_TO_CLEAR,
+  isCompletedHubStatus,
   loadHubTaskBoard,
-  loadHubTask,
   type HubTaskProjection,
   type HubTaskStatus,
 } from "./taskBoard.js";
@@ -49,16 +47,6 @@ const HUB_TO_REMOTE_COLLABORATION_LABEL: Readonly<
   sync_conflict: "sync-conflict",
 };
 
-const REMOTE_COLLABORATION_LABELS_TO_CLEAR = [
-  "needs-triage",
-  "needs-info",
-  "ready-for-agent",
-  "ready-for-human",
-  "blocked",
-  "wontfix",
-  "sync-conflict",
-] as const;
-
 export type HubSyncState =
   | "local_only"
   | "synced"
@@ -94,6 +82,7 @@ export interface SyncHubTasksResult {
     readonly created: readonly string[];
     readonly updated: readonly string[];
     readonly conflicts: readonly string[];
+    readonly duplicateCandidates: readonly HubTaskDuplicateCandidate[];
   };
   readonly pushed: {
     readonly synced: readonly string[];
@@ -102,10 +91,19 @@ export interface SyncHubTasksResult {
   };
 }
 
+export interface HubTaskDuplicateCandidate {
+  readonly issueNumber: number;
+  readonly title: string;
+  readonly localTaskIds: readonly string[];
+}
+
 export interface SyncHubTasksInput {
   readonly cwd: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly github?: GithubIssueClient;
+  readonly mode?: "sync" | "pull" | "push";
+  readonly includeClosed?: boolean;
+  readonly dryRun?: boolean;
 }
 
 const normalizeKey = (value: string): string =>
@@ -165,30 +163,17 @@ export const detectSemanticSyncConflict = (
     return undefined;
   }
 
+  if (
+    isCompletedHubStatus(localStatus) &&
+    !isCompletedHubStatus(remoteStatus)
+  ) {
+    return undefined;
+  }
+
   return `local ${localStatus} disagrees with remote ${remoteStatus}`;
 };
 
-const runBdText = (
-  cwd: string,
-  args: readonly string[],
-  failureLabel: string,
-  env: NodeJS.ProcessEnv = process.env,
-): string => {
-  try {
-    return execFileSync(resolveBdExecutable(env), [...args], {
-      cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-      env,
-    });
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : "unable to execute bd";
-    throw new TaskBoardError({
-      message: `sandcastle ${failureLabel} requires Beads in the current repo: ${message}`,
-    });
-  }
-};
+const runBdText = runBdTextForHubTaskStore;
 
 const parseBdJsonOutput = (output: string): unknown[] => {
   const parsed = JSON.parse(output) as unknown;
@@ -248,6 +233,14 @@ const buildGithubIssueIndex = (
   return index;
 };
 
+const findTitleDuplicateCandidates = (
+  tasks: readonly HubTaskProjection[],
+  issueTitle: string,
+): readonly HubTaskProjection[] => {
+  const normalizedTitle = normalizeKey(issueTitle);
+  return tasks.filter((task) => normalizeKey(task.title) === normalizedTitle);
+};
+
 const readGithubIssueNumber = (
   task: Pick<HubTaskProjection, "remoteRefs">,
 ): number | undefined =>
@@ -277,45 +270,6 @@ const setHubTaskSyncMetadata = (
     ...metadataPatch,
   });
   updateHubTaskRecord(cwd, task.id, metadataArgs, `tasks sync ${task.id}`, env);
-};
-
-const markHubTaskSyncConflict = (
-  cwd: string,
-  task: HubTaskProjection,
-  reason: string,
-  env: NodeJS.ProcessEnv,
-): void => {
-  if (task.hubStatus === "done" || task.hubStatus === "wontfix") {
-    setHubTaskSyncMetadata(
-      cwd,
-      task,
-      {
-        sync_state: "conflict",
-        sync_conflict_reason: reason,
-      },
-      env,
-    );
-    return;
-  }
-
-  const metadata: Record<string, unknown> = {
-    ...task.metadata,
-    hubStatus: "sync_conflict",
-    sync_state: "conflict",
-    sync_conflict_reason: reason,
-  };
-
-  const args = ["--status", "blocked"];
-  appendBdMetadataArg(args, metadata);
-  appendBdAddLabelArgs(args, "sync-conflict");
-
-  for (const label of REMOTE_COLLABORATION_LABELS_TO_CLEAR) {
-    if (task.labels.includes(label)) {
-      appendBdRemoveLabelArgs(args, label);
-    }
-  }
-
-  updateHubTaskRecord(cwd, task.id, args, `tasks sync ${task.id}`, env);
 };
 
 const importGithubIssueToBeads = (
@@ -364,6 +318,7 @@ const refreshLinkedGithubIssue = (
   task: HubTaskProjection,
   issue: GithubIssueRecord,
   env: NodeJS.ProcessEnv,
+  dryRun = false,
 ): "updated" | "conflict" | "unchanged" => {
   const remoteStatus = resolveRemoteCollaborationStatus(issue);
   const conflict = detectSemanticSyncConflict(task.hubStatus, remoteStatus);
@@ -382,6 +337,9 @@ const refreshLinkedGithubIssue = (
       issue.updatedAt !== remoteUpdatedAt &&
       syncState !== "local_only"
     ) {
+      if (dryRun) {
+        return "updated";
+      }
       setHubTaskSyncMetadata(cwd, task, metadataPatch, env);
       return "updated";
     }
@@ -392,7 +350,15 @@ const refreshLinkedGithubIssue = (
     issue.updatedAt !== undefined && issue.updatedAt !== remoteUpdatedAt;
 
   if (conflict && (remoteChanged || syncState === "synced")) {
-    markHubTaskSyncConflict(cwd, task, conflict, env);
+    if (dryRun) {
+      return "conflict";
+    }
+    recordHubTaskSyncConflict({
+      cwd,
+      taskId: task.id,
+      reason: conflict,
+      env,
+    });
     return "conflict";
   }
 
@@ -401,6 +367,9 @@ const refreshLinkedGithubIssue = (
     (task.description ?? "") !== (issue.body ?? "") && issue.body !== undefined;
 
   if (titleChanged || descriptionChanged) {
+    if (dryRun) {
+      return "updated";
+    }
     const args: string[] = [];
     appendBdMetadataArg(args, {
       ...task.metadata,
@@ -418,6 +387,9 @@ const refreshLinkedGithubIssue = (
   }
 
   if (remoteUpdatedAt !== issue.updatedAt || syncState !== "synced") {
+    if (dryRun) {
+      return "updated";
+    }
     setHubTaskSyncMetadata(
       cwd,
       task,
@@ -437,6 +409,7 @@ const pushHubTaskToGithub = (
   task: HubTaskProjection,
   issue: GithubIssueRecord | undefined,
   github: GithubIssueClient,
+  dryRun = false,
 ): "synced" | "push_pending" | "closed" | "skipped" => {
   const issueNumber = readGithubIssueNumber(task);
 
@@ -448,15 +421,27 @@ const pushHubTaskToGithub = (
     return "skipped";
   }
 
+  if (dryRun) {
+    if (isCompletedHubStatus(task.hubStatus)) {
+      return issue?.state === "CLOSED" ? "synced" : "closed";
+    }
+
+    const remoteLabel = resolveRemoteCollaborationLabel(task.hubStatus);
+    return remoteLabel ? "synced" : "skipped";
+  }
+
   try {
-    if (task.hubStatus === "done" || task.hubStatus === "wontfix") {
+    if (isCompletedHubStatus(task.hubStatus)) {
       if (task.hubStatus === "wontfix") {
-        github.editIssue(issueNumber, { addLabels: ["wontfix"] });
+        if (!(issue?.labels ?? task.labels).includes("wontfix")) {
+          github.editIssue(issueNumber, { addLabels: ["wontfix"] });
+        }
       }
       if (issue?.state !== "CLOSED") {
         github.closeIssue(issueNumber);
+        return "closed";
       }
-      return "closed";
+      return "synced";
     }
 
     const remoteLabel = resolveRemoteCollaborationLabel(task.hubStatus);
@@ -464,7 +449,7 @@ const pushHubTaskToGithub = (
       return "skipped";
     }
 
-    const removeLabels = REMOTE_COLLABORATION_LABELS_TO_CLEAR.filter((label) =>
+    const removeLabels = HUB_COLLABORATION_LABELS_TO_CLEAR.filter((label) =>
       (issue?.labels ?? task.labels).includes(label),
     ).filter((label) => label !== remoteLabel);
 
@@ -480,37 +465,55 @@ const pushHubTaskToGithub = (
 
 const updateHubTaskSyncState = (
   cwd: string,
-  taskId: string,
+  task: HubTaskProjection,
   syncState: HubSyncState,
   env: NodeJS.ProcessEnv,
 ): void => {
-  setHubTaskSyncMetadata(
-    cwd,
-    loadHubTask(cwd, taskId, env),
-    { sync_state: syncState },
-    env,
-  );
+  setHubTaskSyncMetadata(cwd, task, { sync_state: syncState }, env);
 };
 
 const pullGithubIssues = (
   cwd: string,
   issues: readonly GithubIssueRecord[],
   env: NodeJS.ProcessEnv,
+  includeClosed = false,
+  dryRun = false,
 ): SyncHubTasksResult["pulled"] => {
   const board = loadHubTaskBoard(cwd, env);
   const linkedTasks = buildGithubIssueIndex(board.tasks);
   const created: string[] = [];
   const updated: string[] = [];
   const conflicts: string[] = [];
+  const duplicateCandidates: HubTaskDuplicateCandidate[] = [];
 
   for (const issue of issues) {
+    if (!includeClosed && issue.state === "CLOSED") {
+      continue;
+    }
+
     const linked = linkedTasks.get(issue.number);
     if (!linked) {
+      const sameTitleTasks = findTitleDuplicateCandidates(
+        board.tasks,
+        issue.title,
+      );
+      if (sameTitleTasks.length > 0) {
+        duplicateCandidates.push({
+          issueNumber: issue.number,
+          title: issue.title,
+          localTaskIds: sameTitleTasks.map((task) => task.id),
+        });
+        continue;
+      }
+      if (dryRun) {
+        created.push(formatGithubRemoteRef(issue.number));
+        continue;
+      }
       created.push(importGithubIssueToBeads(cwd, issue, env));
       continue;
     }
 
-    const outcome = refreshLinkedGithubIssue(cwd, linked, issue, env);
+    const outcome = refreshLinkedGithubIssue(cwd, linked, issue, env, dryRun);
     if (outcome === "conflict") {
       conflicts.push(linked.id);
     } else if (outcome === "updated") {
@@ -518,7 +521,7 @@ const pullGithubIssues = (
     }
   }
 
-  return { created, updated, conflicts };
+  return { created, updated, conflicts, duplicateCandidates };
 };
 
 const pushHubTasks = (
@@ -526,6 +529,7 @@ const pushHubTasks = (
   issues: readonly GithubIssueRecord[],
   env: NodeJS.ProcessEnv,
   github: GithubIssueClient,
+  dryRun = false,
 ): SyncHubTasksResult["pushed"] => {
   const board = loadHubTaskBoard(cwd, env);
   const issuesByNumber = new Map(issues.map((issue) => [issue.number, issue]));
@@ -548,6 +552,7 @@ const pushHubTasks = (
       task,
       issuesByNumber.get(issueNumber),
       github,
+      dryRun,
     );
 
     if (outcome === "skipped") {
@@ -556,17 +561,30 @@ const pushHubTasks = (
 
     if (outcome === "push_pending") {
       pushPending.push(task.id);
-      updateHubTaskSyncState(cwd, task.id, "push_pending", env);
+      if (!dryRun && syncState !== "push_pending") {
+        updateHubTaskSyncState(cwd, task, "push_pending", env);
+      }
       continue;
     }
 
     if (outcome === "closed") {
       closed.push(task.id);
+      const existingIssue = issuesByNumber.get(issueNumber);
+      issuesByNumber.set(issueNumber, {
+        number: issueNumber,
+        title: existingIssue?.title ?? task.title,
+        body: existingIssue?.body,
+        state: "CLOSED",
+        labels: existingIssue?.labels ?? task.labels,
+        updatedAt: existingIssue?.updatedAt,
+      });
     } else {
       synced.push(task.id);
     }
 
-    updateHubTaskSyncState(cwd, task.id, "synced", env);
+    if (!dryRun && syncState !== "synced") {
+      updateHubTaskSyncState(cwd, task, "synced", env);
+    }
   }
 
   return { synced, pushPending, closed };
@@ -624,9 +642,14 @@ const runGhJson = (
   }
 };
 
+export interface DefaultGithubIssueClientOptions {
+  readonly includeClosed?: boolean;
+}
+
 export const createDefaultGithubIssueClient = (
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
+  options: DefaultGithubIssueClientOptions = {},
 ): GithubIssueClient => ({
   listIssues: () =>
     parseGithubIssuesJson(
@@ -636,7 +659,7 @@ export const createDefaultGithubIssueClient = (
           "issue",
           "list",
           "--state",
-          "all",
+          options.includeClosed === true ? "all" : "open",
           "-l",
           GITHUB_ISSUE_SYNC_LABEL,
           "--json",
@@ -666,11 +689,49 @@ export const syncHubTasksWithGithub = (
   input: SyncHubTasksInput,
 ): SyncHubTasksResult => {
   const env = input.env ?? process.env;
-  const github = input.github ?? createDefaultGithubIssueClient(input.cwd, env);
+  const dryRun = input.dryRun === true;
+  const mode = input.mode ?? "sync";
+  const includeClosed = input.includeClosed === true;
+  const github =
+    input.github ??
+    createDefaultGithubIssueClient(input.cwd, env, {
+      includeClosed: mode === "push" || includeClosed,
+    });
   const issues = github.listIssues();
-  const pulled = pullGithubIssues(input.cwd, issues, env);
-  const pushed = pushHubTasks(input.cwd, issues, env, github);
+  const pulled =
+    mode === "push"
+      ? { created: [], updated: [], conflicts: [], duplicateCandidates: [] }
+      : pullGithubIssues(input.cwd, issues, env, includeClosed, dryRun);
+  const pushed =
+    mode === "pull"
+      ? { synced: [], pushPending: [], closed: [] }
+      : pushHubTasks(input.cwd, issues, env, github, dryRun);
   return { pulled, pushed };
+};
+
+const formatDuplicateCandidate = (
+  candidate: HubTaskDuplicateCandidate,
+): string =>
+  `github#${candidate.issueNumber} -> ${candidate.localTaskIds.join(", ")}`;
+
+export const formatHubTaskSyncPreviewLines = (
+  result: SyncHubTasksResult,
+): readonly string[] => {
+  const lines = ["Hub task sync preview"];
+  lines.push(
+    `Pull: ${result.pulled.created.length} create, ${result.pulled.updated.length} update, ${result.pulled.conflicts.length} conflict`,
+  );
+  if (result.pulled.duplicateCandidates.length > 0) {
+    lines.push(
+      `Duplicate link candidates: ${result.pulled.duplicateCandidates
+        .map(formatDuplicateCandidate)
+        .join(" | ")}`,
+    );
+  }
+  lines.push(
+    `Push: ${result.pushed.synced.length} synced, ${result.pushed.closed.length} closed, ${result.pushed.pushPending.length} push pending`,
+  );
+  return lines;
 };
 
 export const formatHubTaskSyncSummaryLines = (
@@ -678,7 +739,7 @@ export const formatHubTaskSyncSummaryLines = (
 ): readonly string[] => {
   const lines = ["Synced Hub tasks with GitHub Issues"];
   lines.push(
-    `Pulled: ${result.pulled.created.length} created, ${result.pulled.updated.length} updated, ${result.pulled.conflicts.length} conflicts`,
+    `Pulled: ${result.pulled.created.length} created, ${result.pulled.updated.length} updated, ${result.pulled.conflicts.length} conflicts, ${result.pulled.duplicateCandidates.length} duplicate candidates`,
   );
   lines.push(
     `Pushed: ${result.pushed.synced.length} synced, ${result.pushed.closed.length} closed, ${result.pushed.pushPending.length} push pending`,

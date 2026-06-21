@@ -1,14 +1,11 @@
 import { exec } from "node:child_process";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
-import type {
-  HubFlowMerger,
-  HubFlowVerifier,
-  HubTaskCloser,
-} from "./hubBatchMerge.js";
+import type { HubFlowMerger, HubFlowVerifier } from "./hubBatchMerge.js";
 import {
   formatHubRecoveryComment,
   isHubRecoveryComment,
@@ -17,6 +14,15 @@ import {
 import { loadHubTask } from "./taskBoard.js";
 
 const execAsync = promisify(exec);
+
+const seedHubTaskStore = (repoDir: string): void => {
+  const beadsDir = join(repoDir, ".beads");
+  mkdirSync(beadsDir, { recursive: true });
+  const metadataPath = join(beadsDir, "metadata.json");
+  if (!existsSync(metadataPath)) {
+    writeFileSync(metadataPath, JSON.stringify({ backend: "dolt" }));
+  }
+};
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
@@ -49,6 +55,7 @@ const writeMockBd = async (
   stateFile: string,
   initialTasks: MockBeadsTask[],
 ) => {
+  seedHubTaskStore(repoDir);
   const binDir = join(repoDir, "bin");
   await mkdir(binDir, { recursive: true });
   const gitPath = (await execAsync("command -v git")).stdout.trim();
@@ -88,6 +95,15 @@ if (command === "update" && args[1]) {
     task.status = args[statusIndex + 1];
   }
   for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      task.labels = [];
+    }
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      const label = args[index + 1];
+      if (!task.labels.includes(label)) task.labels.push(label);
+    }
     if (args[index] === "--add-label") {
       const label = args[index + 1];
       if (!task.labels.includes(label)) task.labels.push(label);
@@ -235,6 +251,54 @@ describe("recoverHubTask", () => {
     );
   });
 
+  it("moves a failed task with existing unmerged branch work back to waiting_for_merge", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-recover-unmerged-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env, commentArgsFile } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-unmerged",
+        title: "Failed with branch work",
+        status: "open",
+        labels: ["failed", "implementing"],
+        metadata: {
+          hubStatus: "failed",
+          failed: true,
+          failureReason: "agent_failed",
+          claim: {
+            runId: "run-unmerged",
+            batchId: "batch-unmerged",
+            branch: "sandcastle/bd-unmerged-failed-with-branch-work",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const result = await recoverHubTask({
+      cwd: repoDir,
+      taskId: "bd-unmerged",
+      env,
+      branchHasUnmergedWork: async () => true,
+    });
+
+    const task = loadHubTask(repoDir, "bd-unmerged", env);
+    expect(result.outcome).toBe("recovered_failed");
+    expect(result.priorStatus).toBe("failed");
+    expect(task.hubStatus).toBe("waiting_for_merge");
+    expect(task.labels).toContain("waiting-for-merge");
+    expect(task.labels).not.toContain("failed");
+    expect(task.labels).not.toContain("implementing");
+    expect(task.claim).toBeDefined();
+    expect(task.metadata.failed).toBeUndefined();
+    expect(task.metadata.failureReason).toBeUndefined();
+    expect(await readFile(commentArgsFile, "utf-8")).toContain(
+      "waiting_for_merge",
+    );
+  });
+
   it("recovers close_failed tasks when the branch is already merged", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-recover-close-"));
     await initRepo(repoDir);
@@ -273,17 +337,12 @@ describe("recoverHubTask", () => {
     const verifier = vi.fn<HubFlowVerifier>(async () => ({
       outcome: "success",
     }));
-    const closer = vi.fn<HubTaskCloser>(async (input) => {
-      const { closeHubTask } = await import("./taskBoard.js");
-      return closeHubTask(input);
-    });
 
     const result = await recoverHubTask({
       cwd: repoDir,
       taskId: "bd-close",
       env,
       verifier,
-      closer,
       merger,
     });
 
@@ -291,9 +350,10 @@ describe("recoverHubTask", () => {
     expect(result.outcome).toBe("recovered_close_failed");
     expect(task.hubStatus).toBe("done");
     expect(task.labels).toContain("done");
+    expect(task.claim).toBeUndefined();
+    expect(task.metadata.failureReason).toBeUndefined();
     expect(merger).not.toHaveBeenCalled();
     expect(verifier).toHaveBeenCalledTimes(1);
-    expect(closer).toHaveBeenCalledTimes(1);
     expect(await readFile(commentArgsFile, "utf-8")).toContain("close_failed");
     expect(await readFile(commentArgsFile, "utf-8")).toContain("merged");
   });

@@ -1,4 +1,5 @@
 import { exec } from "node:child_process";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -9,14 +10,26 @@ import {
   createHubFlowRunVerifier,
   formatHubBatchMergeResultLines,
   runHubBatchMerge,
+  type HubMergeConflictResolver,
   type HubFlowMerger,
   type HubFlowVerifier,
+  type HubMergeBranchInspector,
+  type HubMergeWorktreeInspector,
   type HubTaskCloser,
 } from "./hubBatchMerge.js";
 import { createHubRunContext } from "./hubExecution.js";
 import { selectHubBatchMergeTasks, loadHubTaskBoard } from "./taskBoard.js";
 
 const execAsync = promisify(exec);
+
+const seedHubTaskStore = (repoDir: string): void => {
+  const beadsDir = join(repoDir, ".beads");
+  mkdirSync(beadsDir, { recursive: true });
+  const metadataPath = join(beadsDir, "metadata.json");
+  if (!existsSync(metadataPath)) {
+    writeFileSync(metadataPath, JSON.stringify({ backend: "dolt" }));
+  }
+};
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
@@ -57,6 +70,7 @@ const writeMockBd = async (
   initialTasks: MockBeadsTask[],
   options?: { readonly failCloseFor?: string },
 ) => {
+  seedHubTaskStore(repoDir);
   const binDir = join(repoDir, "bin");
   await mkdir(binDir, { recursive: true });
   const gitPath = (await execAsync("command -v git")).stdout.trim();
@@ -106,6 +120,15 @@ if (command === "update" && id) {
     task.status = args[statusIndex + 1];
   }
   for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      task.labels = [];
+    }
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      const label = args[index + 1];
+      if (!task.labels.includes(label)) task.labels.push(label);
+    }
     if (args[index] === "--add-label") {
       const label = args[index + 1];
       if (!task.labels.includes(label)) task.labels.push(label);
@@ -155,6 +178,14 @@ const createMergeContext = (
 
 const successMerger: HubFlowMerger = async () => ({ outcome: "success" });
 const successVerifier: HubFlowVerifier = async () => ({ outcome: "success" });
+const branchReadyInspector: HubMergeBranchInspector = async () => ({
+  exists: true,
+  hasUnmergedWork: true,
+});
+const cleanWorktreeInspector: HubMergeWorktreeInspector = async () => ({
+  dirtySourceFiles: [],
+  dirtyTaskStoreFiles: [],
+});
 
 describe("Hub batch merge selection", () => {
   it("selects waiting_for_merge tasks for the current batch id", async () => {
@@ -241,6 +272,8 @@ describe("runHubBatchMerge", () => {
       env,
       merger: successMerger,
       verifier: successVerifier,
+      branchInspector: branchReadyInspector,
+      worktreeInspector: cleanWorktreeInspector,
     });
 
     expect(result.batchStatus).toBe("done");
@@ -278,9 +311,848 @@ describe("runHubBatchMerge", () => {
     );
     expect(
       batchEvents.map((event) => (event as { type: string }).type),
-    ).toEqual(["batch_merge_started", "batch_merge_completed"]);
+    ).toEqual([
+      "batch_merge_selection",
+      "batch_merge_started",
+      "batch_merge_completed",
+    ]);
     expect(formatHubBatchMergeResultLines(result).join("\n")).toContain(
       "bd-72: merged -> done",
+    );
+  });
+
+  it("records selected and skipped task selection reasons before merging", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-merge-reasons-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const batchId = "batch-selection";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-selected",
+        title: "Selected task",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch: "branch-selected",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+      {
+        id: "bd-status",
+        title: "Wrong status",
+        status: "in_progress",
+        labels: ["reviewing"],
+        metadata: {
+          hubStatus: "reviewing",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch: "branch-status",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+      {
+        id: "bd-other-batch",
+        title: "Other batch",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId: "batch-other",
+            branch: "branch-other",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+      {
+        id: "bd-missing-claim",
+        title: "Missing claim",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+        },
+      },
+      {
+        id: "bd-missing-branch",
+        title: "Missing branch",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+      {
+        id: "bd-no-work",
+        title: "No unmerged work",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch: "branch-no-work",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
+
+    const result = await runHubBatchMerge({
+      flowId: "no-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger: successMerger,
+      verifier: successVerifier,
+      branchInspector: async (branch) => ({
+        exists: branch !== "branch-missing",
+        hasUnmergedWork: branch !== "branch-no-work",
+      }),
+      worktreeInspector: cleanWorktreeInspector,
+    });
+
+    expect(result.selectedTaskIds).toEqual(["bd-selected"]);
+    expect(
+      result.selectionDiagnostics.map(({ taskId, decision, reason }) => ({
+        taskId,
+        decision,
+        reason,
+      })),
+    ).toEqual([
+      {
+        taskId: "bd-missing-branch",
+        decision: "skipped",
+        reason: "missing_branch",
+      },
+      {
+        taskId: "bd-missing-claim",
+        decision: "skipped",
+        reason: "missing_claim",
+      },
+      { taskId: "bd-no-work", decision: "skipped", reason: "no_unmerged_work" },
+      {
+        taskId: "bd-other-batch",
+        decision: "skipped",
+        reason: "batch_mismatch",
+      },
+      { taskId: "bd-selected", decision: "selected", reason: "selected" },
+      { taskId: "bd-status", decision: "skipped", reason: "status_mismatch" },
+    ]);
+
+    const batchEvents = await readJsonl(
+      join(context.runDir, "events", "batch.jsonl"),
+    );
+    expect(batchEvents).toContainEqual(
+      expect.objectContaining({
+        type: "batch_merge_selection",
+        selectedTaskIds: ["bd-selected"],
+        diagnostics: expect.arrayContaining([
+          expect.objectContaining({
+            taskId: "bd-no-work",
+            decision: "skipped",
+            reason: "no_unmerged_work",
+          }),
+        ]),
+      }),
+    );
+
+    const summary = formatHubBatchMergeResultLines(result).join("\n");
+    expect(summary).toContain("Selection diagnostics:");
+    expect(summary).toContain("bd-selected: selected branch-selected");
+    expect(summary).toContain("bd-status: skipped status_mismatch");
+    expect(summary).toContain("bd-other-batch: skipped batch_mismatch");
+    expect(summary).toContain("bd-missing-claim: skipped missing_claim");
+    expect(summary).toContain("bd-missing-branch: skipped missing_branch");
+    expect(summary).toContain("bd-no-work: skipped no_unmerged_work");
+  });
+
+  it("diagnoses reviewed branch work with stale Beads projection as state inconsistent", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-merge-stale-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const batchId = "batch-state-inconsistent";
+    const stateFile = join(repoDir, "bd-state.json");
+    const initialTasks: MockBeadsTask[] = [
+      {
+        id: "bd-stale",
+        title: "Reviewed stale projection",
+        status: "in_progress",
+        labels: ["reviewing"],
+        metadata: {
+          hubStatus: "reviewing",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch: "branch-stale",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ];
+    const { env } = await writeMockBd(repoDir, stateFile, initialTasks);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
+    writeFileSync(
+      join(context.runDir, "events", "task.jsonl"),
+      `${JSON.stringify({
+        type: "task_review_succeeded",
+        runId: context.runId,
+        batchId,
+        taskId: "bd-stale",
+        branch: "branch-stale",
+        createdAt: "2026-06-12T10:15:00.000Z",
+        status: "waiting_for_merge",
+        commitCount: 1,
+        claim: initialTasks[0]?.metadata.claim,
+      })}\n`,
+    );
+
+    let mergeCalls = 0;
+    const result = await runHubBatchMerge({
+      flowId: "with-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger: async () => {
+        mergeCalls += 1;
+        return { outcome: "success" };
+      },
+      verifier: successVerifier,
+      branchInspector: branchReadyInspector,
+      worktreeInspector: cleanWorktreeInspector,
+    });
+
+    expect(mergeCalls).toBe(0);
+    expect(result.batchStatus).toBe("skipped");
+    expect(result.selectedTaskIds).toEqual([]);
+    expect(result.selectionDiagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-stale",
+        decision: "blocked",
+        reason: "state_inconsistent",
+        branch: "branch-stale",
+        hubStatus: "reviewing",
+        observedProjectedStatus: "reviewing",
+        suggestedRecovery: "sandcastle tasks repair-state bd-stale",
+      }),
+    );
+    expect(formatHubBatchMergeResultLines(result).join("\n")).toContain(
+      "bd-stale: blocked state_inconsistent branch-stale",
+    );
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(finalState).toEqual(initialTasks);
+  });
+
+  it("diagnoses no-review implementation branch work when Beads projection lost claim metadata", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-batch-merge-missing-claim-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const batchId = "batch-missing-claim";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-no-claim",
+        title: "No claim projection",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {
+          hubStatus: "ready_for_agent",
+        },
+      },
+    ]);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
+    writeFileSync(
+      join(context.runDir, "events", "task.jsonl"),
+      `${JSON.stringify({
+        type: "task_implementation_succeeded",
+        runId: context.runId,
+        batchId,
+        taskId: "bd-no-claim",
+        branch: "branch-no-claim",
+        createdAt: "2026-06-12T10:15:00.000Z",
+        status: "waiting_for_merge",
+        commitCount: 0,
+        branchHasUnmergedWork: true,
+        implementationWork: "existing_unmerged_work",
+      })}\n`,
+    );
+
+    const result = await runHubBatchMerge({
+      flowId: "no-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger: successMerger,
+      verifier: successVerifier,
+      branchInspector: branchReadyInspector,
+      worktreeInspector: cleanWorktreeInspector,
+    });
+
+    expect(result.batchStatus).toBe("skipped");
+    expect(result.selectedTaskIds).toEqual([]);
+    expect(result.selectionDiagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-no-claim",
+        decision: "blocked",
+        reason: "state_inconsistent",
+        branch: "branch-no-claim",
+        observedProjectedStatus: "ready_for_agent",
+        missingClaimFields: ["runId", "batchId", "branch"],
+        suggestedRecovery: "sandcastle tasks repair-state bd-no-claim",
+        mergeReadyEventType: "task_implementation_succeeded",
+      }),
+    );
+  });
+
+  it("diagnoses waiting_for_merge tasks with merge-ready events and missing claim metadata", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-batch-merge-waiting-missing-claim-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const batchId = "batch-waiting-missing-claim";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-waiting-no-claim",
+        title: "Waiting without claim",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+        },
+      },
+    ]);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
+    writeFileSync(
+      join(context.runDir, "events", "task.jsonl"),
+      `${JSON.stringify({
+        type: "task_review_succeeded",
+        runId: context.runId,
+        batchId,
+        taskId: "bd-waiting-no-claim",
+        branch: "branch-waiting-no-claim",
+        createdAt: "2026-06-12T10:15:00.000Z",
+        status: "waiting_for_merge",
+        commitCount: 1,
+      })}\n`,
+    );
+
+    const result = await runHubBatchMerge({
+      flowId: "with-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger: successMerger,
+      verifier: successVerifier,
+      branchInspector: branchReadyInspector,
+      worktreeInspector: cleanWorktreeInspector,
+    });
+
+    expect(result.selectedTaskIds).toEqual([]);
+    expect(result.selectionDiagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-waiting-no-claim",
+        decision: "blocked",
+        reason: "state_inconsistent",
+        branch: "branch-waiting-no-claim",
+        observedProjectedStatus: "waiting_for_merge",
+        missingClaimFields: ["runId", "batchId", "branch"],
+      }),
+    );
+  });
+
+  it("skips terminal tasks normally when merge-ready history has no remaining branch work", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-batch-merge-terminal-no-work-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const batchId = "batch-terminal-no-work";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-done",
+        title: "Already done",
+        status: "closed",
+        labels: ["done"],
+        metadata: {
+          hubStatus: "done",
+          done: true,
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch: "branch-done",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
+    writeFileSync(
+      join(context.runDir, "events", "task.jsonl"),
+      `${JSON.stringify({
+        type: "task_review_succeeded",
+        runId: context.runId,
+        batchId,
+        taskId: "bd-done",
+        branch: "branch-done",
+        createdAt: "2026-06-12T10:15:00.000Z",
+        status: "waiting_for_merge",
+        commitCount: 1,
+      })}\n`,
+    );
+
+    const result = await runHubBatchMerge({
+      flowId: "with-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger: successMerger,
+      verifier: successVerifier,
+      branchInspector: async () => ({ exists: true, hasUnmergedWork: false }),
+      worktreeInspector: cleanWorktreeInspector,
+    });
+
+    expect(result.selectedTaskIds).toEqual([]);
+    expect(
+      result.selectionDiagnostics.some(
+        (diagnostic) => diagnostic.reason === "state_inconsistent",
+      ),
+    ).toBe(false);
+    expect(result.selectionDiagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-done",
+        decision: "skipped",
+        reason: "status_mismatch",
+        hubStatus: "done",
+      }),
+    );
+  });
+
+  it("skips closed terminal tasks normally even if branch work is still visible", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-batch-merge-closed-branch-work-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const batchId = "batch-closed-branch-work";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-closed",
+        title: "Closed task",
+        status: "closed",
+        labels: ["done"],
+        metadata: {
+          hubStatus: "done",
+          done: true,
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch: "branch-closed",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
+    writeFileSync(
+      join(context.runDir, "events", "task.jsonl"),
+      `${JSON.stringify({
+        type: "task_review_succeeded",
+        runId: context.runId,
+        batchId,
+        taskId: "bd-closed",
+        branch: "branch-closed",
+        createdAt: "2026-06-12T10:15:00.000Z",
+        status: "waiting_for_merge",
+        commitCount: 1,
+      })}\n`,
+    );
+
+    const result = await runHubBatchMerge({
+      flowId: "with-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger: successMerger,
+      verifier: successVerifier,
+      branchInspector: branchReadyInspector,
+      worktreeInspector: cleanWorktreeInspector,
+    });
+
+    expect(result.selectedTaskIds).toEqual([]);
+    expect(
+      result.selectionDiagnostics.some(
+        (diagnostic) => diagnostic.reason === "state_inconsistent",
+      ),
+    ).toBe(false);
+    expect(result.selectionDiagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-closed",
+        decision: "skipped",
+        reason: "status_mismatch",
+        hubStatus: "done",
+      }),
+    );
+  });
+
+  it("keeps failed tasks with no commits and no branch work out of merge diagnostics", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-batch-merge-failed-no-work-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const batchId = "batch-failed-no-work";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-failed-no-work",
+        title: "Failed without work",
+        status: "open",
+        labels: ["failed"],
+        metadata: {
+          hubStatus: "failed",
+          failed: true,
+          failureReason: "agent_failed",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch: "branch-failed-no-work",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
+    writeFileSync(
+      join(context.runDir, "events", "task.jsonl"),
+      `${JSON.stringify({
+        type: "task_implementation_failed",
+        runId: context.runId,
+        batchId,
+        taskId: "bd-failed-no-work",
+        branch: "branch-failed-no-work",
+        createdAt: "2026-06-12T10:15:00.000Z",
+        status: "failed",
+        failureReason: "agent_failed",
+        commitCount: 0,
+      })}\n`,
+    );
+
+    const result = await runHubBatchMerge({
+      flowId: "no-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger: successMerger,
+      verifier: successVerifier,
+      branchInspector: async () => ({ exists: true, hasUnmergedWork: false }),
+      worktreeInspector: cleanWorktreeInspector,
+    });
+
+    expect(result.selectedTaskIds).toEqual([]);
+    expect(
+      result.selectionDiagnostics.some(
+        (diagnostic) => diagnostic.reason === "state_inconsistent",
+      ),
+    ).toBe(false);
+    expect(result.selectionDiagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-failed-no-work",
+        decision: "skipped",
+        reason: "status_mismatch",
+        hubStatus: "failed",
+      }),
+    );
+  });
+
+  it("blocks merge preflight when the source worktree has dirty source files", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-merge-dirty-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+    await writeFile(join(repoDir, "dirty-source.txt"), "uncommitted");
+
+    const batchId = "batch-dirty";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-dirty",
+        title: "Dirty source task",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch: "branch-dirty",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
+    let mergeCalls = 0;
+
+    const result = await runHubBatchMerge({
+      flowId: "no-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger: async () => {
+        mergeCalls += 1;
+        return { outcome: "success" };
+      },
+      verifier: successVerifier,
+      branchInspector: branchReadyInspector,
+    });
+
+    expect(mergeCalls).toBe(0);
+    expect(result.batchStatus).toBe("skipped");
+    expect(result.selectedTaskIds).toEqual([]);
+    expect(result.selectionDiagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-dirty",
+        decision: "blocked",
+        reason: "dirty_worktree",
+        message: expect.stringContaining("dirty-source.txt"),
+      }),
+    );
+    const summary = formatHubBatchMergeResultLines(result).join("\n");
+    expect(summary).toContain(
+      "Git safety gate: commit, stash, or revert dirty source files",
+    );
+    expect(summary).toContain("dirty-source.txt");
+    expect(summary).toContain("then rerun the same flow so the batch resumes.");
+  });
+
+  it("does not block merge preflight for dirty Beads runtime/export files in the source worktree", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-merge-beads-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const batchId = "batch-beads-dirty";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-beads-dirty",
+        title: "Beads dirty task",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch: "branch-beads-dirty",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
+    let mergeCalls = 0;
+
+    const result = await runHubBatchMerge({
+      flowId: "no-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger: async () => {
+        mergeCalls += 1;
+        return { outcome: "success" };
+      },
+      verifier: successVerifier,
+      branchInspector: branchReadyInspector,
+      worktreeInspector: async () => ({
+        dirtySourceFiles: [],
+        dirtyTaskStoreFiles: [
+          ".beads/issues.jsonl",
+          ".beads/interactions.jsonl",
+        ],
+      }),
+    });
+
+    expect(mergeCalls).toBe(1);
+    expect(result.batchStatus).toBe("done");
+    expect(result.selectedTaskIds).toEqual(["bd-beads-dirty"]);
+    expect(result.selectionDiagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-beads-dirty",
+        decision: "selected",
+        reason: "selected",
+        taskStoreDirtyFiles: [
+          ".beads/issues.jsonl",
+          ".beads/interactions.jsonl",
+        ],
+      }),
+    );
+    expect(formatHubBatchMergeResultLines(result).join("\n")).toContain(
+      "task-store dirty: .beads/issues.jsonl, .beads/interactions.jsonl",
+    );
+  });
+
+  it("blocks task branches that include Beads runtime/export files in their diff", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-batch-merge-beads-diff-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const batchId = "batch-beads-diff";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-beads-diff",
+        title: "Beads branch diff",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch: "branch-beads-diff",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
+    let mergeCalls = 0;
+
+    const result = await runHubBatchMerge({
+      flowId: "no-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger: async () => {
+        mergeCalls += 1;
+        return { outcome: "success" };
+      },
+      verifier: successVerifier,
+      branchInspector: async () => ({
+        exists: true,
+        hasUnmergedWork: true,
+        changedFiles: [".beads/issues.jsonl"],
+      }),
+      worktreeInspector: cleanWorktreeInspector,
+    });
+
+    expect(mergeCalls).toBe(0);
+    expect(result.batchStatus).toBe("skipped");
+    expect(result.selectedTaskIds).toEqual([]);
+    expect(result.selectionDiagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-beads-diff",
+        decision: "blocked",
+        reason: "task_store_dirty",
+        branch: "branch-beads-diff",
+        taskStoreBranchFiles: [".beads/issues.jsonl"],
+      }),
+    );
+    expect(formatHubBatchMergeResultLines(result).join("\n")).toContain(
+      "bd-beads-diff: blocked task_store_dirty branch-beads-diff",
     );
   });
 
@@ -347,6 +1219,8 @@ describe("runHubBatchMerge", () => {
       env,
       merger: successMerger,
       verifier,
+      branchInspector: branchReadyInspector,
+      worktreeInspector: cleanWorktreeInspector,
     });
 
     expect(result.batchStatus).toBe("partial_failed");
@@ -435,6 +1309,8 @@ describe("runHubBatchMerge", () => {
       env,
       merger,
       verifier: successVerifier,
+      branchInspector: branchReadyInspector,
+      worktreeInspector: cleanWorktreeInspector,
     });
 
     expect(result.batchStatus).toBe("partial_failed");
@@ -455,6 +1331,116 @@ describe("runHubBatchMerge", () => {
     expect(
       taskEvents.map((event) => (event as { type: string }).type),
     ).toContain("merge_failed");
+  });
+
+  it("preserves generic merge failure diagnostics in events and result output", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-merge-failed-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const batchId = "batch-merge-failed";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-failed",
+        title: "Failed task",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch: "sandcastle/bd-failed-failed-task",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
+    const merger: HubFlowMerger = async () => ({
+      outcome: "failed",
+      message: "git merge exited 128",
+      diagnostics: {
+        exitCode: 128,
+        stdout: "Auto-merging config.json",
+        stderr: "fatal: refusing to merge unrelated histories",
+        details: { command: "git merge branch-a" },
+      },
+    });
+
+    const result = await runHubBatchMerge({
+      flowId: "no-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger,
+      verifier: successVerifier,
+      branchInspector: branchReadyInspector,
+      worktreeInspector: cleanWorktreeInspector,
+    });
+
+    expect(result.batchStatus).toBe("partial_failed");
+    expect(result.results[0]).toMatchObject({
+      taskId: "bd-failed",
+      outcome: "merge_failed",
+      failureReason: "merge_failed",
+      diagnosticSummary:
+        "git merge exited 128 (exit 128): fatal: refusing to merge unrelated histories",
+      diagnostics: {
+        exitCode: 128,
+        stdout: "Auto-merging config.json",
+        stderr: "fatal: refusing to merge unrelated histories",
+        details: { command: "git merge branch-a" },
+      },
+    });
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(finalState[0]?.metadata.failureReason).toBe("merge_failed");
+
+    const taskEvents = await readJsonl(
+      join(context.runDir, "events", "task.jsonl"),
+    );
+    const mergeFailedEvent = taskEvents.find(
+      (event) => (event as { type: string }).type === "merge_failed",
+    );
+    expect(mergeFailedEvent).toMatchObject({
+      type: "merge_failed",
+      taskId: "bd-failed",
+      failureReason: "merge_failed",
+      diagnosticSummary:
+        "git merge exited 128 (exit 128): fatal: refusing to merge unrelated histories",
+      diagnostics: {
+        exitCode: 128,
+        stdout: "Auto-merging config.json",
+        stderr: "fatal: refusing to merge unrelated histories",
+        details: { command: "git merge branch-a" },
+      },
+    });
+
+    const batchEvents = await readJsonl(
+      join(context.runDir, "events", "batch.jsonl"),
+    );
+    expect(batchEvents.at(-1)).toMatchObject({
+      type: "batch_merge_completed",
+      batchStatus: "partial_failed",
+      failedTaskId: "bd-failed",
+      failureReason: "merge_failed",
+      failureSummary:
+        "bd-failed merge_failed: git merge exited 128 (exit 128): fatal: refusing to merge unrelated histories",
+    });
+    expect(formatHubBatchMergeResultLines(result).join("\n")).toContain(
+      "bd-failed: merge_failed -> failed; git merge exited 128 (exit 128): fatal: refusing to merge unrelated histories",
+    );
   });
 
   it("marks close failures as failed and reverts remaining tasks", async () => {
@@ -516,6 +1502,8 @@ describe("runHubBatchMerge", () => {
       merger: successMerger,
       verifier: successVerifier,
       closer,
+      branchInspector: branchReadyInspector,
+      worktreeInspector: cleanWorktreeInspector,
     });
 
     expect(result.batchStatus).toBe("partial_failed");
@@ -549,8 +1537,15 @@ describe("runHubBatchMerge", () => {
     await execAsync("git checkout main", { cwd: repoDir });
 
     const merger = createHubFlowRunMerger({ cwd: repoDir });
+    const context = createMergeContext(
+      repoDir,
+      "batch-default-git",
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
     const result = await merger({
       flowId: "no-review",
+      runId: context.runId,
+      batchId: context.batchId,
       taskId: "bd-git",
       title: "Feature",
       branch,
@@ -561,6 +1556,124 @@ describe("runHubBatchMerge", () => {
     expect(result.outcome).toBe("success");
     const merged = await readFile(join(repoDir, "feature.txt"), "utf-8");
     expect(merged).toBe("feature");
+  });
+
+  it("uses an agent conflict resolver when the default merger hits conflicts", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-batch-merge-agent-resolve-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "shared.txt", "base\n", "initial commit");
+
+    const branch = "sandcastle/bd-agent-conflict";
+    await execAsync(`git checkout -b "${branch}"`, { cwd: repoDir });
+    await commitFile(repoDir, "shared.txt", "branch\n", "branch edit");
+    await execAsync("git checkout main", { cwd: repoDir });
+    await commitFile(repoDir, "shared.txt", "main\n", "main edit");
+
+    const seenInputs: Array<{ conflictedFiles: readonly string[] }> = [];
+    const conflictResolver: HubMergeConflictResolver = async (input) => {
+      seenInputs.push({ conflictedFiles: input.conflictedFiles });
+      expect(input.gitStatus).toContain("UU shared.txt");
+      await writeFile(join(repoDir, "shared.txt"), "resolved\n");
+      await execAsync("git add shared.txt", { cwd: repoDir });
+      await execAsync("git commit --no-edit", { cwd: repoDir });
+      return { outcome: "success" };
+    };
+    const context = createMergeContext(
+      repoDir,
+      "batch-agent-resolve",
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
+
+    const merger = createHubFlowRunMerger({
+      cwd: repoDir,
+      conflictResolver,
+    });
+    const result = await merger({
+      flowId: "with-review",
+      runId: context.runId,
+      batchId: context.batchId,
+      taskId: "bd-agent",
+      title: "Agent conflict",
+      branch,
+      cwd: repoDir,
+      runDir: context.runDir,
+    });
+
+    expect(result.outcome).toBe("success");
+    expect(seenInputs).toEqual([{ conflictedFiles: ["shared.txt"] }]);
+    await expect(readFile(join(repoDir, "shared.txt"), "utf-8")).resolves.toBe(
+      "resolved\n",
+    );
+    await expect(
+      execAsync("git diff --name-only --diff-filter=U", { cwd: repoDir }),
+    ).resolves.toMatchObject({ stdout: "" });
+    await expect(
+      execAsync("git rev-parse -q --verify MERGE_HEAD", { cwd: repoDir }),
+    ).rejects.toBeTruthy();
+
+    const taskEvents = await readJsonl(
+      join(context.runDir, "events", "task.jsonl"),
+    );
+    expect(taskEvents.map((event) => (event as { type: string }).type)).toEqual(
+      [
+        "merge_conflict_resolution_started",
+        "merge_conflict_resolution_succeeded",
+      ],
+    );
+  });
+
+  it("fails agent-assisted merge when the resolver leaves conflicts unresolved", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-batch-merge-agent-unresolved-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "shared.txt", "base\n", "initial commit");
+
+    const branch = "sandcastle/bd-agent-unresolved";
+    await execAsync(`git checkout -b "${branch}"`, { cwd: repoDir });
+    await commitFile(repoDir, "shared.txt", "branch\n", "branch edit");
+    await execAsync("git checkout main", { cwd: repoDir });
+    await commitFile(repoDir, "shared.txt", "main\n", "main edit");
+
+    const context = createMergeContext(
+      repoDir,
+      "batch-agent-unresolved",
+      join(repoDir, "data", "sandcastle", "hub"),
+    );
+    const merger = createHubFlowRunMerger({
+      cwd: repoDir,
+      conflictResolver: async () => ({ outcome: "success" }),
+    });
+    const result = await merger({
+      flowId: "with-review",
+      runId: context.runId,
+      batchId: context.batchId,
+      taskId: "bd-agent-unresolved",
+      title: "Agent unresolved",
+      branch,
+      cwd: repoDir,
+      runDir: context.runDir,
+    });
+
+    expect(result).toMatchObject({
+      outcome: "merge_conflict",
+      message: "Merge agent left unresolved conflicts: shared.txt",
+    });
+
+    const taskEvents = await readJsonl(
+      join(context.runDir, "events", "task.jsonl"),
+    );
+    expect(taskEvents.map((event) => (event as { type: string }).type)).toEqual(
+      ["merge_conflict_resolution_started", "merge_conflict_resolution_failed"],
+    );
+    expect(taskEvents.at(-1)).toMatchObject({
+      failureReason: "merge_conflict",
+      diagnosticSummary: expect.stringContaining(
+        "Merge agent left unresolved conflicts: shared.txt",
+      ),
+    });
   });
 
   it("passes through missing verify.sh in the default verifier helper", async () => {

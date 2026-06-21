@@ -71,6 +71,15 @@ export interface HubBatchMergeStartedEvent {
   readonly taskIds: readonly string[];
 }
 
+export interface HubBatchMergeSelectionEvent {
+  readonly type: "batch_merge_selection";
+  readonly runId: string;
+  readonly batchId: string;
+  readonly createdAt: string;
+  readonly selectedTaskIds: readonly string[];
+  readonly diagnostics: readonly object[];
+}
+
 export interface HubBatchMergeCompletedEvent {
   readonly type: "batch_merge_completed";
   readonly runId: string;
@@ -78,6 +87,10 @@ export interface HubBatchMergeCompletedEvent {
   readonly createdAt: string;
   readonly taskIds: readonly string[];
   readonly batchStatus: "done" | "partial_failed";
+  readonly failedTaskId?: string;
+  readonly failureReason?: string;
+  readonly failureSummary?: string;
+  readonly diagnostics?: Readonly<Record<string, unknown>>;
 }
 
 export interface HubTaskEvent {
@@ -93,6 +106,9 @@ export interface HubTaskEvent {
     | "merge_started"
     | "merge_succeeded"
     | "merge_failed"
+    | "merge_conflict_resolution_started"
+    | "merge_conflict_resolution_succeeded"
+    | "merge_conflict_resolution_failed"
     | "verification_started"
     | "verification_passed"
     | "verification_failed"
@@ -108,7 +124,11 @@ export interface HubTaskEvent {
   readonly status: string;
   readonly reason?: string;
   readonly failureReason?: string;
+  readonly diagnosticSummary?: string;
+  readonly diagnostics?: Readonly<Record<string, unknown>>;
   readonly commitCount?: number;
+  readonly branchHasUnmergedWork?: boolean;
+  readonly implementationWork?: "new_commits" | "existing_unmerged_work";
   readonly claim?: HubTaskClaimMetadata;
 }
 
@@ -230,12 +250,10 @@ export const createHubRunContext = (
     options.hubProjectDir ??
     resolveHubProjectDir(resolveSandcastleUserDataDir(options.env), repoRoot);
   const identifiers = createHubRunIdentifiers();
-  const ids = options.runId
-    ? {
-        runId: options.runId,
-        batchId: options.batchId ?? identifiers.batchId,
-      }
-    : identifiers;
+  const ids = {
+    runId: options.runId ?? identifiers.runId,
+    batchId: options.batchId ?? identifiers.batchId,
+  };
   const runDir = resolveHubRunDirectory(hubProjectDir, ids.runId);
   const eventsDir = resolveHubRunEventsDirectory(runDir);
   const paths = resolveHubRunEventsPaths(runDir);
@@ -288,6 +306,7 @@ export const appendHubBatchEvent = (
   event:
     | HubBatchStartedEvent
     | HubBatchPlannedEvent
+    | HubBatchMergeSelectionEvent
     | HubBatchMergeStartedEvent
     | HubBatchMergeCompletedEvent,
 ): string => {
@@ -309,6 +328,40 @@ export const appendHubTaskEvent = (
     taskEventsPath,
     event,
   );
+};
+
+export interface RecordHubTaskStatusAdvancedInput {
+  readonly runId: string;
+  readonly batchId: string;
+  readonly taskId: string;
+  readonly branch: string;
+  readonly createdAt: string;
+  readonly status: string;
+  readonly reason?: string;
+  readonly failureReason?: string;
+  readonly commitCount?: number;
+  readonly branchHasUnmergedWork?: boolean;
+  readonly implementationWork?: "new_commits" | "existing_unmerged_work";
+}
+
+export const recordHubTaskStatusAdvanced = (
+  runDir: string,
+  input: RecordHubTaskStatusAdvancedInput,
+): void => {
+  appendHubTaskEvent(runDir, {
+    type: "task_status_advanced",
+    runId: input.runId,
+    batchId: input.batchId,
+    taskId: input.taskId,
+    branch: input.branch,
+    createdAt: input.createdAt,
+    status: input.status,
+    reason: input.reason,
+    failureReason: input.failureReason,
+    commitCount: input.commitCount,
+    branchHasUnmergedWork: input.branchHasUnmergedWork,
+    implementationWork: input.implementationWork,
+  });
 };
 
 export const readHubTaskClaim = (

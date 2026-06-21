@@ -3,6 +3,7 @@ import {
   appendBdAddLabelArgs,
   appendBdMetadataArg,
   appendBdRemoveLabelArgs,
+  appendBdSetLabelsArgs,
   normalizeBdLabels,
 } from "./bdCliArgs.js";
 
@@ -30,6 +31,20 @@ describe("bdCliArgs", () => {
       "needs-info",
       "--remove-label",
       "blocked",
+    ]);
+  });
+
+  it("appends repeatable bd set-labels replacement flags", () => {
+    const args: string[] = ["update", "task-1"];
+    appendBdSetLabelsArgs(args, ["user-owned", "waiting-for-merge"]);
+
+    expect(args).toEqual([
+      "update",
+      "task-1",
+      "--set-labels",
+      "user-owned",
+      "--set-labels",
+      "waiting-for-merge",
     ]);
   });
 

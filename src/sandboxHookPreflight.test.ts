@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Effect } from "effect";
 import {
   collectSandboxHookCommands,
   extractSandcastleScriptPaths,
+  syncSandboxHookScriptsToWorktree,
   validateSandboxHookScripts,
 } from "./sandboxHookPreflight.js";
 
@@ -66,5 +67,27 @@ describe("sandboxHookPreflight", () => {
       expect(result.left.message).toContain("not be committed");
       expect(result.left.message).toContain("git stash pop");
     }
+  });
+
+  it("copies gitignored bootstrap.sh from host repo into issue worktree", async () => {
+    const hostDir = mkdtempSync(join(tmpdir(), "sandcastle-hook-sync-host-"));
+    const worktreeDir = mkdtempSync(
+      join(tmpdir(), "sandcastle-hook-sync-worktree-"),
+    );
+    const scriptDir = join(hostDir, ".sandcastle");
+    mkdirSync(scriptDir, { recursive: true });
+    writeFileSync(join(scriptDir, "bootstrap.sh"), "#!/bin/bash\necho synced\n");
+
+    await Effect.runPromise(
+      syncSandboxHookScriptsToWorktree(hostDir, worktreeDir, {
+        sandbox: {
+          onSandboxReady: [{ command: "bash .sandcastle/bootstrap.sh" }],
+        },
+      }),
+    );
+
+    expect(
+      existsSync(join(worktreeDir, ".sandcastle", "bootstrap.sh")),
+    ).toBe(true);
   });
 });

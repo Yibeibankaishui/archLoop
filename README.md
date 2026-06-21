@@ -742,7 +742,7 @@ Optional **no-sandbox only** add-on for WeChat Developer Tools / MCP runtime deb
 
 ### `sandcastle init`
 
-Scaffolds the `.sandcastle/` config directory and optionally builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a capability pack (first), default scaffold agent, installed runtimes, sandbox provider, backlog manager, optional capability add-ons (when the pack exposes them), workflow template, and Project profile. Init now offers `docker` and `no-sandbox`: choosing `docker` follows the normal image-build flow, while choosing `no-sandbox` skips image build during init and rewrites the scaffolded `main.mts` or `main.ts` to call `noSandbox()`. After scaffold (and before optional image build), init also runs an auth setup step for selected tools, including GitHub Issues, Codex, and Cursor. When you select the `miniprogram` capability pack, init may also offer project-local `miniprogram-ci` installation and writes Mini Program verification scaffold files.
+Scaffolds the `.sandcastle/` config directory and optionally builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a capability pack (first), default scaffold agent, installed runtimes, sandbox provider, backlog manager, optional capability add-ons (when the pack exposes them), workflow template, and Project profile. Init now offers `docker` and `no-sandbox`: choosing `docker` follows the normal image-build flow, while choosing `no-sandbox` skips image build during init and rewrites the scaffolded `main.mts` or `main.ts` to call `noSandbox()`. After scaffold (and before optional image build), init also points selected tools such as GitHub Issues, Codex, and Cursor toward env keys or Hub-owned auth sessions under the Sandcastle user data directory. When you select the `miniprogram` capability pack, init may also offer project-local `miniprogram-ci` installation and writes Mini Program verification scaffold files.
 
 Think of the init agent choices as two layers:
 
@@ -848,7 +848,7 @@ Displays configured Hub agent roles and clearly reports missing roles. Use this 
 
 ### `sandcastle agent-config init`
 
-Runs an interactive wizard to configure all Hub agent roles. You can apply one provider/model pair to every role, or configure each role individually. Use this for first-time Hub agent setup.
+Runs an interactive wizard to configure all Hub agent roles. After you choose a provider, Sandcastle offers a provider-specific model picker (default model marked) with a custom-model escape hatch, then prompts for supported provider options such as Codex/Claude effort or Cursor mode. You can apply one provider/model/options set to every role, or configure each role individually. Use this for first-time Hub agent setup.
 
 ### `sandcastle agent-config configure`
 
@@ -864,11 +864,11 @@ Prints the Hub-wide env file path under the Sandcastle user data directory. Hub 
 
 ### `sandcastle env show`
 
-Displays configured Hub env keys with masked values. `process.env` overrides file values at runtime.
+Displays configured Hub env keys with masked values. `process.env` overrides file values at runtime. Empty known keys include a short acquisition hint and a pointer to `sandcastle env init`.
 
 ### `sandcastle env init`
 
-Runs an interactive wizard to configure shared Hub credentials such as `CURSOR_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_KEY`, `OPENCODE_API_KEY`, and `GH_TOKEN`. The wizard prioritizes env keys required by your configured Hub agent roles.
+Runs an interactive wizard to configure shared Hub env keys such as `CURSOR_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_KEY`, `OPENCODE_API_KEY`, and `GH_TOKEN`. Before each prompt, the wizard shows provider-specific guidance (including stable documentation URLs) for where to obtain the credential. Leaving a prompt blank keeps the existing value and does not clear it. The wizard prioritizes env keys required by your configured Hub agent roles. For Codex, `OPENAI_KEY` uses OpenAI API billing; use `sandcastle auth login codex` for a Codex/ChatGPT CLI login session.
 
 ### `sandcastle env configure`
 
@@ -877,6 +877,22 @@ Alias for `sandcastle env init`.
 ### `sandcastle env set <key> [value]`
 
 Persists one Hub env value. In an interactive terminal, omit `value` to enter it securely at a prompt. In non-interactive mode, `value` is required.
+
+### `sandcastle auth show`
+
+Summarizes provider auth for Hub flows. Each provider reports whether auth is satisfied by `process.env`, the Hub env file, a Hub-owned auth directory/session, or is missing. Providers without first-pass login support, such as Cursor and OpenCode, show `sandcastle env set ...` guidance.
+
+### `sandcastle auth path <provider>`
+
+Prints the Hub-owned auth directory for login-capable providers. `sandcastle auth path codex` prints the `CODEX_HOME` directory; `sandcastle auth path github` prints the `GH_CONFIG_DIR` directory. Both live under the Sandcastle user data directory and are reusable across Hub projects.
+
+### `sandcastle auth login codex`
+
+Runs `codex login` with `CODEX_HOME` set to Sandcastle's Hub-owned Codex auth directory. This configures a Codex/ChatGPT CLI login session. It is distinct from `OPENAI_KEY`, which remains available through `sandcastle env set OPENAI_KEY <value>` and uses OpenAI API billing.
+
+### `sandcastle auth login github`
+
+Runs `gh auth login --insecure-storage` with `GH_CONFIG_DIR` set to Sandcastle's Hub-owned GitHub auth directory for GitHub Issues task sync. In non-interactive mode, both auth login commands fail with the exact command to run from an interactive shell instead of waiting for browser auth.
 
 ### `sandcastle tasks list`
 
@@ -900,9 +916,15 @@ With no arguments in a TTY, Sandcastle opens a multi-select picker for inbox and
 
 Configure the Hub **triage** agent role before first use (`sandcastle agent-config init` or `set-role triage`).
 
-### `sandcastle tasks sync`
+### `sandcastle tasks pull` / `push` / `sync`
 
-Pulls GitHub Issues labeled `Sandcastle` into Beads and pushes core Hub collaboration state back to GitHub. Beads remains the local task store: execution statuses such as `implementing`, `reviewing`, `waiting_for_merge`, `merging`, and `failed` stay local, while collaboration statuses map to GitHub labels and `done` / `wontfix` close the remote issue when push succeeds. Sync failures record `push_pending` or `conflict` metadata without reopening completed local tasks, and semantic mismatches surface as `sync_conflict`.
+Use explicit direction commands for GitHub issue exchange:
+
+- `sandcastle tasks pull` imports GitHub Issues labeled `Sandcastle` into Beads. It defaults to open issues only; pass `--include-closed` when you intentionally want closed historical issues.
+- `sandcastle tasks push` sends linked local Hub collaboration state to GitHub. Local `ready_for_agent`, `ready_for_human`, `needs_info`, and `blocked` update GitHub labels; local `done` / `wontfix` closes the linked GitHub issue. It does not pull remote issues or create local tasks.
+- `sandcastle tasks sync --dry-run` previews the combined pull/push plan. `sandcastle tasks sync` asks for confirmation in a TTY, and non-interactive sync requires `--yes`.
+
+Beads remains the local task store. Execution statuses such as `implementing`, `reviewing`, `waiting_for_merge`, `merging`, and `failed` stay local. Tasks imported from GitHub remain linked through metadata such as `remote_refs` and `github_issue`. If an unlinked GitHub issue has the same normalized title as a local task, Sandcastle reports a duplicate link candidate instead of silently creating another local task.
 
 ### `sandcastle tasks from-prd <prd-ref>`
 
@@ -912,7 +934,7 @@ Interactive sessions let you ask the agent to split, merge, reorder, reclassify,
 
 Configure the Hub **planning** agent role before first use (`sandcastle agent-config init` or `set-role planning`).
 
-Proposal flows never update GitHub Issues directly. They write local Beads tasks, comments, metadata, and dependency edges only; use `sandcastle tasks sync` when you want collaboration labels or closures pushed to a remote issue tracker.
+Proposal flows never update GitHub Issues directly. They write local Beads tasks, comments, metadata, and dependency edges only; use `sandcastle tasks push` when you want collaboration labels or closures pushed to a remote issue tracker.
 
 ### `sandcastle tasks comment <task-selector>`
 
@@ -920,7 +942,19 @@ Appends a readable Beads comment to the task without changing its status. Pass t
 
 ### `sandcastle tasks recover <task-selector>`
 
-Repairs failed or stale Hub execution state for a single Beads task. Recovery is the explicit command allowed to release stale claim metadata, reset abandoned execution statuses such as `implementing` or `reviewing`, and move recoverable `failed` tasks back to an appropriate collaboration state (`ready_for_agent`, `ready_for_human`, `blocked`, or `wontfix`). For `failed(close_failed)`, recovery checks whether the task branch is already merged into `HEAD`, reruns verification, retries local Beads close, and marks the task `done` without repeating merge. Each recovery appends a concise Beads comment starting with `> *This was generated by Sandcastle during task recovery.*`.
+Repairs failed or stale Hub execution state for a single Beads task. Recovery is the explicit command allowed to release stale claim metadata, reset abandoned execution statuses such as `implementing` or `reviewing`, and move recoverable `failed` tasks back to an appropriate collaboration state (`ready_for_agent`, `ready_for_human`, `blocked`, or `wontfix`). If a failed task still has unmerged work on its claimed task branch, recovery moves it back to `waiting_for_merge` instead of rerunning implementation. For `failed(close_failed)`, recovery checks whether the task branch is already merged into `HEAD`, reruns verification, retries local Beads close, and marks the task `done` without repeating merge. Each recovery appends a concise Beads comment starting with `> *This was generated by Sandcastle during task recovery.*`.
+
+### `sandcastle tasks doctor`
+
+Audits local Beads task-board state against Hub run events and git branch/worktree state without mutating Beads, git, or remote GitHub Issues. It reports multiple Sandcastle status labels, stale `metadata.hubStatus`, missing execution claim fields, failed tasks that still have branch work, merge-ready run history that is not selectable for merge, terminal tasks that still carry execution claim metadata, dirty source worktree gates, and task state that still needs `sandcastle tasks push`.
+
+Doctor output includes the next action for each finding: rerun the flow, recover a failed task, repair local state, or push task sync. Dirty source files are a Git safety gate, not repairable Beads task-state pollution; commit, stash, or revert them, then rerun the same flow so the batch resumes.
+
+### `sandcastle tasks repair-state <task-selector>`
+
+Previews local Beads mutations that would repair task-state pollution for one task. In a TTY it asks for confirmation; in non-interactive mode, pass `--yes` after reviewing the preview. The command does not mutate remote GitHub Issues.
+
+Repair uses the same canonical task transition path as normal Hub lifecycle changes, preserving user custom labels while rewriting only Sandcastle-managed status labels and metadata. It can restore the QA incident shape where Hub events show `task_review_succeeded`, branch work is still unmerged, but Beads labels/metadata or claim fields are stale, moving the task back to `waiting_for_merge` with the correct claim. Failed agent attempts with `commitCount=0` and no branch work are not promoted by repair-state; use normal recovery policy for failed tasks.
 
 ### `sandcastle tasks delete <task-selector> [task-selector...]`
 
@@ -934,13 +968,19 @@ Runs a Hub-owned flow against the Beads task board in the target git repository.
 
 The first available task-board flows are `no-review` and `with-review`. Proposal flows `prd-decomposition` and `triage` run through the shared proposal session runtime: `sandcastle run . --flow prd-decomposition --input <prd-ref>` and `sandcastle run . --flow triage --input <task-id|statuses>` execute end-to-end. The matching `sandcastle tasks` shortcuts remain the recommended entry points.
 
-When `--flow` targets `prd-decomposition` or `triage`, Sandcastle runs the same agent-driven proposal path as the task shortcut: no-sandbox execution, Hub-wide role config, structured output validation, proposal artifacts in the Hub run directory, mutation detection before apply, and local-only Beads writes. Remote issue updates remain outside proposal flows and happen only through `sandcastle tasks sync`.
+When `--flow` targets `prd-decomposition` or `triage`, Sandcastle runs the same agent-driven proposal path as the task shortcut: no-sandbox execution, Hub-wide role config, structured output validation, proposal artifacts in the Hub run directory, mutation detection before apply, and local-only Beads writes. Remote issue updates remain outside proposal flows and happen through explicit `sandcastle tasks pull`, `tasks push`, or confirmed `tasks sync`.
 
 The `no-review` flow reads the Beads ready queue, claims unblocked `ready_for_agent` tasks, runs an implementer with task id/title/branch supplied by TypeScript orchestration, and advances successful work to `waiting_for_merge`. Agent or sandbox failures move tasks to `failed` with a failure reason.
 
 The `with-review` flow adds a reviewer stage after implementation: successful work moves to `reviewing`, the reviewer receives the task branch and diff/commit context from orchestration, and completed review advances the task to `waiting_for_merge`. Review failures move tasks to `failed` with a failure reason.
 
-After implementation and review complete, Hub moves eligible `waiting_for_merge` tasks in the batch to `merging`, merges each branch with per-task events, runs verification after each merge, and closes the local Beads task only when merge, verification, and close all succeed. Merge conflicts, verification failures, or close failures stop the batch: the current task becomes `failed`, unprocessed tasks return to `waiting_for_merge`, and the batch becomes `partial_failed`.
+If a later `sandcastle run . --flow <id>` finds no `ready_for_agent` tasks but does find an unfinished previous batch for the same flow with tasks still in `waiting_for_merge`, it creates a fresh Hub run directory for the retry and resumes the old batch's merge selection by its original batch id. If ready tasks exist at the same time as unfinished previous batches, Sandcastle starts a normal new batch and reports the old batch ids as not resumed instead of silently merging unrelated old work.
+
+After implementation and review complete, Hub evaluates all merge candidates and records selected/skipped/blocked reasons in batch events and CLI output. It selects tasks only when they are `waiting_for_merge`, belong to the current batch, have claim branch metadata, and the branch still has unmerged work. Status mismatches, batch mismatches, missing claims, missing branches, and branches with no unmerged work are explained before merge starts. If Hub run events show a task reached merge-ready state but the Beads projection is stale or missing claim fields while branch work still exists, merge selection reports `state_inconsistent` with the projected status, claim drift, branch, and an explicit `sandcastle tasks repair-state <selector>` repair hint instead of silently skipping it.
+
+Before merging, Hub preflights the source worktree. Dirty source files block the merge as a Git safety gate with a summary telling you to commit, stash, or revert the listed files and rerun the same flow so the batch resumes. Dirty Beads runtime/export files such as `.beads/issues.jsonl` and `.beads/interactions.jsonl` are classified separately and do not block by themselves, because Hub task-board state is local task-store state. If a task branch changes `.beads/` runtime/export files, that branch is blocked before merge; use `sandcastle tasks pull` / `push` / `sync` for remote task exchange instead of carrying Beads local state through code branches.
+
+Hub moves selected tasks to `merging`, merges each branch with per-task events, runs verification after each merge, and closes the local Beads task only when merge, verification, and close all succeed. Clean merges use Git directly. When Git reports a merge conflict, Hub invokes the configured `merge` agent role to resolve the conflicted worktree, then checks that no unmerged files or unfinished merge state remain before continuing to verification and task close. Generic merge failures, unresolved merge conflicts, verification failures, or close failures stop the selected batch: the current task becomes `failed`, unprocessed selected tasks return to `waiting_for_merge`, and the batch becomes `partial_failed`. Merge failures preserve a concise Git diagnostic summary in task/batch events and in CLI output so you can decide whether to configure the merge role, clean the worktree, resolve a conflict, or retry.
 
 | Option    | Required | Description                                                                                                                     |
 | --------- | -------- | ------------------------------------------------------------------------------------------------------------------------------- |

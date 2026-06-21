@@ -1,27 +1,47 @@
 import { execFile } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
+import { assertAgentCredentialsConfigured } from "./agentAuthGuidance.js";
 import {
   appendHubBatchEvent,
   appendHubTaskEvent,
+  resolveHubRunEventsPaths,
+  type HubTaskEvent,
   type HubTaskClaimMetadata,
 } from "./hubExecution.js";
+import { readHubAgentConfig } from "./hubAgentConfig.js";
+import { resolveHubAgentProvider } from "./hubProposalAgent.js";
+import { run } from "./run.js";
+import { noSandbox } from "./sandboxes/no-sandbox.js";
 import {
-  closeHubTask,
+  enterMergePhase,
+  recordCloseFailure,
+  recordMergeFailure,
+  recordTaskClosure,
+  recordTaskMergeStarted,
+  recordVerificationFailure,
+  revertTaskToWaitingForMerge,
+  type CloseHubTaskInput,
+  type HubTaskCloser,
+  type HubTaskLifecycleContext,
+} from "./hubTaskLifecycle.js";
+import {
+  isCompletedHubStatus,
   loadHubTaskBoard,
   resolveHubTaskBranch,
-  selectHubBatchMergeTasks,
-  updateHubTaskStatus,
   type HubFailureReason,
   type HubTaskProjection,
+  type HubTaskStatus,
 } from "./taskBoard.js";
 
 const execFileAsync = promisify(execFile);
 
 export interface HubMergeTaskInput {
   readonly flowId: string;
+  readonly runId: string;
+  readonly batchId: string;
   readonly taskId: string;
   readonly title: string;
   readonly branch: string;
@@ -29,14 +49,41 @@ export interface HubMergeTaskInput {
   readonly runDir: string;
 }
 
+export type HubMergeDiagnostics = Readonly<Record<string, unknown>> & {
+  readonly message?: string;
+  readonly stdout?: string;
+  readonly stderr?: string;
+  readonly exitCode?: number;
+  readonly signal?: string;
+  readonly details?: Readonly<Record<string, unknown>>;
+};
+
 export interface HubMergeTaskResult {
   readonly outcome: "success" | "merge_conflict" | "failed";
   readonly message?: string;
+  readonly diagnostics?: HubMergeDiagnostics;
 }
 
 export type HubFlowMerger = (
   input: HubMergeTaskInput,
 ) => Promise<HubMergeTaskResult>;
+
+export interface HubMergeConflictResolutionInput extends HubMergeTaskInput {
+  readonly diagnostics: HubMergeDiagnostics | undefined;
+  readonly conflictedFiles: readonly string[];
+  readonly gitStatus: string;
+  readonly baseBranch: string | undefined;
+}
+
+export interface HubMergeConflictResolutionResult {
+  readonly outcome: "success" | "failed";
+  readonly message?: string;
+  readonly diagnostics?: HubMergeDiagnostics;
+}
+
+export type HubMergeConflictResolver = (
+  input: HubMergeConflictResolutionInput,
+) => Promise<HubMergeConflictResolutionResult>;
 
 export interface HubVerifyTaskInput {
   readonly flowId: string;
@@ -56,16 +103,58 @@ export type HubFlowVerifier = (
   input: HubVerifyTaskInput,
 ) => Promise<HubVerifyTaskResult>;
 
-export interface CloseHubTaskAttemptInput {
-  readonly cwd: string;
+export type { CloseHubTaskInput as CloseHubTaskAttemptInput, HubTaskCloser };
+
+export type HubBatchMergeSelectionDecision = "selected" | "skipped" | "blocked";
+
+export type HubBatchMergeSelectionReason =
+  | "selected"
+  | "status_mismatch"
+  | "batch_mismatch"
+  | "missing_claim"
+  | "missing_branch"
+  | "no_unmerged_work"
+  | "dirty_worktree"
+  | "task_store_dirty"
+  | "state_inconsistent";
+
+export interface HubBatchMergeSelectionDiagnostic {
   readonly taskId: string;
-  readonly metadata: Readonly<Record<string, unknown>>;
-  readonly env?: NodeJS.ProcessEnv;
+  readonly title: string;
+  readonly hubStatus: HubTaskStatus;
+  readonly decision: HubBatchMergeSelectionDecision;
+  readonly reason: HubBatchMergeSelectionReason;
+  readonly branch?: string;
+  readonly batchId?: string;
+  readonly message?: string;
+  readonly taskStoreDirtyFiles?: readonly string[];
+  readonly taskStoreBranchFiles?: readonly string[];
+  readonly observedProjectedStatus?: HubTaskStatus;
+  readonly missingClaimFields?: readonly string[];
+  readonly staleClaimFields?: Readonly<Record<string, string>>;
+  readonly suggestedRecovery?: string;
+  readonly mergeReadyEventType?: string;
 }
 
-export type HubTaskCloser = (
-  input: CloseHubTaskAttemptInput,
-) => Promise<HubTaskProjection>;
+export interface HubMergeBranchState {
+  readonly exists: boolean;
+  readonly hasUnmergedWork: boolean;
+  readonly changedFiles?: readonly string[];
+}
+
+export type HubMergeBranchInspector = (
+  branch: string,
+  cwd: string,
+) => Promise<HubMergeBranchState>;
+
+export interface HubMergeWorktreeState {
+  readonly dirtySourceFiles: readonly string[];
+  readonly dirtyTaskStoreFiles: readonly string[];
+}
+
+export type HubMergeWorktreeInspector = (
+  cwd: string,
+) => Promise<HubMergeWorktreeState>;
 
 export interface RunHubBatchMergeInput {
   readonly flowId: string;
@@ -76,6 +165,8 @@ export interface RunHubBatchMergeInput {
   readonly merger: HubFlowMerger;
   readonly verifier: HubFlowVerifier;
   readonly closer?: HubTaskCloser;
+  readonly branchInspector?: HubMergeBranchInspector;
+  readonly worktreeInspector?: HubMergeWorktreeInspector;
   readonly env?: NodeJS.ProcessEnv;
 }
 
@@ -90,14 +181,17 @@ export interface HubBatchMergeTaskResult {
     | "verification_failed"
     | "close_failed"
     | "skipped";
-  readonly hubStatus: string;
+  readonly hubStatus: HubTaskStatus;
   readonly failureReason?: HubFailureReason;
+  readonly diagnosticSummary?: string;
+  readonly diagnostics?: HubMergeDiagnostics;
 }
 
 export interface RunHubBatchMergeResult {
   readonly runId: string;
   readonly batchId: string;
   readonly selectedTaskIds: readonly string[];
+  readonly selectionDiagnostics: readonly HubBatchMergeSelectionDiagnostic[];
   readonly batchStatus: "done" | "partial_failed" | "skipped";
   readonly results: readonly HubBatchMergeTaskResult[];
 }
@@ -105,125 +199,648 @@ export interface RunHubBatchMergeResult {
 const resolveBranch = (task: HubTaskProjection): string =>
   task.claim?.branch ?? resolveHubTaskBranch(task.id, task.title);
 
-const recordTaskStatusAdvanced = (
-  runDir: string,
-  input: {
-    readonly runId: string;
-    readonly batchId: string;
+const toLifecycleContext = (
+  input: RunHubBatchMergeInput,
+): HubTaskLifecycleContext => ({
+  runId: input.runId,
+  batchId: input.batchId,
+  runDir: input.runDir,
+});
+
+type MergeProgressEventType =
+  | "merge_succeeded"
+  | "verification_started"
+  | "verification_passed"
+  | "task_close_started";
+
+const appendMergeProgressEvent = (
+  input: RunHubBatchMergeInput,
+  event: {
+    readonly type: MergeProgressEventType;
     readonly taskId: string;
     readonly branch: string;
+    readonly claim: HubTaskProjection["claim"];
     readonly createdAt: string;
-    readonly status: string;
-    readonly failureReason?: HubFailureReason;
   },
 ): void => {
-  appendHubTaskEvent(runDir, {
-    type: "task_status_advanced",
+  appendHubTaskEvent(input.runDir, {
+    type: event.type,
     runId: input.runId,
     batchId: input.batchId,
-    taskId: input.taskId,
-    branch: input.branch,
-    createdAt: input.createdAt,
-    status: input.status,
-    failureReason: input.failureReason,
+    taskId: event.taskId,
+    branch: event.branch,
+    createdAt: event.createdAt,
+    status: "merging",
+    claim: event.claim,
   });
 };
 
-const recordTaskFailure = (
-  input: RunHubBatchMergeInput,
+const toBatchMergeTaskResult = (
   task: HubTaskProjection,
   branch: string,
-  claim: HubTaskClaimMetadata | undefined,
-  failureReason: HubFailureReason,
-  eventType: "merge_failed" | "verification_failed" | "task_close_failed",
-  createdAt: string,
   outcome: HubBatchMergeTaskResult["outcome"],
-): HubBatchMergeTaskResult => {
-  appendHubTaskEvent(input.runDir, {
-    type: eventType,
+  hubStatus: HubTaskStatus,
+  failureReason?: HubFailureReason,
+  diagnosticSummary?: string,
+  diagnostics?: HubMergeDiagnostics,
+): HubBatchMergeTaskResult => ({
+  taskId: task.id,
+  title: task.title,
+  branch,
+  outcome,
+  hubStatus,
+  ...(failureReason === undefined ? {} : { failureReason }),
+  ...(diagnosticSummary === undefined ? {} : { diagnosticSummary }),
+  ...(diagnostics === undefined ? {} : { diagnostics }),
+});
+
+const recordBatchMergeCompleted = (
+  input: RunHubBatchMergeInput,
+  selectedTaskIds: readonly string[],
+  batchStatus: "done" | "partial_failed",
+  failedResult?: HubBatchMergeTaskResult,
+): void => {
+  appendHubBatchEvent(input.runDir, {
+    type: "batch_merge_completed",
     runId: input.runId,
     batchId: input.batchId,
-    taskId: task.id,
-    branch,
-    createdAt,
-    status: "failed",
-    failureReason,
-    claim,
+    createdAt: new Date().toISOString(),
+    taskIds: selectedTaskIds,
+    batchStatus,
+    ...(failedResult
+      ? {
+          failedTaskId: failedResult.taskId,
+          failureReason: failedResult.failureReason,
+          failureSummary: `${failedResult.taskId} ${failedResult.outcome}: ${
+            failedResult.diagnosticSummary ??
+            failedResult.failureReason ??
+            failedResult.outcome
+          }`,
+          diagnostics: failedResult.diagnostics,
+        }
+      : {}),
+  });
+};
+
+const errorMessage = (error: unknown): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  return String(error);
+};
+
+const resolveClaimBranch = (task: HubTaskProjection): string | undefined =>
+  task.claim?.branch && task.claim.branch.trim().length > 0
+    ? task.claim.branch
+    : undefined;
+
+const readErrorProperty = (error: unknown, key: string): unknown | undefined =>
+  error && typeof error === "object"
+    ? (error as Record<string, unknown>)[key]
+    : undefined;
+
+const readStringProperty = (
+  error: unknown,
+  key: string,
+): string | undefined => {
+  const value = readErrorProperty(error, key);
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+};
+
+const readExitCode = (error: unknown): number | undefined => {
+  const code = readErrorProperty(error, "code");
+  return typeof code === "number" ? code : undefined;
+};
+
+const compactDiagnostics = (
+  diagnostics: HubMergeDiagnostics,
+): HubMergeDiagnostics | undefined => {
+  const compacted: HubMergeDiagnostics = {
+    ...(diagnostics.message ? { message: diagnostics.message } : {}),
+    ...(diagnostics.stdout ? { stdout: diagnostics.stdout } : {}),
+    ...(diagnostics.stderr ? { stderr: diagnostics.stderr } : {}),
+    ...(diagnostics.exitCode !== undefined
+      ? { exitCode: diagnostics.exitCode }
+      : {}),
+    ...(diagnostics.signal ? { signal: diagnostics.signal } : {}),
+    ...(diagnostics.details && Object.keys(diagnostics.details).length > 0
+      ? { details: diagnostics.details }
+      : {}),
+  };
+
+  return Object.keys(compacted).length > 0 ? compacted : undefined;
+};
+
+const buildMergeDiagnostics = (
+  result: HubMergeTaskResult,
+): HubMergeDiagnostics | undefined =>
+  compactDiagnostics({
+    ...result.diagnostics,
+    message: result.diagnostics?.message ?? result.message,
   });
 
-  const updatedTask = updateHubTaskStatus({
-    cwd: input.cwd,
-    taskId: task.id,
-    hubStatus: "failed",
-    metadata: task.metadata,
-    failureReason,
-    env: input.env,
-  });
-  recordTaskStatusAdvanced(input.runDir, {
-    runId: input.runId,
-    batchId: input.batchId,
-    taskId: task.id,
-    branch,
-    createdAt,
-    status: updatedTask.hubStatus,
-    failureReason,
-  });
+const firstDiagnosticLine = (value: string | undefined): string | undefined =>
+  value
+    ?.split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+
+const formatMergeDiagnosticSummary = (
+  diagnostics: HubMergeDiagnostics | undefined,
+): string | undefined => {
+  if (!diagnostics) {
+    return undefined;
+  }
+
+  const prefixParts = [
+    diagnostics.message,
+    diagnostics.exitCode !== undefined ? `exit ${diagnostics.exitCode}` : "",
+    diagnostics.signal ? `signal ${diagnostics.signal}` : "",
+  ].filter(
+    (part): part is string => typeof part === "string" && part.length > 0,
+  );
+  const prefix =
+    prefixParts.length > 0
+      ? prefixParts.length === 1
+        ? prefixParts[0]
+        : `${prefixParts[0]} (${prefixParts.slice(1).join(", ")})`
+      : undefined;
+  const body =
+    firstDiagnosticLine(diagnostics.stderr) ??
+    firstDiagnosticLine(diagnostics.stdout);
+
+  if (prefix && body && body !== prefix) {
+    return `${prefix}: ${body}`;
+  }
+  return prefix ?? body;
+};
+
+const extractErrorDiagnostics = (error: unknown): HubMergeDiagnostics => {
+  const details: Record<string, unknown> = {};
+  const code = readErrorProperty(error, "code");
+  const command = readStringProperty(error, "cmd");
+  const path = readStringProperty(error, "path");
+  const syscall = readStringProperty(error, "syscall");
+
+  if (typeof code === "string" && code.length > 0) {
+    details.code = code;
+  }
+  if (command) {
+    details.command = command;
+  }
+  if (path) {
+    details.path = path;
+  }
+  if (syscall) {
+    details.syscall = syscall;
+  }
 
   return {
-    taskId: task.id,
-    title: task.title,
-    branch,
-    outcome,
-    hubStatus: updatedTask.hubStatus,
-    failureReason,
+    message: error instanceof Error ? error.message : String(error),
+    stdout: readStringProperty(error, "stdout"),
+    stderr: readStringProperty(error, "stderr"),
+    exitCode: readExitCode(error),
+    signal: readStringProperty(error, "signal"),
+    details,
   };
 };
 
-const revertTasksToWaitingForMerge = (
-  cwd: string,
-  tasks: readonly HubTaskProjection[],
-  env: NodeJS.ProcessEnv | undefined,
-): void => {
-  for (const task of tasks) {
-    updateHubTaskStatus({
-      cwd,
-      taskId: task.id,
-      hubStatus: "waiting_for_merge",
-      metadata: task.metadata,
-      env,
-    });
+const defaultBranchInspector: HubMergeBranchInspector = async (branch, cwd) => {
+  try {
+    await execFileAsync(
+      "git",
+      ["rev-parse", "--verify", `${branch}^{commit}`],
+      {
+        cwd,
+      },
+    );
+  } catch {
+    return { exists: false, hasUnmergedWork: false };
+  }
+
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["rev-list", "--count", `HEAD..${branch}`],
+      { cwd, encoding: "utf8" },
+    );
+    const diff = await execFileAsync(
+      "git",
+      ["diff", "--name-only", `HEAD...${branch}`],
+      { cwd, encoding: "utf8" },
+    ).catch(() => ({ stdout: "" }));
+    return {
+      exists: true,
+      hasUnmergedWork: Number(String(stdout).trim()) > 0,
+      changedFiles: String(diff.stdout)
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0),
+    };
+  } catch {
+    return { exists: true, hasUnmergedWork: false };
   }
 };
 
-const defaultHubTaskCloser: HubTaskCloser = async (input) =>
-  closeHubTask({
-    cwd: input.cwd,
-    taskId: input.taskId,
-    metadata: input.metadata,
-    env: input.env,
+const normalizeGitPath = (path: string): string => path.replace(/\\/g, "/");
+
+const isTaskStoreRuntimePath = (path: string): boolean => {
+  const normalized = normalizeGitPath(path);
+  return normalized === ".beads" || normalized.startsWith(".beads/");
+};
+
+const parseGitStatusPorcelain = (stdout: string): string[] => {
+  const entries = stdout.split("\0").filter((entry) => entry.length > 0);
+  const paths: string[] = [];
+
+  for (let index = 0; index < entries.length; index += 1) {
+    const entry = entries[index]!;
+    if (entry.length < 4) {
+      continue;
+    }
+
+    const status = entry.slice(0, 2);
+    const path = entry.slice(3);
+    if (path.length > 0) {
+      paths.push(path);
+    }
+
+    if (status.includes("R") || status.includes("C")) {
+      index += 1;
+      const renamedPath = entries[index];
+      if (renamedPath && renamedPath.length > 0) {
+        paths.push(renamedPath);
+      }
+    }
+  }
+
+  return paths;
+};
+
+const defaultWorktreeInspector: HubMergeWorktreeInspector = async (cwd) => {
+  const { stdout } = await execFileAsync(
+    "git",
+    ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+    { cwd, encoding: "utf8" },
+  );
+  const dirtyFiles = parseGitStatusPorcelain(String(stdout));
+  return {
+    dirtySourceFiles: dirtyFiles.filter(
+      (path) => !isTaskStoreRuntimePath(path),
+    ),
+    dirtyTaskStoreFiles: dirtyFiles.filter(isTaskStoreRuntimePath),
+  };
+};
+
+const buildSelectionDiagnostic = (
+  task: HubTaskProjection,
+  input: Pick<
+    HubBatchMergeSelectionDiagnostic,
+    | "decision"
+    | "reason"
+    | "branch"
+    | "message"
+    | "taskStoreDirtyFiles"
+    | "taskStoreBranchFiles"
+    | "observedProjectedStatus"
+    | "missingClaimFields"
+    | "staleClaimFields"
+    | "suggestedRecovery"
+    | "mergeReadyEventType"
+  >,
+): HubBatchMergeSelectionDiagnostic => ({
+  taskId: task.id,
+  title: task.title,
+  hubStatus: task.hubStatus,
+  batchId: task.claim?.batchId,
+  ...input,
+});
+
+const parseHubTaskEvents = (runDir: string): readonly HubTaskEvent[] => {
+  const { taskEventsPath } = resolveHubRunEventsPaths(runDir);
+  if (!existsSync(taskEventsPath)) {
+    return [];
+  }
+
+  return readFileSync(taskEventsPath, "utf8")
+    .split(/\r?\n/)
+    .filter((line) => line.trim().length > 0)
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line) as HubTaskEvent];
+      } catch {
+        return [];
+      }
+    });
+};
+
+const isMergeReadyTaskEvent = (event: HubTaskEvent): boolean =>
+  event.type === "task_review_succeeded" ||
+  (event.type === "task_implementation_succeeded" &&
+    event.status === "waiting_for_merge");
+
+const resolveMergeReadyEventsByTask = (
+  runDir: string,
+  batchId: string,
+): ReadonlyMap<string, HubTaskEvent> => {
+  const eventsByTask = new Map<string, HubTaskEvent>();
+
+  for (const event of parseHubTaskEvents(runDir)) {
+    if (event.batchId !== batchId || !isMergeReadyTaskEvent(event)) {
+      continue;
+    }
+    eventsByTask.set(event.taskId, event);
+  }
+
+  return eventsByTask;
+};
+
+const collectMissingClaimFields = (
+  task: HubTaskProjection,
+): readonly string[] => {
+  if (!task.claim) {
+    return ["runId", "batchId", "branch"];
+  }
+
+  return (["runId", "batchId", "branch"] as const).filter(
+    (field) => !task.claim?.[field],
+  );
+};
+
+const collectStaleClaimFields = (
+  task: HubTaskProjection,
+  event: HubTaskEvent,
+): Readonly<Record<string, string>> | undefined => {
+  if (!task.claim) {
+    return undefined;
+  }
+
+  const stale: Record<string, string> = {};
+  const expected = {
+    runId: event.runId,
+    batchId: event.batchId,
+    branch: event.branch,
+  };
+
+  for (const field of ["runId", "batchId", "branch"] as const) {
+    const actualValue = task.claim[field];
+    const expectedValue = expected[field];
+    if (actualValue && expectedValue && actualValue !== expectedValue) {
+      stale[field] = `${actualValue} != ${expectedValue}`;
+    }
+  }
+
+  return Object.keys(stale).length > 0 ? stale : undefined;
+};
+
+const hasClaimDriftFromEvent = (
+  task: HubTaskProjection,
+  event: HubTaskEvent | undefined,
+): boolean =>
+  event !== undefined &&
+  (collectMissingClaimFields(task).length > 0 ||
+    collectStaleClaimFields(task, event) !== undefined);
+
+const maybeBuildStateInconsistentDiagnostic = async (input: {
+  readonly cwd: string;
+  readonly task: HubTaskProjection;
+  readonly event: HubTaskEvent | undefined;
+  readonly branchInspector: HubMergeBranchInspector;
+}): Promise<HubBatchMergeSelectionDiagnostic | undefined> => {
+  const event = input.event;
+  if (!event) {
+    return undefined;
+  }
+  if (
+    isCompletedHubStatus(input.task.hubStatus) ||
+    input.task.beadsStatus === "closed"
+  ) {
+    return undefined;
+  }
+
+  const branch = event.branch;
+  const branchState = await input.branchInspector(branch, input.cwd);
+  if (!branchState.exists || !branchState.hasUnmergedWork) {
+    return undefined;
+  }
+  const missingClaimFields = collectMissingClaimFields(input.task);
+  const staleClaimFields = collectStaleClaimFields(input.task, event);
+
+  return buildSelectionDiagnostic(input.task, {
+    decision: "blocked",
+    reason: "state_inconsistent",
+    branch,
+    observedProjectedStatus: input.task.hubStatus,
+    missingClaimFields:
+      missingClaimFields.length > 0 ? missingClaimFields : undefined,
+    staleClaimFields,
+    suggestedRecovery: `sandcastle tasks repair-state ${input.task.id}`,
+    mergeReadyEventType: event.type,
+    message: `Hub run events show ${event.type} for ${branch}, but the projected task status is ${input.task.hubStatus}. Repair Beads labels/metadata before merging: sandcastle tasks repair-state ${input.task.id}. If the task is failed or has stale execution state, sandcastle tasks recover ${input.task.id} may also apply.`,
   });
+};
+
+const evaluateHubBatchMergeSelection = async (input: {
+  readonly cwd: string;
+  readonly runDir: string;
+  readonly batchId: string;
+  readonly tasks: readonly HubTaskProjection[];
+  readonly branchInspector: HubMergeBranchInspector;
+  readonly worktreeState: HubMergeWorktreeState;
+}): Promise<{
+  readonly selectedTasks: readonly HubTaskProjection[];
+  readonly diagnostics: readonly HubBatchMergeSelectionDiagnostic[];
+}> => {
+  const selectedTasks: HubTaskProjection[] = [];
+  const diagnostics: HubBatchMergeSelectionDiagnostic[] = [];
+  const mergeReadyEvents = resolveMergeReadyEventsByTask(
+    input.runDir,
+    input.batchId,
+  );
+
+  for (const task of input.tasks) {
+    const mergeReadyEvent = mergeReadyEvents.get(task.id);
+    if (task.hubStatus !== "waiting_for_merge") {
+      const stateInconsistentDiagnostic =
+        await maybeBuildStateInconsistentDiagnostic({
+          cwd: input.cwd,
+          task,
+          event: mergeReadyEvent,
+          branchInspector: input.branchInspector,
+        });
+      if (stateInconsistentDiagnostic) {
+        diagnostics.push(stateInconsistentDiagnostic);
+        continue;
+      }
+
+      if (task.claim?.batchId === input.batchId) {
+        diagnostics.push(
+          buildSelectionDiagnostic(task, {
+            decision: "skipped",
+            reason: "status_mismatch",
+            branch: resolveClaimBranch(task),
+            message: `Task is ${task.hubStatus}, not waiting_for_merge.`,
+          }),
+        );
+      }
+      continue;
+    }
+
+    if (hasClaimDriftFromEvent(task, mergeReadyEvent)) {
+      const stateInconsistentDiagnostic =
+        await maybeBuildStateInconsistentDiagnostic({
+          cwd: input.cwd,
+          task,
+          event: mergeReadyEvent,
+          branchInspector: input.branchInspector,
+        });
+      if (stateInconsistentDiagnostic) {
+        diagnostics.push(stateInconsistentDiagnostic);
+        continue;
+      }
+    }
+
+    if (!task.claim) {
+      diagnostics.push(
+        buildSelectionDiagnostic(task, {
+          decision: "skipped",
+          reason: "missing_claim",
+          message: "Task is waiting_for_merge without claim metadata.",
+        }),
+      );
+      continue;
+    }
+
+    if (task.claim.batchId !== input.batchId) {
+      diagnostics.push(
+        buildSelectionDiagnostic(task, {
+          decision: "skipped",
+          reason: "batch_mismatch",
+          branch: resolveClaimBranch(task),
+          message: `Task belongs to batch ${task.claim.batchId ?? "<missing>"}, not ${input.batchId}.`,
+        }),
+      );
+      continue;
+    }
+
+    const branch = resolveClaimBranch(task);
+    if (!branch) {
+      diagnostics.push(
+        buildSelectionDiagnostic(task, {
+          decision: "skipped",
+          reason: "missing_branch",
+          message: "Task claim does not include a branch.",
+        }),
+      );
+      continue;
+    }
+
+    const branchState = await input.branchInspector(branch, input.cwd);
+    if (!branchState.exists) {
+      diagnostics.push(
+        buildSelectionDiagnostic(task, {
+          decision: "skipped",
+          reason: "missing_branch",
+          branch,
+          message: `Branch ${branch} does not exist.`,
+        }),
+      );
+      continue;
+    }
+
+    if (!branchState.hasUnmergedWork) {
+      diagnostics.push(
+        buildSelectionDiagnostic(task, {
+          decision: "skipped",
+          reason: "no_unmerged_work",
+          branch,
+          message: `Branch ${branch} has no commits ahead of HEAD.`,
+        }),
+      );
+      continue;
+    }
+
+    const taskStoreBranchFiles = (branchState.changedFiles ?? []).filter(
+      isTaskStoreRuntimePath,
+    );
+    if (taskStoreBranchFiles.length > 0) {
+      diagnostics.push(
+        buildSelectionDiagnostic(task, {
+          decision: "blocked",
+          reason: "task_store_dirty",
+          branch,
+          message: `Task branch changes Beads runtime/export files (${taskStoreBranchFiles.join(", ")}). Keep local task-store state out of normal Hub merges; remove those files from the branch or sync task state through Sandcastle task sync before retrying.`,
+          taskStoreBranchFiles,
+        }),
+      );
+      continue;
+    }
+
+    if (input.worktreeState.dirtySourceFiles.length > 0) {
+      diagnostics.push(
+        buildSelectionDiagnostic(task, {
+          decision: "blocked",
+          reason: "dirty_worktree",
+          branch,
+          message: `Git safety gate: commit, stash, or revert dirty source files (${input.worktreeState.dirtySourceFiles.join(", ")}), then rerun the same flow so the batch resumes.`,
+        }),
+      );
+      continue;
+    }
+
+    selectedTasks.push(task);
+    const taskStoreDirtyFiles = input.worktreeState.dirtyTaskStoreFiles;
+    diagnostics.push(
+      buildSelectionDiagnostic(task, {
+        decision: "selected",
+        reason: "selected",
+        branch,
+        message:
+          taskStoreDirtyFiles.length > 0
+            ? `Branch ${branch} has unmerged work; task-store dirty: ${taskStoreDirtyFiles.join(", ")}. Hub merge preflight ignores local Beads runtime/export dirtiness unless the task branch also changes those files.`
+            : `Branch ${branch} has unmerged work.`,
+        taskStoreDirtyFiles:
+          taskStoreDirtyFiles.length > 0 ? taskStoreDirtyFiles : undefined,
+      }),
+    );
+  }
+
+  return { selectedTasks, diagnostics };
+};
 
 const processMergeTask = async (
   input: RunHubBatchMergeInput,
   task: HubTaskProjection,
-  claim: HubTaskClaimMetadata | undefined,
+  claim: HubTaskProjection["claim"],
 ): Promise<HubBatchMergeTaskResult> => {
   const branch = resolveBranch(task);
+  const context = toLifecycleContext(input);
   const startedAt = new Date().toISOString();
-
-  appendHubTaskEvent(input.runDir, {
-    type: "merge_started",
-    runId: input.runId,
-    batchId: input.batchId,
+  const lifecycleBase = {
+    cwd: input.cwd,
+    env: input.env,
+    context,
     taskId: task.id,
     branch,
-    createdAt: startedAt,
-    status: "merging",
+    metadata: task.metadata,
     claim,
+  };
+
+  recordTaskMergeStarted({
+    context,
+    taskId: task.id,
+    branch,
+    claim,
+    createdAt: startedAt,
   });
 
   const mergeResult = await input.merger({
     flowId: input.flowId,
+    runId: input.runId,
+    batchId: input.batchId,
     taskId: task.id,
     title: task.title,
     branch,
@@ -233,42 +850,45 @@ const processMergeTask = async (
   const mergeFinishedAt = new Date().toISOString();
 
   if (mergeResult.outcome !== "success") {
-    const failureReason: HubFailureReason =
-      mergeResult.outcome === "merge_conflict" ? "merge_conflict" : "unknown";
-    return recordTaskFailure(
-      input,
+    const isMergeConflict = mergeResult.outcome === "merge_conflict";
+    const failureReason: HubFailureReason = isMergeConflict
+      ? "merge_conflict"
+      : "merge_failed";
+    const diagnostics = buildMergeDiagnostics(mergeResult);
+    const diagnosticSummary = formatMergeDiagnosticSummary(diagnostics);
+    const lifecycleResult = recordMergeFailure({
+      ...lifecycleBase,
+      failureReason,
+      createdAt: mergeFinishedAt,
+      diagnosticSummary,
+      diagnostics,
+    });
+
+    return toBatchMergeTaskResult(
       task,
       branch,
-      claim,
+      isMergeConflict ? "merge_conflict" : "merge_failed",
+      lifecycleResult.hubStatus,
       failureReason,
-      "merge_failed",
-      mergeFinishedAt,
-      mergeResult.outcome === "merge_conflict"
-        ? "merge_conflict"
-        : "merge_failed",
+      diagnosticSummary,
+      diagnostics,
     );
   }
 
-  appendHubTaskEvent(input.runDir, {
+  appendMergeProgressEvent(input, {
     type: "merge_succeeded",
-    runId: input.runId,
-    batchId: input.batchId,
     taskId: task.id,
     branch,
-    createdAt: mergeFinishedAt,
-    status: "merging",
     claim,
+    createdAt: mergeFinishedAt,
   });
 
-  appendHubTaskEvent(input.runDir, {
+  appendMergeProgressEvent(input, {
     type: "verification_started",
-    runId: input.runId,
-    batchId: input.batchId,
     taskId: task.id,
     branch,
-    createdAt: mergeFinishedAt,
-    status: "merging",
     claim,
+    createdAt: mergeFinishedAt,
   });
 
   const verifyResult = await input.verifier({
@@ -282,121 +902,111 @@ const processMergeTask = async (
   const verifyFinishedAt = new Date().toISOString();
 
   if (verifyResult.outcome !== "success") {
-    const failureReason: HubFailureReason = "verification_failure";
-    return recordTaskFailure(
-      input,
-      task,
-      branch,
-      claim,
-      failureReason,
-      "verification_failed",
-      verifyFinishedAt,
-      "verification_failed",
-    );
-  }
-
-  appendHubTaskEvent(input.runDir, {
-    type: "verification_passed",
-    runId: input.runId,
-    batchId: input.batchId,
-    taskId: task.id,
-    branch,
-    createdAt: verifyFinishedAt,
-    status: "merging",
-    claim,
-  });
-
-  appendHubTaskEvent(input.runDir, {
-    type: "task_close_started",
-    runId: input.runId,
-    batchId: input.batchId,
-    taskId: task.id,
-    branch,
-    createdAt: verifyFinishedAt,
-    status: "merging",
-    claim,
-  });
-
-  const closer = input.closer ?? defaultHubTaskCloser;
-  let closedTask: HubTaskProjection;
-  try {
-    closedTask = await closer({
-      cwd: input.cwd,
-      taskId: task.id,
-      metadata: task.metadata,
-      env: input.env,
+    const lifecycleResult = recordVerificationFailure({
+      ...lifecycleBase,
+      createdAt: verifyFinishedAt,
     });
-  } catch (error) {
-    const failureReason: HubFailureReason = "close_failed";
-    const closeFailedAt = new Date().toISOString();
-    return recordTaskFailure(
-      input,
+
+    return toBatchMergeTaskResult(
       task,
       branch,
-      claim,
-      failureReason,
-      "task_close_failed",
-      closeFailedAt,
-      "close_failed",
+      "verification_failed",
+      lifecycleResult.hubStatus,
+      lifecycleResult.failureReason,
     );
   }
 
-  const closedAt = new Date().toISOString();
-  appendHubTaskEvent(input.runDir, {
-    type: "task_closed",
-    runId: input.runId,
-    batchId: input.batchId,
+  appendMergeProgressEvent(input, {
+    type: "verification_passed",
     taskId: task.id,
     branch,
-    createdAt: closedAt,
-    status: closedTask.hubStatus,
     claim,
-  });
-  recordTaskStatusAdvanced(input.runDir, {
-    runId: input.runId,
-    batchId: input.batchId,
-    taskId: task.id,
-    branch,
-    createdAt: closedAt,
-    status: closedTask.hubStatus,
+    createdAt: verifyFinishedAt,
   });
 
-  return {
+  appendMergeProgressEvent(input, {
+    type: "task_close_started",
     taskId: task.id,
-    title: task.title,
     branch,
-    outcome: "merged",
-    hubStatus: closedTask.hubStatus,
-  };
+    claim,
+    createdAt: verifyFinishedAt,
+  });
+
+  try {
+    const lifecycleResult = await recordTaskClosure({
+      ...lifecycleBase,
+      createdAt: verifyFinishedAt,
+      closer: input.closer,
+    });
+
+    return toBatchMergeTaskResult(
+      task,
+      branch,
+      "merged",
+      lifecycleResult.hubStatus,
+    );
+  } catch {
+    const closeFailedAt = new Date().toISOString();
+    const lifecycleResult = recordCloseFailure({
+      ...lifecycleBase,
+      createdAt: closeFailedAt,
+    });
+
+    return toBatchMergeTaskResult(
+      task,
+      branch,
+      "close_failed",
+      lifecycleResult.hubStatus,
+      lifecycleResult.failureReason,
+    );
+  }
 };
 
 export const runHubBatchMerge = async (
   input: RunHubBatchMergeInput,
 ): Promise<RunHubBatchMergeResult> => {
   const board = loadHubTaskBoard(input.cwd, input.env);
-  const selectedTasks = selectHubBatchMergeTasks(board, input.batchId);
+  const worktreeState = await (
+    input.worktreeInspector ?? defaultWorktreeInspector
+  )(input.cwd);
+  const selection = await evaluateHubBatchMergeSelection({
+    cwd: input.cwd,
+    runDir: input.runDir,
+    batchId: input.batchId,
+    tasks: board.tasks,
+    branchInspector: input.branchInspector ?? defaultBranchInspector,
+    worktreeState,
+  });
+  const selectedTasks = selection.selectedTasks;
   const selectedTaskIds = selectedTasks.map((task) => task.id);
+  const selectionCreatedAt = new Date().toISOString();
+
+  appendHubBatchEvent(input.runDir, {
+    type: "batch_merge_selection",
+    runId: input.runId,
+    batchId: input.batchId,
+    createdAt: selectionCreatedAt,
+    selectedTaskIds,
+    diagnostics: selection.diagnostics,
+  });
 
   if (selectedTasks.length === 0) {
     return {
       runId: input.runId,
       batchId: input.batchId,
       selectedTaskIds,
+      selectionDiagnostics: selection.diagnostics,
       batchStatus: "skipped",
       results: [],
     };
   }
 
   const mergeStartedAt = new Date().toISOString();
-  for (const task of selectedTasks) {
-    updateHubTaskStatus({
-      cwd: input.cwd,
-      taskId: task.id,
-      hubStatus: "merging",
-      metadata: task.metadata,
-      env: input.env,
-    });
-  }
+  enterMergePhase({
+    cwd: input.cwd,
+    env: input.env,
+    tasks: selectedTasks,
+  });
 
   appendHubBatchEvent(input.runDir, {
     type: "batch_merge_started",
@@ -416,25 +1026,28 @@ export const runHubBatchMerge = async (
 
     if (result.outcome !== "merged") {
       const remainingTasks = selectedTasks.slice(index + 1);
-      revertTasksToWaitingForMerge(input.cwd, remainingTasks, input.env);
       for (const skippedTask of remainingTasks) {
-        results.push({
-          taskId: skippedTask.id,
-          title: skippedTask.title,
-          branch: resolveBranch(skippedTask),
-          outcome: "skipped",
-          hubStatus: "waiting_for_merge",
+        revertTaskToWaitingForMerge({
+          cwd: input.cwd,
+          env: input.env,
+          task: skippedTask,
         });
+        results.push(
+          toBatchMergeTaskResult(
+            skippedTask,
+            resolveBranch(skippedTask),
+            "skipped",
+            "waiting_for_merge",
+          ),
+        );
       }
 
-      appendHubBatchEvent(input.runDir, {
-        type: "batch_merge_completed",
-        runId: input.runId,
-        batchId: input.batchId,
-        createdAt: new Date().toISOString(),
-        taskIds: selectedTaskIds,
-        batchStatus: "partial_failed",
-      });
+      recordBatchMergeCompleted(
+        input,
+        selectedTaskIds,
+        "partial_failed",
+        result,
+      );
 
       return {
         runId: input.runId,
@@ -442,40 +1055,204 @@ export const runHubBatchMerge = async (
         selectedTaskIds,
         batchStatus: "partial_failed",
         results,
+        selectionDiagnostics: selection.diagnostics,
       };
     }
   }
 
-  appendHubBatchEvent(input.runDir, {
-    type: "batch_merge_completed",
-    runId: input.runId,
-    batchId: input.batchId,
-    createdAt: new Date().toISOString(),
-    taskIds: selectedTaskIds,
-    batchStatus: "done",
-  });
+  recordBatchMergeCompleted(input, selectedTaskIds, "done");
 
   return {
     runId: input.runId,
     batchId: input.batchId,
     selectedTaskIds,
+    selectionDiagnostics: selection.diagnostics,
     batchStatus: "done",
     results,
   };
 };
 
-const isMergeConflict = (error: unknown): boolean => {
-  const message =
+const isMergeConflict = (
+  error: unknown,
+  diagnostics?: HubMergeDiagnostics,
+): boolean => {
+  const message = [
     error instanceof Error
       ? error.message
       : typeof error === "string"
         ? error
-        : "";
-  return /CONFLICT|conflict|merge failed/i.test(message);
+        : "",
+    diagnostics?.stdout,
+    diagnostics?.stderr,
+  ].join("\n");
+  return /CONFLICT|conflicts?/i.test(message);
+};
+
+const readGitStdout = async (
+  cwd: string,
+  args: readonly string[],
+): Promise<string> => {
+  const { stdout } = await execFileAsync("git", [...args], {
+    cwd,
+    encoding: "utf8",
+  });
+  return String(stdout);
+};
+
+const listUnmergedFiles = async (cwd: string): Promise<readonly string[]> =>
+  (await readGitStdout(cwd, ["diff", "--name-only", "--diff-filter=U"]))
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+const readGitStatusShort = async (cwd: string): Promise<string> =>
+  readGitStdout(cwd, ["status", "--short"]);
+
+const readCurrentBranch = async (cwd: string): Promise<string | undefined> => {
+  const branch = (
+    await readGitStdout(cwd, ["branch", "--show-current"])
+  ).trim();
+  return branch.length > 0 ? branch : undefined;
+};
+
+const isMergeInProgress = async (cwd: string): Promise<boolean> => {
+  try {
+    await execFileAsync("git", ["rev-parse", "-q", "--verify", "MERGE_HEAD"], {
+      cwd,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const formatPromptBlock = (value: string | undefined): string =>
+  value && value.trim().length > 0 ? value.trim() : "(none)";
+
+const buildMergeConflictPrompt = (
+  input: HubMergeConflictResolutionInput,
+): string => `# Hub merge conflict resolution
+
+You are Sandcastle's Hub merge agent. A deterministic merge already ran and left this repository in a merge-conflict state.
+
+## Task
+
+- Task id: ${input.taskId}
+- Title: ${input.title}
+- Branch being merged: ${input.branch}
+- Current base branch: ${input.baseBranch ?? "(unknown)"}
+- Flow: ${input.flowId}
+
+## Conflicted files
+
+${input.conflictedFiles.map((file) => `- ${file}`).join("\n") || "(none reported)"}
+
+## Git status
+
+\`\`\`
+${formatPromptBlock(input.gitStatus)}
+\`\`\`
+
+## Merge diagnostics
+
+\`\`\`
+${formatPromptBlock(input.diagnostics?.stderr ?? input.diagnostics?.stdout ?? input.diagnostics?.message)}
+\`\`\`
+
+## Required behavior
+
+1. Inspect the conflicted files and understand both sides of the merge.
+2. Resolve conflicts intelligently, preserving behavior from both the base branch and ${input.branch} where appropriate.
+3. Do not close tasks, update Beads directly, create unrelated branches, or stash/delete Sandcastle runtime files.
+4. After resolving conflicts, run \`git status --short\` and ensure there are no unmerged files.
+5. Complete the merge commit with the existing merge message, for example \`git commit --no-edit\` after staging resolved files.
+6. Run the repository verification command if one is obvious from project docs or scripts. If verification is not available, explain that in your final response.
+7. Output \`<promise>COMPLETE</promise>\` only after the merge conflict is resolved and the merge commit is complete.
+`;
+
+export const createHubMergeConflictResolver = (options: {
+  readonly cwd: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly homeDir?: string;
+}): HubMergeConflictResolver => {
+  return async (input) => {
+    const config = readHubAgentConfig({
+      env: options.env,
+      homeDir: options.homeDir,
+    });
+    const roleEntry = config.roles.merge;
+    if (!roleEntry) {
+      return {
+        outcome: "failed",
+        message:
+          "Missing Hub agent role config: merge. Run `sandcastle agent-config set-role merge --provider <provider> --model <model>`.",
+      };
+    }
+
+    const agent = resolveHubAgentProvider(roleEntry);
+    try {
+      await assertAgentCredentialsConfigured({
+        providerName: agent.name,
+        cwd: options.cwd,
+        env: options.env,
+      });
+
+      const logDir = join(input.runDir, "logs");
+      mkdirSync(logDir, { recursive: true });
+      const result = await run({
+        agent,
+        sandbox: noSandbox(),
+        cwd: options.cwd,
+        prompt: buildMergeConflictPrompt(input),
+        branchStrategy: { type: "head" },
+        name: `merge-${input.taskId}`,
+        logging: {
+          type: "file",
+          path: join(logDir, `${input.taskId}-merge.log`),
+        },
+      });
+
+      if (!result.completionSignal) {
+        return {
+          outcome: "failed",
+          message: "Merge agent finished without completion signal",
+        };
+      }
+
+      const remainingConflicts = await listUnmergedFiles(options.cwd);
+      if (remainingConflicts.length > 0) {
+        return {
+          outcome: "failed",
+          message: `Merge agent left unresolved conflicts: ${remainingConflicts.join(", ")}`,
+          diagnostics: {
+            details: { remainingConflicts },
+          },
+        };
+      }
+
+      if (await isMergeInProgress(options.cwd)) {
+        return {
+          outcome: "failed",
+          message:
+            "Merge agent resolved files but left the merge commit unfinished.",
+        };
+      }
+
+      return { outcome: "success" };
+    } catch (error) {
+      return {
+        outcome: "failed",
+        message: error instanceof Error ? error.message : String(error),
+        diagnostics: compactDiagnostics(extractErrorDiagnostics(error)),
+      };
+    }
+  };
 };
 
 export const createHubFlowRunMerger = (options: {
   readonly cwd: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly conflictResolver?: HubMergeConflictResolver;
 }): HubFlowMerger => {
   return async (input) => {
     try {
@@ -486,16 +1263,114 @@ export const createHubFlowRunMerger = (options: {
       );
       return { outcome: "success" };
     } catch (error) {
-      if (isMergeConflict(error)) {
+      const diagnostics = compactDiagnostics(extractErrorDiagnostics(error));
+      if (isMergeConflict(error, diagnostics)) {
+        const conflictedFiles = await listUnmergedFiles(options.cwd);
+        const gitStatus = await readGitStatusShort(options.cwd);
+        const baseBranch = await readCurrentBranch(options.cwd);
+        const conflictStartedAt = new Date().toISOString();
+        appendHubTaskEvent(input.runDir, {
+          type: "merge_conflict_resolution_started",
+          runId: input.runId,
+          batchId: input.batchId,
+          taskId: input.taskId,
+          branch: input.branch,
+          createdAt: conflictStartedAt,
+          status: "merging",
+          diagnostics: {
+            ...diagnostics,
+            details: {
+              ...diagnostics?.details,
+              conflictedFiles,
+              gitStatus,
+              baseBranch,
+            },
+          },
+        });
+
+        const resolver =
+          options.conflictResolver ??
+          createHubMergeConflictResolver({
+            cwd: options.cwd,
+            env: options.env,
+          });
+        const resolution = await resolver({
+          ...input,
+          diagnostics,
+          conflictedFiles,
+          gitStatus,
+          baseBranch,
+        });
+        const conflictFinishedAt = new Date().toISOString();
+
+        const remainingConflicts = await listUnmergedFiles(options.cwd);
+        const mergeStillInProgress = await isMergeInProgress(options.cwd);
+
+        if (
+          resolution.outcome === "success" &&
+          remainingConflicts.length === 0 &&
+          !mergeStillInProgress
+        ) {
+          appendHubTaskEvent(input.runDir, {
+            type: "merge_conflict_resolution_succeeded",
+            runId: input.runId,
+            batchId: input.batchId,
+            taskId: input.taskId,
+            branch: input.branch,
+            createdAt: conflictFinishedAt,
+            status: "merging",
+          });
+          return { outcome: "success" };
+        }
+
+        const guardMessage =
+          resolution.outcome === "success" && remainingConflicts.length > 0
+            ? `Merge agent left unresolved conflicts: ${remainingConflicts.join(", ")}`
+            : resolution.outcome === "success" && mergeStillInProgress
+              ? "Merge agent resolved files but left the merge commit unfinished."
+              : resolution.message;
+        const resolutionDiagnostics = compactDiagnostics({
+          ...diagnostics,
+          ...resolution.diagnostics,
+          message: guardMessage ?? resolution.diagnostics?.message,
+          details: {
+            ...diagnostics?.details,
+            ...resolution.diagnostics?.details,
+            conflictedFiles,
+            gitStatus,
+            baseBranch,
+            ...(remainingConflicts.length > 0 ? { remainingConflicts } : {}),
+            ...(mergeStillInProgress ? { mergeStillInProgress } : {}),
+          },
+        });
+        appendHubTaskEvent(input.runDir, {
+          type: "merge_conflict_resolution_failed",
+          runId: input.runId,
+          batchId: input.batchId,
+          taskId: input.taskId,
+          branch: input.branch,
+          createdAt: conflictFinishedAt,
+          status: "failed",
+          failureReason: "merge_conflict",
+          diagnostics: resolutionDiagnostics,
+          diagnosticSummary: formatMergeDiagnosticSummary(
+            resolutionDiagnostics,
+          ),
+        });
+
         return {
           outcome: "merge_conflict",
-          message: error instanceof Error ? error.message : String(error),
+          message:
+            guardMessage ??
+            (error instanceof Error ? error.message : String(error)),
+          diagnostics: resolutionDiagnostics,
         };
       }
 
       return {
         outcome: "failed",
         message: error instanceof Error ? error.message : String(error),
+        diagnostics,
       };
     }
   };
@@ -516,7 +1391,7 @@ export const createHubFlowRunVerifier = (options: {
     } catch (error) {
       return {
         outcome: "failed",
-        message: error instanceof Error ? error.message : String(error),
+        message: errorMessage(error),
       };
     }
   };
@@ -531,14 +1406,30 @@ export const formatHubBatchMergeResultLines = (
     `Selected tasks: ${result.selectedTaskIds.length}`,
   ];
 
+  if (result.selectionDiagnostics.length > 0) {
+    lines.push("Selection diagnostics:");
+    for (const diagnostic of result.selectionDiagnostics) {
+      const branchSuffix = diagnostic.branch ? ` ${diagnostic.branch}` : "";
+      const messageSuffix = diagnostic.message ? `; ${diagnostic.message}` : "";
+      const decisionSummary =
+        diagnostic.decision === "selected"
+          ? `selected${branchSuffix}`
+          : `${diagnostic.decision} ${diagnostic.reason}${branchSuffix}`;
+      lines.push(`  ${diagnostic.taskId}: ${decisionSummary}${messageSuffix}`);
+    }
+  }
+
   if (result.selectedTaskIds.length === 0) {
     lines.push("No waiting_for_merge tasks selected for merge.");
     return lines;
   }
 
   for (const taskResult of result.results) {
+    const diagnosticSuffix = taskResult.diagnosticSummary
+      ? `; ${taskResult.diagnosticSummary}`
+      : "";
     lines.push(
-      `  ${taskResult.taskId}: ${taskResult.outcome} -> ${taskResult.hubStatus}`,
+      `  ${taskResult.taskId}: ${taskResult.outcome} -> ${taskResult.hubStatus}${diagnosticSuffix}`,
     );
   }
 
