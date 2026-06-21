@@ -9,7 +9,7 @@ With several remotes (for example `origin` pointing at upstream and `fork` at yo
 To send all issue operations from this clone to **your fork**, set the default once (replace with your fork’s `owner/name`):
 
 ```bash
-gh repo set-default YOUR_GITHUB_USER/sandcastle
+gh repo set-default YOUR_GITHUB_USER/archloop
 ```
 
 Confirm with:

@@ -4,7 +4,7 @@ This document is for contributors adding support for a new **agent** (e.g. Claud
 
 1. [Evaluating a new agent](#evaluating-a-new-agent) — the questionnaire used to decide whether an agent's CLI can be supported.
 2. [The `AgentProvider` interface](#the-agentprovider-interface) — what you implement.
-3. [Scaffold integration](#scaffold-integration) — what `sandcastle init` needs to offer the agent.
+3. [Scaffold integration](#scaffold-integration) — what `archloop init` needs to offer the agent.
 4. [Implementation checklist](#implementation-checklist) — every file to touch.
 
 For terminology (**agent**, **agent provider**, **sandbox**, etc.), see [`CONTEXT.md`](../../CONTEXT.md).
@@ -15,7 +15,7 @@ Before implementing, confirm the agent's CLI satisfies the must-haves below. If 
 
 ### Must-have CLI capabilities
 
-- **Non-interactive run mode.** A flag (often `--print`, `exec`, `run`) that takes a prompt, runs the agent to completion, and exits. Without this, Sandcastle cannot drive the agent unattended.
+- **Non-interactive run mode.** A flag (often `--print`, `exec`, `run`) that takes a prompt, runs the agent to completion, and exits. Without this, archLoop cannot drive the agent unattended.
 - **Prompt input via argv or stdin.** stdin is strongly preferred — Linux caps `argv` at ~128 KB, which large prompts blow past.
 - **Auto-approval / bypass-permissions flag.** The agent runs inside a **sandbox**, so any "are you sure?" prompts will hang it. Examples: Claude Code's `--dangerously-skip-permissions`, Codex's `--dangerously-bypass-approvals-and-sandbox`.
 - **Model selection.** A flag that picks the model (e.g. `--model`, `-m`).
@@ -41,20 +41,20 @@ Resume support is a hard requirement for new **agent providers** ([ADR 0012](../
 
 - **Resume-by-session-ID flag.** A flag that takes a previously emitted session ID and continues that session (e.g. `claude --resume <id>`, `codex exec resume <id>`, `pi --session <id>`, `opencode run --session <id>`).
 - **Session-ID round-trip stability.** The session ID emitted in the stream during a fresh run is the same string the resume flag accepts back. If the CLI mints a new ID per invocation but only persists the file/row, resume cannot work — verify the round-trip empirically before starting implementation.
-- **Persisted session storage.** The agent writes its conversation record somewhere addressable by session ID — a JSONL file, a SQLite row, etc. — so Sandcastle can transfer it between **host** and **sandbox**.
+- **Persisted session storage.** The agent writes its conversation record somewhere addressable by session ID — a JSONL file, a SQLite row, etc. — so archLoop can transfer it between **host** and **sandbox**.
 
 If any of these is missing, the agent likely cannot be supported until its CLI changes.
 
 ### Optional capabilities
 
-These unlock extra Sandcastle features but are not required:
+These unlock extra archLoop features but are not required:
 
 - **Per-iteration token usage.** Tokens reported in the session log (input, output, cache create, cache read). Today only Claude Code; powers the usage display.
 - **Interactive mode.** A separate invocation form for human use (`interactive()`). If the agent has a TUI, expose it via `buildInteractiveArgs`.
 
 ### Scaffold prerequisites
 
-For `sandcastle init` to offer the agent:
+For `archloop init` to offer the agent:
 
 - A reproducible install command (npm package, install script, etc.) that works inside a Debian-based Docker image.
 - A documented set of env vars for auth.
@@ -85,11 +85,11 @@ Field by field:
 
 - `name` — short identifier (e.g. `"claude-code"`, `"codex"`). Used in logs and config.
 - `env` — environment variables injected into the **sandbox** when this agent runs. Auth keys live here. Merged with the env resolver and **sandbox provider** env at launch.
-- `captureSessions` — user-facing kill-switch. When `true` (default), Sandcastle records the agent's session log per **iteration** and is able to resume it. Expose this on the provider's `Options` interface so users can opt out.
+- `captureSessions` — user-facing kill-switch. When `true` (default), archLoop records the agent's session log per **iteration** and is able to resume it. Expose this on the provider's `Options` interface so users can opt out.
 - `sessionStorage` — provider-owned factories that describe where and how the agent's session record is persisted ([ADR 0012](../adr/0012-agent-provider-owned-session-storage.md)). The provider supplies `hostStore` (reads/writes session content on the **host**), `sandboxStore` (the same, inside the **sandbox** via the bind-mount handle), and `transfer` (copies a session between two stores, applying any format-specific content rewriting — e.g. Claude Code rewrites the `cwd` field in each JSONL entry from source-cwd to target-cwd). For file-backed agents (JSONL, single file per session), the stores wrap a directory + filename convention. For non-file backends (e.g. SQLite), the stores wrap whatever access primitive fits.
 - `buildPrintCommand({ prompt, dangerouslySkipPermissions, resumeSession })` — returns the shell command to run the agent non-interactively. Return `{ command, stdin }` when piping the prompt via stdin (preferred for large prompts). When `resumeSession` is set, append the agent's native resume CLI flag.
 - `buildInteractiveArgs(options)` — optional. Returns the argv array for `interactive()`. Omit if the agent has no TUI.
-- `parseStreamLine(line)` — given one line of stdout, return zero or more `ParsedStreamEvent`s. Event types: `text`, `result`, `tool_call`, `session_id`. Return `[]` for lines you can't or don't need to parse. **Emitting `session_id` is required** — without it, Sandcastle cannot capture the session for resume.
+- `parseStreamLine(line)` — given one line of stdout, return zero or more `ParsedStreamEvent`s. Event types: `text`, `result`, `tool_call`, `session_id`. Return `[]` for lines you can't or don't need to parse. **Emitting `session_id` is required** — without it, archLoop cannot capture the session for resume.
 - `parseSessionUsage(content)` — optional. Given the session log content, return token usage for the most recent iteration. Currently only Claude Code implements this.
 
 ### `SessionStore`
@@ -130,7 +130,7 @@ Before writing code, **verify session-ID round-trip stability empirically**: run
 
 ## Scaffold integration
 
-For the agent to appear in `sandcastle init`, add an entry to `AGENT_REGISTRY` in [`src/InitService.ts`](../../src/InitService.ts):
+For the agent to appear in `archloop init`, add an entry to `AGENT_REGISTRY` in [`src/InitService.ts`](../../src/InitService.ts):
 
 ```ts
 {
@@ -157,7 +157,7 @@ RUN npm install -g @google/gemini-cli`,
 GOOGLE_API_KEY=`,
   authMounts: [
     {
-      hostPath: ".sandcastle/auth/gemini",
+      hostPath: ".archloop/auth/gemini",
       sandboxPath: "/home/agent/.config/gemini",
     },
   ],

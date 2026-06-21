@@ -1,6 +1,6 @@
 # Hub flows own their prompts
 
-`sandcastle run <project> --flow <id>` uses prompts owned by the selected **flow**, not prompt files scaffolded by `sandcastle init` into the project's config directory. The existing scaffolded `main.mts` path remains fully supported for users who want to run or customize init-generated prompts, while Hub flows provide a separate runtime-selectable path whose behavior is not tied to whichever scaffold template was chosen earlier.
+`archloop run <project> --flow <id>` uses prompts owned by the selected **flow**, not prompt files scaffolded by `archloop init` into the project's config directory. The existing scaffolded `main.mts` path remains fully supported for users who want to run or customize init-generated prompts, while Hub flows provide a separate runtime-selectable path whose behavior is not tied to whichever scaffold template was chosen earlier.
 
 ## Considered Options
 

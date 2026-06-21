@@ -1,6 +1,6 @@
 # Hub task board uses Beads as the local task store
 
-**Sandcastle Hub** uses Beads as the **local task store** for task planning, triage, dependencies, and task board state. Remote systems such as GitHub Issues are modeled as **remote task sources** that synchronize with the local store through **task sync**, so Hub flows plan from local Beads state rather than treating each remote issue tracker as the direct task board.
+**archLoop Hub** uses Beads as the **local task store** for task planning, triage, dependencies, and task board state. Remote systems such as GitHub Issues are modeled as **remote task sources** that synchronize with the local store through **task sync**, so Hub flows plan from local Beads state rather than treating each remote issue tracker as the direct task board.
 
 ## Considered Options
 

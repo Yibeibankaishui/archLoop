@@ -6,13 +6,13 @@ For user-facing changes, add a changeset to `.changeset`. Check all changesets t
 
 When changing public-facing behavior, check `README.md` to see if the documentation needs updating.
 
-## Bundled skill (`skills/sandcastle-usage/SKILL.md`)
+## Bundled skill (`skills/archloop-usage/SKILL.md`)
 
-The repo ships a portable agent skill at `skills/sandcastle-usage/SKILL.md` that teaches other agents how to set up and run Sandcastle in a target project. Keep it from going stale across releases.
+The repo ships a portable agent skill at `skills/archloop-usage/SKILL.md` that teaches other agents how to set up and run archLoop in a target project. Keep it from going stale across releases.
 
-- Treat the skill as user-facing docs: whenever you change CLI commands/flags, `sandcastle init` prompts or defaults, template names, project profiles, env var names, public API surface (`run`/`interactive`/`createSandbox`/`createWorktree`, provider factories), the `.sandcastle/` layout, or known failure modes/diagnostics, update `skills/sandcastle-usage/SKILL.md` in the same change.
+- Treat the skill as user-facing docs: whenever you change CLI commands/flags, `archloop init` prompts or defaults, template names, project profiles, env var names, public API surface (`run`/`interactive`/`createSandbox`/`createWorktree`, provider factories), the `.archloop/` layout, or known failure modes/diagnostics, update `skills/archloop-usage/SKILL.md` in the same change.
 - Keep it consistent with `README.md`, `readme_cn.md`, and `user_guide.md`.
-- Preserve the YAML frontmatter (`name`, `description`); keep the body concise (< 500 lines) and use placeholders like `<SANDCASTLE_REPO>` / `<TARGET_REPO>` rather than absolute paths.
+- Preserve the YAML frontmatter (`name`, `description`); keep the body concise (< 500 lines) and use placeholders like `<ARCHLOOP_REPO>` / `<TARGET_REPO>` rather than absolute paths.
 
 ## Roadmap
 
@@ -25,7 +25,7 @@ The repo ships a portable agent skill at `skills/sandcastle-usage/SKILL.md` that
 
 ### Issue tracker
 
-Issues are GitHub issues in the repository `gh` resolves for this clone (`gh repo view`). See `docs/agents/issue-tracker.md` for how to point `gh issue` at a fork (`gh repo set-default`). Upstream source repository: `mattpocock/sandcastle`.
+Issues are GitHub issues in the repository `gh` resolves for this clone (`gh repo view`). See `docs/agents/issue-tracker.md` for how to point `gh issue` at the intended repository (`gh repo set-default yibeibankaishui/archloop`).
 
 ### Triage labels
 
@@ -35,8 +35,8 @@ Default canonical labels. Agent provider support is detailed here. See `docs/age
 
 Single-context layout: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
-
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
+
 ## Beads Issue Tracker
 
 This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
@@ -78,6 +78,7 @@ bd close <id>         # Complete work
 7. **Hand off** - Provide context for next session
 
 **CRITICAL RULES:**
+
 - Work is NOT complete until `git push` succeeds
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push

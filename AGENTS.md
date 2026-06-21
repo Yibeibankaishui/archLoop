@@ -9,13 +9,13 @@ For user-facing changes, add a changeset to `.changeset`. Check all changesets t
 - When changing public-facing behavior, public APIs, CLI behavior, setup flow, or user-facing defaults, update `README.md` if the documentation is affected.
 - When PRDs, issues, public APIs, CLI behavior, major features, releases, or phase status change, update `docs/roadmap.md` if the roadmap is affected.
 
-## Bundled skill (`skills/sandcastle-usage/SKILL.md`)
+## Bundled skill (`skills/archloop-usage/SKILL.md`)
 
-The repo ships a portable agent skill at `skills/sandcastle-usage/SKILL.md` that teaches other agents how to set up and run Sandcastle in a target project. It must not go stale across releases.
+The repo ships a portable agent skill at `skills/archloop-usage/SKILL.md` that teaches other agents how to set up and run archLoop in a target project. It must not go stale across releases.
 
-- Treat the skill as user-facing docs: whenever you change CLI commands/flags, `sandcastle init` prompts or defaults, template names, project profiles, env var names, public API surface (`run`/`interactive`/`createSandbox`/`createWorktree`, provider factories), the `.sandcastle/` layout, or known failure modes/diagnostics, update `skills/sandcastle-usage/SKILL.md` in the same change.
+- Treat the skill as user-facing docs: whenever you change CLI commands/flags, `archloop init` prompts or defaults, template names, project profiles, env var names, public API surface (`run`/`interactive`/`createSandbox`/`createWorktree`, provider factories), the `.archloop/` layout, or known failure modes/diagnostics, update `skills/archloop-usage/SKILL.md` in the same change.
 - Keep it consistent with `README.md`, `readme_cn.md`, and `user_guide.md`; if those move, reconcile the skill.
-- Preserve the YAML frontmatter (`name`, `description`) and keep the description's WHAT/WHEN trigger terms accurate. Keep the body concise (< 500 lines) and use placeholders like `<SANDCASTLE_REPO>` / `<TARGET_REPO>` rather than absolute paths.
+- Preserve the YAML frontmatter (`name`, `description`) and keep the description's WHAT/WHEN trigger terms accurate. Keep the body concise (< 500 lines) and use placeholders like `<ARCHLOOP_REPO>` / `<TARGET_REPO>` rather than absolute paths.
 - This skill is distributed by copying into a user skills directory (see README "Agent skill" section); it is not auto-installed.
 
 ## Roadmap
@@ -31,11 +31,11 @@ The repo ships a portable agent skill at `skills/sandcastle-usage/SKILL.md` that
 
 Issues are GitHub issues in the repository `gh` resolves for this clone (`gh repo view`).
 
-For this clone, treat `Yibeibankaishui/sandcastle` as the default remote repository for all `gh issue`, `gh pr`, PRD publication, and other GitHub CLI write operations. Before creating or editing issues/PRs, verify that `gh repo set-default --view` resolves to `Yibeibankaishui/sandcastle`; if it does not, either run `gh repo set-default Yibeibankaishui/sandcastle` or pass `-R Yibeibankaishui/sandcastle` explicitly on the command.
+For this clone, treat `yibeibankaishui/archloop` as the default remote repository for all `gh issue`, `gh pr`, PRD publication, and other GitHub CLI write operations. Before creating or editing issues/PRs, verify that `gh repo set-default --view` resolves to `yibeibankaishui/archloop`; if it does not, either run `gh repo set-default yibeibankaishui/archloop` or pass `-R yibeibankaishui/archloop` explicitly on the command.
 
-Do not assume `origin` is the writable/default GitHub target for agent operations. In this clone, `origin` may point at upstream (`mattpocock/sandcastle`) while the intended default GitHub CLI target is the fork (`Yibeibankaishui/sandcastle`).
+Do not assume `origin` is the writable/default GitHub target for agent operations.
 
-See `docs/agents/issue-tracker.md` for general `gh` default-repository behavior. Upstream source repository: `mattpocock/sandcastle`.
+See `docs/agents/issue-tracker.md` for general `gh` default-repository behavior.
 
 ### Triage labels
 
@@ -46,6 +46,7 @@ Default canonical labels. Agent provider support is detailed here. See `docs/age
 Single-context layout: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:7510c1e2 -->
+
 ## Beads Issue Tracker
 
 This project uses **bd (beads)** for issue tracking. Run `bd prime` to see full workflow context and commands.
@@ -87,6 +88,7 @@ bd close <id>         # Complete work
 7. **Hand off** - Provide context for next session
 
 **CRITICAL RULES:**
+
 - Work is NOT complete until `git push` succeeds
 - NEVER stop before pushing - that leaves work stranded locally
 - NEVER say "ready to push when you are" - YOU must push

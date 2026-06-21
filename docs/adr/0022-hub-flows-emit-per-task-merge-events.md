@@ -1,6 +1,6 @@
 # Hub flows emit per-task merge events
 
-**Sandcastle Hub** flows must make merge progress observable per task, even when the UI presents a whole **flow batch** as merging together. Existing scaffold templates can only infer merger outcomes after a black-box merger agent run, but Hub task board state requires per-task events such as merge started, merge succeeded, merge failed, and task closed.
+**archLoop Hub** flows must make merge progress observable per task, even when the UI presents a whole **flow batch** as merging together. Existing scaffold templates can only infer merger outcomes after a black-box merger agent run, but Hub task board state requires per-task events such as merge started, merge succeeded, merge failed, and task closed.
 
 ## Considered Options
 

@@ -2,15 +2,15 @@
 
 ## Problem Statement
 
-Sandcastle users can choose templates, project profiles, preset agents, sandbox providers, and installed agent runtimes during init, but those choices are still low-level. A user who wants Sandcastle to specialize in a class of development work, such as WeChat Mini Program development, must know which template, project profile, preset agents, skills, prompts, verification commands, and optional host tools belong together.
+archLoop users can choose templates, project profiles, preset agents, sandbox providers, and installed agent runtimes during init, but those choices are still low-level. A user who wants archLoop to specialize in a class of development work, such as WeChat Mini Program development, must know which template, project profile, preset agents, skills, prompts, verification commands, and optional host tools belong together.
 
-The existing preset agent and bundled skill mechanism is useful but not strong enough for professional specialization. A preset prompt can tell the agent to read a skill file, but Sandcastle does not yet provide a higher-level scaffold that reliably assembles role guidance, domain skills, capability context, verification rules, and add-on guidance into a coherent prompt template and development loop.
+The existing preset agent and bundled skill mechanism is useful but not strong enough for professional specialization. A preset prompt can tell the agent to read a skill file, but archLoop does not yet provide a higher-level scaffold that reliably assembles role guidance, domain skills, capability context, verification rules, and add-on guidance into a coherent prompt template and development loop.
 
 The first motivating case is WeChat Mini Program development. The useful loop is not just "write code"; it is code, run a CLI validation command, read structured debug logs, fix failures, and optionally use host-dependent runtime debugging or cloud tooling when the sandbox mode supports it.
 
 ## Solution
 
-Add capability packs to `sandcastle init`. A capability pack is an explicit init-time choice that specializes the generated config directory for a class of development work. It composes existing init concepts into a professional agent environment:
+Add capability packs to `archloop init`. A capability pack is an explicit init-time choice that specializes the generated config directory for a class of development work. It composes existing init concepts into a professional agent environment:
 
 - A default template.
 - A default project profile.
@@ -25,7 +25,7 @@ The first version ships two capability packs:
 - `generic`, the default pack that preserves the current low-assumption init path.
 - `miniprogram`, the first specialized pack for WeChat Mini Program development.
 
-The `miniprogram` core pack scaffolds a CLI-first feedback loop for the native WeChat Mini Program capability variant, centered on `.sandcastle/verify.sh`, `npm run wx:check` when present, the generated `.sandcastle/wx-check-native.mjs` fallback when `wx:check` is absent, Mini Program project checks, and `debug/wx-check.log`. It supports sandboxed and no-sandbox init paths. The core pack's required completion line is native local verification: the verification entrypoint must run project-specific `wx:check` or the generated native fallback, and it must not report success for unsupported variants such as Taro or uni-app.
+The `miniprogram` core pack scaffolds a CLI-first feedback loop for the native WeChat Mini Program capability variant, centered on `.archloop/verify.sh`, `npm run wx:check` when present, the generated `.archloop/wx-check-native.mjs` fallback when `wx:check` is absent, Mini Program project checks, and `debug/wx-check.log`. It supports sandboxed and no-sandbox init paths. The core pack's required completion line is native local verification: the verification entrypoint must run project-specific `wx:check` or the generated native fallback, and it must not report success for unsupported variants such as Taro or uni-app.
 
 Mini Program platform validation through `miniprogram-ci` preview, upload, or `packNpm` is guided and recommended, but optional for the core loop. Init should help users understand how to configure AppID, code upload private keys, and IP allowlists, but users may choose not to configure them. If `miniprogram-ci` platform validation is not configured, the agent loop must still run through local checks, project structure checks, build steps, and debug log feedback. If `miniprogram-ci` configuration is present, platform validation is considered enabled and the verifier must call it. Present but invalid configuration must fail loudly and point to the relevant log and configuration guidance rather than silently skipping the failure.
 
@@ -42,23 +42,23 @@ The first version models WeChat DevTools MCP as a no-sandbox-only `runtime-debug
 
 Capability packs provide defaults for other init choices, but explicit init flags override those defaults. For example, the Mini Program pack may default to a Mini Program loop template, Node project profile, and Mini Program preset agent, while still allowing a user to pass explicit `--template`, `--project-profile`, or `--preset-agents` flags.
 
-The first version uses init-time prompt assembly. Init writes prompt templates that include the selected preset agent role, required skills, capability context, verification guidance, and selected add-on guidance. Sandcastle does not add a public runtime `run({ agentProfile })` API in the first version.
+The first version uses init-time prompt assembly. Init writes prompt templates that include the selected preset agent role, required skills, capability context, verification guidance, and selected add-on guidance. archLoop does not add a public runtime `run({ agentProfile })` API in the first version.
 
 ## User Stories
 
-1. As a Sandcastle user, I want to select a capability pack during init, so that Sandcastle can scaffold an environment for the type of development work I want to automate.
-2. As a Sandcastle user, I want `generic` to remain available, so that I can keep using Sandcastle without domain-specific assumptions.
-3. As a Sandcastle user, I want to select `miniprogram`, so that my generated config directory is tailored to WeChat Mini Program development.
-4. As a Sandcastle user, I want capability pack selection to be explicit, so that Sandcastle does not silently infer a specialized workflow from ambiguous repository files.
-5. As a Sandcastle user, I want capability packs to provide sensible defaults for template, project profile, and preset agents, so that I do not need to manually assemble common combinations.
-6. As a Sandcastle user, I want explicit init flags to override capability pack defaults, so that I can customize a pack without losing its context and verification scaffold.
-7. As a Sandcastle user, I want init to write a capability manifest, so that the selected pack and add-ons are visible after init.
-8. As a Sandcastle user, I want capability-owned files to live in the config directory, so that I can inspect and edit them without Sandcastle rewriting my application files.
-9. As a Sandcastle user, I want the first version not to modify `package.json` unless I explicitly choose an init-time setup action that requires it, so that Sandcastle does not accidentally damage a project with custom package manager, framework, or monorepo conventions.
-10. As a Sandcastle user, I want a verification entrypoint, so that agents have one stable command to run after changing code.
-11. As a Mini Program developer, I want the first Mini Program capability variant to target native WeChat Mini Programs, so that Sandcastle can provide a meaningful built-in verification fallback.
-12. As a Mini Program developer, I want `.sandcastle/verify.sh` to call `npm run wx:check` when available, so that the agent follows the project's own Mini Program validation loop.
-13. As a Mini Program developer, I want `.sandcastle/verify.sh` to run `.sandcastle/wx-check-native.mjs` when no `wx:check` script is available, so that native Mini Program projects still get a real default verification loop.
+1. As a archLoop user, I want to select a capability pack during init, so that archLoop can scaffold an environment for the type of development work I want to automate.
+2. As a archLoop user, I want `generic` to remain available, so that I can keep using archLoop without domain-specific assumptions.
+3. As a archLoop user, I want to select `miniprogram`, so that my generated config directory is tailored to WeChat Mini Program development.
+4. As a archLoop user, I want capability pack selection to be explicit, so that archLoop does not silently infer a specialized workflow from ambiguous repository files.
+5. As a archLoop user, I want capability packs to provide sensible defaults for template, project profile, and preset agents, so that I do not need to manually assemble common combinations.
+6. As a archLoop user, I want explicit init flags to override capability pack defaults, so that I can customize a pack without losing its context and verification scaffold.
+7. As a archLoop user, I want init to write a capability manifest, so that the selected pack and add-ons are visible after init.
+8. As a archLoop user, I want capability-owned files to live in the config directory, so that I can inspect and edit them without archLoop rewriting my application files.
+9. As a archLoop user, I want the first version not to modify `package.json` unless I explicitly choose an init-time setup action that requires it, so that archLoop does not accidentally damage a project with custom package manager, framework, or monorepo conventions.
+10. As a archLoop user, I want a verification entrypoint, so that agents have one stable command to run after changing code.
+11. As a Mini Program developer, I want the first Mini Program capability variant to target native WeChat Mini Programs, so that archLoop can provide a meaningful built-in verification fallback.
+12. As a Mini Program developer, I want `.archloop/verify.sh` to call `npm run wx:check` when available, so that the agent follows the project's own Mini Program validation loop.
+13. As a Mini Program developer, I want `.archloop/verify.sh` to run `.archloop/wx-check-native.mjs` when no `wx:check` script is available, so that native Mini Program projects still get a real default verification loop.
 14. As a Mini Program developer, I want the native fallback verifier to reject unsupported variants such as Taro, uni-app, mpvue, or cross-framework build outputs, so that the agent cannot mistake an unsupported project shape for a verified native Mini Program.
 15. As a Mini Program developer, I want unsupported variant diagnostics to be written to `debug/wx-check.log`, so that I know whether to add a project-specific `wx:check` or wait for a future variant.
 16. As a Mini Program developer, I want failed verification to point the agent at `debug/wx-check.log`, so that the agent fixes based on concrete logs instead of guessing.
@@ -66,7 +66,7 @@ The first version uses init-time prompt assembly. Init writes prompt templates t
 18. As a Mini Program developer, I want the generated skill to warn against committing private upload keys such as `private.*.key`, so that agent work does not leak credentials.
 19. As a Mini Program developer, I want the generated context to explain the expected `wx:check` loop and the native fallback verifier, so that I can adapt or replace the default verification path intentionally.
 20. As a Mini Program developer, I want the generated context to include a WeChat DevTools error report template, so that runtime debugging feedback is structured for agents.
-21. As a Mini Program developer, I want Sandcastle to guide me through optional but recommended `miniprogram-ci` platform validation configuration, so that I understand the AppID, code upload private key, and IP allowlist requirements before manual DevTools preview finds them later.
+21. As a Mini Program developer, I want archLoop to guide me through optional but recommended `miniprogram-ci` platform validation configuration, so that I understand the AppID, code upload private key, and IP allowlist requirements before manual DevTools preview finds them later.
 22. As a Mini Program developer, I want to skip `miniprogram-ci` platform validation configuration, so that the agent loop still works when I only want local checks.
 23. As a Mini Program developer, I want the verification entrypoint to keep running native local checks when platform validation is unconfigured, so that missing credentials do not block basic agent iteration.
 24. As a Mini Program developer, I want present `miniprogram-ci` configuration to automatically enable platform validation, so that configured preview/upload credentials are always exercised by the agent loop.
@@ -79,23 +79,23 @@ The first version uses init-time prompt assembly. Init writes prompt templates t
 31. As a Mini Program developer using no-sandbox, I want runtime-debug guidance to mention WeChat Developer Tools service port, login state, CLI path, project path, and automator readiness, so that agents can diagnose local DevTools setup problems.
 32. As a Mini Program developer using no-sandbox, I want runtime-debug guidance to include the `wait IDE port timeout` troubleshooting path, so that agents know to use the DevTools CLI open/auto flow when MCP startup is incomplete.
 33. As a Mini Program developer, I want MCP add-ons not to be required for the core Mini Program pack, so that missing GUI tools do not block init.
-34. As a Mini Program developer, I want MCP add-ons to be rejected for Docker in the first version, so that Sandcastle does not imply host-dependent tools are available inside a sandbox.
+34. As a Mini Program developer, I want MCP add-ons to be rejected for Docker in the first version, so that archLoop does not imply host-dependent tools are available inside a sandbox.
 35. As a Mini Program developer, I want the runtime-debug add-on to be framed as simulator/runtime debugging rather than as a replacement for `miniprogram-ci` preview/upload automation, so that agents use the right tool for each layer.
 36. As a Mini Program developer, I want generated context to distinguish WaterTian `wechat-devtools-mcp` from FliPPeDround `wechat-devtools-mcp`, so that users do not install the wrong same-name tool by accident.
 37. As a Mini Program developer, I want FliPPeDround `wechat-devtools-mcp` to be described only as an experimental fallback, so that it does not become the default runtime-debug workflow.
-38. As a Sandcastle user, I want the generated Mini Program prompt template to include the relevant skill and context, so that skill loading does not rely only on the agent deciding to open another file.
-39. As a Sandcastle user, I want selected add-on guidance to be assembled into the prompt template, so that the agent sees only the add-ons I enabled.
-40. As a Sandcastle user, I want generated prompts to remain ordinary Markdown files, so that I can edit the assembled guidance after init.
-41. As a Sandcastle user, I want capability packs to work with existing agent providers, so that the first version does not depend on provider-native skill support.
-42. As a Sandcastle user, I want the generated workflow to keep using the current `run()` API, so that capability packs do not require a new runtime API.
-43. As a Sandcastle user, I want a future web capability pack to be possible, so that the abstraction is not Mini Program-specific.
-44. As a Sandcastle user, I want a future game capability pack to be possible, so that the abstraction can support other specialized development loops.
+38. As a archLoop user, I want the generated Mini Program prompt template to include the relevant skill and context, so that skill loading does not rely only on the agent deciding to open another file.
+39. As a archLoop user, I want selected add-on guidance to be assembled into the prompt template, so that the agent sees only the add-ons I enabled.
+40. As a archLoop user, I want generated prompts to remain ordinary Markdown files, so that I can edit the assembled guidance after init.
+41. As a archLoop user, I want capability packs to work with existing agent providers, so that the first version does not depend on provider-native skill support.
+42. As a archLoop user, I want the generated workflow to keep using the current `run()` API, so that capability packs do not require a new runtime API.
+43. As a archLoop user, I want a future web capability pack to be possible, so that the abstraction is not Mini Program-specific.
+44. As a archLoop user, I want a future game capability pack to be possible, so that the abstraction can support other specialized development loops.
 45. As a maintainer, I want capability pack definitions in a registry, so that supported packs and add-ons are explicit and testable.
 46. As a maintainer, I want capability pack ids and add-on ids to be stable and filesystem-safe, so that generated files and manifests are predictable.
 47. As a maintainer, I want invalid capability pack definitions to fail tests, so that broken defaults or missing files do not ship.
 48. As a maintainer, I want capability default resolution to happen before explicit init flags are applied, so that user overrides remain clear.
 49. As a maintainer, I want capability add-on compatibility rules to be validated during init, so that unsupported sandbox/add-on combinations fail early.
-50. As a maintainer, I want capability packs to reuse existing project profile and preset agent concepts, so that Sandcastle does not duplicate registries unnecessarily.
+50. As a maintainer, I want capability packs to reuse existing project profile and preset agent concepts, so that archLoop does not duplicate registries unnecessarily.
 51. As a maintainer, I want prompt assembly to be testable without running a real agent, so that generated prompts reliably include required skill and context sections.
 52. As a maintainer, I want template directories to remain self-contained, so that capability packs do not violate the template architecture decision.
 53. As a maintainer, I want capability manifests to be scaffold metadata rather than required runtime config, so that generated workflows keep running even if future tooling changes.
@@ -126,9 +126,9 @@ The first version uses init-time prompt assembly. Init writes prompt templates t
 - Do not add a public `run({ agentProfile })` API in the first version.
 - Write a capability manifest in the config directory when a capability pack is selected.
 - Keep the capability manifest as scaffold metadata, not required runtime configuration.
-- Use `.sandcastle/capability.json` to record `capability`, `variant`, selected `addons`, `verification`, and `setupActions`.
-- Record Mini Program verification metadata in `.sandcastle/capability.json`, including `entrypoint: ".sandcastle/verify.sh"` and `diagnosticLog: "debug/wx-check.log"`.
-- Record setup actions in `.sandcastle/capability.json` with stable `id`, `status`, `packageManager`, `command`, and `summary` fields.
+- Use `.archloop/capability.json` to record `capability`, `variant`, selected `addons`, `verification`, and `setupActions`.
+- Record Mini Program verification metadata in `.archloop/capability.json`, including `entrypoint: ".archloop/verify.sh"` and `diagnosticLog: "debug/wx-check.log"`.
+- Record setup actions in `.archloop/capability.json` with stable `id`, `status`, `packageManager`, `command`, and `summary` fields.
 - Allow setup action `status` values `skipped`, `succeeded`, and `failed` in the first version.
 - Record setup action `reason` separately from `status` so skipped setup actions distinguish already-satisfied prerequisites from user-declined or impossible setup.
 - Use `reason: "already_available"` when `miniprogram-ci` is already available and no install action is needed.
@@ -137,34 +137,34 @@ The first version uses init-time prompt assembly. Init writes prompt templates t
 - Use `reason: "installed"` when user-approved `miniprogram-ci` project installation succeeds.
 - Use `reason: "install_command_failed"` when user-approved `miniprogram-ci` project installation fails.
 - Use `reason: "detected_but_unusable"` when a `miniprogram-ci` candidate exists but the lightweight availability probe fails.
-- Keep `.sandcastle/capability.json` as metadata only; generated verification workflows must not require reading it to run.
+- Keep `.archloop/capability.json` as metadata only; generated verification workflows must not require reading it to run.
 - Add a verification entrypoint scaffold for capability packs that define a development validation loop.
-- Use `.sandcastle/verify.sh` as the first-version verification entrypoint path.
-- Generate `.sandcastle/wx-check-native.mjs` as the native Mini Program fallback verifier.
-- Make `.sandcastle/verify.sh` prefer `npm run wx:check` when it exists and fall back to `.sandcastle/wx-check-native.mjs` when it does not.
-- Treat `.sandcastle/verify.sh` as a verification wrapper when it runs project-owned `npm run wx:check`.
+- Use `.archloop/verify.sh` as the first-version verification entrypoint path.
+- Generate `.archloop/wx-check-native.mjs` as the native Mini Program fallback verifier.
+- Make `.archloop/verify.sh` prefer `npm run wx:check` when it exists and fall back to `.archloop/wx-check-native.mjs` when it does not.
+- Treat `.archloop/verify.sh` as a verification wrapper when it runs project-owned `npm run wx:check`.
 - Preserve `npm run wx:check` exit code as the source of verification success or failure when that project-owned command is present.
 - Capture `npm run wx:check` stdout and stderr so the agent can inspect them through the verification diagnostic log even when the project command does not write structured diagnostics.
-- If `npm run wx:check` does not write `debug/wx-check.log`, have `.sandcastle/verify.sh` create a JSONL `project_wx_check` event with `severity`, `message`, and `exit_code`.
-- If `npm run wx:check` already writes `debug/wx-check.log`, have `.sandcastle/verify.sh` preserve the existing log and append a JSONL summary event instead of overwriting it.
-- Make `.sandcastle/wx-check-native.mjs` validate native Mini Program project shape, including `project.config.json`, `compileType`, `miniprogramRoot`, `app.json`, route declarations, page JSON files, component JSON files, `tabBar` paths, and local asset references.
+- If `npm run wx:check` does not write `debug/wx-check.log`, have `.archloop/verify.sh` create a JSONL `project_wx_check` event with `severity`, `message`, and `exit_code`.
+- If `npm run wx:check` already writes `debug/wx-check.log`, have `.archloop/verify.sh` preserve the existing log and append a JSONL summary event instead of overwriting it.
+- Make `.archloop/wx-check-native.mjs` validate native Mini Program project shape, including `project.config.json`, `compileType`, `miniprogramRoot`, `app.json`, route declarations, page JSON files, component JSON files, `tabBar` paths, and local asset references.
 - Resolve the native Mini Program `project.config.json` path from `WX_PROJECT_CONFIG` when it is set.
 - When `WX_PROJECT_CONFIG` is not set, check only the repository root `project.config.json` in the first version.
 - Do not recursively scan monorepos or guess `apps/*/project.config.json` in the first version.
 - Require the resolved `project.config.json` path to stay inside the repository.
 - Require the resolved `miniprogramRoot` path to stay inside the repository.
 - Report `project_config_missing` when no usable `project.config.json` is found.
-- Report `project_config_ambiguous` if future discovery or user-provided inputs identify multiple candidates that Sandcastle cannot choose between.
+- Report `project_config_ambiguous` if future discovery or user-provided inputs identify multiple candidates that archLoop cannot choose between.
 - Report `project_config_outside_repo` when `WX_PROJECT_CONFIG` points outside the repository.
 - Report `miniprogram_root_missing` when `miniprogramRoot` is missing or resolves to a missing directory.
 - Report `miniprogram_root_outside_repo` when `miniprogramRoot` escapes the repository.
-- Make `.sandcastle/wx-check-native.mjs` reject unsupported variants such as Taro, uni-app, mpvue, or cross-framework build outputs with an `unsupported_miniprogram_variant` diagnostic.
+- Make `.archloop/wx-check-native.mjs` reject unsupported variants such as Taro, uni-app, mpvue, or cross-framework build outputs with an `unsupported_miniprogram_variant` diagnostic.
 - Detect unsupported Mini Program variants through explicit reject signals rather than broad framework inference in the first version.
 - Treat `@tarojs/*` dependencies or devDependencies as a Taro reject signal for the native fallback verifier.
 - Treat `@dcloudio/*`, `uni-app`, or the `manifest.json` plus `pages.json` file pair near the selected project config as uni-app reject signals for the native fallback verifier.
 - Treat `mpvue` dependencies or devDependencies as an mpvue reject signal for the native fallback verifier.
 - Treat obvious cross-framework build output roots such as `dist/`, `dist/build/mp-weixin/`, and `unpackage/dist/dev/mp-weixin/` as unsupported native fallback inputs.
-- Keep project-owned `npm run wx:check` as the escape hatch for unsupported variants; when it exists, `.sandcastle/verify.sh` runs the project command instead of the native fallback verifier.
+- Keep project-owned `npm run wx:check` as the escape hatch for unsupported variants; when it exists, `.archloop/verify.sh` runs the project command instead of the native fallback verifier.
 - Scope the native fallback verifier to static project-structure integrity checks; do not attempt to simulate the WeChat compiler in the first version.
 - Require `project.config.json` to be valid JSON.
 - Treat `compileType` as compatible only when it is absent or compatible with native Mini Program development.
@@ -187,10 +187,10 @@ The first version uses init-time prompt assembly. Init writes prompt templates t
 - Do not use `miniprogram-ci --version` as a required availability probe, because it is not the documented detection contract.
 - Allow `miniprogram-ci --help` only as a secondary CLI executability probe for explicitly configured binary paths, not as the primary project dependency check.
 - Record the detected `miniprogram-ci` source as `project_local` when project-local Node API detection succeeds.
-- Do not treat global PATH, `npx`, or explicitly configured CLI-only availability as satisfying Sandcastle's Mini Program verification loop in the first version.
-- Mention global CLI or `npx` only as manual user fallback guidance outside Sandcastle's managed verification loop.
+- Do not treat global PATH, `npx`, or explicitly configured CLI-only availability as satisfying archLoop's Mini Program verification loop in the first version.
+- Mention global CLI or `npx` only as manual user fallback guidance outside archLoop's managed verification loop.
 - Treat a detected but unusable project-local `miniprogram-ci` package as missing for install prompting purposes.
-- If `miniprogram-ci` is missing during Mini Program init, prompt the user to choose whether Sandcastle should install it into the project.
+- If `miniprogram-ci` is missing during Mini Program init, prompt the user to choose whether archLoop should install it into the project.
 - If the user chooses installation, install `miniprogram-ci` into the host repo as an explicit init-time project setup action.
 - Treat user-approved project installation as an allowed `package.json` / lockfile mutation, not as an implicit capability scaffold mutation.
 - For user-approved `miniprogram-ci` project installation, choose the package manager from `package.json#packageManager` first, then lockfiles, then default to npm.
@@ -198,7 +198,7 @@ The first version uses init-time prompt assembly. Init writes prompt templates t
 - If no `package.json` exists, do not create a new Node package during Mini Program init; continue init and guide the user to initialize a package before installing `miniprogram-ci`.
 - If user-approved `miniprogram-ci` project installation fails, continue init and mark the setup action as failed in the init summary.
 - Include the failed install command, a stderr summary, and the suggested manual install command in the init summary.
-- Record setup action status in `.sandcastle/capability.json` without storing full stderr output.
+- Record setup action status in `.archloop/capability.json` without storing full stderr output.
 - Use `miniprogram_ci_install_status: "failed"` in init summary or setup metadata when the user-approved install action fails.
 - If the user declines installation, continue init and record next-step guidance explaining how to install or configure `miniprogram-ci` later.
 - Make init summary distinguish project-local `miniprogram-ci` availability from host PATH availability, and recommend project-local installation when only a global CLI is found.
@@ -206,22 +206,22 @@ The first version uses init-time prompt assembly. Init writes prompt templates t
 - Present `miniprogram-ci` platform validation as recommended for Mini Program projects, even though it remains optional for the core local verification loop.
 - Treat detected `miniprogram-ci` preview/upload/packNpm configuration as enabled platform automation for the Mini Program core pack.
 - Do not require a separate environment flag to enable `miniprogram-ci` platform validation once configuration is detected.
-- Let `.sandcastle/wx-check-native.mjs` detect `miniprogram-ci` configuration from AppID plus an upload private key path.
+- Let `.archloop/wx-check-native.mjs` detect `miniprogram-ci` configuration from AppID plus an upload private key path.
 - Resolve Mini Program AppID from `WX_APPID` first, then `project.config.json.appid`.
 - Treat missing AppID as unconfigured platform validation while continuing local structure checks.
 - Treat placeholder AppID values such as `touristappid` or `wx0000000000000000` as missing AppID for platform validation.
 - When AppID is missing or placeholder, write a visible non-failing warning diagnostic `appid_missing` to `debug/wx-check.log`.
 - If an upload key is present but AppID is missing or placeholder, keep `platform_validation_status: "not_configured"` and write a warning message explaining that platform validation was not enabled because AppID is missing.
 - Prefer explicit `WX_UPLOAD_KEY_PATH` over any repository-local key path.
-- When `WX_UPLOAD_KEY_PATH` is unset, resolve the repository-local upload key path from the effective AppID as `.sandcastle/auth/wx-upload/private.{effectiveAppid}.key`.
+- When `WX_UPLOAD_KEY_PATH` is unset, resolve the repository-local upload key path from the effective AppID as `.archloop/auth/wx-upload/private.{effectiveAppid}.key`.
 - When `WX_APPID` and `project.config.json.appid` differ, treat `WX_APPID` as the effective AppID for both `ci.Project` and repository-local upload key lookup.
 - If repository-local `private.*.key` files exist for AppIDs other than the effective AppID, do not use them and write a non-failing warning diagnostic `upload_key_appid_mismatch`.
 - When `WX_UPLOAD_KEY_PATH` is set, do not infer AppID from the key filename; use the effective AppID for `ci.Project`.
 - If an explicit upload key path exists but `miniprogram-ci` preview fails because of AppID/key mismatch, report it as `platform_validation_status: "configured_invalid"`.
-- Allow `.sandcastle/auth/wx-upload/private.{appid}.key` as a protected local credential drop zone for users who want an inspectable project-local path.
-- Generate `.sandcastle/auth/wx-upload/.gitignore` that ignores `private.*.key`.
+- Allow `.archloop/auth/wx-upload/private.{appid}.key` as a protected local credential drop zone for users who want an inspectable project-local path.
+- Generate `.archloop/auth/wx-upload/.gitignore` that ignores `private.*.key`.
 - Do not generate, copy, upload, commit, or otherwise manage WeChat code upload private keys.
-- Do not write private key contents or sensitive private key metadata into `.sandcastle/capability.json`.
+- Do not write private key contents or sensitive private key metadata into `.archloop/capability.json`.
 - Make init summary and generated context recommend `WX_UPLOAD_KEY_PATH` pointing outside the repository as the safest default.
 - Make `preview` the default `miniprogram-ci` platform validation action when configuration is detected.
 - Invoke configured Mini Program platform validation through the `miniprogram-ci` Node API rather than through the CLI in the first version.
@@ -236,7 +236,7 @@ The first version uses init-time prompt assembly. Init writes prompt templates t
 - When `WX_PACK_NPM` is unset and no Mini Program npm build signal is present, skip `ci.packNpm(project, ...)`.
 - Treat `ci.packNpm(project, ...)` failure as a verification failure with diagnostic `pack_npm_failed`.
 - Write native fallback and unsupported-variant diagnostics to `debug/wx-check.log` with enough structure for the agent to classify setup, project-shape, platform-validation, and code failures.
-- Treat `debug/wx-check.log` as a verification diagnostic log, not as the Sandcastle run log.
+- Treat `debug/wx-check.log` as a verification diagnostic log, not as the archLoop run log.
 - Format `debug/wx-check.log` as JSON Lines in the first Mini Program capability implementation.
 - Require each `debug/wx-check.log` JSONL event to include `type`, `severity`, and `message`.
 - Allow each JSONL event to include additional structured fields such as `diagnostic`, `file`, `appid`, `miniprogramRoot`, `platform_validation_status`, and `command`.
@@ -251,10 +251,10 @@ The first version uses init-time prompt assembly. Init writes prompt templates t
 - Save the successful `miniprogram-ci preview` QR code artifact to `debug/wx-preview.jpg`.
 - Include `artifact: "debug/wx-preview.jpg"` on the successful platform-validation JSONL event.
 - Treat preview success plus QR code artifact write failure as a verification failure with diagnostic `preview_artifact_write_failed`.
-- Keep preview artifacts under `debug/` rather than `.sandcastle/`, because they are run outputs rather than config scaffolds.
+- Keep preview artifacts under `debug/` rather than `.archloop/`, because they are run outputs rather than config scaffolds.
 - Do not modify the host repo root `.gitignore` in the first version.
 - Generate Mini Program context and init summary guidance recommending users ignore `debug/wx-check.log`, `debug/wx-preview.jpg`, `debug/wx-check-*.log`, and `debug/wx-preview-*.jpg`.
-- Have `.sandcastle/verify.sh` write a non-failing warning JSONL event with diagnostic `verification_artifacts_not_ignored` when Mini Program verification artifacts are not ignored by git.
+- Have `.archloop/verify.sh` write a non-failing warning JSONL event with diagnostic `verification_artifacts_not_ignored` when Mini Program verification artifacts are not ignored by git.
 - Skip verification artifact ignore checks when the host repo is not a git repository.
 - Write a non-failing info JSONL event with diagnostic `git_not_available_for_artifact_ignore_check` when artifact ignore checks are skipped because git repository metadata is unavailable.
 - Ensure unconfigured platform validation does not prevent the agent loop from running local checks and reading debug logs, while writing a non-failing `platform_validation_not_configured` diagnostic.
@@ -262,13 +262,13 @@ The first version uses init-time prompt assembly. Init writes prompt templates t
 - Treat detected upload key plus missing or unusable project-local `miniprogram-ci` package, AppID mismatch, private key failure, IP allowlist rejection, or `preview` failure as verification failures.
 - Generate Mini Program context that explains how users can wire `npm run wx:check`, `miniprogram-ci`, and debug logs into their project.
 - Generate Mini Program context that explains the difference between local checks, credentialed platform validation, and simulator/runtime debugging.
-- Generate `.sandcastle/context/miniprogram-setup.md` as a user-readable setup checklist for the Mini Program capability pack.
-- Treat `.sandcastle/context/miniprogram-setup.md` as an init-time static snapshot rather than a runtime status file.
-- Do not update `.sandcastle/context/miniprogram-setup.md` from `.sandcastle/verify.sh` or `.sandcastle/wx-check-native.mjs`.
-- Include current init detection results in `.sandcastle/context/miniprogram-setup.md`, such as project-local `miniprogram-ci` availability, AppID source or missing state, upload key guidance, and verification artifact ignore guidance.
-- Include next-step guidance in `.sandcastle/context/miniprogram-setup.md` for installing `miniprogram-ci`, setting `WX_APPID`, placing or specifying upload keys, and configuring WeChat public platform upload keys and IP allowlists.
-- Include safety reminders in `.sandcastle/context/miniprogram-setup.md` that `private.*.key` must not be committed and that `WX_UPLOAD_KEY_PATH` pointing outside the repository is preferred.
-- Reference `.sandcastle/context/miniprogram.md`, `.sandcastle/context/miniprogram-setup.md`, `.sandcastle/verify.sh`, and `debug/wx-check.log` from all assembled Mini Program capability prompts, including planner, implementer, reviewer, and merger prompts when those roles exist in the selected template.
+- Generate `.archloop/context/miniprogram-setup.md` as a user-readable setup checklist for the Mini Program capability pack.
+- Treat `.archloop/context/miniprogram-setup.md` as an init-time static snapshot rather than a runtime status file.
+- Do not update `.archloop/context/miniprogram-setup.md` from `.archloop/verify.sh` or `.archloop/wx-check-native.mjs`.
+- Include current init detection results in `.archloop/context/miniprogram-setup.md`, such as project-local `miniprogram-ci` availability, AppID source or missing state, upload key guidance, and verification artifact ignore guidance.
+- Include next-step guidance in `.archloop/context/miniprogram-setup.md` for installing `miniprogram-ci`, setting `WX_APPID`, placing or specifying upload keys, and configuring WeChat public platform upload keys and IP allowlists.
+- Include safety reminders in `.archloop/context/miniprogram-setup.md` that `private.*.key` must not be committed and that `WX_UPLOAD_KEY_PATH` pointing outside the repository is preferred.
+- Reference `.archloop/context/miniprogram.md`, `.archloop/context/miniprogram-setup.md`, `.archloop/verify.sh`, and `debug/wx-check.log` from all assembled Mini Program capability prompts, including planner, implementer, reviewer, and merger prompts when those roles exist in the selected template.
 - Ensure Mini Program planner prompts understand whether platform validation is configured before treating preview/upload validation as a completion condition.
 - Ensure Mini Program reviewer and merger prompts distinguish local verification pass, platform validation pass, and platform validation not configured.
 - Require Mini Program capability agents to include a final verification summary with `local`, `platform`, and `artifacts` fields.
@@ -289,22 +289,22 @@ The first version uses init-time prompt assembly. Init writes prompt templates t
 - Generate add-on context and prompt guidance only when the user explicitly selects the add-on.
 - Reject unsupported add-on and sandbox provider combinations during init.
 - Generate add-on context files only when the add-ons are selected.
-- Do not change `.sandcastle/verify.sh` behavior when the Mini Program `runtime-debug` add-on is selected.
-- Keep WeChat DevTools MCP guidance out of `.sandcastle/verify.sh`; runtime debugging remains prompt/context guidance rather than part of the default verification entrypoint.
+- Do not change `.archloop/verify.sh` behavior when the Mini Program `runtime-debug` add-on is selected.
+- Keep WeChat DevTools MCP guidance out of `.archloop/verify.sh`; runtime debugging remains prompt/context guidance rather than part of the default verification entrypoint.
 - Make WaterTian `wechat-devtools-mcp` the documented default for the runtime-debug add-on.
 - Mention FliPPeDround `wechat-devtools-mcp` only as a lightweight experimental fallback, not as the default.
-- Generate `.sandcastle/context/miniprogram-runtime-debug.md` only when the Mini Program `runtime-debug` add-on is selected.
-- Include WeChat Developer Tools prerequisites in `.sandcastle/context/miniprogram-runtime-debug.md`: installed DevTools, login state, service port or automation availability, and correct project path.
-- Include common runtime-debug troubleshooting in `.sandcastle/context/miniprogram-runtime-debug.md`, including `wait IDE port timeout`, `CLI_TIMEOUT`, and automator port readiness.
-- In `.sandcastle/context/miniprogram-runtime-debug.md`, instruct agents to use runtime-debug guidance only when runtime, simulator, debugger, screenshot, console, or page-state evidence is needed.
-- In `.sandcastle/context/miniprogram-runtime-debug.md`, state that runtime-debug does not replace `.sandcastle/verify.sh` and is not a completion standard unless the user task explicitly requires runtime debugging evidence.
-- Reference `.sandcastle/context/miniprogram-runtime-debug.md` from all assembled Mini Program capability prompts when the runtime-debug add-on is selected.
+- Generate `.archloop/context/miniprogram-runtime-debug.md` only when the Mini Program `runtime-debug` add-on is selected.
+- Include WeChat Developer Tools prerequisites in `.archloop/context/miniprogram-runtime-debug.md`: installed DevTools, login state, service port or automation availability, and correct project path.
+- Include common runtime-debug troubleshooting in `.archloop/context/miniprogram-runtime-debug.md`, including `wait IDE port timeout`, `CLI_TIMEOUT`, and automator port readiness.
+- In `.archloop/context/miniprogram-runtime-debug.md`, instruct agents to use runtime-debug guidance only when runtime, simulator, debugger, screenshot, console, or page-state evidence is needed.
+- In `.archloop/context/miniprogram-runtime-debug.md`, state that runtime-debug does not replace `.archloop/verify.sh` and is not a completion standard unless the user task explicitly requires runtime debugging evidence.
+- Reference `.archloop/context/miniprogram-runtime-debug.md` from all assembled Mini Program capability prompts when the runtime-debug add-on is selected.
 - Ensure runtime-debug prompt references frame the context as conditional guidance, not as an instruction to start WeChat Developer Tools for every task.
 - Ensure planner prompts can decide when runtime evidence is needed.
 - Ensure reviewer and merger prompts can report whether runtime evidence was used and avoid requiring it when the task does not call for it.
 - Generate runtime-debug context that explains WeChat Developer Tools setup prerequisites: service port, login state, CLI path, project path, normal CLI open flow, and automator readiness.
 - Generate runtime-debug context that includes common troubleshooting for `wait IDE port timeout`, `CLI_TIMEOUT`, automator port readiness, and MCP server process behavior.
-- Keep `wechat-devtools-mcp` guidance out of `.sandcastle/verify.sh`; the verification entrypoint should not require a GUI or simulator automation by default.
+- Keep `wechat-devtools-mcp` guidance out of `.archloop/verify.sh`; the verification entrypoint should not require a GUI or simulator automation by default.
 - Do not automatically install `wechat-devtools-mcp`, start WeChat Developer Tools, or assume MCP servers are available.
 - Update init summary and next steps to explain selected capability pack, add-ons, verification entrypoint, and follow-up setup.
 - Update user documentation to explain the distinction between project profiles, templates, preset agents, skills, capability packs, and capability add-ons.
@@ -313,7 +313,7 @@ The first version uses init-time prompt assembly. Init writes prompt templates t
 
 ## Testing Decisions
 
-- Tests should focus on scaffolded external behavior: given init options, Sandcastle writes the expected config directory files, manifest, prompts, context, and verification entrypoint.
+- Tests should focus on scaffolded external behavior: given init options, archLoop writes the expected config directory files, manifest, prompts, context, and verification entrypoint.
 - Add registry validation tests for capability pack ids, add-on ids, default references, required files, and compatibility declarations.
 - Add tests that `generic` preserves the existing init behavior when no specialized capability is selected.
 - Add tests that `miniprogram` applies default template, project profile, and preset agent selections when no explicit override is provided.
@@ -325,34 +325,34 @@ The first version uses init-time prompt assembly. Init writes prompt templates t
 - Add tests that unknown or incompatible non-blank templates fail Mini Program init rather than silently falling back to the default template.
 - Add tests that incompatible Mini Program template errors name the selected template and list supported templates.
 - Add tests that reviewer or merger roles can add checks but do not change the Mini Program verification contract or final verification summary contract.
-- Add tests that `.sandcastle/capability.json` is written with the selected capability, add-ons, verification entrypoint, and log paths.
-- Add tests that `.sandcastle/capability.json` records Mini Program `variant`, `verification`, and `setupActions`.
+- Add tests that `.archloop/capability.json` is written with the selected capability, add-ons, verification entrypoint, and log paths.
+- Add tests that `.archloop/capability.json` records Mini Program `variant`, `verification`, and `setupActions`.
 - Add tests that setup actions use stable `id`, `status`, `packageManager`, `command`, and `summary` fields.
 - Add tests that setup action status is limited to `skipped`, `succeeded`, and `failed` in the first version.
 - Add tests that setup actions record `reason` and distinguish `already_available`, `user_declined`, `no_package_json`, `installed`, `install_command_failed`, and `detected_but_unusable`.
-- Add tests that generated verification workflows do not require `.sandcastle/capability.json` to run.
-- Add tests that `.sandcastle/verify.sh` is written for the Mini Program pack and is executable when the platform supports mode assertions.
-- Add tests that `.sandcastle/wx-check-native.mjs` is written for the native Mini Program variant.
-- Add tests that `.sandcastle/verify.sh` calls `npm run wx:check` when that script is present.
-- Add tests that `.sandcastle/verify.sh` falls back to `.sandcastle/wx-check-native.mjs` when `wx:check` is absent.
-- Add tests that `.sandcastle/verify.sh` preserves the `npm run wx:check` exit code when wrapping project-owned validation.
-- Add tests that `.sandcastle/verify.sh` writes a JSONL `project_wx_check` event when project-owned `wx:check` does not write `debug/wx-check.log`.
-- Add tests that `.sandcastle/verify.sh` appends a summary event without overwriting `debug/wx-check.log` when project-owned `wx:check` already writes it.
-- Add tests that `.sandcastle/wx-check-native.mjs` passes for a minimal native Mini Program project.
-- Add tests that `.sandcastle/wx-check-native.mjs` uses `WX_PROJECT_CONFIG` when it is set.
-- Add tests that `.sandcastle/wx-check-native.mjs` checks only the repository root `project.config.json` when `WX_PROJECT_CONFIG` is absent.
-- Add tests that `.sandcastle/wx-check-native.mjs` reports `project_config_missing` when no usable `project.config.json` is found.
-- Add tests that `.sandcastle/wx-check-native.mjs` reports `project_config_ambiguous` rather than guessing when project config selection is ambiguous.
-- Add tests that `.sandcastle/wx-check-native.mjs` reports `project_config_outside_repo` when `WX_PROJECT_CONFIG` points outside the repository.
-- Add tests that `.sandcastle/wx-check-native.mjs` reports `miniprogram_root_missing` when `miniprogramRoot` is absent or resolves to a missing directory.
-- Add tests that `.sandcastle/wx-check-native.mjs` reports `miniprogram_root_outside_repo` when `miniprogramRoot` escapes the repository.
-- Add tests that `.sandcastle/wx-check-native.mjs` exits non-zero and writes an actionable `unsupported_miniprogram_variant` diagnostic for unsupported variants such as Taro or uni-app.
+- Add tests that generated verification workflows do not require `.archloop/capability.json` to run.
+- Add tests that `.archloop/verify.sh` is written for the Mini Program pack and is executable when the platform supports mode assertions.
+- Add tests that `.archloop/wx-check-native.mjs` is written for the native Mini Program variant.
+- Add tests that `.archloop/verify.sh` calls `npm run wx:check` when that script is present.
+- Add tests that `.archloop/verify.sh` falls back to `.archloop/wx-check-native.mjs` when `wx:check` is absent.
+- Add tests that `.archloop/verify.sh` preserves the `npm run wx:check` exit code when wrapping project-owned validation.
+- Add tests that `.archloop/verify.sh` writes a JSONL `project_wx_check` event when project-owned `wx:check` does not write `debug/wx-check.log`.
+- Add tests that `.archloop/verify.sh` appends a summary event without overwriting `debug/wx-check.log` when project-owned `wx:check` already writes it.
+- Add tests that `.archloop/wx-check-native.mjs` passes for a minimal native Mini Program project.
+- Add tests that `.archloop/wx-check-native.mjs` uses `WX_PROJECT_CONFIG` when it is set.
+- Add tests that `.archloop/wx-check-native.mjs` checks only the repository root `project.config.json` when `WX_PROJECT_CONFIG` is absent.
+- Add tests that `.archloop/wx-check-native.mjs` reports `project_config_missing` when no usable `project.config.json` is found.
+- Add tests that `.archloop/wx-check-native.mjs` reports `project_config_ambiguous` rather than guessing when project config selection is ambiguous.
+- Add tests that `.archloop/wx-check-native.mjs` reports `project_config_outside_repo` when `WX_PROJECT_CONFIG` points outside the repository.
+- Add tests that `.archloop/wx-check-native.mjs` reports `miniprogram_root_missing` when `miniprogramRoot` is absent or resolves to a missing directory.
+- Add tests that `.archloop/wx-check-native.mjs` reports `miniprogram_root_outside_repo` when `miniprogramRoot` escapes the repository.
+- Add tests that `.archloop/wx-check-native.mjs` exits non-zero and writes an actionable `unsupported_miniprogram_variant` diagnostic for unsupported variants such as Taro or uni-app.
 - Add tests that Taro dependency signals trigger `unsupported_miniprogram_variant` in the native fallback verifier.
 - Add tests that uni-app dependency and `manifest.json` plus `pages.json` signals trigger `unsupported_miniprogram_variant` in the native fallback verifier.
 - Add tests that mpvue dependency signals trigger `unsupported_miniprogram_variant` in the native fallback verifier.
 - Add tests that obvious cross-framework build output roots trigger `unsupported_miniprogram_variant` in the native fallback verifier.
 - Add tests that project-owned `npm run wx:check` bypasses native fallback unsupported-variant detection because the project supplies its own validation contract.
-- Add tests that `.sandcastle/wx-check-native.mjs` reports native project-shape failures such as missing page JSON, bad `tabBar` paths, or invalid `miniprogramRoot`.
+- Add tests that `.archloop/wx-check-native.mjs` reports native project-shape failures such as missing page JSON, bad `tabBar` paths, or invalid `miniprogramRoot`.
 - Add tests that invalid `project.config.json`, `app.json`, or page JSON files are reported as verifier failures.
 - Add tests that empty or missing `app.json.pages` is reported as a verifier failure.
 - Add tests that page paths escaping `miniprogramRoot` are reported as verifier failures.
@@ -371,15 +371,15 @@ The first version uses init-time prompt assembly. Init writes prompt templates t
 - Add tests that sandboxed init paths hide or disable MCP-oriented Mini Program add-ons with a host-state reason.
 - Add tests that no-sandbox init paths present Mini Program `runtime-debug` as an unchecked option.
 - Add tests that add-on context and prompt guidance are generated only when the user explicitly selects the add-on.
-- Add tests that selecting the Mini Program `runtime-debug` add-on does not change `.sandcastle/verify.sh`.
-- Add tests that WeChat DevTools MCP guidance remains out of `.sandcastle/verify.sh`.
+- Add tests that selecting the Mini Program `runtime-debug` add-on does not change `.archloop/verify.sh`.
+- Add tests that WeChat DevTools MCP guidance remains out of `.archloop/verify.sh`.
 - Add tests that runtime-debug context identifies WaterTian `wechat-devtools-mcp` as the default and does not present FliPPeDround as the default.
-- Add tests that `.sandcastle/context/miniprogram-runtime-debug.md` is generated only when the runtime-debug add-on is selected.
-- Add tests that runtime-debug context states it does not replace `.sandcastle/verify.sh` and is not a completion standard unless the task explicitly requires runtime debugging evidence.
-- Add tests that all assembled Mini Program capability prompts reference `.sandcastle/context/miniprogram-runtime-debug.md` when the runtime-debug add-on is selected.
+- Add tests that `.archloop/context/miniprogram-runtime-debug.md` is generated only when the runtime-debug add-on is selected.
+- Add tests that runtime-debug context states it does not replace `.archloop/verify.sh` and is not a completion standard unless the task explicitly requires runtime debugging evidence.
+- Add tests that all assembled Mini Program capability prompts reference `.archloop/context/miniprogram-runtime-debug.md` when the runtime-debug add-on is selected.
 - Add tests that runtime-debug prompt references frame runtime debugging as conditional guidance rather than mandatory DevTools startup.
 - Add tests that runtime-debug context includes WeChat Developer Tools service port, CLI path, project path, login state, and automator readiness prerequisites.
-- Add tests that `.sandcastle/verify.sh` guidance does not require WeChat Developer Tools MCP or GUI automation by default.
+- Add tests that `.archloop/verify.sh` guidance does not require WeChat Developer Tools MCP or GUI automation by default.
 - Add tests that Mini Program core pack does not require add-ons.
 - Add tests that init does not silently modify host repo application files such as `package.json`.
 - Add tests that Mini Program init detects missing `miniprogram-ci` and offers an explicit install choice.
@@ -397,13 +397,13 @@ The first version uses init-time prompt assembly. Init writes prompt templates t
 - Add tests that Mini Program init does not create `package.json` when the user chooses installation but no `package.json` exists; it should continue init with guidance instead.
 - Add tests that Mini Program init continues when user-approved `miniprogram-ci` project installation fails.
 - Add tests that failed user-approved `miniprogram-ci` installation is reported in init summary with `miniprogram_ci_install_status: "failed"`, failed command, stderr summary, and manual install guidance.
-- Add tests that `.sandcastle/capability.json` records setup action status without storing full stderr output.
+- Add tests that `.archloop/capability.json` records setup action status without storing full stderr output.
 - Add tests that Mini Program init summary distinguishes project-local `miniprogram-ci` availability from host PATH availability.
 - Add tests that Mini Program context files and DevTools error template are copied into the config directory.
-- Add tests that `.sandcastle/context/miniprogram-setup.md` is generated for the Mini Program capability pack.
-- Add tests that `.sandcastle/context/miniprogram-setup.md` includes init detection results, next-step setup guidance, and upload-key safety reminders.
-- Add tests that `.sandcastle/verify.sh` and `.sandcastle/wx-check-native.mjs` do not update `.sandcastle/context/miniprogram-setup.md`.
-- Add tests that all assembled Mini Program capability prompts reference `.sandcastle/context/miniprogram.md`, `.sandcastle/context/miniprogram-setup.md`, `.sandcastle/verify.sh`, and `debug/wx-check.log`.
+- Add tests that `.archloop/context/miniprogram-setup.md` is generated for the Mini Program capability pack.
+- Add tests that `.archloop/context/miniprogram-setup.md` includes init detection results, next-step setup guidance, and upload-key safety reminders.
+- Add tests that `.archloop/verify.sh` and `.archloop/wx-check-native.mjs` do not update `.archloop/context/miniprogram-setup.md`.
+- Add tests that all assembled Mini Program capability prompts reference `.archloop/context/miniprogram.md`, `.archloop/context/miniprogram-setup.md`, `.archloop/verify.sh`, and `debug/wx-check.log`.
 - Add tests that assembled Mini Program planner prompts distinguish configured platform validation from local-only verification.
 - Add tests that assembled Mini Program reviewer and merger prompts distinguish local verification pass, platform validation pass, and platform validation not configured.
 - Add tests that assembled Mini Program prompts require final verification summaries with `local`, `platform`, and `artifacts`.
@@ -429,20 +429,20 @@ The first version uses init-time prompt assembly. Init writes prompt templates t
 - Add tests that preview success plus QR code artifact write failure exits non-zero with diagnostic `preview_artifact_write_failed`.
 - Add tests that init does not modify the host repo root `.gitignore`.
 - Add tests that Mini Program context and init summary recommend ignoring Mini Program verification artifacts.
-- Add tests that `.sandcastle/verify.sh` writes a non-failing `verification_artifacts_not_ignored` warning when Mini Program verification artifacts are not ignored by git.
-- Add tests that `.sandcastle/verify.sh` skips artifact ignore checks outside git repositories and writes a non-failing `git_not_available_for_artifact_ignore_check` info event.
+- Add tests that `.archloop/verify.sh` writes a non-failing `verification_artifacts_not_ignored` warning when Mini Program verification artifacts are not ignored by git.
+- Add tests that `.archloop/verify.sh` skips artifact ignore checks outside git repositories and writes a non-failing `git_not_available_for_artifact_ignore_check` info event.
 - Add tests that detected `miniprogram-ci` configuration automatically triggers platform validation without a separate enable flag.
-- Add tests that `WX_UPLOAD_KEY_PATH` takes precedence over `.sandcastle/auth/wx-upload/private.{appid}.key`.
+- Add tests that `WX_UPLOAD_KEY_PATH` takes precedence over `.archloop/auth/wx-upload/private.{appid}.key`.
 - Add tests that `WX_APPID` takes precedence over `project.config.json.appid`.
 - Add tests that missing AppID writes visible non-failing warning diagnostic `appid_missing` and keeps platform validation `not_configured`.
 - Add tests that placeholder AppID values such as `touristappid` and `wx0000000000000000` are treated as missing.
 - Add tests that upload key present plus missing AppID does not fail local verification but writes a warning explaining platform validation was not enabled.
-- Add tests that repository-local upload key lookup uses `.sandcastle/auth/wx-upload/private.{effectiveAppid}.key`.
+- Add tests that repository-local upload key lookup uses `.archloop/auth/wx-upload/private.{effectiveAppid}.key`.
 - Add tests that `WX_APPID` controls effective AppID and repository-local upload key lookup when it differs from `project.config.json.appid`.
 - Add tests that extra repository-local `private.*.key` files for other AppIDs are ignored and produce warning diagnostic `upload_key_appid_mismatch`.
 - Add tests that `WX_UPLOAD_KEY_PATH` does not infer AppID from the key filename and still uses effective AppID for `ci.Project`.
-- Add tests that `.sandcastle/auth/wx-upload/.gitignore` ignores `private.*.key`.
-- Add tests that `.sandcastle/capability.json` does not contain private key contents or sensitive private key metadata.
+- Add tests that `.archloop/auth/wx-upload/.gitignore` ignores `private.*.key`.
+- Add tests that `.archloop/capability.json` does not contain private key contents or sensitive private key metadata.
 - Add tests that detected `miniprogram-ci` configuration invokes `preview` by default.
 - Add tests that detected upload key plus missing `miniprogram-ci` package is represented as a verification failure.
 - Add tests that invalid platform validation configuration is represented as a verification failure with a useful diagnostic.
@@ -480,4 +480,4 @@ The Mini Program tooling choices follow `docs/research/miniprogram-ci-and-wechat
 
 The design follows ADR-0016. Capability packs are a new composition layer rather than a replacement for project profiles, templates, preset agents, or skills.
 
-The first implementation should prefer boring, inspectable scaffold files over hidden runtime behavior. That keeps Sandcastle explainable while giving future web and game capability packs a clear path.
+The first implementation should prefer boring, inspectable scaffold files over hidden runtime behavior. That keeps archLoop explainable while giving future web and game capability packs a clear path.

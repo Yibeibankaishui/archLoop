@@ -1,12 +1,12 @@
 # Hub keeps Beads runtime files out of code branch merges
 
-**Sandcastle Hub** treats Beads files under `.beads/` as **local task store** runtime/export state, not ordinary code owned by task branches. Hub flows may read and write the local task store while planning, claiming, recovering, or closing tasks, but batch merge must not require `.beads/issues.jsonl`, `.beads/interactions.jsonl`, or related `.beads/` files to be clean before normal source branches can merge.
+**archLoop Hub** treats Beads files under `.beads/` as **local task store** runtime/export state, not ordinary code owned by task branches. Hub flows may read and write the local task store while planning, claiming, recovering, or closing tasks, but batch merge must not require `.beads/issues.jsonl`, `.beads/interactions.jsonl`, or related `.beads/` files to be clean before normal source branches can merge.
 
 ## Decision
 
 Hub batch merge preflight classifies dirty worktree files into source files and task-store/runtime files. Dirty source files block merge with an actionable summary. Dirty `.beads/` files in the source worktree are reported separately and do not block by themselves.
 
-Task branches are different: if a branch diff includes `.beads/` runtime/export files, Hub blocks that branch before merge. Task state exchange with remote systems must flow through explicit `sandcastle tasks pull`, `sandcastle tasks push`, or confirmed `sandcastle tasks sync`, not through ordinary code branch merges.
+Task branches are different: if a branch diff includes `.beads/` runtime/export files, Hub blocks that branch before merge. Task state exchange with remote systems must flow through explicit `archloop tasks pull`, `archloop tasks push`, or confirmed `archloop tasks sync`, not through ordinary code branch merges.
 
 ## Considered Options
 
