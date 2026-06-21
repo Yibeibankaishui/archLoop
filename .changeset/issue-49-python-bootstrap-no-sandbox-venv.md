@@ -1,5 +1,5 @@
 ---
-"@ai-hero/sandcastle": patch
+"@yibeibankaishui/archloop": patch
 ---
 
 Harden the Python project profile bootstrap for no-sandbox hosts.

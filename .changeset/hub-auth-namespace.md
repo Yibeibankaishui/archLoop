@@ -1,5 +1,5 @@
 ---
-"@ai-hero/sandcastle": patch
+"@yibeibankaishui/archloop": patch
 ---
 
-Add the Hub `sandcastle auth` namespace for Codex and GitHub provider login sessions.
+Add the Hub `archloop auth` namespace for Codex and GitHub provider login sessions.

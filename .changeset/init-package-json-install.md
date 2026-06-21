@@ -1,5 +1,5 @@
 ---
-"@ai-hero/sandcastle": patch
+"@yibeibankaishui/archloop": patch
 ---
 
-`sandcastle init` now creates or updates `package.json` with `@ai-hero/sandcastle` and `tsx` devDependencies, adds a `sandcastle` npm script, and runs `npm install` so the generated entrypoint resolves on first run.
+`archloop init` now creates or updates `package.json` with `@yibeibankaishui/archloop` and `tsx` devDependencies, adds a `archloop` npm script, and runs `npm install` so the generated entrypoint resolves on first run.

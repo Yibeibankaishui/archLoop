@@ -1,3 +1,3 @@
-"@ai-hero/sandcastle": patch
+"@yibeibankaishui/archloop": patch
 
-Add `sandcastle tasks doctor` and `sandcastle tasks repair-state` for diagnosing and explicitly repairing local Hub task-state drift.
+Add `archloop tasks doctor` and `archloop tasks repair-state` for diagnosing and explicitly repairing local Hub task-state drift.
