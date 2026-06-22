@@ -176,9 +176,10 @@ export const selectHubFlowTasksWithBatchOptions = (input: {
   };
 };
 
-const formatHubBatchSelectionInvalidReasons = (
-  reasons: readonly HubBatchSelectionInvalidReason[],
-): string => reasons.join(", ");
+const indexHubTasksById = (
+  candidates: readonly HubTaskProjection[],
+): ReadonlyMap<string, HubTaskProjection> =>
+  new Map(candidates.map((task) => [task.id, task] as const));
 
 export const validateHubBatchSelectionFreshness = (input: {
   readonly selectedTaskIds: readonly string[];
@@ -206,9 +207,7 @@ export const validateHubBatchSelectionFreshness = (input: {
     invalidReasons.add("over_max_tasks");
   }
 
-  const freshById = new Map(
-    input.freshCandidates.map((task) => [task.id, task] as const),
-  );
+  const freshById = indexHubTasksById(input.freshCandidates);
 
   for (const taskId of input.selectedTaskIds) {
     const task = freshById.get(taskId);
@@ -239,9 +238,7 @@ const mapSelectedTaskIdsToFreshCandidates = (
   selectedTaskIds: readonly string[],
   freshCandidates: readonly HubTaskProjection[],
 ): readonly HubTaskProjection[] => {
-  const freshById = new Map(
-    freshCandidates.map((task) => [task.id, task] as const),
-  );
+  const freshById = indexHubTasksById(freshCandidates);
   return selectedTaskIds.flatMap((taskId) => {
     const task = freshById.get(taskId);
     return task ? [task] : [];
@@ -259,9 +256,12 @@ export const resolveFreshValidatedHubBatchSelection = (input: {
   readonly batchSelection?: HubBatchPlannerResult;
   readonly fallbackReason?: string;
 } => {
-  const effectiveMaxTasks =
-    input.maxTasks ??
-    (input.batchStrategy ? HUB_BATCH_DEFAULT_MAX_TASKS : Number.POSITIVE_INFINITY);
+  let effectiveMaxTasks = input.maxTasks;
+  if (effectiveMaxTasks === undefined) {
+    effectiveMaxTasks = input.batchStrategy
+      ? HUB_BATCH_DEFAULT_MAX_TASKS
+      : Number.POSITIVE_INFINITY;
+  }
   const validation = validateHubBatchSelectionFreshness({
     selectedTaskIds: input.initialSelectedTaskIds,
     freshCandidates: input.freshCandidates,
@@ -278,9 +278,7 @@ export const resolveFreshValidatedHubBatchSelection = (input: {
     };
   }
 
-  const fallbackReason = formatHubBatchSelectionInvalidReasons(
-    validation.invalidReasons,
-  );
+  const fallbackReason = validation.invalidReasons.join(", ");
   const fallbackSelection = planHubFlowBatch({
     candidates: input.freshCandidates,
     batchStrategy: "conservative",

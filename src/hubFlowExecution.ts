@@ -693,6 +693,26 @@ export const runHubFlow = async (
 
   mkdirSync(join(context.runDir, "logs"), { recursive: true });
 
+  const batchPlannedMetadata: {
+    batchStrategyRequested?: HubBatchStrategy;
+    batchStrategyUsed?: HubBatchStrategy;
+    maxTasks?: number;
+    deferredTasks?: HubBatchPlannerResult["deferredTasks"];
+    fallbackReason?: string;
+  } = {};
+  if (batchSelection) {
+    batchPlannedMetadata.batchStrategyRequested =
+      batchSelection.batchStrategyRequested;
+    batchPlannedMetadata.batchStrategyUsed = batchSelection.batchStrategyUsed;
+    batchPlannedMetadata.maxTasks = batchSelection.maxTasks;
+    batchPlannedMetadata.deferredTasks = batchSelection.deferredTasks;
+    if (batchSelection.fallbackReason) {
+      batchPlannedMetadata.fallbackReason = batchSelection.fallbackReason;
+    }
+  } else if (fallbackReason) {
+    batchPlannedMetadata.fallbackReason = fallbackReason;
+  }
+
   appendHubBatchEvent(context.runDir, {
     type: "batch_planned",
     runId: context.runId,
@@ -700,19 +720,7 @@ export const runHubFlow = async (
     flowId: input.flowId,
     createdAt: startedAt.toISOString(),
     taskIds: selectedTaskIds,
-    ...(batchSelection
-      ? {
-          batchStrategyRequested: batchSelection.batchStrategyRequested,
-          batchStrategyUsed: batchSelection.batchStrategyUsed,
-          maxTasks: batchSelection.maxTasks,
-          deferredTasks: batchSelection.deferredTasks,
-          ...(batchSelection.fallbackReason
-            ? { fallbackReason: batchSelection.fallbackReason }
-            : {}),
-        }
-      : fallbackReason
-        ? { fallbackReason }
-        : {}),
+    ...batchPlannedMetadata,
   });
 
   const results: HubFlowTaskResult[] = [];
