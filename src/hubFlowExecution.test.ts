@@ -1,8 +1,11 @@
-import { exec } from "node:child_process";
+import { exec, spawn } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { Effect } from "effect";
+import { FileSystem } from "@effect/platform";
+import { NodeFileSystem } from "@effect/platform-node";
 import { describe, expect, it, vi } from "vitest";
 import { appendHubBatchEvent, createHubRunContext } from "./hubExecution.js";
 import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
@@ -24,8 +27,46 @@ import {
   resolveHubTaskBranch,
   selectHubFlowTasks,
 } from "./taskBoard.js";
+import * as WorktreeManager from "./WorktreeManager.js";
+import {
+  leaseLockPath,
+  leaseNameFromBranch,
+} from "./WorktreeLease.js";
 
 const execAsync = promisify(exec);
+
+const runLeaseEffect = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem>) =>
+  Effect.runPromise(
+    effect.pipe(Effect.provide(NodeFileSystem.layer)) as Effect.Effect<
+      A,
+      never
+    >,
+  );
+
+const spawnExitedPid = async (): Promise<number> =>
+  await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["-e", "process.exit(0)"], {
+      stdio: "ignore",
+    });
+    child.on("error", reject);
+    child.on("exit", () => {
+      if (child.pid === undefined) {
+        reject(new Error("child pid missing"));
+        return;
+      }
+      resolve(child.pid);
+    });
+  });
+
+const writeLeaseFile = async (
+  repoDir: string,
+  branch: string,
+  content: string,
+) => {
+  const lockPath = leaseLockPath(repoDir, leaseNameFromBranch(branch));
+  await mkdir(join(repoDir, ".archloop", "locks"), { recursive: true });
+  await writeFile(lockPath, content, "utf-8");
+};
 
 const expectBundledHubFlowPrompt = (promptPath: string, segment: string) => {
   expect(promptPath).toContain(segment);
@@ -1037,5 +1078,166 @@ describe("with-review Hub flow execution", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it("reports active execution instead of starting a retry when a live worktree lease exists", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-retry-active-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const taskId = "bd-retry-active";
+    const branch = resolveHubTaskBranch(taskId, "Retry active task");
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: taskId,
+        title: "Retry active task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    await runLeaseEffect(WorktreeManager.create(repoDir, { branch }));
+    await writeLeaseFile(
+      repoDir,
+      branch,
+      JSON.stringify({
+        owner: "hub",
+        taskId,
+        flowId: "no-review",
+        batchId: "batch-live",
+        branch,
+        pid: process.pid,
+        acquiredAt: "2026-06-22T10:00:00.000Z",
+      }),
+    );
+
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "retry-active",
+    );
+    const implementer = vi.fn<HubFlowImplementer>(async () => ({
+      outcome: "success",
+      commits: [{ sha: "abc" }],
+      completionSignal: "<promise>COMPLETE</promise>",
+    }));
+
+    const result = await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      implementer,
+      runMergePhase: false,
+    });
+
+    expect(implementer).not.toHaveBeenCalled();
+    expect(result.results[0]).toMatchObject({
+      taskId,
+      outcome: "active_execution",
+      hubStatus: "ready_for_agent",
+      commitCount: 0,
+    });
+
+    const taskEvents = await readJsonl(
+      join(result.runDir, "events", "task.jsonl"),
+    );
+    expect(taskEvents).toContainEqual(
+      expect.objectContaining({
+        type: "task_retry_blocked",
+        taskId,
+        reason: "active_worktree_lease",
+      }),
+    );
+  });
+
+  it("retries from a preserved dirty worktree after clearing a stale lease", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-retry-preserved-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const taskId = "bd-retry-preserved";
+    const title = "Retry preserved task";
+    const branch = resolveHubTaskBranch(taskId, title);
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: taskId,
+        title,
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    const worktree = await runLeaseEffect(
+      WorktreeManager.create(repoDir, { branch }),
+    );
+    await writeFile(join(worktree.path, "partial.txt"), "wip\n");
+    const deadPid = await spawnExitedPid();
+    await writeLeaseFile(
+      repoDir,
+      branch,
+      JSON.stringify({
+        owner: "hub",
+        taskId,
+        flowId: "no-review",
+        batchId: "batch-dead",
+        branch,
+        pid: deadPid,
+        acquiredAt: "2026-06-22T09:00:00.000Z",
+      }),
+    );
+
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "retry-preserved",
+    );
+    let capturedInput: HubImplementTaskInput | undefined;
+    const implementer = vi.fn<HubFlowImplementer>(async (input) => {
+      capturedInput = input;
+      return {
+        outcome: "success",
+        commits: [],
+        completionSignal: "<promise>COMPLETE</promise>",
+        branchHasUnmergedWork: true,
+      };
+    });
+
+    const result = await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      implementer,
+      runMergePhase: false,
+    });
+
+    expect(implementer).toHaveBeenCalledTimes(1);
+    expect(capturedInput?.branch).toBe(branch);
+    expect(capturedInput?.preservedWorktreePath).toContain(
+      "archloop-bd-retry-preserved",
+    );
+    expect(capturedInput?.retryContext?.toLowerCase()).toContain(
+      "inspect existing work",
+    );
+    expect(capturedInput?.retryContext?.toLowerCase()).toContain(
+      "uncommitted changes",
+    );
+    expect(result.results[0]).toMatchObject({
+      taskId,
+      outcome: "implemented",
+      hubStatus: "waiting_for_merge",
+      implementationWork: "existing_unmerged_work",
+    });
   });
 });

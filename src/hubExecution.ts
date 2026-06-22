@@ -97,6 +97,7 @@ export interface HubTaskEvent {
   readonly type:
     | "task_claimed"
     | "task_claim_skipped"
+    | "task_retry_blocked"
     | "task_implementation_started"
     | "task_implementation_succeeded"
     | "task_implementation_failed"
@@ -123,6 +124,7 @@ export interface HubTaskEvent {
   readonly createdAt: string;
   readonly status: string;
   readonly reason?: string;
+  readonly message?: string;
   readonly failureReason?: string;
   readonly diagnosticSummary?: string;
   readonly diagnostics?: Readonly<Record<string, unknown>>;

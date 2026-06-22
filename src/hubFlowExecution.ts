@@ -35,6 +35,10 @@ import {
   type HubTaskLifecycleContext,
 } from "./hubTaskLifecycle.js";
 import {
+  buildHubRetryPromptArgs,
+  prepareHubTaskRetry,
+} from "./hubTaskRetry.js";
+import {
   loadHubTaskBoard,
   resolveHubTaskBranch,
   selectHubFlowTasks,
@@ -54,6 +58,8 @@ export interface HubImplementTaskInput {
   readonly promptFile: string;
   readonly cwd: string;
   readonly runDir: string;
+  readonly retryContext?: string;
+  readonly preservedWorktreePath?: string;
 }
 
 export interface HubImplementTaskResult {
@@ -112,6 +118,7 @@ export interface HubFlowTaskResult {
     | "implemented"
     | "reviewed"
     | "claim_skipped"
+    | "active_execution"
     | "agent_failed"
     | "sandbox_failed";
   readonly hubStatus: string;
@@ -254,12 +261,16 @@ const isSandboxFailureTag = (tag: string | undefined): boolean =>
   tag !== undefined && SANDBOX_FAILURE_TAGS.has(tag);
 
 const buildHubAgentPromptArgs = (
-  input: Pick<HubImplementTaskInput, "taskId" | "title" | "branch">,
+  input: Pick<
+    HubImplementTaskInput,
+    "taskId" | "title" | "branch" | "retryContext"
+  >,
 ): Readonly<Record<string, string>> => ({
   TASK_ID: input.taskId,
   TASK_TITLE: input.title,
   BRANCH: input.branch,
   VIEW_TASK_COMMAND: `bd show ${input.taskId}`,
+  RETRY_CONTEXT: input.retryContext ?? "",
 });
 
 const runHubAgent = async (input: {
@@ -274,6 +285,7 @@ const runHubAgent = async (input: {
   readonly name: string;
   readonly logFileName: string;
   readonly env?: NodeJS.ProcessEnv;
+  readonly retryContext?: string;
 }) => {
   await assertAgentCredentialsConfigured({
     providerName: "cursor",
@@ -406,6 +418,54 @@ const implementSelectedTask = async (
 ): Promise<HubFlowTaskResult> => {
   const cwd = input.cwd ?? process.cwd();
   const branch = resolveHubTaskBranch(task.id, task.title);
+  const retryPreparation = await prepareHubTaskRetry({
+    repoDir: cwd,
+    branch,
+    taskId: task.id,
+  });
+
+  if (retryPreparation.status === "active_execution") {
+    appendHubTaskEvent(context.runDir, {
+      type: "task_retry_blocked",
+      runId: context.runId,
+      batchId: context.batchId,
+      taskId: task.id,
+      branch,
+      createdAt: new Date().toISOString(),
+      status: task.hubStatus,
+      reason: "active_worktree_lease",
+      message: retryPreparation.message,
+    });
+
+    return {
+      taskId: task.id,
+      title: task.title,
+      branch,
+      outcome: "active_execution",
+      hubStatus: task.hubStatus,
+      commitCount: 0,
+    };
+  }
+
+  if (retryPreparation.status === "lease_malformed") {
+    return {
+      taskId: task.id,
+      title: task.title,
+      branch,
+      outcome: "sandbox_failed",
+      hubStatus: task.hubStatus,
+      failureReason: "sandbox_failed",
+      commitCount: 0,
+    };
+  }
+
+  const retryPromptArgs = buildHubRetryPromptArgs({
+    branch,
+    preservedWorktreePath: retryPreparation.preservedWorktreePath,
+    hasDirtyWork: retryPreparation.hasDirtyWork,
+  });
+  const retryContext = retryPromptArgs.RETRY_CONTEXT;
+
   const claimResult = claimHubTaskForImplementation({
     cwd,
     taskId: task.id,
@@ -461,6 +521,8 @@ const implementSelectedTask = async (
       promptFile,
       cwd,
       runDir: context.runDir,
+      retryContext,
+      preservedWorktreePath: retryPreparation.preservedWorktreePath,
     });
   } catch (error) {
     const message =
@@ -740,6 +802,7 @@ export const createHubFlowRunImplementer = (options: {
         runDir: input.runDir,
         name: `implement-${input.taskId}`,
         logFileName: `${input.taskId}.log`,
+        retryContext: input.retryContext,
       });
 
       if (!result.completionSignal) {

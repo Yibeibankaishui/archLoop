@@ -8,6 +8,7 @@ Only work on the task specified.
 
 Work on branch {{BRANCH}}. Make commits and run tests.
 
+{{RETRY_CONTEXT}}
 # CONTEXT
 
 Here are the last 10 commits:
