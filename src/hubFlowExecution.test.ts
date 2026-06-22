@@ -1023,6 +1023,7 @@ describe("with-review Hub flow execution", () => {
     try {
       const result = await implementer({
         flowId: "no-review",
+        batchId: "batch-test",
         taskId: "bd-1",
         title: "Test task",
         branch: "archloop/bd-1-test-task",

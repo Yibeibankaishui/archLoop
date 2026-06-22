@@ -2,6 +2,7 @@ import { Effect, Option } from "effect";
 import { FileSystem } from "@effect/platform";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
+import { pruneStaleWorktreeLeases } from "./WorktreeLease.js";
 import {
   emptyRepoWorktreeError,
   WorktreeError,
@@ -332,6 +333,14 @@ export const pruneStale = (
 
     // Let git clean up metadata for worktrees whose directories are gone
     yield* execGit(["worktree", "prune"], repoDir);
+
+    yield* pruneStaleWorktreeLeases(repoDir).pipe(
+      Effect.mapError((error) =>
+        error._tag === "WorktreeLeaseError"
+          ? new WorktreeError({ message: error.message })
+          : error,
+      ),
+    );
 
     const worktreesDir = join(repoDir, ".archloop", "worktrees");
 

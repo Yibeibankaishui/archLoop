@@ -24,6 +24,8 @@ export const formatErrorMessage = (error: SandboxError): string => {
       return isPreformattedWorktreeMessage(error.message)
         ? error.message
         : `Git worktree operation failed: ${error.message}`;
+    case "WorktreeLeaseError":
+      return error.message;
     case "PromptError":
       return `Failed to resolve prompt: ${error.message}`;
     case "AgentError":
@@ -84,6 +86,7 @@ export const withFriendlyErrors = <A, E, R>(
     PodmanError: showErrorAndExit,
     SyncError: showErrorAndExit,
     WorktreeError: showErrorAndExit,
+    WorktreeLeaseError: showErrorAndExit,
     PromptError: showErrorAndExit,
     AgentError: showErrorAndExit,
     ConfigDirError: showErrorAndExit,
