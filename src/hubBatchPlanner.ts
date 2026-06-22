@@ -1,10 +1,7 @@
 import { HubFlowError } from "./errors.js";
 import type { HubFlowKind } from "./hubFlows.js";
 import type { HubBatchPlannerInvoker } from "./hubBatchPlannerAgent.js";
-import {
-  enrichHubBatchPlannerCandidates,
-  type HubBatchPlannerCandidate,
-} from "./hubBatchPlannerCandidates.js";
+import { enrichHubBatchPlannerCandidates } from "./hubBatchPlannerCandidates.js";
 import { isHubFlowEligibleTask, type HubTaskProjection } from "./taskBoard.js";
 
 export const HUB_BATCH_DEFAULT_MAX_TASKS = 3;
@@ -98,6 +95,16 @@ const readObject = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+
+const readDeferredTaskId = (record: Record<string, unknown>): string => {
+  if (typeof record.taskId === "string") {
+    return record.taskId.trim();
+  }
+  if (typeof record.task_id === "string") {
+    return record.task_id.trim();
+  }
+  return "";
+};
 
 export const parseHubBatchStrategy = (raw: string): HubBatchStrategy => {
   const normalized = raw.trim().toLowerCase();
@@ -197,12 +204,7 @@ export const parseHubBatchPlannerOutput = (
   const deferredRaw = Array.isArray(record.deferred) ? record.deferred : [];
   const deferred = deferredRaw.flatMap((entry) => {
     const deferredRecord = readObject(entry);
-    const taskId =
-      typeof deferredRecord.taskId === "string"
-        ? deferredRecord.taskId.trim()
-        : typeof deferredRecord.task_id === "string"
-          ? deferredRecord.task_id.trim()
-          : "";
+    const taskId = readDeferredTaskId(deferredRecord);
     const reason = normalizeHubBatchDeferredReason(
       deferredRecord.reason ?? deferredRecord.deferredReason,
     );
@@ -299,6 +301,22 @@ const planConservativeHubFlowBatch = (
     maxTasks: input.maxTasks,
   });
 
+const fallbackPlannedHubFlowBatch = (
+  input: HubBatchPlannerInput,
+  fallbackReason: HubBatchFallbackReason,
+  extras: {
+    readonly rationale?: string;
+    readonly deferredTasks?: readonly HubBatchDeferredTask[];
+  } = {},
+): HubBatchPlannerResult =>
+  buildConservativeBatchResult({
+    candidates: input.candidates,
+    batchStrategyRequested: "planned",
+    maxTasks: input.maxTasks,
+    fallbackReason,
+    ...extras,
+  });
+
 const planPlannedHubFlowBatch = async (
   input: HubBatchPlannerInput,
 ): Promise<HubBatchPlannerResult> => {
@@ -306,22 +324,16 @@ const planPlannedHubFlowBatch = async (
   const eligibleTaskIds = new Set(eligible.map((task) => task.id));
 
   if (!input.batchPlanner || !input.flowId || !input.cwd || !input.runDir) {
-    return buildConservativeBatchResult({
-      candidates: input.candidates,
-      batchStrategyRequested: "planned",
-      maxTasks: input.maxTasks,
-      fallbackReason: "planner_failed",
-    });
+    return fallbackPlannedHubFlowBatch(input, "planner_failed");
   }
 
-  let enrichedCandidates: readonly HubBatchPlannerCandidate[];
-  enrichedCandidates = enrichHubBatchPlannerCandidates({
+  const enrichedCandidates = enrichHubBatchPlannerCandidates({
     cwd: input.cwd,
     candidates: eligible,
     env: input.env,
   });
 
-  let stdout = "";
+  let stdout: string;
   try {
     stdout = await input.batchPlanner({
       flowId: input.flowId,
@@ -332,22 +344,12 @@ const planPlannedHubFlowBatch = async (
       env: input.env,
     });
   } catch {
-    return buildConservativeBatchResult({
-      candidates: input.candidates,
-      batchStrategyRequested: "planned",
-      maxTasks: input.maxTasks,
-      fallbackReason: "planner_failed",
-    });
+    return fallbackPlannedHubFlowBatch(input, "planner_failed");
   }
 
   const parsed = parseHubBatchPlannerOutput(stdout);
   if (!parsed) {
-    return buildConservativeBatchResult({
-      candidates: input.candidates,
-      batchStrategyRequested: "planned",
-      maxTasks: input.maxTasks,
-      fallbackReason: "malformed_output",
-    });
+    return fallbackPlannedHubFlowBatch(input, "malformed_output");
   }
 
   const validationIssue = validateHubBatchPlannerOutput({
@@ -356,11 +358,7 @@ const planPlannedHubFlowBatch = async (
     maxTasks: input.maxTasks,
   });
   if (validationIssue) {
-    return buildConservativeBatchResult({
-      candidates: input.candidates,
-      batchStrategyRequested: "planned",
-      maxTasks: input.maxTasks,
-      fallbackReason: validationIssue,
+    return fallbackPlannedHubFlowBatch(input, validationIssue, {
       rationale: parsed.rationale,
       deferredTasks: parsed.deferred,
     });

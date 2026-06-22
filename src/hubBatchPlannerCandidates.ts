@@ -180,6 +180,23 @@ const readPriority = (
   return undefined;
 };
 
+const resolveBlockerSource = (input: {
+  readonly beadsDependencyBlockers: readonly string[];
+  readonly metadataBlockers: readonly string[];
+  readonly blockersDeclared: readonly string[];
+}): HubBatchPlannerBlockerSource => {
+  if (
+    input.beadsDependencyBlockers.length > 0 ||
+    input.metadataBlockers.length > 0
+  ) {
+    return "beads_dependency";
+  }
+  if (input.blockersDeclared.length > 0) {
+    return "description";
+  }
+  return "none";
+};
+
 export const enrichHubBatchPlannerCandidate = (
   task: HubTaskProjection,
   input: {
@@ -193,19 +210,14 @@ export const enrichHubBatchPlannerCandidate = (
       ? beadsDependencyBlockers
       : metadataBlockers;
 
-  const blockerBody = task.description ?? "";
-  const declaredBlockers = parseDeclaredBeadsBlockers(blockerBody);
+  const declaredBlockers = parseDeclaredBeadsBlockers(task.description ?? "");
   const blockersDeclared =
     explicitBlockers.length > 0 ? explicitBlockers : declaredBlockers;
-
-  const blockerSource: HubBatchPlannerBlockerSource =
-    beadsDependencyBlockers.length > 0
-      ? "beads_dependency"
-      : metadataBlockers.length > 0
-        ? "beads_dependency"
-        : blockersDeclared.length > 0
-          ? "description"
-          : "none";
+  const blockerSource = resolveBlockerSource({
+    beadsDependencyBlockers,
+    metadataBlockers,
+    blockersDeclared,
+  });
 
   return {
     id: task.id,
