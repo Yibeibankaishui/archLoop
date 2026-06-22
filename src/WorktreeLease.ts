@@ -8,17 +8,17 @@ import { WorktreeError, WorktreeLeaseError } from "./errors.js";
 export const leaseNameFromBranch = (branch: string): string =>
   branch.replace(/\//g, "-");
 
+/** Host path to the managed worktree directory for a lease/worktree name. */
+export const worktreePathForLeaseName = (
+  repoDir: string,
+  leaseName: string,
+): string => join(repoDir, ".archloop", "worktrees", leaseName);
+
 /** Host path to the managed worktree directory for a branch. */
 export const worktreePathForBranch = (
   repoDir: string,
   branch: string,
-): string =>
-  join(
-    repoDir,
-    ".archloop",
-    "worktrees",
-    leaseNameFromBranch(branch),
-  );
+): string => worktreePathForLeaseName(repoDir, leaseNameFromBranch(branch));
 
 /** Host path to the lease lock file for a branch. */
 export const leaseLockPath = (repoDir: string, leaseName: string): string =>
@@ -116,6 +116,26 @@ const activeLeaseError = (
   });
 };
 
+const isDirectWorktreeLeaseMetadata = (
+  value: unknown,
+): value is DirectWorktreeLeaseMetadata => {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    record.owner === "direct" &&
+    typeof record.pid === "number" &&
+    Number.isInteger(record.pid) &&
+    record.pid > 0 &&
+    typeof record.branch === "string" &&
+    record.branch.length > 0 &&
+    typeof record.acquiredAt === "string" &&
+    record.acquiredAt.length > 0
+  );
+};
+
 const parseLeaseMetadata = (
   raw: string,
   repoDir: string,
@@ -127,38 +147,23 @@ const parseLeaseMetadata = (
     catch: () => malformedLeaseError(repoDir, branch, "invalid JSON"),
   }).pipe(
     Effect.flatMap((value) => {
-      if (
-        typeof value !== "object" ||
-        value === null ||
-        (value as { owner?: unknown }).owner !== "direct" ||
-        typeof (value as { pid?: unknown }).pid !== "number" ||
-        !Number.isInteger((value as { pid: number }).pid) ||
-        (value as { pid: number }).pid <= 0 ||
-        typeof (value as { branch?: unknown }).branch !== "string" ||
-        (value as { branch: string }).branch.length === 0 ||
-        typeof (value as { acquiredAt?: unknown }).acquiredAt !== "string" ||
-        (value as { acquiredAt: string }).acquiredAt.length === 0
-      ) {
+      if (!isDirectWorktreeLeaseMetadata(value)) {
         return Effect.fail(
           malformedLeaseError(repoDir, branch, "missing required fields"),
         );
       }
 
-      const metadata = value as DirectWorktreeLeaseMetadata;
-      if (
-        options?.requireBranchMatch !== false &&
-        metadata.branch !== branch
-      ) {
+      if (options?.requireBranchMatch !== false && value.branch !== branch) {
         return Effect.fail(
           malformedLeaseError(
             repoDir,
             branch,
-            `branch '${metadata.branch}' does not match '${branch}'`,
+            `branch '${value.branch}' does not match '${branch}'`,
           ),
         );
       }
 
-      return Effect.succeed(metadata);
+      return Effect.succeed(value);
     }),
   );
 
@@ -263,6 +268,22 @@ const worktreeDirectoryExists = (
     });
   });
 
+const readLocksDirectoryEntries = (
+  repoDir: string,
+): Effect.Effect<string[], WorktreeError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    return yield* fs.readDirectory(locksDirectory(repoDir)).pipe(
+      Effect.map((value): string[] => value),
+      Effect.catchSome((error) =>
+        error._tag === "SystemError" && error.reason === "NotFound"
+          ? Option.some(Effect.succeed([] as string[]))
+          : Option.none(),
+      ),
+      Effect.mapError((error) => mapFsError(error.message)),
+    );
+  });
+
 /**
  * Removes a stale lease when the owner process is gone or the worktree path is
  * missing. Never deletes or resets the worktree directory itself.
@@ -300,6 +321,18 @@ export const recoverStaleWorktreeLeaseIfNeeded = (
     return "removed" as const;
   });
 
+const ensureLeaseNotActive = (
+  repoDir: string,
+  branch: string,
+): Effect.Effect<void, WorktreeLeaseError | WorktreeError, FileSystem.FileSystem> =>
+  Effect.gen(function* () {
+    const recovery = yield* recoverStaleWorktreeLeaseIfNeeded(repoDir, branch);
+    if (recovery === "active") {
+      const existing = yield* readLeaseMetadata(repoDir, branch);
+      return yield* Effect.fail(activeLeaseError(existing, repoDir, branch));
+    }
+  });
+
 /**
  * Acquire an exclusive worktree lease for `branch`, recovering stale lease
  * files when the recorded owner process is no longer alive.
@@ -331,28 +364,14 @@ export const acquireWorktreeLease = (
       FileSystem.FileSystem
     > => createLeaseFileAtomic(repoDir, branch, metadata);
 
-    const recovery = yield* recoverStaleWorktreeLeaseIfNeeded(repoDir, branch);
-    if (recovery === "active") {
-      const existing = yield* readLeaseMetadata(repoDir, branch);
-      return yield* Effect.fail(activeLeaseError(existing, repoDir, branch));
-    }
+    yield* ensureLeaseNotActive(repoDir, branch);
 
     yield* tryAcquire().pipe(
       Effect.catchTag("WorktreeLeaseError", (error) =>
         error.reason === "recovery"
-          ? Effect.gen(function* () {
-              const secondRecovery = yield* recoverStaleWorktreeLeaseIfNeeded(
-                repoDir,
-                branch,
-              );
-              if (secondRecovery === "active") {
-                const existing = yield* readLeaseMetadata(repoDir, branch);
-                return yield* Effect.fail(
-                  activeLeaseError(existing, repoDir, branch),
-                );
-              }
-              return yield* tryAcquire();
-            })
+          ? ensureLeaseNotActive(repoDir, branch).pipe(
+              Effect.flatMap(() => tryAcquire()),
+            )
           : Effect.fail(error),
       ),
     );
@@ -384,27 +403,14 @@ export const pruneOrphanWorktreeLeases = (
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const locksDir = locksDirectory(repoDir);
-    const entries = yield* fs.readDirectory(locksDir).pipe(
-      Effect.map((value): string[] => value),
-      Effect.catchSome((error) =>
-        error._tag === "SystemError" && error.reason === "NotFound"
-          ? Option.some(Effect.succeed([] as string[]))
-          : Option.none(),
-      ),
-      Effect.mapError((error) => mapFsError(error.message)),
-    );
+    const entries = yield* readLocksDirectoryEntries(repoDir);
 
     for (const entry of entries) {
       if (!entry.endsWith(".lock")) {
         continue;
       }
       const leaseName = entry.slice(0, -".lock".length);
-      const worktreePath = join(
-        repoDir,
-        ".archloop",
-        "worktrees",
-        leaseName,
-      );
+      const worktreePath = worktreePathForLeaseName(repoDir, leaseName);
       const worktreeExists = yield* fs.stat(worktreePath).pipe(
         Effect.map((stat) => stat.type === "Directory"),
         Effect.catchAll(() => Effect.succeed(false)),
@@ -427,15 +433,7 @@ export const pruneStaleWorktreeLeases = (
 
     const fs = yield* FileSystem.FileSystem;
     const locksDir = locksDirectory(repoDir);
-    const entries = yield* fs.readDirectory(locksDir).pipe(
-      Effect.map((value): string[] => value),
-      Effect.catchSome((error) =>
-        error._tag === "SystemError" && error.reason === "NotFound"
-          ? Option.some(Effect.succeed([] as string[]))
-          : Option.none(),
-      ),
-      Effect.mapError((error) => mapFsError(error.message)),
-    );
+    const entries = yield* readLocksDirectoryEntries(repoDir);
 
     for (const entry of entries) {
       if (!entry.endsWith(".lock")) {
