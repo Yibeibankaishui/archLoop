@@ -35,7 +35,7 @@ import {
   type HubTaskLifecycleContext,
 } from "./hubTaskLifecycle.js";
 import {
-  buildHubRetryPromptArgs,
+  formatHubRetryPromptContext,
   prepareHubTaskRetry,
 } from "./hubTaskRetry.js";
 import {
@@ -459,12 +459,11 @@ const implementSelectedTask = async (
     };
   }
 
-  const retryPromptArgs = buildHubRetryPromptArgs({
+  const retryContext = formatHubRetryPromptContext({
     branch,
     preservedWorktreePath: retryPreparation.preservedWorktreePath,
     hasDirtyWork: retryPreparation.hasDirtyWork,
   });
-  const retryContext = retryPromptArgs.RETRY_CONTEXT;
 
   const claimResult = claimHubTaskForImplementation({
     cwd,

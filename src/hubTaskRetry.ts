@@ -43,15 +43,33 @@ export interface PrepareHubTaskRetryInput {
   readonly taskId: string;
 }
 
-const runLeaseEffect = <A, E>(
+const runFileSystemEffect = <A, E>(
   effect: Effect.Effect<A, E, FileSystem.FileSystem>,
 ): Promise<A> =>
-  Effect.runPromise(
-    effect.pipe(Effect.provide(NodeFileSystem.layer)) as Effect.Effect<
-      A,
-      never
-    >,
-  );
+  Effect.runPromise(Effect.provide(effect, NodeFileSystem.layer));
+
+const mapLeaseErrorToPreparation = (
+  error: WorktreeLeaseError,
+  branch: string,
+): HubTaskRetryPreparation | undefined => {
+  if (error.reason === "active") {
+    return {
+      status: "active_execution",
+      message: error.message,
+      lease: error,
+    };
+  }
+
+  if (error.reason === "malformed") {
+    return {
+      status: "lease_malformed",
+      message: `Worktree lease has invalid metadata for branch '${branch}'. ${error.message}`,
+      lease: error,
+    };
+  }
+
+  return undefined;
+};
 
 /** Detect whether a managed worktree already exists for a Hub task branch. */
 export const detectPreservedHubTaskWorktree = async (
@@ -67,7 +85,7 @@ export const detectPreservedHubTaskWorktree = async (
     };
   }
 
-  const hasDirtyWork = await runLeaseEffect(
+  const hasDirtyWork = await runFileSystemEffect(
     WorktreeManager.hasUncommittedChanges(preservedWorktreePath),
   );
 
@@ -103,18 +121,14 @@ export const buildHubRetryPromptContext = (input: {
   ].join("\n");
 };
 
-/** Build prompt args for Hub implementer retries. */
-export const buildHubRetryPromptArgs = (input: {
+/** Format retry context for Hub implementer prompt substitution. */
+export const formatHubRetryPromptContext = (input: {
   readonly branch: string;
   readonly preservedWorktreePath?: string;
   readonly hasDirtyWork: boolean;
-}): Readonly<Record<string, string>> => {
+}): string => {
   const retryContext = buildHubRetryPromptContext(input);
-  if (retryContext.length === 0) {
-    return { RETRY_CONTEXT: "" };
-  }
-
-  return { RETRY_CONTEXT: `${retryContext}\n` };
+  return retryContext.length === 0 ? "" : `${retryContext}\n`;
 };
 
 /**
@@ -129,65 +143,28 @@ export const prepareHubTaskRetry = async (
     input.branch,
   );
 
-  try {
-    const leaseResult = await Effect.runPromise(
-      checkWorktreeLeaseBeforeHubRetry(input.repoDir, input.branch).pipe(
-        Effect.either,
-        Effect.provide(NodeFileSystem.layer),
-      ) as Effect.Effect<
-        Either.Either<
-          { readonly staleLeaseCleared: boolean },
-          WorktreeLeaseError
-        >,
-        never
-      >,
-    );
+  const leaseResult = await runFileSystemEffect(
+    checkWorktreeLeaseBeforeHubRetry(input.repoDir, input.branch).pipe(
+      Effect.either,
+    ),
+  );
 
-    if (Either.isLeft(leaseResult)) {
-      const error = leaseResult.left;
-      if (error.reason === "active") {
-        return {
-          status: "active_execution",
-          message: error.message,
-          lease: error,
-        };
-      }
-
-      if (error.reason === "malformed") {
-        return {
-          status: "lease_malformed",
-          message: `Worktree lease has invalid metadata for branch '${input.branch}'. ${error.message}`,
-          lease: error,
-        };
-      }
-
-      throw error;
-    }
-
-    return {
-      status: "ready",
-      ...preserved,
-      staleLeaseCleared: leaseResult.right.staleLeaseCleared,
-    };
-  } catch (error) {
-    if (error instanceof WorktreeLeaseError) {
-      if (error.reason === "active") {
-        return {
-          status: "active_execution",
-          message: error.message,
-          lease: error,
-        };
-      }
-
-      if (error.reason === "malformed") {
-        return {
-          status: "lease_malformed",
-          message: `Worktree lease has invalid metadata for branch '${input.branch}'. ${error.message}`,
-          lease: error,
-        };
+  if (Either.isLeft(leaseResult)) {
+    if (leaseResult.left instanceof WorktreeLeaseError) {
+      const blocked = mapLeaseErrorToPreparation(
+        leaseResult.left,
+        input.branch,
+      );
+      if (blocked) {
+        return blocked;
       }
     }
-
-    throw error;
+    throw leaseResult.left;
   }
+
+  return {
+    status: "ready",
+    ...preserved,
+    staleLeaseCleared: leaseResult.right.staleLeaseCleared,
+  };
 };
