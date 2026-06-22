@@ -339,6 +339,10 @@ export const WorktreeDockerSandboxFactory = {
       const fileSystem = yield* FileSystem.FileSystem;
       const display = yield* Display;
 
+      const defaultWorktreeLeaseOwner: WorktreeLeaseOwnerInput = {
+        kind: "direct",
+      };
+
       const mapLeaseError = (
         error: WorktreeLeaseError | WorktreeError,
       ): WorktreeError => new WorktreeError({ message: error.message });
@@ -346,7 +350,7 @@ export const WorktreeDockerSandboxFactory = {
       const acquireLeaseForBranch = (leaseBranch: string) =>
         acquireWorktreeLease(hostRepoDir, {
           branch: leaseBranch,
-          owner: worktreeLeaseOwner ?? { kind: "direct" },
+          owner: worktreeLeaseOwner ?? defaultWorktreeLeaseOwner,
         }).pipe(
           Effect.mapError(mapLeaseError),
           Effect.provideService(FileSystem.FileSystem, fileSystem),

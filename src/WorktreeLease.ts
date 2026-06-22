@@ -160,7 +160,11 @@ export const buildWorktreeLeaseMetadata = (
   };
 };
 
-/** Serialize lease metadata using an allowlist of safe diagnostic fields. */
+/**
+ * Serialize lease metadata using an allowlist of safe diagnostic fields.
+ * Allowlisting is the primary guard; the forbidden-key pass is a backstop if a
+ * sensitive field is ever added to an allowlist by mistake.
+ */
 export const serializeWorktreeLeaseMetadata = (
   metadata: WorktreeLeaseMetadata,
 ): Record<string, string | number> => {
@@ -261,6 +265,12 @@ const activeLeaseError = (
   });
 };
 
+const isNonEmptyString = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0;
+
+const isPositiveInteger = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value) && value > 0;
+
 const isDirectWorktreeLeaseMetadata = (
   value: unknown,
 ): value is DirectWorktreeLeaseMetadata => {
@@ -271,13 +281,9 @@ const isDirectWorktreeLeaseMetadata = (
   const record = value as Record<string, unknown>;
   return (
     record.owner === "direct" &&
-    typeof record.pid === "number" &&
-    Number.isInteger(record.pid) &&
-    record.pid > 0 &&
-    typeof record.branch === "string" &&
-    record.branch.length > 0 &&
-    typeof record.acquiredAt === "string" &&
-    record.acquiredAt.length > 0
+    isPositiveInteger(record.pid) &&
+    isNonEmptyString(record.branch) &&
+    isNonEmptyString(record.acquiredAt)
   );
 };
 
@@ -291,19 +297,12 @@ const isHubWorktreeLeaseMetadata = (
   const record = value as Record<string, unknown>;
   return (
     record.owner === "hub" &&
-    typeof record.taskId === "string" &&
-    record.taskId.length > 0 &&
-    typeof record.flowId === "string" &&
-    record.flowId.length > 0 &&
-    typeof record.batchId === "string" &&
-    record.batchId.length > 0 &&
-    typeof record.branch === "string" &&
-    record.branch.length > 0 &&
-    typeof record.pid === "number" &&
-    Number.isInteger(record.pid) &&
-    record.pid > 0 &&
-    typeof record.acquiredAt === "string" &&
-    record.acquiredAt.length > 0
+    isNonEmptyString(record.taskId) &&
+    isNonEmptyString(record.flowId) &&
+    isNonEmptyString(record.batchId) &&
+    isNonEmptyString(record.branch) &&
+    isPositiveInteger(record.pid) &&
+    isNonEmptyString(record.acquiredAt)
   );
 };
 
@@ -509,6 +508,35 @@ const ensureLeaseNotActive = (
     }
   });
 
+const toAcquiredWorktreeLease = (
+  branch: string,
+  leaseName: string,
+  leasePath: string,
+  worktreePath: string,
+  metadata: WorktreeLeaseMetadata,
+): AcquiredWorktreeLease => {
+  const base = {
+    branch,
+    leaseName,
+    leasePath,
+    worktreePath,
+    pid: metadata.pid,
+    acquiredAt: metadata.acquiredAt,
+    owner: metadata.owner,
+  };
+
+  if (metadata.owner === "hub") {
+    return {
+      ...base,
+      taskId: metadata.taskId,
+      flowId: metadata.flowId,
+      batchId: metadata.batchId,
+    };
+  }
+
+  return base;
+};
+
 /**
  * Acquire an exclusive worktree lease for `branch`, recovering stale lease
  * files when the recorded owner process is no longer alive.
@@ -548,22 +576,13 @@ export const acquireWorktreeLease = (
       ),
     );
 
-    return {
+    return toAcquiredWorktreeLease(
       branch,
       leaseName,
       leasePath,
       worktreePath,
-      pid: metadata.pid,
-      acquiredAt: metadata.acquiredAt,
-      owner: metadata.owner,
-      ...(metadata.owner === "hub"
-        ? {
-            taskId: metadata.taskId,
-            flowId: metadata.flowId,
-            batchId: metadata.batchId,
-          }
-        : {}),
-    };
+      metadata,
+    );
   });
 
 /** Release the worktree lease for `branch` if present. */

@@ -288,16 +288,14 @@ describe("WorktreeLease Hub owner metadata", () => {
       flowId: "with-review",
       batchId: "batch-123",
     });
+    const polluted = Object.assign(metadata, {
+      prompt: "secret prompt",
+      commandLine: "archloop run --prompt-file task.md",
+      env: { API_KEY: "secret" },
+      taskContent: "user task body",
+    });
 
-    const serialized = serializeWorktreeLeaseMetadata({
-      ...metadata,
-      ...( {
-        prompt: "secret prompt",
-        commandLine: "archloop run --prompt-file task.md",
-        env: { API_KEY: "secret" },
-        taskContent: "user task body",
-      } as Record<string, unknown>),
-    } as typeof metadata);
+    const serialized = serializeWorktreeLeaseMetadata(polluted);
 
     expect(serialized).not.toHaveProperty("prompt");
     expect(serialized).not.toHaveProperty("commandLine");
