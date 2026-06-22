@@ -2,11 +2,8 @@ import {
   branchToWorktreeName,
   type WorktreeLeaseOwner,
   type WorktreeLeaseRecord,
-} from "./worktreeLease.js";
-import {
-  resolveHubTaskBranch,
-  type HubTaskProjection,
-} from "./taskBoard.js";
+} from "./worktreeLeaseStore.js";
+import { resolveHubTaskBranch, type HubTaskProjection } from "./taskBoard.js";
 
 export type HubWorktreeLeaseDiagnosticReason =
   | "worktree_lease_active_execution"
@@ -133,7 +130,11 @@ export const buildHubWorktreeLeaseDiagnostic = (
     );
   }
 
-  if (task.hubStatus === "failed" && claimState === "stale" && leaseState === "active") {
+  if (
+    task.hubStatus === "failed" &&
+    claimState === "stale" &&
+    leaseState === "active"
+  ) {
     return createTaskLeaseDiagnostic(
       task,
       branch,
@@ -150,7 +151,11 @@ export const buildHubWorktreeLeaseDiagnostic = (
     );
   }
 
-  if (task.hubStatus === "failed" && claimState === "stale" && leaseState === "stale") {
+  if (
+    task.hubStatus === "failed" &&
+    claimState === "stale" &&
+    leaseState === "stale"
+  ) {
     return createTaskLeaseDiagnostic(
       task,
       branch,
@@ -186,9 +191,7 @@ export const collectHubWorktreeLeaseDiagnosticsForTasks = (
   }
 
   const activeClaimTaskIds = new Set(
-    tasks
-      .filter((task) => task.claimState === "active")
-      .map((task) => task.id),
+    tasks.filter((task) => task.claimState === "active").map((task) => task.id),
   );
 
   for (const lease of leases) {

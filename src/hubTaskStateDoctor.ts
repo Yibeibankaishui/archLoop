@@ -23,7 +23,7 @@ import {
   type HubTaskProjection,
   type HubTaskStatus,
 } from "./taskBoard.js";
-import { listWorktreeLeases } from "./worktreeLease.js";
+import { listWorktreeLeases } from "./worktreeLeaseStore.js";
 
 const execFileAsync = promisify(execFile);
 
