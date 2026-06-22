@@ -68,6 +68,8 @@ export interface HubBatchPlannedEvent {
     readonly taskId: string;
     readonly reason: string;
   }[];
+  readonly fallbackReason?: string;
+  readonly rationale?: string;
 }
 
 export interface HubBatchMergeStartedEvent {

@@ -227,6 +227,10 @@ describe("Hub flow registry", () => {
       resolveHubFlowPromptPath("no-review", "implement"),
       "hub-flows/no-review/implement-prompt.md",
     );
+    expectBundledHubFlowPrompt(
+      resolveHubFlowPromptPath("no-review", "batchPlanner"),
+      "hub-flows/no-review/batch-planner-prompt.md",
+    );
   });
 
   it("ships bundled with-review prompts outside repo-local .archloop/", () => {
@@ -376,6 +380,102 @@ describe("Hub flow planner", () => {
     );
     expect(finalState.find((task) => task.id === "bd-second")?.labels).toContain(
       "ready-for-agent",
+    );
+  });
+
+  it("planned batch strategy uses the flow-owned batch planner before claim", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-planned-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-first",
+        title: "First ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-second",
+        title: "Second ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-third",
+        title: "Third ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    const invocations: HubImplementTaskInput[] = [];
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "planned",
+    );
+
+    const result = await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      batchStrategy: "planned",
+      maxTasks: 2,
+      batchPlanner: async () =>
+        `<batch-plan>${JSON.stringify({
+          selectedTaskIds: ["bd-first", "bd-second"],
+          deferred: [{ taskId: "bd-third", reason: "same_core_module" }],
+          rationale: "Two independent tasks can run in parallel.",
+        })}</batch-plan>`,
+      implementer: async (input) => {
+        invocations.push(input);
+        return {
+          outcome: "success",
+          commits: [{ sha: "abc123" }],
+          completionSignal: "<promise>COMPLETE</promise>",
+        };
+      },
+      runMergePhase: false,
+    });
+
+    expect(result.selectedTaskIds).toEqual(["bd-first", "bd-second"]);
+    expect(result.batchSelection).toMatchObject({
+      batchStrategyUsed: "planned",
+      maxTasks: 2,
+      deferredTasks: [{ taskId: "bd-third", reason: "same_core_module" }],
+      rationale: "Two independent tasks can run in parallel.",
+    });
+    expect(invocations.map((input) => input.taskId)).toEqual([
+      "bd-first",
+      "bd-second",
+    ]);
+
+    const batchEvents = await readJsonl(
+      join(result.runDir, "events", "batch.jsonl"),
+    );
+    const plannedEvent = batchEvents.find(
+      (event) => (event as { type?: string }).type === "batch_planned",
+    );
+    expect(plannedEvent).toMatchObject({
+      type: "batch_planned",
+      taskIds: ["bd-first", "bd-second"],
+      batchStrategyUsed: "planned",
+      maxTasks: 2,
+      deferredTasks: [{ taskId: "bd-third", reason: "same_core_module" }],
+      rationale: "Two independent tasks can run in parallel.",
+    });
+
+    expect(formatHubFlowResultLines(result).join("\n")).toContain(
+      "Batch strategy: planned (max 2)",
     );
   });
 });

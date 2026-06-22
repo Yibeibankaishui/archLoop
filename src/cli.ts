@@ -84,6 +84,7 @@ import {
   formatHubFlowResultLines,
   runHubFlow,
 } from "./hubFlowExecution.js";
+import { createHubBatchPlannerInvoker } from "./hubBatchPlannerAgent.js";
 import { resolveHubBatchSelectionOptions } from "./hubBatchPlanner.js";
 import { getHubFlowDefinition, listHubFlows } from "./hubFlows.js";
 import {
@@ -2463,7 +2464,7 @@ const flowYesOption = Options.boolean("yes").pipe(
 
 const flowBatchStrategyOption = Options.text("batch-strategy").pipe(
   Options.withDescription(
-    "Task-board batch selection strategy (conservative selects one eligible ready task)",
+    "Task-board batch selection strategy (planned uses the Hub batch planner; conservative selects one eligible ready task)",
   ),
   Options.optional,
 );
@@ -2986,6 +2987,10 @@ const runCommand = Command.make(
               : undefined,
             batchStrategy: batchSelectionOptions.batchStrategy,
             maxTasks: batchSelectionOptions.maxTasks,
+            batchPlanner:
+              batchSelectionOptions.batchStrategy === "planned"
+                ? createHubBatchPlannerInvoker({ env: process.env })
+                : undefined,
           }),
         catch: toHubFlowError,
       });

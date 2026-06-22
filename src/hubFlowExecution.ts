@@ -43,10 +43,12 @@ import {
   type HubBatchPlannerResult,
   type HubBatchStrategy,
 } from "./hubBatchPlanner.js";
+import type { HubBatchPlannerInvoker } from "./hubBatchPlannerAgent.js";
 import {
   loadHubTaskBoard,
   resolveHubTaskBranch,
   loadHubReadyQueue,
+  isHubFlowEligibleTask,
   type HubFailureReason,
   type HubTaskProjection,
 } from "./taskBoard.js";
@@ -114,6 +116,7 @@ export interface RunHubFlowInput {
   readonly runMergePhase?: boolean;
   readonly batchStrategy?: HubBatchStrategy;
   readonly maxTasks?: number;
+  readonly batchPlanner?: HubBatchPlannerInvoker;
 }
 
 export interface HubFlowTaskResult {
@@ -643,28 +646,16 @@ export const runHubFlow = async (
   const hubProjectDir =
     input.hubProjectDir ??
     resolveHubProjectDir(resolveArchloopUserDataDir(input.env), repoRoot);
+  const startedAt = input.startedAt ?? new Date();
   const readyBoard = loadHubReadyQueue(repoRoot, input.env);
-  const { selectedTasks, batchSelection } = selectHubFlowTasksWithBatchOptions({
-    candidates: readyBoard.tasks,
-    batchStrategy: input.batchStrategy,
-    maxTasks: input.maxTasks,
-  });
-  const selectedTaskIds = selectedTasks.map((task) => task.id);
+  const eligibleTasks = readyBoard.tasks.filter(isHubFlowEligibleTask);
   const unfinishedBatches = findResumableHubFlowBatches({
     hubProjectDir,
     flowId: input.flowId,
     tasks: loadHubTaskBoard(repoRoot, input.env).tasks,
   });
-  const unfinishedBatchIds = unfinishedBatches.map((batch) => batch.batchId);
   const resumedBatchId =
-    selectedTasks.length === 0 ? unfinishedBatches[0]?.batchId : undefined;
-  const mode =
-    selectedTasks.length > 0
-      ? "new_batch"
-      : resumedBatchId
-        ? "resumed_batch"
-        : "no_ready";
-  const startedAt = input.startedAt ?? new Date();
+    eligibleTasks.length === 0 ? unfinishedBatches[0]?.batchId : undefined;
   const context = createHubRunContext({
     cwd: repoRoot,
     hubProjectDir,
@@ -673,13 +664,33 @@ export const runHubFlow = async (
     startedAt,
     env: input.env,
   });
-
   mkdirSync(join(context.runDir, "logs"), { recursive: true });
+
+  const { selectedTasks, batchSelection } =
+    await selectHubFlowTasksWithBatchOptions({
+      flowId: input.flowId,
+      cwd: repoRoot,
+      env: input.env,
+      runDir: context.runDir,
+      candidates: readyBoard.tasks,
+      batchStrategy: input.batchStrategy,
+      maxTasks: input.maxTasks,
+      batchPlanner: input.batchPlanner,
+    });
+  const selectedTaskIds = selectedTasks.map((task) => task.id);
+  const unfinishedBatchIds = unfinishedBatches.map((batch) => batch.batchId);
+  const mode =
+    selectedTasks.length > 0
+      ? "new_batch"
+      : resumedBatchId
+        ? "resumed_batch"
+        : "no_ready";
+  const effectiveBatchId = resumedBatchId ?? context.batchId;
 
   appendHubBatchEvent(context.runDir, {
     type: "batch_planned",
     runId: context.runId,
-    batchId: context.batchId,
+    batchId: effectiveBatchId,
     flowId: input.flowId,
     createdAt: startedAt.toISOString(),
     taskIds: selectedTaskIds,
@@ -689,6 +700,8 @@ export const runHubFlow = async (
           batchStrategyUsed: batchSelection.batchStrategyUsed,
           maxTasks: batchSelection.maxTasks,
           deferredTasks: batchSelection.deferredTasks,
+          fallbackReason: batchSelection.fallbackReason,
+          rationale: batchSelection.rationale,
         }
       : {}),
   });
@@ -727,7 +740,7 @@ export const runHubFlow = async (
   return {
     flowId: input.flowId,
     runId: context.runId,
-    batchId: context.batchId,
+    batchId: effectiveBatchId,
     runDir: context.runDir,
     mode,
     selectedTaskIds,
@@ -754,6 +767,14 @@ export const formatHubFlowResultLines = (
     lines.push(
       `Batch strategy: ${result.batchSelection.batchStrategyUsed} (max ${result.batchSelection.maxTasks})`,
     );
+    if (result.batchSelection.fallbackReason) {
+      lines.push(
+        `Batch planner fallback: ${result.batchSelection.fallbackReason}`,
+      );
+    }
+    if (result.batchSelection.rationale) {
+      lines.push(`Batch planner rationale: ${result.batchSelection.rationale}`);
+    }
     if (result.batchSelection.deferredTasks.length > 0) {
       lines.push(
         `Deferred tasks: ${result.batchSelection.deferredTasks
