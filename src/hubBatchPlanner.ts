@@ -29,7 +29,18 @@ export interface HubBatchPlannerResult {
   readonly batchStrategyRequested: HubBatchStrategy;
   readonly batchStrategyUsed: HubBatchStrategy;
   readonly maxTasks: number;
+  readonly fallbackReason?: string;
 }
+
+export const HUB_BATCH_SELECTION_INVALID_REASONS = [
+  "duplicate_selection",
+  "over_max_tasks",
+  "not_in_candidate_set",
+  "not_ready_for_agent",
+  "active_claim",
+] as const;
+export type HubBatchSelectionInvalidReason =
+  (typeof HUB_BATCH_SELECTION_INVALID_REASONS)[number];
 
 export interface ResolvedHubBatchSelectionOptions {
   readonly batchStrategy?: HubBatchStrategy;
@@ -162,5 +173,132 @@ export const selectHubFlowTasksWithBatchOptions = (input: {
   return {
     selectedTasks: batchSelection.selectedTasks,
     batchSelection,
+  };
+};
+
+const indexHubTasksById = (
+  candidates: readonly HubTaskProjection[],
+): ReadonlyMap<string, HubTaskProjection> =>
+  new Map(candidates.map((task) => [task.id, task] as const));
+
+export const validateHubBatchSelectionFreshness = (input: {
+  readonly selectedTaskIds: readonly string[];
+  readonly freshCandidates: readonly HubTaskProjection[];
+  readonly maxTasks: number;
+}): {
+  readonly valid: boolean;
+  readonly invalidReasons: readonly HubBatchSelectionInvalidReason[];
+} => {
+  const invalidReasons = new Set<HubBatchSelectionInvalidReason>();
+  const seen = new Set<string>();
+
+  for (const taskId of input.selectedTaskIds) {
+    if (seen.has(taskId)) {
+      invalidReasons.add("duplicate_selection");
+      break;
+    }
+    seen.add(taskId);
+  }
+
+  if (
+    Number.isFinite(input.maxTasks) &&
+    input.selectedTaskIds.length > input.maxTasks
+  ) {
+    invalidReasons.add("over_max_tasks");
+  }
+
+  const freshById = indexHubTasksById(input.freshCandidates);
+
+  for (const taskId of input.selectedTaskIds) {
+    const task = freshById.get(taskId);
+    if (!task) {
+      invalidReasons.add("not_in_candidate_set");
+      continue;
+    }
+    if (task.claimState === "active") {
+      invalidReasons.add("active_claim");
+      continue;
+    }
+    if (task.hubStatus !== "ready_for_agent") {
+      invalidReasons.add("not_ready_for_agent");
+      continue;
+    }
+    if (!isHubFlowEligibleTask(task)) {
+      invalidReasons.add("not_in_candidate_set");
+    }
+  }
+
+  return {
+    valid: invalidReasons.size === 0,
+    invalidReasons: [...invalidReasons],
+  };
+};
+
+const mapSelectedTaskIdsToFreshCandidates = (
+  selectedTaskIds: readonly string[],
+  freshCandidates: readonly HubTaskProjection[],
+): readonly HubTaskProjection[] => {
+  const freshById = indexHubTasksById(freshCandidates);
+  return selectedTaskIds.flatMap((taskId) => {
+    const task = freshById.get(taskId);
+    return task ? [task] : [];
+  });
+};
+
+export const resolveFreshValidatedHubBatchSelection = (input: {
+  readonly initialSelectedTaskIds: readonly string[];
+  readonly freshCandidates: readonly HubTaskProjection[];
+  readonly batchStrategy?: HubBatchStrategy;
+  readonly maxTasks?: number;
+  readonly batchSelection?: HubBatchPlannerResult;
+}): {
+  readonly selectedTasks: readonly HubTaskProjection[];
+  readonly batchSelection?: HubBatchPlannerResult;
+  readonly fallbackReason?: string;
+} => {
+  let effectiveMaxTasks = input.maxTasks;
+  if (effectiveMaxTasks === undefined) {
+    effectiveMaxTasks = input.batchStrategy
+      ? HUB_BATCH_DEFAULT_MAX_TASKS
+      : Number.POSITIVE_INFINITY;
+  }
+  const validation = validateHubBatchSelectionFreshness({
+    selectedTaskIds: input.initialSelectedTaskIds,
+    freshCandidates: input.freshCandidates,
+    maxTasks: effectiveMaxTasks,
+  });
+
+  if (validation.valid) {
+    return {
+      selectedTasks: mapSelectedTaskIdsToFreshCandidates(
+        input.initialSelectedTaskIds,
+        input.freshCandidates,
+      ),
+      batchSelection: input.batchSelection,
+    };
+  }
+
+  const fallbackReason = validation.invalidReasons.join(", ");
+  const fallbackSelection = planHubFlowBatch({
+    candidates: input.freshCandidates,
+    batchStrategy: "conservative",
+    maxTasks: input.maxTasks ?? HUB_BATCH_DEFAULT_MAX_TASKS,
+  });
+
+  if (input.batchSelection) {
+    return {
+      selectedTasks: fallbackSelection.selectedTasks,
+      batchSelection: {
+        ...fallbackSelection,
+        batchStrategyRequested: input.batchSelection.batchStrategyRequested,
+        fallbackReason,
+      },
+      fallbackReason,
+    };
+  }
+
+  return {
+    selectedTasks: fallbackSelection.selectedTasks,
+    fallbackReason,
   };
 };
