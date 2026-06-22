@@ -84,6 +84,7 @@ import {
   formatHubFlowResultLines,
   runHubFlow,
 } from "./hubFlowExecution.js";
+import { createHubBatchPlannerInvoker } from "./hubBatchPlannerAgent.js";
 import { resolveHubBatchSelectionOptions } from "./hubBatchPlanner.js";
 import { getHubFlowDefinition, listHubFlows } from "./hubFlows.js";
 import {
@@ -2986,6 +2987,10 @@ const runCommand = Command.make(
               : undefined,
             batchStrategy: batchSelectionOptions.batchStrategy,
             maxTasks: batchSelectionOptions.maxTasks,
+            batchPlanner:
+              batchSelectionOptions.batchStrategy === "planned"
+                ? createHubBatchPlannerInvoker({ env: process.env })
+                : undefined,
           }),
         catch: toHubFlowError,
       });

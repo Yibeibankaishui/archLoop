@@ -47,6 +47,7 @@ import {
   type HubBatchPlannerResult,
   type HubBatchStrategy,
 } from "./hubBatchPlanner.js";
+import type { HubBatchPlannerInvoker } from "./hubBatchPlannerAgent.js";
 import {
   loadHubTaskBoard,
   resolveHubTaskBranch,
@@ -118,6 +119,7 @@ export interface RunHubFlowInput {
   readonly runMergePhase?: boolean;
   readonly batchStrategy?: HubBatchStrategy;
   readonly maxTasks?: number;
+  readonly batchPlanner?: HubBatchPlannerInvoker;
 }
 
 export interface HubFlowTaskResult {
@@ -648,6 +650,7 @@ export const runHubFlow = async (
   const hubProjectDir =
     input.hubProjectDir ??
     resolveHubProjectDir(resolveArchloopUserDataDir(input.env), repoRoot);
+  const startedAt = input.startedAt ?? new Date();
   const unfinishedBatches = findResumableHubFlowBatches({
     hubProjectDir,
     flowId: input.flowId,
@@ -656,7 +659,15 @@ export const runHubFlow = async (
   const unfinishedBatchIds = unfinishedBatches.map((batch) => batch.batchId);
   const resumedBatchId = unfinishedBatches[0]?.batchId;
   const isResumingMergeBatch = resumedBatchId !== undefined;
-
+  const context = createHubRunContext({
+    cwd: repoRoot,
+    hubProjectDir,
+    branch: `flow/${input.flowId}`,
+    batchId: resumedBatchId,
+    startedAt,
+    env: input.env,
+  });
+  mkdirSync(join(context.runDir, "logs"), { recursive: true });
   let selectedTasks: readonly HubTaskProjection[] = [];
   let batchSelection: HubBatchPlannerResult | undefined;
   let fallbackReason: string | undefined;
@@ -675,10 +686,15 @@ export const runHubFlow = async (
     const {
       selectedTasks: initiallySelectedTasks,
       batchSelection: initialBatchSelection,
-    } = selectHubFlowTasksWithBatchOptions({
+    } = await selectHubFlowTasksWithBatchOptions({
+      flowId: input.flowId,
+      cwd: repoRoot,
+      env: input.env,
+      runDir: context.runDir,
       candidates: readyBoard.tasks,
       batchStrategy,
       maxTasks,
+      batchPlanner: input.batchPlanner,
     });
     const freshBoard = loadHubReadyQueue(repoRoot, input.env);
     ({ selectedTasks, batchSelection, fallbackReason } =
@@ -692,25 +708,12 @@ export const runHubFlow = async (
   }
 
   const selectedTaskIds = selectedTasks.map((task) => task.id);
-  let mode: RunHubFlowResult["mode"];
-  if (isResumingMergeBatch) {
-    mode = "resumed_batch";
-  } else if (selectedTasks.length > 0) {
-    mode = "new_batch";
-  } else {
-    mode = "no_ready";
-  }
-  const startedAt = input.startedAt ?? new Date();
-  const context = createHubRunContext({
-    cwd: repoRoot,
-    hubProjectDir,
-    branch: `flow/${input.flowId}`,
-    batchId: resumedBatchId,
-    startedAt,
-    env: input.env,
-  });
-
-  mkdirSync(join(context.runDir, "logs"), { recursive: true });
+  const mode: RunHubFlowResult["mode"] = isResumingMergeBatch
+    ? "resumed_batch"
+    : selectedTasks.length > 0
+      ? "new_batch"
+      : "no_ready";
+  const effectiveBatchId = resumedBatchId ?? context.batchId;
 
   const batchPlannedMetadata: {
     batchStrategyRequested?: HubBatchStrategy;
@@ -718,6 +721,7 @@ export const runHubFlow = async (
     maxTasks?: number;
     deferredTasks?: HubBatchPlannerResult["deferredTasks"];
     fallbackReason?: string;
+    rationale?: string;
   } = {};
   if (batchSelection) {
     batchPlannedMetadata.batchStrategyRequested =
@@ -728,6 +732,9 @@ export const runHubFlow = async (
     if (batchSelection.fallbackReason) {
       batchPlannedMetadata.fallbackReason = batchSelection.fallbackReason;
     }
+    if (batchSelection.rationale) {
+      batchPlannedMetadata.rationale = batchSelection.rationale;
+    }
   } else if (fallbackReason) {
     batchPlannedMetadata.fallbackReason = fallbackReason;
   }
@@ -735,7 +742,7 @@ export const runHubFlow = async (
   appendHubBatchEvent(context.runDir, {
     type: "batch_planned",
     runId: context.runId,
-    batchId: context.batchId,
+    batchId: effectiveBatchId,
     flowId: input.flowId,
     createdAt: startedAt.toISOString(),
     taskIds: selectedTaskIds,
@@ -776,7 +783,7 @@ export const runHubFlow = async (
   return {
     flowId: input.flowId,
     runId: context.runId,
-    batchId: context.batchId,
+    batchId: effectiveBatchId,
     runDir: context.runDir,
     mode,
     selectedTaskIds,
@@ -814,6 +821,9 @@ export const formatHubFlowResultLines = (
     }
     if (result.batchSelection.fallbackReason) {
       lines.push(`Batch fallback: ${result.batchSelection.fallbackReason}`);
+    }
+    if (result.batchSelection.rationale) {
+      lines.push(`Batch planner rationale: ${result.batchSelection.rationale}`);
     }
     if (result.batchSelection.deferredTasks.length > 0) {
       lines.push(
