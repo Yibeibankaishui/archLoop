@@ -648,47 +648,55 @@ export const runHubFlow = async (
   const hubProjectDir =
     input.hubProjectDir ??
     resolveHubProjectDir(resolveArchloopUserDataDir(input.env), repoRoot);
-  const readyBoard = loadHubReadyQueue(repoRoot, input.env);
-  const effectiveBatchSelection = resolveEffectiveHubBatchSelection({
-    flowKind: flowDefinition.kind,
-    batchStrategy: input.batchStrategy,
-    maxTasks: input.maxTasks,
-  });
-  const batchStrategy =
-    effectiveBatchSelection.batchStrategy ?? HUB_BATCH_DEFAULT_STRATEGY;
-  const maxTasks =
-    effectiveBatchSelection.maxTasks ?? HUB_BATCH_DEFAULT_MAX_TASKS;
-  const {
-    selectedTasks: initiallySelectedTasks,
-    batchSelection: initialBatchSelection,
-  } = selectHubFlowTasksWithBatchOptions({
-    candidates: readyBoard.tasks,
-    batchStrategy,
-    maxTasks,
-  });
-  const freshBoard = loadHubReadyQueue(repoRoot, input.env);
-  const { selectedTasks, batchSelection, fallbackReason } =
-    resolveFreshValidatedHubBatchSelection({
-      initialSelectedTaskIds: initiallySelectedTasks.map((task) => task.id),
-      freshCandidates: freshBoard.tasks,
-      batchStrategy,
-      maxTasks,
-      batchSelection: initialBatchSelection,
-    });
-  const selectedTaskIds = selectedTasks.map((task) => task.id);
   const unfinishedBatches = findResumableHubFlowBatches({
     hubProjectDir,
     flowId: input.flowId,
     tasks: loadHubTaskBoard(repoRoot, input.env).tasks,
   });
   const unfinishedBatchIds = unfinishedBatches.map((batch) => batch.batchId);
-  const resumedBatchId =
-    selectedTasks.length === 0 ? unfinishedBatches[0]?.batchId : undefined;
+  const resumedBatchId = unfinishedBatches[0]?.batchId;
+  const isResumingMergeBatch = resumedBatchId !== undefined;
+
+  let selectedTasks: readonly HubTaskProjection[] = [];
+  let batchSelection: HubBatchPlannerResult | undefined;
+  let fallbackReason: string | undefined;
+
+  if (!isResumingMergeBatch) {
+    const readyBoard = loadHubReadyQueue(repoRoot, input.env);
+    const effectiveBatchSelection = resolveEffectiveHubBatchSelection({
+      flowKind: flowDefinition.kind,
+      batchStrategy: input.batchStrategy,
+      maxTasks: input.maxTasks,
+    });
+    const batchStrategy =
+      effectiveBatchSelection.batchStrategy ?? HUB_BATCH_DEFAULT_STRATEGY;
+    const maxTasks =
+      effectiveBatchSelection.maxTasks ?? HUB_BATCH_DEFAULT_MAX_TASKS;
+    const {
+      selectedTasks: initiallySelectedTasks,
+      batchSelection: initialBatchSelection,
+    } = selectHubFlowTasksWithBatchOptions({
+      candidates: readyBoard.tasks,
+      batchStrategy,
+      maxTasks,
+    });
+    const freshBoard = loadHubReadyQueue(repoRoot, input.env);
+    ({ selectedTasks, batchSelection, fallbackReason } =
+      resolveFreshValidatedHubBatchSelection({
+        initialSelectedTaskIds: initiallySelectedTasks.map((task) => task.id),
+        freshCandidates: freshBoard.tasks,
+        batchStrategy,
+        maxTasks,
+        batchSelection: initialBatchSelection,
+      }));
+  }
+
+  const selectedTaskIds = selectedTasks.map((task) => task.id);
   let mode: RunHubFlowResult["mode"];
-  if (selectedTasks.length > 0) {
-    mode = "new_batch";
-  } else if (resumedBatchId) {
+  if (isResumingMergeBatch) {
     mode = "resumed_batch";
+  } else if (selectedTasks.length > 0) {
+    mode = "new_batch";
   } else {
     mode = "no_ready";
   }
@@ -819,15 +827,13 @@ export const formatHubFlowResultLines = (
   }
   if (result.resumedBatchId) {
     lines.push(`Resumed batch id: ${result.resumedBatchId}`);
-  } else if (result.unfinishedBatchIds.length > 0) {
-    lines.push(
-      `Unfinished batches not resumed: ${result.unfinishedBatchIds.join(", ")}`,
-    );
   }
 
   if (selectedTaskCount === 0) {
-    lines.push("No ready tasks selected.");
-    if (!result.resumedBatchId) {
+    if (result.mode === "resumed_batch") {
+      lines.push("No new tasks claimed; resuming prior merge-ready batch.");
+    } else {
+      lines.push("No ready tasks selected.");
       lines.push(`No unfinished ${result.flowId} batch found to resume.`);
     }
   } else {
