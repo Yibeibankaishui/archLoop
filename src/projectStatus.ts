@@ -10,7 +10,7 @@ import {
   isHubTaskStoreInitialized,
 } from "./hubTaskStore.js";
 import {
-  collectActiveHubWorktreeLeaseDiagnostics,
+  collectHubWorktreeLeaseDiagnosticsForTasks,
   type HubWorktreeLeaseDiagnostic,
 } from "./hubWorktreeLeaseDiagnostics.js";
 import {
@@ -825,7 +825,7 @@ export const resolveHubProjectStatus = (
   const worktreeLeaseDiagnostics =
     board === undefined
       ? []
-      : collectActiveHubWorktreeLeaseDiagnostics(
+      : collectHubWorktreeLeaseDiagnosticsForTasks(
           board.tasks,
           (options.listWorktreeLeases ?? listWorktreeLeases)(repoRoot),
         );

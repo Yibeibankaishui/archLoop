@@ -190,4 +190,38 @@ describe("hubWorktreeLeaseDiagnostics", () => {
       }),
     );
   });
+
+  it("does not duplicate diagnostics for failed tasks with stale claims and active leases", () => {
+    const task = createTask({
+      id: "bd-6",
+      title: "Failed but running",
+      hubStatus: "failed",
+      claimState: "stale",
+      claim: {
+        runId: "run-6",
+        batchId: "batch-6",
+        branch: "archloop/bd-6-failed-but-running",
+        claimedAt: "2026-06-22T10:00:00.000Z",
+        raw: {},
+      },
+    });
+    const lease = createLease({
+      branch: "archloop/bd-6-failed-but-running",
+      state: "active",
+      owner: { kind: "hub", taskId: "bd-6" },
+    });
+
+    const diagnostics = collectHubWorktreeLeaseDiagnosticsForTasks(
+      [task],
+      [lease],
+    );
+
+    expect(diagnostics).toHaveLength(1);
+    expect(diagnostics[0]).toEqual(
+      expect.objectContaining({
+        taskId: "bd-6",
+        reason: "worktree_lease_active_with_failed_claim",
+      }),
+    );
+  });
 });

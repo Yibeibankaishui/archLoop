@@ -71,6 +71,26 @@ const formatOwnerSummary = (owner: WorktreeLeaseOwner | undefined): string => {
   return "direct execution";
 };
 
+const createTaskLeaseDiagnostic = (
+  task: HubTaskProjection,
+  branch: string,
+  worktreeName: string,
+  claimState: HubWorktreeLeaseDiagnostic["claimState"],
+  leaseState: HubWorktreeLeaseDiagnostic["leaseState"],
+  lease: WorktreeLeaseRecord | undefined,
+  fields: Pick<HubWorktreeLeaseDiagnostic, "reason" | "message" | "nextAction">,
+): HubWorktreeLeaseDiagnostic => ({
+  taskId: task.id,
+  title: task.title,
+  branch,
+  worktreeName,
+  claimState,
+  leaseState,
+  pid: lease?.pid,
+  owner: lease?.owner,
+  ...fields,
+});
+
 export const buildHubWorktreeLeaseDiagnostic = (
   task: HubTaskProjection,
   lease: WorktreeLeaseRecord | undefined,
@@ -81,67 +101,69 @@ export const buildHubWorktreeLeaseDiagnostic = (
   const leaseState = lease?.state ?? "missing";
 
   if (claimState === "active" && leaseState === "active") {
-    return {
-      taskId: task.id,
-      title: task.title,
-      reason: "worktree_lease_active_execution",
+    return createTaskLeaseDiagnostic(
+      task,
       branch,
       worktreeName,
-      leaseState,
       claimState,
-      pid: lease?.pid,
-      owner: lease?.owner,
-      nextAction: "Wait for the active execution to finish before retrying.",
-      message: `Task ${task.id} has an active Hub claim and an active worktree lease on ${branch} (${formatOwnerSummary(lease?.owner)}, pid ${lease?.pid}).`,
-    };
+      leaseState,
+      lease,
+      {
+        reason: "worktree_lease_active_execution",
+        nextAction: "Wait for the active execution to finish before retrying.",
+        message: `Task ${task.id} has an active Hub claim and an active worktree lease on ${branch} (${formatOwnerSummary(lease?.owner)}, pid ${lease?.pid}).`,
+      },
+    );
   }
 
   if (claimState === "active" && leaseState === "missing") {
-    return {
-      taskId: task.id,
-      title: task.title,
-      reason: "worktree_lease_missing",
+    return createTaskLeaseDiagnostic(
+      task,
       branch,
       worktreeName,
-      leaseState,
       claimState,
-      nextAction:
-        "Rerun the flow to recreate execution state, or recover the task if execution was abandoned.",
-      message: `Task ${task.id} has an active Hub claim on ${branch}, but no worktree lease is present.`,
-    };
+      leaseState,
+      lease,
+      {
+        reason: "worktree_lease_missing",
+        nextAction:
+          "Rerun the flow to recreate execution state, or recover the task if execution was abandoned.",
+        message: `Task ${task.id} has an active Hub claim on ${branch}, but no worktree lease is present.`,
+      },
+    );
   }
 
   if (task.hubStatus === "failed" && claimState === "stale" && leaseState === "active") {
-    return {
-      taskId: task.id,
-      title: task.title,
-      reason: "worktree_lease_active_with_failed_claim",
+    return createTaskLeaseDiagnostic(
+      task,
       branch,
       worktreeName,
-      leaseState,
       claimState,
-      pid: lease?.pid,
-      owner: lease?.owner,
-      nextAction:
-        "Wait for the active worktree execution to finish, then run archloop tasks recover.",
-      message: `Failed task ${task.id} still has stale claim metadata, but ${branch} remains locked by active execution (${formatOwnerSummary(lease?.owner)}, pid ${lease?.pid}).`,
-    };
+      leaseState,
+      lease,
+      {
+        reason: "worktree_lease_active_with_failed_claim",
+        nextAction:
+          "Wait for the active worktree execution to finish, then run archloop tasks recover.",
+        message: `Failed task ${task.id} still has stale claim metadata, but ${branch} remains locked by active execution (${formatOwnerSummary(lease?.owner)}, pid ${lease?.pid}).`,
+      },
+    );
   }
 
   if (task.hubStatus === "failed" && claimState === "stale" && leaseState === "stale") {
-    return {
-      taskId: task.id,
-      title: task.title,
-      reason: "worktree_lease_stale_with_failed_claim",
+    return createTaskLeaseDiagnostic(
+      task,
       branch,
       worktreeName,
-      leaseState,
       claimState,
-      pid: lease?.pid,
-      owner: lease?.owner,
-      nextAction: `archloop tasks recover ${task.id} to retry from the preserved branch and worktree.`,
-      message: `Failed task ${task.id} has stale claim metadata and a stale worktree lease on ${branch}. The worktree is preserved for retry.`,
-    };
+      leaseState,
+      lease,
+      {
+        reason: "worktree_lease_stale_with_failed_claim",
+        nextAction: `archloop tasks recover ${task.id} to retry from the preserved branch and worktree.`,
+        message: `Failed task ${task.id} has stale claim metadata and a stale worktree lease on ${branch}. The worktree is preserved for retry.`,
+      },
+    );
   }
 
   return undefined;
@@ -152,33 +174,39 @@ export const collectHubWorktreeLeaseDiagnosticsForTasks = (
   leases: readonly WorktreeLeaseRecord[],
 ): readonly HubWorktreeLeaseDiagnostic[] => {
   const diagnostics: HubWorktreeLeaseDiagnostic[] = [];
+  const diagnosedTaskIds = new Set<string>();
 
   for (const task of tasks) {
     const lease = findLeaseForTask(task, leases);
     const diagnostic = buildHubWorktreeLeaseDiagnostic(task, lease);
     if (diagnostic) {
       diagnostics.push(diagnostic);
+      diagnosedTaskIds.add(diagnostic.taskId);
     }
   }
 
-  const claimedTaskIds = new Set(
+  const activeClaimTaskIds = new Set(
     tasks
       .filter((task) => task.claimState === "active")
       .map((task) => task.id),
   );
 
   for (const lease of leases) {
-    if (lease.state !== "active" || lease.owner?.kind !== "hub" || !lease.owner.taskId) {
-      continue;
-    }
-    if (claimedTaskIds.has(lease.owner.taskId)) {
+    const taskId = lease.owner?.taskId;
+    if (
+      lease.state !== "active" ||
+      lease.owner?.kind !== "hub" ||
+      !taskId ||
+      activeClaimTaskIds.has(taskId) ||
+      diagnosedTaskIds.has(taskId)
+    ) {
       continue;
     }
 
-    const task = tasks.find((entry) => entry.id === lease.owner?.taskId);
+    const task = tasks.find((entry) => entry.id === taskId);
     diagnostics.push({
-      taskId: lease.owner.taskId,
-      title: task?.title ?? lease.owner.taskId,
+      taskId,
+      title: task?.title ?? taskId,
       reason: "worktree_lease_active_without_claim",
       branch: lease.branch,
       worktreeName: lease.worktreeName,
@@ -187,9 +215,9 @@ export const collectHubWorktreeLeaseDiagnosticsForTasks = (
       pid: lease.pid,
       owner: lease.owner,
       nextAction: task
-        ? `Wait for execution on ${lease.branch} to finish, or recover task ${lease.owner.taskId} if execution was abandoned.`
+        ? `Wait for execution on ${lease.branch} to finish, or recover task ${taskId} if execution was abandoned.`
         : `Wait for execution on ${lease.branch} to finish before starting another run on that branch.`,
-      message: `Worktree lease on ${lease.branch} is active (${formatOwnerSummary(lease.owner)}, pid ${lease.pid}), but Hub has no active claim for task ${lease.owner.taskId}.`,
+      message: `Worktree lease on ${lease.branch} is active (${formatOwnerSummary(lease.owner)}, pid ${lease.pid}), but Hub has no active claim for task ${taskId}.`,
     });
   }
 
@@ -197,16 +225,3 @@ export const collectHubWorktreeLeaseDiagnosticsForTasks = (
     left.taskId.localeCompare(right.taskId),
   );
 };
-
-export const collectActiveHubWorktreeLeaseDiagnostics = (
-  tasks: readonly HubTaskProjection[],
-  leases: readonly WorktreeLeaseRecord[],
-): readonly HubWorktreeLeaseDiagnostic[] =>
-  collectHubWorktreeLeaseDiagnosticsForTasks(tasks, leases).filter(
-    (diagnostic) =>
-      diagnostic.reason === "worktree_lease_active_execution" ||
-      diagnostic.reason === "worktree_lease_active_with_failed_claim" ||
-      diagnostic.reason === "worktree_lease_active_without_claim" ||
-      diagnostic.reason === "worktree_lease_missing" ||
-      diagnostic.reason === "worktree_lease_stale_with_failed_claim",
-  );
