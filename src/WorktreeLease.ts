@@ -31,6 +31,40 @@ export interface DirectWorktreeLeaseMetadata {
   readonly acquiredAt: string;
 }
 
+export interface HubWorktreeLeaseMetadata {
+  readonly owner: "hub";
+  readonly taskId: string;
+  readonly flowId: string;
+  readonly batchId: string;
+  readonly branch: string;
+  readonly pid: number;
+  readonly acquiredAt: string;
+}
+
+export type WorktreeLeaseMetadata =
+  | DirectWorktreeLeaseMetadata
+  | HubWorktreeLeaseMetadata;
+
+export interface DirectWorktreeLeaseOwnerInput {
+  readonly kind: "direct";
+}
+
+export interface HubWorktreeLeaseOwnerInput {
+  readonly kind: "hub";
+  readonly taskId: string;
+  readonly flowId: string;
+  readonly batchId: string;
+}
+
+export type WorktreeLeaseOwnerInput =
+  | DirectWorktreeLeaseOwnerInput
+  | HubWorktreeLeaseOwnerInput;
+
+export interface AcquireWorktreeLeaseInput {
+  readonly branch: string;
+  readonly owner?: WorktreeLeaseOwnerInput;
+}
+
 export interface AcquiredWorktreeLease {
   readonly branch: string;
   readonly leaseName: string;
@@ -38,7 +72,43 @@ export interface AcquiredWorktreeLease {
   readonly worktreePath: string;
   readonly pid: number;
   readonly acquiredAt: string;
+  readonly owner: WorktreeLeaseMetadata["owner"];
+  readonly taskId?: string;
+  readonly flowId?: string;
+  readonly batchId?: string;
 }
+
+const DIRECT_LEASE_METADATA_KEYS = [
+  "owner",
+  "pid",
+  "branch",
+  "acquiredAt",
+] as const;
+
+const HUB_LEASE_METADATA_KEYS = [
+  "owner",
+  "taskId",
+  "flowId",
+  "batchId",
+  "branch",
+  "pid",
+  "acquiredAt",
+] as const;
+
+const FORBIDDEN_LEASE_METADATA_KEYS = [
+  "prompt",
+  "promptFile",
+  "commandLine",
+  "command",
+  "env",
+  "environment",
+  "agentOutput",
+  "stdout",
+  "stderr",
+  "taskContent",
+  "title",
+  "description",
+] as const;
 
 const locksDirectory = (repoDir: string): string =>
   join(repoDir, ".archloop", "locks");
@@ -59,6 +129,65 @@ export const isProcessAlive = (pid: number): boolean => {
     }
     return false;
   }
+};
+
+/** Build lease metadata from owner input, omitting sensitive execution content. */
+export const buildWorktreeLeaseMetadata = (
+  branch: string,
+  owner: WorktreeLeaseOwnerInput = { kind: "direct" },
+  options?: { readonly acquiredAt?: string; readonly pid?: number },
+): WorktreeLeaseMetadata => {
+  const acquiredAt = options?.acquiredAt ?? new Date().toISOString();
+  const pid = options?.pid ?? process.pid;
+
+  if (owner.kind === "hub") {
+    return {
+      owner: "hub",
+      taskId: owner.taskId,
+      flowId: owner.flowId,
+      batchId: owner.batchId,
+      branch,
+      pid,
+      acquiredAt,
+    };
+  }
+
+  return {
+    owner: "direct",
+    pid,
+    branch,
+    acquiredAt,
+  };
+};
+
+/**
+ * Serialize lease metadata using an allowlist of safe diagnostic fields.
+ * Allowlisting is the primary guard; the forbidden-key pass is a backstop if a
+ * sensitive field is ever added to an allowlist by mistake.
+ */
+export const serializeWorktreeLeaseMetadata = (
+  metadata: WorktreeLeaseMetadata,
+): Record<string, string | number> => {
+  const allowedKeys =
+    metadata.owner === "hub"
+      ? HUB_LEASE_METADATA_KEYS
+      : DIRECT_LEASE_METADATA_KEYS;
+
+  const serialized: Record<string, string | number> = {};
+  for (const key of allowedKeys) {
+    const value = metadata[key as keyof WorktreeLeaseMetadata];
+    if (typeof value === "string" || typeof value === "number") {
+      serialized[key] = value;
+    }
+  }
+
+  for (const forbidden of FORBIDDEN_LEASE_METADATA_KEYS) {
+    if (forbidden in serialized) {
+      delete serialized[forbidden];
+    }
+  }
+
+  return serialized;
 };
 
 const mapFsError = (message: string): WorktreeError =>
@@ -98,11 +227,31 @@ const malformedLeaseError = (
 };
 
 const activeLeaseError = (
-  metadata: DirectWorktreeLeaseMetadata,
+  metadata: WorktreeLeaseMetadata,
   repoDir: string,
   branch: string,
 ): WorktreeLeaseError => {
   const { leasePath, worktreePath } = leaseDiagnostics(repoDir, branch);
+
+  if (metadata.owner === "hub") {
+    return new WorktreeLeaseError({
+      reason: "active",
+      branch,
+      leasePath,
+      worktreePath,
+      pid: metadata.pid,
+      acquiredAt: metadata.acquiredAt,
+      taskId: metadata.taskId,
+      flowId: metadata.flowId,
+      batchId: metadata.batchId,
+      message:
+        `Task '${metadata.taskId}' already has active execution ` +
+        `(flow ${metadata.flowId}, batch ${metadata.batchId}, branch '${metadata.branch}', ` +
+        `process ${metadata.pid}, acquired at ${metadata.acquiredAt}). ` +
+        "Wait for that execution to finish, or recover the task if it failed.",
+    });
+  }
+
   return new WorktreeLeaseError({
     reason: "active",
     branch,
@@ -116,6 +265,12 @@ const activeLeaseError = (
   });
 };
 
+const isNonEmptyString = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0;
+
+const isPositiveInteger = (value: unknown): value is number =>
+  typeof value === "number" && Number.isInteger(value) && value > 0;
+
 const isDirectWorktreeLeaseMetadata = (
   value: unknown,
 ): value is DirectWorktreeLeaseMetadata => {
@@ -126,28 +281,48 @@ const isDirectWorktreeLeaseMetadata = (
   const record = value as Record<string, unknown>;
   return (
     record.owner === "direct" &&
-    typeof record.pid === "number" &&
-    Number.isInteger(record.pid) &&
-    record.pid > 0 &&
-    typeof record.branch === "string" &&
-    record.branch.length > 0 &&
-    typeof record.acquiredAt === "string" &&
-    record.acquiredAt.length > 0
+    isPositiveInteger(record.pid) &&
+    isNonEmptyString(record.branch) &&
+    isNonEmptyString(record.acquiredAt)
   );
 };
+
+const isHubWorktreeLeaseMetadata = (
+  value: unknown,
+): value is HubWorktreeLeaseMetadata => {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+  return (
+    record.owner === "hub" &&
+    isNonEmptyString(record.taskId) &&
+    isNonEmptyString(record.flowId) &&
+    isNonEmptyString(record.batchId) &&
+    isNonEmptyString(record.branch) &&
+    isPositiveInteger(record.pid) &&
+    isNonEmptyString(record.acquiredAt)
+  );
+};
+
+const isWorktreeLeaseMetadata = (
+  value: unknown,
+): value is WorktreeLeaseMetadata =>
+  isDirectWorktreeLeaseMetadata(value) || isHubWorktreeLeaseMetadata(value);
 
 const parseLeaseMetadata = (
   raw: string,
   repoDir: string,
   branch: string,
   options?: { readonly requireBranchMatch?: boolean },
-): Effect.Effect<DirectWorktreeLeaseMetadata, WorktreeLeaseError> =>
+): Effect.Effect<WorktreeLeaseMetadata, WorktreeLeaseError> =>
   Effect.try({
     try: () => JSON.parse(raw) as unknown,
     catch: () => malformedLeaseError(repoDir, branch, "invalid JSON"),
   }).pipe(
     Effect.flatMap((value) => {
-      if (!isDirectWorktreeLeaseMetadata(value)) {
+      if (!isWorktreeLeaseMetadata(value)) {
         return Effect.fail(
           malformedLeaseError(repoDir, branch, "missing required fields"),
         );
@@ -171,18 +346,20 @@ const readLeaseMetadata = (
   repoDir: string,
   branch: string,
 ): Effect.Effect<
-  DirectWorktreeLeaseMetadata,
+  WorktreeLeaseMetadata,
   WorktreeLeaseError,
   FileSystem.FileSystem
 > =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const { leasePath } = leaseDiagnostics(repoDir, branch);
-    const raw = yield* fs.readFileString(leasePath).pipe(
-      Effect.mapError(() =>
-        malformedLeaseError(repoDir, branch, "lease file unreadable"),
-      ),
-    );
+    const raw = yield* fs
+      .readFileString(leasePath)
+      .pipe(
+        Effect.mapError(() =>
+          malformedLeaseError(repoDir, branch, "lease file unreadable"),
+        ),
+      );
     return yield* parseLeaseMetadata(raw, repoDir, branch);
   });
 
@@ -210,8 +387,12 @@ const removeLeaseFileByPath = (
 const createLeaseFileAtomic = (
   repoDir: string,
   branch: string,
-  metadata: DirectWorktreeLeaseMetadata,
-): Effect.Effect<void, WorktreeLeaseError | WorktreeError, FileSystem.FileSystem> =>
+  metadata: WorktreeLeaseMetadata,
+): Effect.Effect<
+  void,
+  WorktreeLeaseError | WorktreeError,
+  FileSystem.FileSystem
+> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const locksDir = locksDirectory(repoDir);
@@ -220,7 +401,7 @@ const createLeaseFileAtomic = (
       .pipe(Effect.mapError((error) => mapFsError(error.message)));
 
     const { leasePath } = leaseDiagnostics(repoDir, branch);
-    const content = `${JSON.stringify(metadata)}\n`;
+    const content = `${JSON.stringify(serializeWorktreeLeaseMetadata(metadata))}\n`;
 
     const created = yield* Effect.tryPromise({
       try: async () => {
@@ -299,9 +480,9 @@ export const recoverStaleWorktreeLeaseIfNeeded = (
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const { leasePath } = leaseDiagnostics(repoDir, branch);
-    const exists = yield* fs.exists(leasePath).pipe(
-      Effect.mapError((error) => mapFsError(error.message)),
-    );
+    const exists = yield* fs
+      .exists(leasePath)
+      .pipe(Effect.mapError((error) => mapFsError(error.message)));
     if (!exists) {
       return "absent" as const;
     }
@@ -324,7 +505,11 @@ export const recoverStaleWorktreeLeaseIfNeeded = (
 const ensureLeaseNotActive = (
   repoDir: string,
   branch: string,
-): Effect.Effect<void, WorktreeLeaseError | WorktreeError, FileSystem.FileSystem> =>
+): Effect.Effect<
+  void,
+  WorktreeLeaseError | WorktreeError,
+  FileSystem.FileSystem
+> =>
   Effect.gen(function* () {
     const recovery = yield* recoverStaleWorktreeLeaseIfNeeded(repoDir, branch);
     if (recovery === "active") {
@@ -333,13 +518,42 @@ const ensureLeaseNotActive = (
     }
   });
 
+const toAcquiredWorktreeLease = (
+  branch: string,
+  leaseName: string,
+  leasePath: string,
+  worktreePath: string,
+  metadata: WorktreeLeaseMetadata,
+): AcquiredWorktreeLease => {
+  const base = {
+    branch,
+    leaseName,
+    leasePath,
+    worktreePath,
+    pid: metadata.pid,
+    acquiredAt: metadata.acquiredAt,
+    owner: metadata.owner,
+  };
+
+  if (metadata.owner === "hub") {
+    return {
+      ...base,
+      taskId: metadata.taskId,
+      flowId: metadata.flowId,
+      batchId: metadata.batchId,
+    };
+  }
+
+  return base;
+};
+
 /**
  * Acquire an exclusive worktree lease for `branch`, recovering stale lease
  * files when the recorded owner process is no longer alive.
  */
 export const acquireWorktreeLease = (
   repoDir: string,
-  input: { readonly branch: string },
+  input: AcquireWorktreeLeaseInput,
 ): Effect.Effect<
   AcquiredWorktreeLease,
   WorktreeLeaseError | WorktreeError,
@@ -347,16 +561,12 @@ export const acquireWorktreeLease = (
 > =>
   Effect.gen(function* () {
     const branch = input.branch;
+    const owner: WorktreeLeaseOwnerInput = input.owner ?? { kind: "direct" };
     const { leaseName, leasePath, worktreePath } = leaseDiagnostics(
       repoDir,
       branch,
     );
-    const metadata: DirectWorktreeLeaseMetadata = {
-      owner: "direct",
-      pid: process.pid,
-      branch,
-      acquiredAt: new Date().toISOString(),
-    };
+    const metadata = buildWorktreeLeaseMetadata(branch, owner);
 
     const tryAcquire = (): Effect.Effect<
       void,
@@ -376,14 +586,13 @@ export const acquireWorktreeLease = (
       ),
     );
 
-    return {
+    return toAcquiredWorktreeLease(
       branch,
       leaseName,
       leasePath,
       worktreePath,
-      pid: metadata.pid,
-      acquiredAt: metadata.acquiredAt,
-    };
+      metadata,
+    );
   });
 
 /** Release the worktree lease for `branch` if present. */
@@ -427,7 +636,11 @@ export const pruneOrphanWorktreeLeases = (
  */
 export const pruneStaleWorktreeLeases = (
   repoDir: string,
-): Effect.Effect<void, WorktreeError | WorktreeLeaseError, FileSystem.FileSystem> =>
+): Effect.Effect<
+  void,
+  WorktreeError | WorktreeLeaseError,
+  FileSystem.FileSystem
+> =>
   Effect.gen(function* () {
     yield* pruneOrphanWorktreeLeases(repoDir);
 
@@ -441,9 +654,7 @@ export const pruneStaleWorktreeLeases = (
       }
       const leaseName = entry.slice(0, -".lock".length);
       const leasePath = join(locksDir, entry);
-      const raw = yield* fs.readFileString(leasePath).pipe(
-        Effect.option,
-      );
+      const raw = yield* fs.readFileString(leasePath).pipe(Effect.option);
       if (Option.isNone(raw)) {
         continue;
       }
@@ -452,7 +663,9 @@ export const pruneStaleWorktreeLeases = (
         raw.value,
         repoDir,
         leaseName,
-        { requireBranchMatch: false },
+        {
+          requireBranchMatch: false,
+        },
       ).pipe(Effect.option);
 
       if (Option.isNone(metadata)) {

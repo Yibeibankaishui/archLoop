@@ -47,6 +47,7 @@ const execFileAsync = promisify(execFile);
 
 export interface HubImplementTaskInput {
   readonly flowId: string;
+  readonly batchId: string;
   readonly taskId: string;
   readonly title: string;
   readonly branch: string;
@@ -69,6 +70,7 @@ export type HubFlowImplementer = (
 
 export interface HubReviewTaskInput {
   readonly flowId: string;
+  readonly batchId: string;
   readonly taskId: string;
   readonly title: string;
   readonly branch: string;
@@ -263,6 +265,8 @@ const buildHubAgentPromptArgs = (
 const runHubAgent = async (input: {
   readonly cwd: string;
   readonly promptFile: string;
+  readonly flowId: string;
+  readonly batchId: string;
   readonly taskId: string;
   readonly title: string;
   readonly branch: string;
@@ -289,6 +293,12 @@ const runHubAgent = async (input: {
     promptArgs: buildHubAgentPromptArgs(input),
     branchStrategy: { type: "branch", branch: input.branch },
     name: input.name,
+    worktreeLeaseOwner: {
+      kind: "hub",
+      taskId: input.taskId,
+      flowId: input.flowId,
+      batchId: input.batchId,
+    },
     logging: {
       type: "file",
       path: join(input.runDir, "logs", input.logFileName),
@@ -331,6 +341,7 @@ const reviewSelectedTask = async (
   try {
     reviewResult = await reviewer({
       flowId: input.flowId,
+      batchId: context.batchId,
       taskId: task.id,
       title: task.title,
       branch,
@@ -443,6 +454,7 @@ const implementSelectedTask = async (
   try {
     implementationResult = await input.implementer({
       flowId: input.flowId,
+      batchId: context.batchId,
       taskId: task.id,
       title: task.title,
       branch,
@@ -720,6 +732,8 @@ export const createHubFlowRunImplementer = (options: {
       const result = await runHubAgent({
         cwd: options.cwd,
         promptFile: input.promptFile,
+        flowId: input.flowId,
+        batchId: input.batchId,
         taskId: input.taskId,
         title: input.title,
         branch: input.branch,
@@ -783,6 +797,8 @@ export const createHubFlowRunReviewer = (options: {
       const result = await runHubAgent({
         cwd: options.cwd,
         promptFile: input.promptFile,
+        flowId: input.flowId,
+        batchId: input.batchId,
         taskId: input.taskId,
         title: input.title,
         branch: input.branch,

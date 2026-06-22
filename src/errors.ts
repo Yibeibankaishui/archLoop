@@ -46,6 +46,9 @@ export class WorktreeLeaseError extends Data.TaggedError("WorktreeLeaseError")<{
   readonly leasePath?: string;
   readonly pid?: number;
   readonly acquiredAt?: string;
+  readonly taskId?: string;
+  readonly flowId?: string;
+  readonly batchId?: string;
 }> {}
 
 /** User-facing message when archLoop runs in a Git repo with no commits. */
@@ -255,6 +258,7 @@ export type SandboxError =
   | PodmanError
   | SyncError
   | WorktreeError
+  | WorktreeLeaseError
   | PromptError
   | AgentError
   | ConfigDirError
