@@ -130,6 +130,10 @@ _Avoid_: "named-branch"
 A git worktree created in `.archloop/worktrees/` on the **host**, used by the **merge-to-head** and **branch** strategies. For **bind-mount sandbox providers**, the **worktree** is mounted into the **sandbox**. For **isolated sandbox providers**, the **worktree** is the sync source/destination -- commits from the **sandbox** are pulled back into the **worktree**. Created explicitly via `createWorktree()` or implicitly by `run()`/`interactive()` when using a non-**head** **branch strategy**.
 _Avoid_: "workspace", "branch copy", "clone"
 
+**Worktree lease**:
+A time-bounded claim that one archLoop run session, interactive session, or **flow** run owns a **worktree**.
+_Avoid_: "workspace lease", "directory lock"
+
 **Source branch**:
 The branch the **agent** works on -- determined by the **branch strategy**.
 _Avoid_: "working branch", "agent branch"
@@ -380,6 +384,9 @@ _Avoid_: "log event" (the log file contains more than just agent output), "displ
 - Each **sandbox provider** has a **branch strategy** configured at construction time
 - A **bind-mount sandbox provider** supports all three **branch strategies**: **head** (default), **merge-to-head**, and **branch**
 - An **isolated sandbox provider** supports **merge-to-head** (default) and **branch** only -- **head** is not valid because it cannot write directly to the **host** filesystem
+- A non-**head** **branch strategy** requires a **worktree lease** before the **agent** can use a **worktree**
+- A **worktree lease** acquired by a Hub **flow** should identify the owning **task** and **flow batch** when that context exists
+- A Hub task retry starts from the preserved task branch and **worktree**, and the retry **flow** must tell the **agent** to continue from the preserved work rather than start from scratch
 - An **isolated sandbox provider** handles syncing code in and extracting commits out -- optionally using **bundle/patch sync**. **Isolated sandbox providers are defined in the type system but not yet implemented**
 - A **no-sandbox provider** supports all three **branch strategies** (default: **head**). It is accepted by `run()`, `createSandbox()`, and `interactive()` -- the caller opts in to host execution by importing `noSandbox()`. The **agent provider** does not receive `dangerouslySkipPermissions: true`
 - `run()`, `createSandbox()`, and `interactive()` all accept any **sandbox provider** type, including **no-sandbox**
