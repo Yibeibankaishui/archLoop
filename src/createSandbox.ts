@@ -50,6 +50,7 @@ import type {
 import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
 import * as WorktreeManager from "./WorktreeManager.js";
+import { createHeldWorktreeLease } from "./WorktreeLease.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
 import { resolveCwd } from "./resolveCwd.js";
 import { patchGitMountsForWindows } from "./mountUtils.js";
@@ -717,20 +718,41 @@ export const createSandbox = async (
   const { branch } = options;
   const isTestMode = !!options._test?.buildSandboxLayer;
 
+  const heldLease = createHeldWorktreeLease();
+
+  const releaseHeldLease = () =>
+    Effect.runPromise(
+      heldLease.release().pipe(Effect.provide(NodeFileSystem.layer)),
+    );
+
   // 1. Resolve cwd, prune stale worktrees + create worktree on the explicit branch
-  const { hostRepoDir, worktreeInfo } = await Effect.runPromise(
-    Effect.gen(function* () {
+  let hostRepoDir: string;
+  let worktreeInfo: WorktreeManager.WorktreeInfo;
+
+  try {
+    const created = await Effect.gen(function* () {
       const hostRepoDir = yield* resolveCwd(options.cwd);
       yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
         Effect.catchAll(() => Effect.void),
       );
+      yield* heldLease.acquire(hostRepoDir, branch);
       const worktreeInfo = yield* WorktreeManager.create(hostRepoDir, {
         branch,
         baseBranch: options.baseBranch,
       });
       return { hostRepoDir, worktreeInfo };
-    }).pipe(Effect.provide(NodeContext.layer)),
-  );
+    }).pipe(
+      Effect.provide(NodeContext.layer),
+      Effect.provide(NodeFileSystem.layer),
+      Effect.runPromise,
+    );
+
+    hostRepoDir = created.hostRepoDir;
+    worktreeInfo = created.worktreeInfo;
+  } catch (error) {
+    await releaseHeldLease();
+    throw error;
+  }
 
   const worktreePath = worktreeInfo.path;
 
@@ -896,6 +918,7 @@ export const createSandbox = async (
     );
 
     if (isDirty) {
+      await releaseHeldLease();
       return { preservedWorktreePath: worktreePath };
     }
 
@@ -906,6 +929,7 @@ export const createSandbox = async (
       ),
     );
 
+    await releaseHeldLease();
     return { preservedWorktreePath: undefined };
   };
 

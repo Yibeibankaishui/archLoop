@@ -611,6 +611,64 @@ export const releaseWorktreeLease = (
 ): Effect.Effect<void, WorktreeError, FileSystem.FileSystem> =>
   removeLeaseFile(repoDir, branch);
 
+/** Map lease errors to WorktreeError for callers that surface a single error type. */
+export const mapWorktreeLeaseError = (
+  error: WorktreeLeaseError | WorktreeError,
+): WorktreeError => new WorktreeError({ message: error.message });
+
+/** Best-effort lease release; ignores missing files and I/O errors. */
+export const releaseHeldWorktreeLease = (
+  repoDir: string,
+  branch: string,
+): Effect.Effect<void, never, FileSystem.FileSystem> =>
+  releaseWorktreeLease(repoDir, branch).pipe(
+    Effect.catchAll(() => Effect.void),
+  );
+
+/**
+ * Tracks a worktree lease held for a long-lived handle (`createWorktree`,
+ * `createSandbox`). Call `acquire` during setup and `release` on close or
+ * setup failure.
+ */
+export interface HeldWorktreeLease {
+  readonly acquire: (
+    repoDir: string,
+    branch: string,
+  ) => Effect.Effect<void, WorktreeError, FileSystem.FileSystem>;
+  readonly release: () => Effect.Effect<void, never, FileSystem.FileSystem>;
+}
+
+export const createHeldWorktreeLease = (): HeldWorktreeLease => {
+  let repoDir: string | undefined;
+  let branch: string | undefined;
+  let held = false;
+
+  return {
+    acquire: (dir, leaseBranch) =>
+      acquireWorktreeLease(dir, { branch: leaseBranch }).pipe(
+        Effect.mapError(mapWorktreeLeaseError),
+        Effect.tap(() =>
+          Effect.sync(() => {
+            repoDir = dir;
+            branch = leaseBranch;
+            held = true;
+          }),
+        ),
+      ),
+    release: () => {
+      if (!held || repoDir === undefined || branch === undefined) {
+        return Effect.void;
+      }
+      const dir = repoDir;
+      const leaseBranch = branch;
+      held = false;
+      repoDir = undefined;
+      branch = undefined;
+      return releaseHeldWorktreeLease(dir, leaseBranch);
+    },
+  };
+};
+
 /**
  * Remove lease files whose managed worktree directory no longer exists.
  * Does not delete worktree directories.

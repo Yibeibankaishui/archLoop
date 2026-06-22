@@ -43,6 +43,7 @@ import { mergeProviderEnv } from "./mergeProviderEnv.js";
 import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
 import * as WorktreeManager from "./WorktreeManager.js";
+import { createHeldWorktreeLease } from "./WorktreeLease.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
 import { resolveCwd } from "./resolveCwd.js";
 import {
@@ -221,29 +222,61 @@ export const createWorktree = async (
       ? options.branchStrategy.baseBranch
       : undefined;
 
-  const { hostRepoDir, worktreeInfo } = await Effect.gen(function* () {
-    const hostRepoDir = yield* resolveCwd(options.cwd);
-    yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
-      Effect.catchAll(() => Effect.void),
+  const heldLease = createHeldWorktreeLease();
+
+  const releaseHeldLease = () =>
+    Effect.runPromise(
+      heldLease.release().pipe(Effect.provide(NodeFileSystem.layer)),
     );
-    const info = yield* WorktreeManager.create(hostRepoDir, {
-      branch,
-      baseBranch,
-    });
-    if (options.copyToWorktree && options.copyToWorktree.length > 0) {
-      yield* copyToWorktree(
-        options.copyToWorktree,
-        hostRepoDir,
-        info.path,
-        options.timeouts?.copyToWorktreeMs,
+
+  let hostRepoDir: string;
+  let worktreeInfo: WorktreeManager.WorktreeInfo;
+
+  try {
+    const created = await Effect.gen(function* () {
+      const hostRepoDir = yield* resolveCwd(options.cwd);
+      yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
+        Effect.catchAll(() => Effect.void),
       );
-    }
-    // Run host.onWorktreeReady hooks after copyToWorktree, before sandbox creation
-    if (options.hooks?.host?.onWorktreeReady?.length) {
-      yield* runHostHooks(options.hooks.host.onWorktreeReady, info.path);
-    }
-    return { hostRepoDir, worktreeInfo: info };
-  }).pipe(Effect.provide(NodeContext.layer), Effect.runPromise);
+
+      if (branch) {
+        yield* heldLease.acquire(hostRepoDir, branch);
+      }
+
+      const info = yield* WorktreeManager.create(hostRepoDir, {
+        branch,
+        baseBranch,
+      });
+
+      if (!branch) {
+        yield* heldLease.acquire(hostRepoDir, info.branch);
+      }
+
+      if (options.copyToWorktree && options.copyToWorktree.length > 0) {
+        yield* copyToWorktree(
+          options.copyToWorktree,
+          hostRepoDir,
+          info.path,
+          options.timeouts?.copyToWorktreeMs,
+        );
+      }
+      // Run host.onWorktreeReady hooks after copyToWorktree, before sandbox creation
+      if (options.hooks?.host?.onWorktreeReady?.length) {
+        yield* runHostHooks(options.hooks.host.onWorktreeReady, info.path);
+      }
+      return { hostRepoDir, worktreeInfo: info };
+    }).pipe(
+      Effect.provide(NodeContext.layer),
+      Effect.provide(NodeFileSystem.layer),
+      Effect.runPromise,
+    );
+
+    hostRepoDir = created.hostRepoDir;
+    worktreeInfo = created.worktreeInfo;
+  } catch (error) {
+    await releaseHeldLease();
+    throw error;
+  }
 
   let closed = false;
 
@@ -251,7 +284,7 @@ export const createWorktree = async (
     if (closed) return { preservedWorktreePath: undefined };
     closed = true;
 
-    return Effect.gen(function* () {
+    const result = await Effect.gen(function* () {
       const isDirty = yield* WorktreeManager.hasUncommittedChanges(
         worktreeInfo.path,
       ).pipe(Effect.catchAll(() => Effect.succeed(false)));
@@ -266,6 +299,9 @@ export const createWorktree = async (
 
       return { preservedWorktreePath: undefined } as CloseResult;
     }).pipe(Effect.runPromise);
+
+    await releaseHeldLease();
+    return result;
   };
 
   const worktreeInteractive = async (

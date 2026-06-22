@@ -9,13 +9,16 @@ import {
   ExecError,
   SyncError,
   WorktreeError,
-  WorktreeLeaseError,
   type DockerError,
   type SandboxError,
 } from "./errors.js";
 import type { Timeouts } from "./run.js";
 import type { WorktreeLeaseOwnerInput } from "./WorktreeLease.js";
-import { acquireWorktreeLease, releaseWorktreeLease } from "./WorktreeLease.js";
+import {
+  acquireWorktreeLease,
+  mapWorktreeLeaseError,
+  releaseHeldWorktreeLease,
+} from "./WorktreeLease.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
 import { Display } from "./Display.js";
@@ -339,22 +342,18 @@ export const WorktreeDockerSandboxFactory = {
       const defaultWorktreeLeaseOwner: WorktreeLeaseOwnerInput = {
         kind: "direct",
       };
-      const mapLeaseError = (
-        error: WorktreeLeaseError | WorktreeError,
-      ): WorktreeError => new WorktreeError({ message: error.message });
 
       const acquireLeaseForBranch = (leaseBranch: string) =>
         acquireWorktreeLease(hostRepoDir, {
           branch: leaseBranch,
           owner: worktreeLeaseOwner ?? defaultWorktreeLeaseOwner,
         }).pipe(
-          Effect.mapError(mapLeaseError),
+          Effect.mapError(mapWorktreeLeaseError),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
         );
 
       const releaseLeaseForBranch = (leaseBranch: string) =>
-        releaseWorktreeLease(hostRepoDir, leaseBranch).pipe(
-          Effect.catchAll(() => Effect.void),
+        releaseHeldWorktreeLease(hostRepoDir, leaseBranch).pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
         );
 
