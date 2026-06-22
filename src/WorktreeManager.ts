@@ -2,7 +2,7 @@ import { Effect, Option } from "effect";
 import { FileSystem } from "@effect/platform";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
-import { pruneStaleWorktreeLeases } from "./WorktreeLease.js";
+import { pruneStaleWorktreeLeases, leaseNameFromBranch } from "./WorktreeLease.js";
 import {
   emptyRepoWorktreeError,
   WorktreeError,
@@ -175,7 +175,7 @@ export const create = (
 
     if (opts?.branch) {
       branch = opts.branch;
-      worktreeName = branch.replace(/\//g, "-");
+      worktreeName = leaseNameFromBranch(branch);
     } else {
       const timestamp = formatTimestamp(new Date());
       if (opts?.name) {
