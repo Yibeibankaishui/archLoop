@@ -1508,9 +1508,15 @@ if (command === "update") {
   }
   const metadataIndex = args.indexOf("--metadata");
   if (metadataIndex >= 0) {
-    task.metadata = JSON.parse(args[metadataIndex + 1]);
+    task.metadata = {
+      ...task.metadata,
+      ...JSON.parse(args[metadataIndex + 1]),
+    };
   }
   for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--unset-metadata") {
+      delete task.metadata[args[index + 1]];
+    }
     if (args[index] === "--set-labels") {
       task.labels = [];
     }
@@ -1644,7 +1650,15 @@ if (command === "update") {
   }
   const metadataIndex = args.indexOf("--metadata");
   if (metadataIndex >= 0) {
-    task.metadata = JSON.parse(args[metadataIndex + 1]);
+    task.metadata = {
+      ...task.metadata,
+      ...JSON.parse(args[metadataIndex + 1]),
+    };
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--unset-metadata") {
+      delete task.metadata[args[index + 1]];
+    }
   }
   fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
   process.exit(0);
@@ -1892,7 +1906,15 @@ if (args[0] === "update") {
   }
   const metadataIndex = args.indexOf("--metadata");
   if (metadataIndex >= 0) {
-    task.metadata = JSON.parse(args[metadataIndex + 1]);
+    task.metadata = {
+      ...task.metadata,
+      ...JSON.parse(args[metadataIndex + 1]),
+    };
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--unset-metadata") {
+      delete task.metadata[args[index + 1]];
+    }
   }
   writeState(state);
   process.exit(0);
@@ -2356,7 +2378,17 @@ if (command === "update") {
     }
   }
   const metadataIndex = args.indexOf("--metadata");
-  if (metadataIndex >= 0) task.metadata = JSON.parse(args[metadataIndex + 1]);
+  if (metadataIndex >= 0) {
+    task.metadata = {
+      ...task.metadata,
+      ...JSON.parse(args[metadataIndex + 1]),
+    };
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--unset-metadata") {
+      delete task.metadata[args[index + 1]];
+    }
+  }
   writeState(state);
   process.exit(0);
 }

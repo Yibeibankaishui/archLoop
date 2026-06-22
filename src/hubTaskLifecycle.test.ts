@@ -132,7 +132,15 @@ if (command === "update" && id) {
   }
   const metadataIndex = args.indexOf("--metadata");
   if (metadataIndex >= 0) {
-    task.metadata = JSON.parse(args[metadataIndex + 1]);
+    task.metadata = {
+      ...task.metadata,
+      ...JSON.parse(args[metadataIndex + 1]),
+    };
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--unset-metadata") {
+      delete task.metadata[args[index + 1]];
+    }
   }
   writeState(state);
   process.exit(0);
@@ -745,6 +753,7 @@ describe("Hub task lifecycle merge outcomes", () => {
       await readFile(stateFile, "utf-8"),
     ) as MockBeadsTask[];
     expect(finalState[0]?.metadata.failureReason).toBe("close_failed");
+    expect(finalState[0]?.metadata.done).toBeUndefined();
 
     const taskEvents = await readJsonl(
       join(context.runDir, "events", "task.jsonl"),
@@ -791,6 +800,9 @@ describe("Hub task lifecycle merge outcomes", () => {
     ) as MockBeadsTask[];
     expect(finalState[0]?.status).toBe("closed");
     expect(finalState[0]?.labels).toContain("done");
+    expect(finalState[0]?.metadata.claim).toBeUndefined();
+    expect(finalState[0]?.metadata.failed).toBeUndefined();
+    expect(finalState[0]?.metadata.failureReason).toBeUndefined();
 
     const taskEvents = await readJsonl(
       join(context.runDir, "events", "task.jsonl"),
@@ -1488,5 +1500,6 @@ describe("Hub task lifecycle recovery", () => {
     expect(task.claim).toBeUndefined();
     expect(task.metadata.failed).toBeUndefined();
     expect(task.metadata.failureReason).toBeUndefined();
+    expect(task.metadata.done).toBe(true);
   });
 });

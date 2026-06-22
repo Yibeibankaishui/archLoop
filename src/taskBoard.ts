@@ -16,7 +16,11 @@ import {
   resolveHubTaskClaimState,
   type HubTaskClaimMetadata,
 } from "./hubExecution.js";
-import { appendBdMetadataArg, appendBdSetLabelsArgs } from "./bdCliArgs.js";
+import {
+  appendBdMetadataArg,
+  appendBdSetLabelsArgs,
+  appendBdUnsetMetadataArgs,
+} from "./bdCliArgs.js";
 import { TaskBoardError } from "./errors.js";
 import { runBdTextForHubTaskStore } from "./hubTaskStore.js";
 
@@ -1066,6 +1070,11 @@ const resolveTransitionClaim = (
   return patchClaim ? { ...patchClaim } : undefined;
 };
 
+const removedMetadataKeys = (
+  previous: Readonly<Record<string, unknown>>,
+  next: Readonly<Record<string, unknown>>,
+): string[] => Object.keys(previous).filter((key) => !(key in next));
+
 export interface UpdateHubTaskStatusInput {
   readonly cwd: string;
   readonly taskId: string;
@@ -1128,6 +1137,13 @@ export const transitionHubTaskStatus = (
 
   appendBdMetadataArg(args, metadata);
   runBdText(input.cwd, args, `tasks update ${input.taskId}`, input.env);
+
+  const metadataKeysToUnset = removedMetadataKeys(task.metadata, metadata);
+  if (metadataKeysToUnset.length > 0) {
+    const unsetArgs = ["update", input.taskId];
+    appendBdUnsetMetadataArgs(unsetArgs, metadataKeysToUnset);
+    runBdText(input.cwd, unsetArgs, `tasks update ${input.taskId}`, input.env);
+  }
 
   const updatedTask = loadHubTask(input.cwd, input.taskId, input.env);
   assertHubTaskTransition(updatedTask, input.hubStatus);

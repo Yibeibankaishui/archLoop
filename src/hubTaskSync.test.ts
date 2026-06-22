@@ -221,12 +221,18 @@ if (command === "update") {
   }
   const metadataIndex = args.indexOf("--metadata");
   if (metadataIndex >= 0) {
-    task.metadata = JSON.parse(args[metadataIndex + 1]);
+    task.metadata = {
+      ...task.metadata,
+      ...JSON.parse(args[metadataIndex + 1]),
+    };
     if (task.metadata.remote_refs) {
       task.remoteRefs = task.metadata.remote_refs.map((url) => ({ url }));
     }
   }
   for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--unset-metadata") {
+      delete task.metadata[args[index + 1]];
+    }
     if (args[index] === "--add-label") {
       const label = args[index + 1];
       task.labels = [...new Set([...(task.labels ?? []), label])];

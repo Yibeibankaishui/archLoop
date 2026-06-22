@@ -35,6 +35,21 @@ export const appendBdSetLabelsArgs = (
   }
 };
 
+export const appendBdUnsetMetadataArgs = (
+  args: string[],
+  keys: readonly string[],
+): void => {
+  const seen = new Set<string>();
+  for (const key of keys) {
+    const trimmed = key.trim();
+    if (trimmed.length === 0 || seen.has(trimmed)) {
+      continue;
+    }
+    seen.add(trimmed);
+    args.push("--unset-metadata", trimmed);
+  }
+};
+
 export const appendBdMetadataArg = (
   args: string[],
   metadata: Record<string, unknown>,
