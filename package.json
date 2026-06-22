@@ -59,7 +59,7 @@
   "packageManager": "npm@10.9.2",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yibeibankaishui/archloop"
+    "url": "https://github.com/Yibeibankaishui/archLoop"
   },
   "license": "MIT",
   "devDependencies": {

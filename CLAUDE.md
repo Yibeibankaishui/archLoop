@@ -15,7 +15,7 @@ Use these names for all new code, docs, tests, generated files, and user-facing 
 - User data directory name: `archloop`
 - Env var prefix: `ARCHLOOP_`
 - Managed branch prefix: `archloop/`
-- GitHub owner/repo: `yibeibankaishui/archloop`
+- GitHub owner/repo: `Yibeibankaishui/archLoop`
 
 Do not introduce new references to the old Sandcastle identity, including `Sandcastle`, `sandcastle`, `.sandcastle/`, `SANDCASTLE_*`, `@ai-hero/sandcastle`, `ai-hero`, or `mattpocock`, except inside explicit historical rename/migration documents.
 
@@ -44,7 +44,7 @@ The repo ships a portable agent skill at `skills/archloop-usage/SKILL.md` that t
 
 ### Issue tracker
 
-Issues are GitHub issues in the repository `gh` resolves for this clone (`gh repo view`). See `docs/agents/issue-tracker.md` for how to point `gh issue` at the intended repository (`gh repo set-default yibeibankaishui/archloop`).
+Issues are GitHub issues in the repository `gh` resolves for this clone (`gh repo view`). See `docs/agents/issue-tracker.md` for how to point `gh issue` at the intended repository (`gh repo set-default Yibeibankaishui/archLoop`).
 
 ### Triage labels
 

@@ -1,6 +1,6 @@
 # Sandbox Provider Research
 
-Research for [#250](https://github.com/yibeibankaishui/archloop/issues/250) — pluggable sandbox providers.
+Research for [#250](https://github.com/Yibeibankaishui/archLoop/issues/250) — pluggable sandbox providers.
 
 **Date:** 2026-04-10
 

@@ -16,7 +16,7 @@
 | 产品展示名          | Sandcastle                                              | archLoop                    |
 | npm 包名            | `@ai-hero/sandcastle`                                   | `@yibeibankaishui/archloop` |
 | CLI 命令            | `sandcastle`                                            | `archloop`                  |
-| GitHub owner/repo   | `mattpocock/sandcastle` 或 `Yibeibankaishui/sandcastle` | `yibeibankaishui/archloop`  |
+| GitHub owner/repo   | `mattpocock/sandcastle` 或 `Yibeibankaishui/sandcastle` | `Yibeibankaishui/archLoop`  |
 | repo-local 配置目录 | `.sandcastle/`                                          | `.archloop/`                |
 | 用户数据目录        | `sandcastle`                                            | `archloop`                  |
 | env var 前缀        | `SANDCASTLE_`                                           | `ARCHLOOP_`                 |
@@ -57,7 +57,7 @@
 - 更新 root `package.json`：
   - `name` 改为 `@yibeibankaishui/archloop`。
   - `bin` 改为 `{ "archloop": "dist/main.js" }`。
-  - `repository.url` 改为 `https://github.com/yibeibankaishui/archloop`。
+  - `repository.url` 改为 `https://github.com/Yibeibankaishui/archLoop`。
   - 自引用 devDependency 改为 `@yibeibankaishui/archloop`。
   - scripts 中的 `.sandcastle/*` 和 `sandcastle` 改为 `.archloop/*` 和 `archloop`。
 - 更新 `package-lock.json`。

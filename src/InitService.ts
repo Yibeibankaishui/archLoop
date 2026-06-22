@@ -392,7 +392,7 @@ RUN curl -fsSL https://claude.ai/install.sh | bash`,
     dockerfileTemplate: CLAUDE_CODE_DOCKERFILE,
     envVars: ["ANTHROPIC_API_KEY"],
     envExample: `# Anthropic API key
-# If you want to use your Claude subscription instead of an API key, see https://github.com/yibeibankaishui/archloop/issues/191
+# If you want to use your Claude subscription instead of an API key, see https://github.com/Yibeibankaishui/archLoop/issues/191
 ANTHROPIC_API_KEY=`,
   },
   {
@@ -1068,7 +1068,7 @@ export function getNextStepsLines(
     const lines: string[] = [
       "Next steps:",
       `${step++}. Set the required env vars in .archloop/.env (see .archloop/.env.example)`,
-      "   If you want to use your Claude subscription instead of an API key, see https://github.com/yibeibankaishui/archloop/issues/191",
+      "   If you want to use your Claude subscription instead of an API key, see https://github.com/Yibeibankaishui/archLoop/issues/191",
       `${step++}. Read and customize .archloop/prompt.md to describe what you want the agent to do`,
       `${step++}. Customize .archloop/${mainFilename} — it uses the JS API (\`run()\`) to control how the agent runs and can mix installed agent providers after init`,
       `${step++}. ${packageScriptStep}`,
@@ -1096,7 +1096,7 @@ export function getNextStepsLines(
   const lines: string[] = [
     "Next steps:",
     `${step++}. Set the required env vars in .archloop/.env (see .archloop/.env.example)`,
-    "   If you want to use your Claude subscription instead of an API key, see https://github.com/yibeibankaishui/archloop/issues/191",
+    "   If you want to use your Claude subscription instead of an API key, see https://github.com/Yibeibankaishui/archLoop/issues/191",
     `${step++}. ${packageScriptStep}`,
     `${step++}. Edit .archloop/${mainFilename} to mix installed agent providers after init; the selected default agent only seeds the scaffolded example`,
     `${step++}. ${nonBlankBootstrapNextStep}`,

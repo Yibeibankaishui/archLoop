@@ -7,7 +7,7 @@ archLoop unified interface 是 archLoop 的新主入口。它把项目管理、�
 首版主仓库为：
 
 ```text
-https://github.com/yibeibankaishui/archloop.git
+https://github.com/Yibeibankaishui/archLoop.git
 ```
 
 旧的 `archloop init` 方式仍然保留。已经使用 `.archloop/main.ts` 或 `.archloop/main.mts` 的项目可以继续按原流程运行；新的主要使用方式推荐直接使用 Hub / task board / flow 命令。

@@ -1,6 +1,6 @@
 # Permissions: Systemic Diagnosis and Proposed Fix
 
-Research document compiled during triage of #499. Catalogues every permission-related bug report (open + closed) in `yibeibankaishui/archloop`, identifies the systemic root causes still live on `main`, and proposes a four-layer fix.
+Research document compiled during triage of #499. Catalogues every permission-related bug report (open + closed) in `Yibeibankaishui/archLoop`, identifies the systemic root causes still live on `main`, and proposes a four-layer fix.
 
 ## 1. Taxonomy
 

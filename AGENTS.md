@@ -15,7 +15,7 @@ Use these names for all new code, docs, tests, generated files, and user-facing 
 - User data directory name: `archloop`
 - Env var prefix: `ARCHLOOP_`
 - Managed branch prefix: `archloop/`
-- GitHub owner/repo: `yibeibankaishui/archloop`
+- GitHub owner/repo: `Yibeibankaishui/archLoop`
 
 Do not introduce new references to the old Sandcastle identity, including `Sandcastle`, `sandcastle`, `.sandcastle/`, `SANDCASTLE_*`, `@ai-hero/sandcastle`, `ai-hero`, or `mattpocock`, except inside explicit historical rename/migration documents.
 
@@ -50,7 +50,7 @@ The repo ships a portable agent skill at `skills/archloop-usage/SKILL.md` that t
 
 Issues are GitHub issues in the repository `gh` resolves for this clone (`gh repo view`).
 
-For this clone, treat `yibeibankaishui/archloop` as the default remote repository for all `gh issue`, `gh pr`, PRD publication, and other GitHub CLI write operations. Before creating or editing issues/PRs, verify that `gh repo set-default --view` resolves to `yibeibankaishui/archloop`; if it does not, either run `gh repo set-default yibeibankaishui/archloop` or pass `-R yibeibankaishui/archloop` explicitly on the command.
+For this clone, treat `Yibeibankaishui/archLoop` as the default remote repository for all `gh issue`, `gh pr`, PRD publication, and other GitHub CLI write operations. Before creating or editing issues/PRs, verify that `gh repo set-default --view` resolves to `Yibeibankaishui/archLoop`; if it does not, either run `gh repo set-default Yibeibankaishui/archLoop` or pass `-R Yibeibankaishui/archLoop` explicitly on the command.
 
 Do not assume `origin` is the writable/default GitHub target for agent operations.
 
