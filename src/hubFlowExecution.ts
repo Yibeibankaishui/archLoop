@@ -39,6 +39,8 @@ import {
   prepareHubTaskRetry,
 } from "./hubTaskRetry.js";
 import {
+  HUB_BATCH_DEFAULT_MAX_TASKS,
+  HUB_BATCH_DEFAULT_STRATEGY,
   resolveEffectiveHubBatchSelection,
   selectHubFlowTasksWithBatchOptions,
   type HubBatchPlannerResult,
@@ -650,10 +652,14 @@ export const runHubFlow = async (
     batchStrategy: input.batchStrategy,
     maxTasks: input.maxTasks,
   });
+  const batchStrategy =
+    effectiveBatchSelection.batchStrategy ?? HUB_BATCH_DEFAULT_STRATEGY;
+  const maxTasks =
+    effectiveBatchSelection.maxTasks ?? HUB_BATCH_DEFAULT_MAX_TASKS;
   const { selectedTasks, batchSelection } = selectHubFlowTasksWithBatchOptions({
     candidates: readyBoard.tasks,
-    batchStrategy: effectiveBatchSelection.batchStrategy!,
-    maxTasks: effectiveBatchSelection.maxTasks!,
+    batchStrategy,
+    maxTasks,
   });
   const selectedTaskIds = selectedTasks.map((task) => task.id);
   const unfinishedBatches = findResumableHubFlowBatches({
@@ -664,12 +670,14 @@ export const runHubFlow = async (
   const unfinishedBatchIds = unfinishedBatches.map((batch) => batch.batchId);
   const resumedBatchId =
     selectedTasks.length === 0 ? unfinishedBatches[0]?.batchId : undefined;
-  const mode =
-    selectedTasks.length > 0
-      ? "new_batch"
-      : resumedBatchId
-        ? "resumed_batch"
-        : "no_ready";
+  let mode: RunHubFlowResult["mode"];
+  if (selectedTasks.length > 0) {
+    mode = "new_batch";
+  } else if (resumedBatchId) {
+    mode = "resumed_batch";
+  } else {
+    mode = "no_ready";
+  }
   const startedAt = input.startedAt ?? new Date();
   const context = createHubRunContext({
     cwd: repoRoot,
@@ -689,16 +697,12 @@ export const runHubFlow = async (
     flowId: input.flowId,
     createdAt: startedAt.toISOString(),
     taskIds: selectedTaskIds,
-    ...(batchSelection
-      ? {
-          batchStrategyRequested: batchSelection.batchStrategyRequested,
-          batchStrategyUsed: batchSelection.batchStrategyUsed,
-          maxTasks: batchSelection.maxTasks,
-          deferredTasks: batchSelection.deferredTasks,
-          ...(batchSelection.fallbackReason
-            ? { fallbackReason: batchSelection.fallbackReason }
-            : {}),
-        }
+    batchStrategyRequested: batchSelection.batchStrategyRequested,
+    batchStrategyUsed: batchSelection.batchStrategyUsed,
+    maxTasks: batchSelection.maxTasks,
+    deferredTasks: batchSelection.deferredTasks,
+    ...(batchSelection.fallbackReason
+      ? { fallbackReason: batchSelection.fallbackReason }
       : {}),
   });
 

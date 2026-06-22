@@ -53,18 +53,15 @@ const invalidMaxTasksError = (raw: string): HubFlowError =>
     message: `Invalid --max-tasks value "${raw}". Expected an integer between ${HUB_BATCH_MIN_MAX_TASKS} and ${HUB_BATCH_MAX_TASKS_UPPER_LIMIT}.`,
   });
 
+const isHubBatchStrategy = (value: string): value is HubBatchStrategy =>
+  (HUB_BATCH_STRATEGIES as readonly string[]).includes(value);
+
 const parseHubBatchStrategyNormalized = (
   normalized: string,
   raw: string,
 ): HubBatchStrategy => {
-  if (normalized === "planned") {
-    return "planned";
-  }
-  if (normalized === "limited") {
-    return "limited";
-  }
-  if (normalized === "conservative") {
-    return "conservative";
+  if (isHubBatchStrategy(normalized)) {
+    return normalized;
   }
   throw new HubFlowError({
     message: `Unknown batch strategy "${raw}". Supported strategies: ${HUB_BATCH_STRATEGIES.join(", ")}.`,
@@ -142,16 +139,30 @@ export const resolveEffectiveHubBatchSelection = (input: {
   };
 };
 
+const partitionEligibleCandidates = (
+  candidates: readonly HubTaskProjection[],
+  selectionLimit: number,
+): {
+  readonly selectedTasks: readonly HubTaskProjection[];
+  readonly deferredTasks: readonly HubBatchDeferredTask[];
+} => {
+  const eligible = candidates.filter(isHubFlowEligibleTask);
+  return {
+    selectedTasks: eligible.slice(0, selectionLimit),
+    deferredTasks: eligible.slice(selectionLimit).map((task) => ({
+      taskId: task.id,
+      reason: "over_max_tasks",
+    })),
+  };
+};
+
 const planConservativeBatch = (
   input: HubBatchPlannerInput,
 ): HubBatchPlannerResult => {
-  const eligible = input.candidates.filter(isHubFlowEligibleTask);
-  const effectiveLimit = Math.min(input.maxTasks, 1);
-  const selectedTasks = eligible.slice(0, effectiveLimit);
-  const deferredTasks = eligible.slice(effectiveLimit).map((task) => ({
-    taskId: task.id,
-    reason: "over_max_tasks" as const,
-  }));
+  const { selectedTasks, deferredTasks } = partitionEligibleCandidates(
+    input.candidates,
+    1,
+  );
 
   return {
     selectedTasks,
@@ -165,12 +176,10 @@ const planConservativeBatch = (
 const planLimitedBatch = (
   input: HubBatchPlannerInput,
 ): HubBatchPlannerResult => {
-  const eligible = input.candidates.filter(isHubFlowEligibleTask);
-  const selectedTasks = eligible.slice(0, input.maxTasks);
-  const deferredTasks = eligible.slice(input.maxTasks).map((task) => ({
-    taskId: task.id,
-    reason: "over_max_tasks" as const,
-  }));
+  const { selectedTasks, deferredTasks } = partitionEligibleCandidates(
+    input.candidates,
+    input.maxTasks,
+  );
 
   return {
     selectedTasks,
