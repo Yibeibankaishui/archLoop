@@ -10,12 +10,17 @@ import {
   isHubTaskStoreInitialized,
 } from "./hubTaskStore.js";
 import {
+  collectActiveHubWorktreeLeaseDiagnostics,
+  type HubWorktreeLeaseDiagnostic,
+} from "./hubWorktreeLeaseDiagnostics.js";
+import {
   loadHubTaskBoard,
   type HubFailureReason,
   type HubTaskBoard,
   type HubTaskProjection,
   type HubTaskStatus,
 } from "./taskBoard.js";
+import { listWorktreeLeases } from "./worktreeLease.js";
 
 export interface HubProjectTaskCounts {
   readonly ready: number;
@@ -73,6 +78,7 @@ export interface HubProjectStatus {
   readonly activeBatches: readonly HubProjectBatchSummary[];
   readonly runDirectories: readonly string[];
   readonly recentEvents: readonly string[];
+  readonly worktreeLeaseDiagnostics: readonly HubWorktreeLeaseDiagnostic[];
 }
 
 export interface HubProjectStatusOptions {
@@ -88,6 +94,7 @@ export interface HubProjectStatusOptions {
   readonly listRunSummaries?: (
     hubProjectDir: string,
   ) => readonly HubProjectRunSummary[];
+  readonly listWorktreeLeases?: typeof listWorktreeLeases;
 }
 
 const BD_JSON_COUNT_KEYS = [
@@ -576,6 +583,28 @@ const appendRunDirectoryLines = (
   }
 };
 
+const appendWorktreeLeaseLines = (
+  lines: string[],
+  diagnostics: readonly HubWorktreeLeaseDiagnostic[],
+) => {
+  lines.push("");
+  lines.push("Worktree lease diagnostics");
+  if (diagnostics.length === 0) {
+    lines.push("  No active or inconsistent worktree leases.");
+    return;
+  }
+
+  for (const diagnostic of diagnostics) {
+    const pid =
+      diagnostic.pid !== undefined ? ` pid ${diagnostic.pid}` : "";
+    lines.push(
+      `  ${diagnostic.taskId}: ${diagnostic.reason} on ${diagnostic.branch}${pid}`,
+    );
+    lines.push(`    ${diagnostic.message}`);
+    lines.push(`    Next action: ${diagnostic.nextAction}`);
+  }
+};
+
 export const formatHubProjectStatusLines = (
   status: HubProjectStatus,
 ): readonly string[] => {
@@ -589,6 +618,7 @@ export const formatHubProjectStatusLines = (
   appendSyncStateLines(lines, status.syncCounts);
   appendRecentEventLines(lines, status.recentEvents);
   appendRunDirectoryLines(lines, status.runDirectories);
+  appendWorktreeLeaseLines(lines, status.worktreeLeaseDiagnostics);
 
   return lines;
 };
@@ -792,6 +822,13 @@ export const resolveHubProjectStatus = (
     failedTasks,
     board,
   );
+  const worktreeLeaseDiagnostics =
+    board === undefined
+      ? []
+      : collectActiveHubWorktreeLeaseDiagnostics(
+          board.tasks,
+          (options.listWorktreeLeases ?? listWorktreeLeases)(repoRoot),
+        );
 
   return {
     repoRoot,
@@ -807,5 +844,6 @@ export const resolveHubProjectStatus = (
     activeBatches,
     runDirectories,
     recentEvents,
+    worktreeLeaseDiagnostics,
   };
 };

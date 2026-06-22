@@ -5,6 +5,11 @@ import { promisify } from "node:util";
 
 import type { HubTaskEvent } from "./hubExecution.js";
 import {
+  collectHubWorktreeLeaseDiagnosticsForTasks,
+  type HubWorktreeLeaseDiagnostic,
+  type HubWorktreeLeaseDiagnosticReason,
+} from "./hubWorktreeLeaseDiagnostics.js";
+import {
   resolveGitRepoRoot,
   resolveHubProjectDir,
   resolveArchloopUserDataDir,
@@ -18,6 +23,7 @@ import {
   type HubTaskProjection,
   type HubTaskStatus,
 } from "./taskBoard.js";
+import { listWorktreeLeases } from "./worktreeLease.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -48,7 +54,8 @@ export type HubTaskStateDiagnosticReason =
   | "failed_branch_work"
   | "terminal_stale_execution_metadata"
   | "dirty_worktree"
-  | "task_sync_push_pending";
+  | "task_sync_push_pending"
+  | HubWorktreeLeaseDiagnosticReason;
 
 export interface HubTaskStateDiagnostic {
   readonly taskId: string;
@@ -71,6 +78,7 @@ export interface DoctorHubTaskStateInput {
   readonly archloopUserDataDir?: string;
   readonly branchInspector?: HubTaskStateBranchInspector;
   readonly worktreeInspector?: HubTaskStateWorktreeInspector;
+  readonly listWorktreeLeases?: typeof listWorktreeLeases;
 }
 
 export interface DoctorHubTaskStateResult {
@@ -452,6 +460,20 @@ const buildTaskSyncPushPendingDiagnostic = (
     "Local task state is pending remote sync. Use task sync push; doctor and repair-state do not mutate remote GitHub issues.",
 });
 
+const buildWorktreeLeaseDiagnostic = (
+  diagnostic: HubWorktreeLeaseDiagnostic,
+  task: HubTaskProjection | undefined,
+): HubTaskStateDiagnostic => ({
+  taskId: diagnostic.taskId,
+  title: diagnostic.title,
+  reason: diagnostic.reason,
+  repairable: false,
+  currentStatus: task?.hubStatus ?? "inbox",
+  branch: diagnostic.branch,
+  nextAction: diagnostic.nextAction,
+  message: diagnostic.message,
+});
+
 const collectarchLoopStatusLabels = (
   task: HubTaskProjection,
 ): readonly string[] =>
@@ -476,8 +498,21 @@ export const doctorHubTaskState = async (
   const worktreeState = await (
     input.worktreeInspector ?? defaultWorktreeInspector
   )(repoRoot);
+  const leases = (input.listWorktreeLeases ?? listWorktreeLeases)(repoRoot);
 
   const diagnostics: HubTaskStateDiagnostic[] = [];
+  for (const leaseDiagnostic of collectHubWorktreeLeaseDiagnosticsForTasks(
+    board.tasks,
+    leases,
+  )) {
+    diagnostics.push(
+      buildWorktreeLeaseDiagnostic(
+        leaseDiagnostic,
+        board.tasks.find((task) => task.id === leaseDiagnostic.taskId),
+      ),
+    );
+  }
+
   for (const task of board.tasks) {
     const statusLabels = collectarchLoopStatusLabels(task);
     if (statusLabels.length > 1) {
@@ -610,6 +645,12 @@ const actionLabel = (diagnostic: HubTaskStateDiagnostic): string => {
   }
   if (diagnostic.nextAction.startsWith("archloop tasks push")) {
     return "push task sync";
+  }
+  if (diagnostic.nextAction.startsWith("Wait")) {
+    return "wait for execution";
+  }
+  if (diagnostic.nextAction.includes("Rerun the flow")) {
+    return "rerun flow";
   }
   return "rerun flow";
 };

@@ -182,6 +182,51 @@ describe("doctorHubTaskState", () => {
     expect(JSON.parse(await readFile(stateFile, "utf8"))).toEqual(initialTasks);
   });
 
+  it("reports worktree lease claim and occupancy mismatches", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-task-doctor-lease-"));
+    await initRepo(repoDir);
+
+    const { env } = await writeMockBd(repoDir, [
+      {
+        id: "bd-lease",
+        title: "Lease mismatch",
+        status: "open",
+        labels: ["implementing"],
+        metadata: {
+          hubStatus: "implementing",
+          claim: {
+            runId: "run-lease",
+            batchId: "batch-lease",
+            branch: "archloop/bd-lease-lease-mismatch",
+            claimedAt: "2026-06-22T10:00:00.000Z",
+          },
+        },
+      },
+    ]);
+
+    const result = await doctorHubTaskState({
+      cwd: repoDir,
+      env,
+      branchInspector: async () => ({
+        exists: true,
+        hasUnmergedWork: false,
+      }),
+      worktreeInspector: async () => ({
+        dirtySourceFiles: [],
+        dirtyTaskStoreFiles: [],
+      }),
+      listWorktreeLeases: () => [],
+    });
+
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-lease",
+        reason: "worktree_lease_missing",
+        nextAction: expect.stringContaining("Rerun the flow"),
+      }),
+    );
+  });
+
   it("previews repair-state mutations without mutating Beads by default", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-task-repair-preview-"));
     await initRepo(repoDir);
