@@ -5,7 +5,7 @@ import {
   collectHubWorktreeLeaseDiagnosticsForTasks,
 } from "./hubWorktreeLeaseDiagnostics.js";
 import type { HubTaskProjection } from "./taskBoard.js";
-import type { WorktreeLeaseRecord } from "./worktreeLease.js";
+import type { WorktreeLeaseRecord } from "./worktreeLeaseStore.js";
 
 const createTask = (
   overrides: Partial<HubTaskProjection> &

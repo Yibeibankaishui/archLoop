@@ -9,9 +9,9 @@ import {
   listWorktreeLeases,
   parseWorktreeLeaseFile,
   resolveWorktreeLeaseLockPath,
-} from "./worktreeLease.js";
+} from "./worktreeLeaseStore.js";
 
-describe("worktreeLease", () => {
+describe("worktreeLeaseStore", () => {
   it("maps branch names to worktree lock names", () => {
     expect(branchToWorktreeName("archloop/bd-1-task")).toBe(
       "archloop-bd-1-task",

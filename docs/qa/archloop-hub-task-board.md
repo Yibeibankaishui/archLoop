@@ -709,6 +709,7 @@ Batch-only statuses:
 - [ ] A merge failure is simulated and recovery succeeds.
 - [ ] Legacy `archloop init` path still works.
 - [ ] README, bundled `skills/archloop-usage/SKILL.md`, and PRD terminology agree.
+- [ ] [Worktree lease QA](./worktree-lease.md) scenarios pass when worktree lease behavior is in scope.
 - [ ] Real-agent PRD and triage proposal sessions were reviewed by a human for judgment quality.
 - [ ] `archloop run . --flow prd-decomposition --input <prd-ref>` and `archloop run . --flow triage --input <query>` match task shortcut behavior.
 - [ ] No Hub-owned orchestration asset is written into the target repo during Hub flow execution.

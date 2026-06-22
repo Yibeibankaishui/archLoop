@@ -2,7 +2,7 @@ import {
   branchToWorktreeName,
   type WorktreeLeaseOwner,
   type WorktreeLeaseRecord,
-} from "./worktreeLease.js";
+} from "./worktreeLeaseStore.js";
 import {
   resolveHubTaskBranch,
   type HubTaskProjection,
