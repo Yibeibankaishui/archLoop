@@ -511,11 +511,31 @@ const ensureLeaseNotActive = (
   FileSystem.FileSystem
 > =>
   Effect.gen(function* () {
+    yield* checkWorktreeLeaseBeforeHubRetry(repoDir, branch).pipe(
+      Effect.asVoid,
+    );
+  });
+
+/**
+ * Clears stale leases when needed and fails fast when a live lease still owns
+ * the branch worktree. Used by Hub task retry before starting a new attempt.
+ */
+export const checkWorktreeLeaseBeforeHubRetry = (
+  repoDir: string,
+  branch: string,
+): Effect.Effect<
+  { readonly staleLeaseCleared: boolean },
+  WorktreeLeaseError | WorktreeError,
+  FileSystem.FileSystem
+> =>
+  Effect.gen(function* () {
     const recovery = yield* recoverStaleWorktreeLeaseIfNeeded(repoDir, branch);
     if (recovery === "active") {
       const existing = yield* readLeaseMetadata(repoDir, branch);
       return yield* Effect.fail(activeLeaseError(existing, repoDir, branch));
     }
+
+    return { staleLeaseCleared: recovery === "removed" };
   });
 
 const toAcquiredWorktreeLease = (

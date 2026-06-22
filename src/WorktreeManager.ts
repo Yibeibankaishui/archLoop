@@ -106,7 +106,10 @@ interface WorktreeEntry {
   branch: string | null;
 }
 
-/** Parses `git worktree list --porcelain` output into structured entries. */
+const pathsEqual = (left: string, right: string): boolean =>
+  left === right ||
+  left.replace(/^\/private/, "") === right.replace(/^\/private/, "");
+
 const listWorktrees = (
   repoDir: string,
 ): Effect.Effect<WorktreeEntry[], WorktreeError> =>
@@ -197,10 +200,19 @@ export const create = (
       const existing = yield* listWorktrees(repoDir);
       const collision =
         existing.find((wt) => wt.branch === branch) ??
-        existing.find((wt) => wt.path === worktreePath);
+        existing.find((wt) => pathsEqual(wt.path, worktreePath));
       if (collision) {
         // Only reuse worktrees managed by archloop (under .archloop/worktrees/)
-        const isManagedWorktree = collision.path.startsWith(worktreesDir);
+        const realWorktreesDir = yield* fs
+          .realPath(worktreesDir)
+          .pipe(Effect.catchAll(() => Effect.succeed(worktreesDir)));
+        const normalizedCollisionPath = collision.path.replace(/^\/private/, "");
+        const normalizedWorktreesDir = realWorktreesDir.replace(/^\/private/, "");
+        const normalizedConfiguredDir = worktreesDir.replace(/^\/private/, "");
+        const isManagedWorktree =
+          pathsEqual(collision.path, worktreePath) ||
+          normalizedCollisionPath.startsWith(normalizedWorktreesDir) ||
+          normalizedCollisionPath.startsWith(normalizedConfiguredDir);
         if (isManagedWorktree) {
           const dirty = yield* hasUncommittedChanges(collision.path);
           if (dirty) {
@@ -212,7 +224,7 @@ export const create = (
               `Reusing existing worktree at ${collision.path} (branch '${branch}')`,
             );
           }
-          return { path: collision.path, branch };
+          return { path: worktreePath, branch };
         }
         // Branch is checked out in the main working tree or external worktree
         yield* Effect.fail(
