@@ -486,25 +486,27 @@ export const groupHubTasks = (
       .sort(compareTaskIds),
   })).filter((group) => group.tasks.length > 0);
 
-export const projectHubTaskBoard = (
+const buildHubTaskBoard = (
   tasks: readonly BeadsTaskRecord[],
+  sortByTaskId: boolean,
 ): HubTaskBoard => {
-  const projected = tasks.map(projectHubTask).sort(compareTaskIds);
+  const projected = tasks.map(projectHubTask);
+  const orderedTasks = sortByTaskId
+    ? [...projected].sort(compareTaskIds)
+    : projected;
   return {
-    tasks: projected,
-    groups: groupHubTasks(projected),
+    tasks: orderedTasks,
+    groups: groupHubTasks(orderedTasks),
   };
 };
 
+export const projectHubTaskBoard = (
+  tasks: readonly BeadsTaskRecord[],
+): HubTaskBoard => buildHubTaskBoard(tasks, true);
+
 export const projectHubReadyQueueBoard = (
   tasks: readonly BeadsTaskRecord[],
-): HubTaskBoard => {
-  const projected = tasks.map(projectHubTask);
-  return {
-    tasks: projected,
-    groups: groupHubTasks(projected),
-  };
-};
+): HubTaskBoard => buildHubTaskBoard(tasks, false);
 
 const parseBdJsonOutput = (output: string): unknown[] => {
   const parsed = JSON.parse(output) as unknown;

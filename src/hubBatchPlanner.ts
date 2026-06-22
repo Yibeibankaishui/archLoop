@@ -117,25 +117,15 @@ export const planHubFlowBatch = (
   const eligible = input.candidates.filter(isHubFlowEligibleTask);
 
   switch (input.batchStrategy) {
-    case "conservative": {
-      const effectiveLimit = Math.min(input.maxTasks, 1);
-      const selectedTasks = eligible.slice(0, effectiveLimit);
-      const deferredTasks = eligible.slice(effectiveLimit).map((task) => ({
-        taskId: task.id,
-        reason: "over_max_tasks" as const,
-      }));
-
-      return {
-        selectedTasks,
-        deferredTasks,
-        batchStrategyRequested: input.batchStrategy,
-        batchStrategyUsed: "conservative",
-        maxTasks: input.maxTasks,
-      };
-    }
+    case "conservative":
     case "limited": {
-      const selectedTasks = eligible.slice(0, input.maxTasks);
-      const deferredTasks = eligible.slice(input.maxTasks).map((task) => ({
+      let taskLimit = input.maxTasks;
+      if (input.batchStrategy === "conservative") {
+        taskLimit = Math.min(input.maxTasks, 1);
+      }
+
+      const selectedTasks = eligible.slice(0, taskLimit);
+      const deferredTasks = eligible.slice(taskLimit).map((task) => ({
         taskId: task.id,
         reason: "over_max_tasks" as const,
       }));
@@ -144,7 +134,7 @@ export const planHubFlowBatch = (
         selectedTasks,
         deferredTasks,
         batchStrategyRequested: input.batchStrategy,
-        batchStrategyUsed: "limited",
+        batchStrategyUsed: input.batchStrategy,
         maxTasks: input.maxTasks,
       };
     }
