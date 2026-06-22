@@ -733,6 +733,117 @@ describe("Hub flow planner", () => {
       "Batch strategy: planned (max 2)",
     );
   });
+
+  it("limited batch strategy selects eligible ready tasks in ready queue order up to max-tasks", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-limited-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-z-queue-first",
+        title: "Queue first",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-m-queue-second",
+        title: "Queue second",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-a-queue-third",
+        title: "Queue third",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-claimed",
+        title: "Already claimed",
+        status: "in_progress",
+        labels: ["ready-for-agent", "implementing"],
+        metadata: {
+          claim: {
+            runId: "run-existing",
+            batchId: "batch-existing",
+            branch: "archloop/bd-claimed-other",
+            claimedAt: "2026-06-11T15:30:00Z",
+          },
+        },
+      },
+    ]);
+
+    const invocations: HubImplementTaskInput[] = [];
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "limited",
+    );
+
+    const result = await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      batchStrategy: "limited",
+      maxTasks: 2,
+      implementer: async (input) => {
+        invocations.push(input);
+        return {
+          outcome: "success",
+          commits: [{ sha: "abc123" }],
+          completionSignal: "<promise>COMPLETE</promise>",
+        };
+      },
+      runMergePhase: false,
+    });
+
+    expect(result.selectedTaskIds).toEqual([
+      "bd-z-queue-first",
+      "bd-m-queue-second",
+    ]);
+    expect(result.batchSelection).toMatchObject({
+      batchStrategyUsed: "limited",
+      maxTasks: 2,
+      deferredTasks: [{ taskId: "bd-a-queue-third", reason: "over_max_tasks" }],
+    });
+    expect(invocations.map((input) => input.taskId)).toEqual([
+      "bd-z-queue-first",
+      "bd-m-queue-second",
+    ]);
+
+    const batchEvents = await readJsonl(
+      join(result.runDir, "events", "batch.jsonl"),
+    );
+    const plannedEvent = batchEvents.find(
+      (event) => (event as { type?: string }).type === "batch_planned",
+    );
+    expect(plannedEvent).toMatchObject({
+      type: "batch_planned",
+      taskIds: ["bd-z-queue-first", "bd-m-queue-second"],
+      batchStrategyUsed: "limited",
+      maxTasks: 2,
+    });
+
+    expect(formatHubFlowResultLines(result).join("\n")).toContain(
+      "Batch strategy: limited (max 2)",
+    );
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(
+      finalState.find((task) => task.id === "bd-a-queue-third")?.labels,
+    ).toContain("ready-for-agent");
+  });
 });
 
 describe("no-review Hub flow execution", () => {

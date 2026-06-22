@@ -62,6 +62,7 @@ describe("hubBatchPlanner", () => {
     expect(parseHubBatchStrategy("limited")).toBe("limited");
     expect(parseHubBatchStrategy("conservative")).toBe("conservative");
     expect(parseHubBatchStrategy(" Conservative ")).toBe("conservative");
+    expect(parseHubBatchStrategy(" Limited ")).toBe("limited");
     expect(() => parseHubBatchStrategy("random")).toThrow(HubFlowError);
   });
 
@@ -351,6 +352,50 @@ describe("hubBatchPlanner", () => {
       { taskId: "bd-third", reason: "same_core_module" },
     ]);
     expect(result.rationale).toBe("Two independent tasks.");
+  });
+
+  it("selects at most max-tasks eligible ready tasks for limited strategy", async () => {
+    const candidates = [
+      readyTask("bd-first"),
+      readyTask("bd-second"),
+      readyTask("bd-third"),
+      readyTask("bd-claimed", { claimState: "active" }),
+      readyTask("bd-human", { hubStatus: "ready_for_human" }),
+    ];
+
+    const result = await planHubFlowBatch({
+      candidates,
+      batchStrategy: "limited",
+      maxTasks: 2,
+    });
+
+    expect(result.selectedTasks.map((task) => task.id)).toEqual([
+      "bd-first",
+      "bd-second",
+    ]);
+    expect(result.deferredTasks).toEqual([
+      { taskId: "bd-third", reason: "over_max_tasks" },
+    ]);
+    expect(result.batchStrategyUsed).toBe("limited");
+  });
+
+  it("limited selection follows ready queue order rather than task id order", async () => {
+    const candidates = [
+      readyTask("bd-z-last-alphabetically"),
+      readyTask("bd-m-middle"),
+      readyTask("bd-a-first-alphabetically"),
+    ];
+
+    const result = await planHubFlowBatch({
+      candidates,
+      batchStrategy: "limited",
+      maxTasks: 2,
+    });
+
+    expect(result.selectedTasks.map((task) => task.id)).toEqual([
+      "bd-z-last-alphabetically",
+      "bd-m-middle",
+    ]);
   });
 
   it("falls back to conservative when planned planner fails", async () => {

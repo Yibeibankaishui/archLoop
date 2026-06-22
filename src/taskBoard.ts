@@ -486,15 +486,27 @@ export const groupHubTasks = (
       .sort(compareTaskIds),
   })).filter((group) => group.tasks.length > 0);
 
-export const projectHubTaskBoard = (
+const buildHubTaskBoard = (
   tasks: readonly BeadsTaskRecord[],
+  sortByTaskId: boolean,
 ): HubTaskBoard => {
-  const projected = tasks.map(projectHubTask).sort(compareTaskIds);
+  const projected = tasks.map(projectHubTask);
+  const orderedTasks = sortByTaskId
+    ? [...projected].sort(compareTaskIds)
+    : projected;
   return {
-    tasks: projected,
-    groups: groupHubTasks(projected),
+    tasks: orderedTasks,
+    groups: groupHubTasks(orderedTasks),
   };
 };
+
+export const projectHubTaskBoard = (
+  tasks: readonly BeadsTaskRecord[],
+): HubTaskBoard => buildHubTaskBoard(tasks, true);
+
+export const projectHubReadyQueueBoard = (
+  tasks: readonly BeadsTaskRecord[],
+): HubTaskBoard => buildHubTaskBoard(tasks, false);
 
 const parseBdJsonOutput = (output: string): unknown[] => {
   const parsed = JSON.parse(output) as unknown;
@@ -756,7 +768,7 @@ export const loadHubReadyQueue = (
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
 ): HubTaskBoard =>
-  projectHubTaskBoard(
+  projectHubReadyQueueBoard(
     runBdJson(
       cwd,
       ["ready", "--json"],
@@ -770,8 +782,7 @@ export const isHubFlowEligibleTask = (task: HubTaskProjection): boolean =>
 
 export const selectHubFlowTasks = (
   board: HubTaskBoard,
-): readonly HubTaskProjection[] =>
-  board.tasks.filter(isHubFlowEligibleTask);
+): readonly HubTaskProjection[] => board.tasks.filter(isHubFlowEligibleTask);
 
 export const selectHubBatchMergeTasks = (
   board: HubTaskBoard,
