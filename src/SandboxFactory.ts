@@ -339,7 +339,6 @@ export const WorktreeDockerSandboxFactory = {
       const defaultWorktreeLeaseOwner: WorktreeLeaseOwnerInput = {
         kind: "direct",
       };
-
       const mapLeaseError = (
         error: WorktreeLeaseError | WorktreeError,
       ): WorktreeError => new WorktreeError({ message: error.message });
@@ -359,6 +358,32 @@ export const WorktreeDockerSandboxFactory = {
           Effect.provideService(FileSystem.FileSystem, fileSystem),
         );
 
+      const releaseLeasedWorktree = (
+        {
+          worktreeInfo,
+          leaseBranch,
+          handle,
+        }: {
+          worktreeInfo: WorktreeManager.WorktreeInfo;
+          leaseBranch: string;
+          handle:
+            | BindMountSandboxHandle
+            | IsolatedSandboxHandle
+            | NoSandboxHandle;
+        },
+        exit: Exit.Exit<unknown, unknown>,
+        onPreserve: (path: string | undefined) => void,
+      ) =>
+        Effect.tryPromise({
+          try: () => handle.close(),
+          catch: () => undefined,
+        }).pipe(
+          Effect.andThen(() => cleanupWorktree(worktreeInfo.path, exit)),
+          Effect.tap(onPreserve),
+          Effect.andThen(() => releaseLeaseForBranch(leaseBranch)),
+          Effect.asVoid,
+          Effect.orDie,
+        );
       /** Prune stale worktrees (best-effort), then create a fresh one. */
       const pruneAndCreate = () =>
         WorktreeManager.pruneStale(hostRepoDir).pipe(
@@ -378,7 +403,11 @@ export const WorktreeDockerSandboxFactory = {
           Effect.provideService(FileSystem.FileSystem, fileSystem),
         );
 
-      /** Acquire a worktree lease before use and return the branch key for release. */
+      /**
+       * Acquire a worktree lease before use and return the branch key for release.
+       * Explicit branch: lease before worktree creation to block concurrent callers.
+       * Ephemeral merge-to-head branch: lease after creation once the branch name exists.
+       */
       const acquireLeasedWorktree = () =>
         Effect.gen(function* () {
           if (branch) {
@@ -503,19 +532,12 @@ export const WorktreeDockerSandboxFactory = {
                   Exclude<R, Sandbox>
                 >,
               ({ worktreeInfo, leaseBranch, handle }, exit) =>
-                Effect.tryPromise({
-                  try: () => handle.close(),
-                  catch: () => undefined,
-                }).pipe(
-                  Effect.andThen(() =>
-                    cleanupWorktree(worktreeInfo.path, exit),
-                  ),
-                  Effect.tap((p) => {
+                releaseLeasedWorktree(
+                  { worktreeInfo, leaseBranch, handle },
+                  exit,
+                  (p) => {
                     preservedPath = p;
-                  }),
-                  Effect.andThen(() => releaseLeaseForBranch(leaseBranch)),
-                  Effect.asVoid,
-                  Effect.orDie,
+                  },
                 ),
             ).pipe(
               Effect.map((value) => ({
@@ -575,19 +597,12 @@ export const WorktreeDockerSandboxFactory = {
                 >,
               // Release: close handle, then cleanup worktree
               ({ worktreeInfo, leaseBranch, handle }, exit) =>
-                Effect.tryPromise({
-                  try: () => handle.close(),
-                  catch: () => undefined,
-                }).pipe(
-                  Effect.andThen(() =>
-                    cleanupWorktree(worktreeInfo.path, exit),
-                  ),
-                  Effect.tap((p) => {
+                releaseLeasedWorktree(
+                  { worktreeInfo, leaseBranch, handle },
+                  exit,
+                  (p) => {
                     preservedPath = p;
-                  }),
-                  Effect.andThen(() => releaseLeaseForBranch(leaseBranch)),
-                  Effect.asVoid,
-                  Effect.orDie,
+                  },
                 ),
             ).pipe(
               Effect.map((value) => ({
@@ -765,17 +780,12 @@ export const WorktreeDockerSandboxFactory = {
               >,
             // Release: close provider handle, then remove/preserve worktree based on dirty state.
             ({ worktreeInfo, leaseBranch, handle }, exit) =>
-              Effect.tryPromise({
-                try: () => handle.close(),
-                catch: () => undefined,
-              }).pipe(
-                Effect.andThen(() => cleanupWorktree(worktreeInfo.path, exit)),
-                Effect.tap((p) => {
+              releaseLeasedWorktree(
+                { worktreeInfo, leaseBranch, handle },
+                exit,
+                (p) => {
                   preservedWorktreePath = p;
-                }),
-                Effect.andThen(() => releaseLeaseForBranch(leaseBranch)),
-                Effect.asVoid,
-                Effect.orDie,
+                },
               ),
           ).pipe(
             Effect.map((value) => ({

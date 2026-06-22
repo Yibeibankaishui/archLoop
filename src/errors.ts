@@ -37,7 +37,7 @@ export class WorktreeError extends Data.TaggedError("WorktreeError")<{
   readonly message: string;
 }> {}
 
-/** Worktree lease acquisition, release, or recovery failed */
+/** Worktree lease acquisition or recovery failed */
 export class WorktreeLeaseError extends Data.TaggedError("WorktreeLeaseError")<{
   readonly message: string;
   readonly reason: "active" | "malformed" | "recovery";

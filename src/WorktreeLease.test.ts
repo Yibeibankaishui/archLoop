@@ -1,7 +1,8 @@
 import { Effect } from "effect";
 import { FileSystem } from "@effect/platform";
 import { NodeFileSystem } from "@effect/platform-node";
-import { exec, spawn } from "node:child_process";
+import { exec } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -111,11 +112,21 @@ describe("WorktreeLease stale recovery", () => {
       leaseLockPath(repoDir, leaseNameFromBranch(branch)),
       "utf-8",
     );
-    const parsed = JSON.parse(lockContent) as { pid: number };
+    const parsed = JSON.parse(lockContent) as {
+      pid: number;
+      owner: string;
+      branch: string;
+      acquiredAt: string;
+    };
     expect(parsed.pid).toBe(process.pid);
+    expect(parsed.owner).toBe("direct");
+    expect(parsed.branch).toBe(branch);
+    expect(parsed.acquiredAt).toBeTruthy();
+    expect(parsed).not.toHaveProperty("prompt");
+    expect(parsed).not.toHaveProperty("env");
 
     await run(releaseWorktreeLease(repoDir, branch));
-    expect(worktree.path).toBe(worktreePathForBranch(repoDir, branch));
+    expect(worktree.path).toContain(leaseNameFromBranch(branch));
   });
 
   it("preserves dirty worktree contents after stale lease cleanup", async () => {
@@ -197,6 +208,7 @@ describe("WorktreeLease stale recovery", () => {
     const repoDir = await setupRepo();
     const branch = "archloop/active";
     await run(WorktreeManager.create(repoDir, { branch }));
+    const acquiredAt = "2026-06-22T10:00:00.000Z";
     await writeLeaseFile(
       repoDir,
       branch,
@@ -204,7 +216,7 @@ describe("WorktreeLease stale recovery", () => {
         owner: "direct",
         pid: process.pid,
         branch,
-        acquiredAt: "2026-06-22T10:00:00.000Z",
+        acquiredAt,
       }),
     );
 
@@ -214,7 +226,11 @@ describe("WorktreeLease stale recovery", () => {
     expect(err).toBeInstanceOf(WorktreeLeaseError);
     expect(err.reason).toBe("active");
     expect(err.pid).toBe(process.pid);
+    expect(err.acquiredAt).toBe(acquiredAt);
+    expect(err.branch).toBe(branch);
+    expect(err.worktreePath).toBe(worktreePathForBranch(repoDir, branch));
     expect(err.message).toContain("in use");
+    expect(err.message).toMatch(/next action/i);
   });
 });
 
@@ -342,5 +358,71 @@ describe("WorktreeLease Hub owner metadata", () => {
     expect(err.batchId).toBe("batch-456");
     expect(err.message).toContain("already has active execution");
     expect(err.message).not.toContain("lock");
+  });
+});
+
+describe("WorktreeLease reuse without active lease", () => {
+  it("allows clean worktree reuse after the previous lease is released", async () => {
+    const repoDir = await setupRepo();
+    const branch = "feature/clean-reuse";
+    await execAsync(`git checkout -b ${branch}`, { cwd: repoDir });
+    await commitFile(repoDir, "x.txt", "x", "branch commit");
+    await execAsync("git checkout main", { cwd: repoDir });
+
+    const first = await run(WorktreeManager.create(repoDir, { branch }));
+    await run(releaseWorktreeLease(repoDir, branch));
+
+    await run(acquireWorktreeLease(repoDir, { branch }));
+    const second = await run(WorktreeManager.create(repoDir, { branch }));
+    await run(releaseWorktreeLease(repoDir, branch));
+
+    expect(second.path).toBe(first.path);
+
+    await run(WorktreeManager.remove(first.path));
+  });
+
+  it("allows dirty worktree reuse after the previous lease is released", async () => {
+    const repoDir = await setupRepo();
+    const branch = "feature/dirty-reuse";
+    await execAsync(`git checkout -b ${branch}`, { cwd: repoDir });
+    await commitFile(repoDir, "x.txt", "x", "branch commit");
+    await execAsync("git checkout main", { cwd: repoDir });
+
+    const worktree = await run(WorktreeManager.create(repoDir, { branch }));
+    await writeFile(join(worktree.path, "dirty.txt"), "dirty");
+    await run(releaseWorktreeLease(repoDir, branch));
+
+    await run(acquireWorktreeLease(repoDir, { branch }));
+    const reused = await run(WorktreeManager.create(repoDir, { branch }));
+    await run(releaseWorktreeLease(repoDir, branch));
+
+    expect(reused.path).toBe(worktree.path);
+    expect(await readFile(join(worktree.path, "dirty.txt"), "utf-8")).toBe(
+      "dirty",
+    );
+
+    await run(WorktreeManager.remove(worktree.path));
+  });
+
+  it("blocks reuse when an active lease exists even for a dirty worktree", async () => {
+    const repoDir = await setupRepo();
+    const branch = "feature/active-dirty";
+    await execAsync(`git checkout -b ${branch}`, { cwd: repoDir });
+    await commitFile(repoDir, "x.txt", "x", "branch commit");
+    await execAsync("git checkout main", { cwd: repoDir });
+
+    const worktree = await run(WorktreeManager.create(repoDir, { branch }));
+    await writeFile(join(worktree.path, "dirty.txt"), "dirty");
+
+    const holder = await run(acquireWorktreeLease(repoDir, { branch }));
+
+    const err = (await runFail(
+      acquireWorktreeLease(repoDir, { branch }),
+    )) as WorktreeLeaseError;
+    expect(err.reason).toBe("active");
+    expect(err.worktreePath).toBe(holder.worktreePath);
+
+    await run(releaseWorktreeLease(repoDir, branch));
+    await run(WorktreeManager.remove(worktree.path));
   });
 });

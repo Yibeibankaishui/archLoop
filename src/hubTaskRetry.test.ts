@@ -15,11 +15,7 @@ import {
   prepareHubTaskRetry,
 } from "./hubTaskRetry.js";
 import * as WorktreeManager from "./WorktreeManager.js";
-import {
-  leaseLockPath,
-  leaseNameFromBranch,
-  worktreePathForBranch,
-} from "./WorktreeLease.js";
+import { leaseLockPath, leaseNameFromBranch } from "./WorktreeLease.js";
 
 const execAsync = promisify(exec);
 
@@ -226,7 +222,7 @@ describe("hub task retry preparation", () => {
   it("keeps the preserved worktree path stable across retry preparation", async () => {
     const repoDir = await setupRepo();
     const branch = "archloop/bd-retry-stable-path";
-    await run(WorktreeManager.create(repoDir, { branch }));
+    const worktree = await run(WorktreeManager.create(repoDir, { branch }));
 
     const result = await prepareHubTaskRetry({
       repoDir,
@@ -236,9 +232,7 @@ describe("hub task retry preparation", () => {
 
     expect(result.status).toBe("ready");
     if (result.status === "ready") {
-      expect(result.preservedWorktreePath).toBe(
-        worktreePathForBranch(repoDir, branch),
-      );
+      expect(result.preservedWorktreePath).toBe(worktree.path);
     }
   });
 });

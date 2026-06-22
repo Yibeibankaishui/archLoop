@@ -110,8 +110,29 @@ const FORBIDDEN_LEASE_METADATA_KEYS = [
   "description",
 ] as const;
 
+const LOCK_FILE_SUFFIX = ".lock";
+
 const locksDirectory = (repoDir: string): string =>
   join(repoDir, ".archloop", "locks");
+
+const lockFileNameToLeaseName = (fileName: string): string | null =>
+  fileName.endsWith(LOCK_FILE_SUFFIX)
+    ? fileName.slice(0, -LOCK_FILE_SUFFIX.length)
+    : null;
+
+const readLocksDirectory = (
+  fs: FileSystem.FileSystem,
+  locksDir: string,
+): Effect.Effect<string[], WorktreeError> =>
+  fs.readDirectory(locksDir).pipe(
+    Effect.map((value): string[] => value),
+    Effect.catchSome((error) =>
+      error._tag === "SystemError" && error.reason === "NotFound"
+        ? Option.some(Effect.succeed([] as string[]))
+        : Option.none(),
+    ),
+    Effect.mapError((error) => mapFsError(error.message)),
+  );
 
 /** Returns true when `pid` refers to a live process. */
 export const isProcessAlive = (pid: number): boolean => {
@@ -260,8 +281,9 @@ const activeLeaseError = (
     pid: metadata.pid,
     acquiredAt: metadata.acquiredAt,
     message:
-      `Worktree for branch '${branch}' is in use by process ${metadata.pid} ` +
-      `(acquired at ${metadata.acquiredAt}). Wait for that run to finish, or recover the task if it failed.`,
+      `Worktree for branch '${branch}' at ${worktreePath} is in use by process ${metadata.pid} ` +
+      `(acquired at ${metadata.acquiredAt}). ` +
+      `Next action: wait for that run to finish, or recover the task if it failed.`,
   });
 };
 
@@ -449,22 +471,6 @@ const worktreeDirectoryExists = (
     });
   });
 
-const readLocksDirectoryEntries = (
-  repoDir: string,
-): Effect.Effect<string[], WorktreeError, FileSystem.FileSystem> =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    return yield* fs.readDirectory(locksDirectory(repoDir)).pipe(
-      Effect.map((value): string[] => value),
-      Effect.catchSome((error) =>
-        error._tag === "SystemError" && error.reason === "NotFound"
-          ? Option.some(Effect.succeed([] as string[]))
-          : Option.none(),
-      ),
-      Effect.mapError((error) => mapFsError(error.message)),
-    );
-  });
-
 /**
  * Removes a stale lease when the owner process is gone or the worktree path is
  * missing. Never deletes or resets the worktree directory itself.
@@ -632,13 +638,13 @@ export const pruneOrphanWorktreeLeases = (
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const locksDir = locksDirectory(repoDir);
-    const entries = yield* readLocksDirectoryEntries(repoDir);
+    const entries = yield* readLocksDirectory(fs, locksDir);
 
     for (const entry of entries) {
-      if (!entry.endsWith(".lock")) {
+      const leaseName = lockFileNameToLeaseName(entry);
+      if (leaseName === null) {
         continue;
       }
-      const leaseName = entry.slice(0, -".lock".length);
       const worktreePath = worktreePathForLeaseName(repoDir, leaseName);
       const worktreeExists = yield* fs.stat(worktreePath).pipe(
         Effect.map((stat) => stat.type === "Directory"),
@@ -666,13 +672,13 @@ export const pruneStaleWorktreeLeases = (
 
     const fs = yield* FileSystem.FileSystem;
     const locksDir = locksDirectory(repoDir);
-    const entries = yield* readLocksDirectoryEntries(repoDir);
+    const entries = yield* readLocksDirectory(fs, locksDir);
 
     for (const entry of entries) {
-      if (!entry.endsWith(".lock")) {
+      const leaseName = lockFileNameToLeaseName(entry);
+      if (leaseName === null) {
         continue;
       }
-      const leaseName = entry.slice(0, -".lock".length);
       const leasePath = join(locksDir, entry);
       const raw = yield* fs.readFileString(leasePath).pipe(Effect.option);
       if (Option.isNone(raw)) {

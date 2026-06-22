@@ -1,7 +1,7 @@
 import { Effect, Either } from "effect";
 import { FileSystem } from "@effect/platform";
 import { NodeFileSystem } from "@effect/platform-node";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { WorktreeLeaseError } from "./errors.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import {
@@ -76,14 +76,22 @@ export const detectPreservedHubTaskWorktree = async (
   repoDir: string,
   branch: string,
 ): Promise<PreservedHubTaskWorktree> => {
-  const preservedWorktreePath = worktreePathForBranch(repoDir, branch);
-  if (!existsSync(preservedWorktreePath)) {
+  const configuredWorktreePath = worktreePathForBranch(repoDir, branch);
+  if (!existsSync(configuredWorktreePath)) {
     return {
       isRetry: false,
       preservedWorktreePath: undefined,
       hasDirtyWork: false,
     };
   }
+
+  const preservedWorktreePath = (() => {
+    try {
+      return realpathSync(configuredWorktreePath);
+    } catch {
+      return configuredWorktreePath;
+    }
+  })();
 
   const hasDirtyWork = await runFileSystemEffect(
     WorktreeManager.hasUncommittedChanges(preservedWorktreePath),
