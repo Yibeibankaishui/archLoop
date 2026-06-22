@@ -9,14 +9,14 @@ import {
   ExecError,
   SyncError,
   WorktreeError,
-  WorktreeLeaseError,
   type DockerError,
   type SandboxError,
 } from "./errors.js";
 import type { Timeouts } from "./run.js";
 import {
   acquireWorktreeLease,
-  releaseWorktreeLease,
+  mapWorktreeLeaseError,
+  releaseHeldWorktreeLease,
 } from "./WorktreeLease.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
@@ -335,19 +335,14 @@ export const WorktreeDockerSandboxFactory = {
       const fileSystem = yield* FileSystem.FileSystem;
       const display = yield* Display;
 
-      const mapLeaseError = (
-        error: WorktreeLeaseError | WorktreeError,
-      ): WorktreeError => new WorktreeError({ message: error.message });
-
       const acquireLeaseForBranch = (leaseBranch: string) =>
         acquireWorktreeLease(hostRepoDir, { branch: leaseBranch }).pipe(
-          Effect.mapError(mapLeaseError),
+          Effect.mapError(mapWorktreeLeaseError),
           Effect.provideService(FileSystem.FileSystem, fileSystem),
         );
 
       const releaseLeaseForBranch = (leaseBranch: string) =>
-        releaseWorktreeLease(hostRepoDir, leaseBranch).pipe(
-          Effect.catchAll(() => Effect.void),
+        releaseHeldWorktreeLease(hostRepoDir, leaseBranch).pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
         );
 

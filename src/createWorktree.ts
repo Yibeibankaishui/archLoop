@@ -43,11 +43,7 @@ import { mergeProviderEnv } from "./mergeProviderEnv.js";
 import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
 import * as WorktreeManager from "./WorktreeManager.js";
-import {
-  acquireWorktreeLease,
-  releaseWorktreeLease,
-} from "./WorktreeLease.js";
-import { WorktreeError } from "./errors.js";
+import { createHeldWorktreeLease } from "./WorktreeLease.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
 import { resolveCwd } from "./resolveCwd.js";
 import {
@@ -226,24 +222,12 @@ export const createWorktree = async (
       ? options.branchStrategy.baseBranch
       : undefined;
 
-  const mapLeaseError = (error: { message: string }): WorktreeError =>
-    new WorktreeError({ message: error.message });
-
-  let leaseBranch: string | undefined;
-  let leaseRepoDir: string | undefined;
-  let leaseHeld = false;
+  const heldLease = createHeldWorktreeLease();
 
   const releaseHeldLease = () =>
-    leaseHeld && leaseBranch && leaseRepoDir
-      ? Effect.runPromise(
-          releaseWorktreeLease(leaseRepoDir, leaseBranch).pipe(
-            Effect.catchAll(() => Effect.void),
-            Effect.provide(NodeFileSystem.layer),
-          ),
-        ).then(() => {
-          leaseHeld = false;
-        })
-      : Promise.resolve();
+    Effect.runPromise(
+      heldLease.release().pipe(Effect.provide(NodeFileSystem.layer)),
+    );
 
   let hostRepoDir: string;
   let worktreeInfo: WorktreeManager.WorktreeInfo;
@@ -251,17 +235,12 @@ export const createWorktree = async (
   try {
     const created = await Effect.gen(function* () {
       const hostRepoDir = yield* resolveCwd(options.cwd);
-      leaseRepoDir = hostRepoDir;
       yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
         Effect.catchAll(() => Effect.void),
       );
 
       if (branch) {
-        yield* acquireWorktreeLease(hostRepoDir, { branch }).pipe(
-          Effect.mapError(mapLeaseError),
-        );
-        leaseBranch = branch;
-        leaseHeld = true;
+        yield* heldLease.acquire(hostRepoDir, branch);
       }
 
       const info = yield* WorktreeManager.create(hostRepoDir, {
@@ -270,11 +249,7 @@ export const createWorktree = async (
       });
 
       if (!branch) {
-        leaseBranch = info.branch;
-        yield* acquireWorktreeLease(hostRepoDir, { branch: leaseBranch }).pipe(
-          Effect.mapError(mapLeaseError),
-        );
-        leaseHeld = true;
+        yield* heldLease.acquire(hostRepoDir, info.branch);
       }
 
       if (options.copyToWorktree && options.copyToWorktree.length > 0) {
