@@ -765,13 +765,13 @@ export const loadHubReadyQueue = (
     ) as BeadsTaskRecord[],
   );
 
+export const isHubFlowEligibleTask = (task: HubTaskProjection): boolean =>
+  task.hubStatus === "ready_for_agent" && task.claimState !== "active";
+
 export const selectHubFlowTasks = (
   board: HubTaskBoard,
 ): readonly HubTaskProjection[] =>
-  board.tasks.filter(
-    (task) =>
-      task.hubStatus === "ready_for_agent" && task.claimState !== "active",
-  );
+  board.tasks.filter(isHubFlowEligibleTask);
 
 export const selectHubBatchMergeTasks = (
   board: HubTaskBoard,

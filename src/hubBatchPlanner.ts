@@ -1,6 +1,6 @@
 import { HubFlowError } from "./errors.js";
 import type { HubFlowKind } from "./hubFlows.js";
-import type { HubTaskProjection } from "./taskBoard.js";
+import { isHubFlowEligibleTask, type HubTaskProjection } from "./taskBoard.js";
 
 export const HUB_BATCH_DEFAULT_MAX_TASKS = 3;
 export const HUB_BATCH_MIN_MAX_TASKS = 1;
@@ -36,8 +36,13 @@ export interface ResolvedHubBatchSelectionOptions {
   readonly maxTasks?: number;
 }
 
-const isEligibleHubFlowCandidate = (task: HubTaskProjection): boolean =>
-  task.hubStatus === "ready_for_agent" && task.claimState !== "active";
+const hasOptionalCliText = (value: string | undefined): value is string =>
+  value !== undefined && value.trim().length > 0;
+
+const invalidMaxTasksError = (raw: string): HubFlowError =>
+  new HubFlowError({
+    message: `Invalid --max-tasks value "${raw}". Expected an integer between ${HUB_BATCH_MIN_MAX_TASKS} and ${HUB_BATCH_MAX_TASKS_UPPER_LIMIT}.`,
+  });
 
 export const parseHubBatchStrategy = (raw: string): HubBatchStrategy => {
   const normalized = raw.trim().toLowerCase();
@@ -57,20 +62,15 @@ export const parseHubBatchStrategy = (raw: string): HubBatchStrategy => {
 export const parseHubBatchMaxTasks = (raw: string): number => {
   const trimmed = raw.trim();
   if (!/^\d+$/.test(trimmed)) {
-    throw new HubFlowError({
-      message: `Invalid --max-tasks value "${raw}". Expected an integer between ${HUB_BATCH_MIN_MAX_TASKS} and ${HUB_BATCH_MAX_TASKS_UPPER_LIMIT}.`,
-    });
+    throw invalidMaxTasksError(raw);
   }
 
   const parsed = Number.parseInt(trimmed, 10);
   if (
-    !Number.isInteger(parsed) ||
     parsed < HUB_BATCH_MIN_MAX_TASKS ||
     parsed > HUB_BATCH_MAX_TASKS_UPPER_LIMIT
   ) {
-    throw new HubFlowError({
-      message: `Invalid --max-tasks value "${raw}". Expected an integer between ${HUB_BATCH_MIN_MAX_TASKS} and ${HUB_BATCH_MAX_TASKS_UPPER_LIMIT}.`,
-    });
+    throw invalidMaxTasksError(raw);
   }
 
   return parsed;
@@ -81,10 +81,8 @@ export const resolveHubBatchSelectionOptions = (input: {
   readonly batchStrategy?: string;
   readonly maxTasks?: string;
 }): ResolvedHubBatchSelectionOptions => {
-  const hasBatchStrategy =
-    input.batchStrategy !== undefined && input.batchStrategy.trim().length > 0;
-  const hasMaxTasks =
-    input.maxTasks !== undefined && input.maxTasks.trim().length > 0;
+  const hasBatchStrategy = hasOptionalCliText(input.batchStrategy);
+  const hasMaxTasks = hasOptionalCliText(input.maxTasks);
 
   if (input.flowKind === "proposal") {
     if (hasBatchStrategy || hasMaxTasks) {
@@ -97,13 +95,15 @@ export const resolveHubBatchSelectionOptions = (input: {
   }
 
   const batchStrategy = hasBatchStrategy
-    ? parseHubBatchStrategy(input.batchStrategy!)
+    ? parseHubBatchStrategy(input.batchStrategy)
     : undefined;
-  const maxTasks = hasMaxTasks
-    ? parseHubBatchMaxTasks(input.maxTasks!)
-    : batchStrategy !== undefined
-      ? HUB_BATCH_DEFAULT_MAX_TASKS
-      : undefined;
+
+  let maxTasks: number | undefined;
+  if (hasMaxTasks) {
+    maxTasks = parseHubBatchMaxTasks(input.maxTasks);
+  } else if (batchStrategy !== undefined) {
+    maxTasks = HUB_BATCH_DEFAULT_MAX_TASKS;
+  }
 
   return { batchStrategy, maxTasks };
 };
@@ -111,7 +111,7 @@ export const resolveHubBatchSelectionOptions = (input: {
 export const planHubFlowBatch = (
   input: HubBatchPlannerInput,
 ): HubBatchPlannerResult => {
-  const eligible = input.candidates.filter(isEligibleHubFlowCandidate);
+  const eligible = input.candidates.filter(isHubFlowEligibleTask);
 
   switch (input.batchStrategy) {
     case "conservative": {
@@ -149,7 +149,7 @@ export const selectHubFlowTasksWithBatchOptions = (input: {
 } => {
   if (!input.batchStrategy) {
     return {
-      selectedTasks: input.candidates.filter(isEligibleHubFlowCandidate),
+      selectedTasks: input.candidates.filter(isHubFlowEligibleTask),
     };
   }
 
