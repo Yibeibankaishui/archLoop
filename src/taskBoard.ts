@@ -496,6 +496,16 @@ export const projectHubTaskBoard = (
   };
 };
 
+export const projectHubReadyQueueBoard = (
+  tasks: readonly BeadsTaskRecord[],
+): HubTaskBoard => {
+  const projected = tasks.map(projectHubTask);
+  return {
+    tasks: projected,
+    groups: groupHubTasks(projected),
+  };
+};
+
 const parseBdJsonOutput = (output: string): unknown[] => {
   const parsed = JSON.parse(output) as unknown;
   if (Array.isArray(parsed)) {
@@ -756,7 +766,7 @@ export const loadHubReadyQueue = (
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
 ): HubTaskBoard =>
-  projectHubTaskBoard(
+  projectHubReadyQueueBoard(
     runBdJson(
       cwd,
       ["ready", "--json"],

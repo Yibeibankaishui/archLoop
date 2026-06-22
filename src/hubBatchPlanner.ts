@@ -6,7 +6,7 @@ export const HUB_BATCH_DEFAULT_MAX_TASKS = 3;
 export const HUB_BATCH_MIN_MAX_TASKS = 1;
 export const HUB_BATCH_MAX_TASKS_UPPER_LIMIT = 10;
 
-export const HUB_BATCH_STRATEGIES = ["conservative"] as const;
+export const HUB_BATCH_STRATEGIES = ["conservative", "limited"] as const;
 export type HubBatchStrategy = (typeof HUB_BATCH_STRATEGIES)[number];
 
 export const HUB_BATCH_DEFERRED_REASONS = ["over_max_tasks"] as const;
@@ -48,11 +48,14 @@ export const parseHubBatchStrategy = (raw: string): HubBatchStrategy => {
   const normalized = raw.trim().toLowerCase();
   if (normalized.length === 0) {
     throw new HubFlowError({
-      message: "Invalid --batch-strategy value. Use conservative.",
+      message: `Invalid --batch-strategy value. Use ${HUB_BATCH_STRATEGIES.join(" or ")}.`,
     });
   }
   if (normalized === "conservative") {
     return "conservative";
+  }
+  if (normalized === "limited") {
+    return "limited";
   }
   throw new HubFlowError({
     message: `Unknown batch strategy "${raw}". Supported strategies: ${HUB_BATCH_STRATEGIES.join(", ")}.`,
@@ -127,6 +130,21 @@ export const planHubFlowBatch = (
         deferredTasks,
         batchStrategyRequested: input.batchStrategy,
         batchStrategyUsed: "conservative",
+        maxTasks: input.maxTasks,
+      };
+    }
+    case "limited": {
+      const selectedTasks = eligible.slice(0, input.maxTasks);
+      const deferredTasks = eligible.slice(input.maxTasks).map((task) => ({
+        taskId: task.id,
+        reason: "over_max_tasks" as const,
+      }));
+
+      return {
+        selectedTasks,
+        deferredTasks,
+        batchStrategyRequested: input.batchStrategy,
+        batchStrategyUsed: "limited",
         maxTasks: input.maxTasks,
       };
     }

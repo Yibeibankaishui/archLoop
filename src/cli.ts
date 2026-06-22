@@ -2463,7 +2463,7 @@ const flowYesOption = Options.boolean("yes").pipe(
 
 const flowBatchStrategyOption = Options.text("batch-strategy").pipe(
   Options.withDescription(
-    "Task-board batch selection strategy (conservative selects one eligible ready task)",
+    "Task-board batch selection strategy (conservative: one eligible ready task; limited: up to max-tasks in ready queue order)",
   ),
   Options.optional,
 );

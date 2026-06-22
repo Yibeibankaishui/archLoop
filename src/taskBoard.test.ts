@@ -15,6 +15,7 @@ import {
   loadHubTaskBoard,
   projectHubTask,
   projectHubTaskBoard,
+  projectHubReadyQueueBoard,
   resolveHubTaskSelectors,
   selectHubBatchMergeTasks,
 } from "./taskBoard.js";
@@ -491,6 +492,15 @@ fs.writeSync(1, JSON.stringify(tasks));
     expect(lines).toContain("PRD warnings: 1 high · 0 medium · 0 low");
     expect(lines).toContain("  1. bd-1: High warning [high]");
     expect(lines.some((line) => line.includes("bd-2"))).toBe(false);
+  });
+
+  it("preserves bd ready queue order in projectHubReadyQueueBoard", () => {
+    const board = projectHubReadyQueueBoard([
+      { id: "bd-z", title: "Later in queue", status: "open" },
+      { id: "bd-a", title: "Earlier alphabetically", status: "open" },
+    ]);
+
+    expect(board.tasks.map((task) => task.id)).toEqual(["bd-z", "bd-a"]);
   });
 });
 

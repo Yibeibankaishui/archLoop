@@ -38,9 +38,11 @@ describe("hubBatchPlanner", () => {
     expect(() => parseHubBatchMaxTasks("abc")).toThrow(HubFlowError);
   });
 
-  it("parses conservative batch strategy", () => {
+  it("parses conservative and limited batch strategies", () => {
     expect(parseHubBatchStrategy("conservative")).toBe("conservative");
     expect(parseHubBatchStrategy(" Conservative ")).toBe("conservative");
+    expect(parseHubBatchStrategy("limited")).toBe("limited");
+    expect(parseHubBatchStrategy(" Limited ")).toBe("limited");
     expect(() => parseHubBatchStrategy("planned")).toThrow(HubFlowError);
   });
 
@@ -101,5 +103,49 @@ describe("hubBatchPlanner", () => {
     });
 
     expect(selectedTasks.map((task) => task.id)).toEqual(["bd-a"]);
+  });
+
+  it("selects at most max-tasks eligible ready tasks for limited strategy", () => {
+    const candidates = [
+      readyTask("bd-first"),
+      readyTask("bd-second"),
+      readyTask("bd-third"),
+      readyTask("bd-claimed", { claimState: "active" }),
+      readyTask("bd-human", { hubStatus: "ready_for_human" }),
+    ];
+
+    const result = planHubFlowBatch({
+      candidates,
+      batchStrategy: "limited",
+      maxTasks: 2,
+    });
+
+    expect(result.selectedTasks.map((task) => task.id)).toEqual([
+      "bd-first",
+      "bd-second",
+    ]);
+    expect(result.deferredTasks).toEqual([
+      { taskId: "bd-third", reason: "over_max_tasks" },
+    ]);
+    expect(result.batchStrategyUsed).toBe("limited");
+  });
+
+  it("limited selection follows ready queue order rather than task id order", () => {
+    const candidates = [
+      readyTask("bd-z-last-alphabetically"),
+      readyTask("bd-m-middle"),
+      readyTask("bd-a-first-alphabetically"),
+    ];
+
+    const result = planHubFlowBatch({
+      candidates,
+      batchStrategy: "limited",
+      maxTasks: 2,
+    });
+
+    expect(result.selectedTasks.map((task) => task.id)).toEqual([
+      "bd-z-last-alphabetically",
+      "bd-m-middle",
+    ]);
   });
 });
