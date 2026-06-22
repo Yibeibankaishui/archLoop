@@ -790,7 +790,7 @@ describe("with-review Hub flow execution", () => {
     );
   });
 
-  it("starts a new batch when ready tasks exist and reports unfinished batches that were not resumed", async () => {
+  it("resumes merge-ready batch before claiming ready tasks when both exist", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-ready-conflict-"));
     await initRepo(repoDir);
     await commitFile(repoDir, "hello.txt", "hello", "initial commit");
@@ -855,29 +855,22 @@ describe("with-review Hub flow execution", () => {
     await commitFile(repoDir, "old-work.txt", "old", "old conflict work");
     await execAsync("git checkout main", { cwd: repoDir });
 
+    let implementCalls = 0;
+    let reviewCalls = 0;
     const mergedTaskIds: string[] = [];
     const result = await runHubFlow({
       flowId: "with-review",
       cwd: repoDir,
       hubProjectDir,
       env,
-      implementer: async (input) => {
-        await execAsync(`git checkout -B ${input.branch} main`, {
-          cwd: repoDir,
-        });
-        await commitFile(repoDir, "ready-work.txt", "ready", "ready work");
-        await execAsync("git checkout main", { cwd: repoDir });
-        return {
-          outcome: "success",
-          commits: [{ sha: "abc123" }],
-          completionSignal: "<promise>COMPLETE</promise>",
-        };
+      implementer: async () => {
+        implementCalls += 1;
+        throw new Error("implementer should not run while resuming merge batch");
       },
-      reviewer: async () => ({
-        outcome: "success",
-        commits: [],
-        completionSignal: "<promise>COMPLETE</promise>",
-      }),
+      reviewer: async () => {
+        reviewCalls += 1;
+        throw new Error("reviewer should not run while resuming merge batch");
+      },
       merger: async (input) => {
         mergedTaskIds.push(input.taskId);
         return { outcome: "success" };
@@ -885,31 +878,37 @@ describe("with-review Hub flow execution", () => {
       verifier: async () => ({ outcome: "success" }),
     });
 
-    expect(result.mode).toBe("new_batch");
-    expect(result.selectedTaskIds).toEqual(["bd-ready"]);
-    expect(result.resumedBatchId).toBeUndefined();
+    expect(result.mode).toBe("resumed_batch");
+    expect(result.selectedTaskIds).toEqual([]);
+    expect(result.resumedBatchId).toBe(oldBatchId);
+    expect(result.batchId).toBe(oldBatchId);
     expect(result.unfinishedBatchIds).toEqual([oldBatchId]);
     expect(result.mergeResult).toMatchObject({
-      batchId: result.batchId,
-      selectedTaskIds: ["bd-ready"],
+      batchId: oldBatchId,
+      selectedTaskIds: ["bd-old-conflict"],
       batchStatus: "done",
     });
-    expect(mergedTaskIds).toEqual(["bd-ready"]);
+    expect(mergedTaskIds).toEqual(["bd-old-conflict"]);
+    expect(implementCalls).toBe(0);
+    expect(reviewCalls).toBe(0);
 
     const finalState = JSON.parse(
       await readFile(stateFile, "utf-8"),
     ) as MockBeadsTask[];
     expect(finalState.find((task) => task.id === "bd-ready")?.status).toBe(
-      "closed",
+      "open",
     );
+    expect(finalState.find((task) => task.id === "bd-ready")?.labels).toEqual([
+      "ready-for-agent",
+    ]);
     expect(
-      finalState.find((task) => task.id === "bd-old-conflict")?.metadata
-        .hubStatus,
-    ).toBe("waiting_for_merge");
+      finalState.find((task) => task.id === "bd-old-conflict")?.status,
+    ).toBe("closed");
 
     const summary = formatHubFlowResultLines(result).join("\n");
-    expect(summary).toContain(`Unfinished batches not resumed: ${oldBatchId}`);
-    expect(summary).not.toContain(`Resumed batch id: ${oldBatchId}`);
+    expect(summary).toContain(`Mode: resumed_batch`);
+    expect(summary).toContain(`Resumed batch id: ${oldBatchId}`);
+    expect(summary).not.toContain("Unfinished batches not resumed");
   });
 
   it("advances successful work through reviewing to waiting_for_merge", async () => {

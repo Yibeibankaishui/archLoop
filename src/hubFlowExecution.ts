@@ -643,27 +643,27 @@ export const runHubFlow = async (
   const hubProjectDir =
     input.hubProjectDir ??
     resolveHubProjectDir(resolveArchloopUserDataDir(input.env), repoRoot);
-  const readyBoard = loadHubReadyQueue(repoRoot, input.env);
-  const { selectedTasks, batchSelection } = selectHubFlowTasksWithBatchOptions({
-    candidates: readyBoard.tasks,
-    batchStrategy: input.batchStrategy,
-    maxTasks: input.maxTasks,
-  });
-  const selectedTaskIds = selectedTasks.map((task) => task.id);
   const unfinishedBatches = findResumableHubFlowBatches({
     hubProjectDir,
     flowId: input.flowId,
     tasks: loadHubTaskBoard(repoRoot, input.env).tasks,
   });
   const unfinishedBatchIds = unfinishedBatches.map((batch) => batch.batchId);
-  const resumedBatchId =
-    selectedTasks.length === 0 ? unfinishedBatches[0]?.batchId : undefined;
-  const mode =
-    selectedTasks.length > 0
+  const resumedBatchId = unfinishedBatches[0]?.batchId;
+  const isResumingMergeBatch = resumedBatchId !== undefined;
+  const { selectedTasks, batchSelection } = isResumingMergeBatch
+    ? { selectedTasks: [], batchSelection: undefined }
+    : selectHubFlowTasksWithBatchOptions({
+        candidates: loadHubReadyQueue(repoRoot, input.env).tasks,
+        batchStrategy: input.batchStrategy,
+        maxTasks: input.maxTasks,
+      });
+  const selectedTaskIds = selectedTasks.map((task) => task.id);
+  const mode = isResumingMergeBatch
+    ? "resumed_batch"
+    : selectedTasks.length > 0
       ? "new_batch"
-      : resumedBatchId
-        ? "resumed_batch"
-        : "no_ready";
+      : "no_ready";
   const startedAt = input.startedAt ?? new Date();
   const context = createHubRunContext({
     cwd: repoRoot,
@@ -771,9 +771,13 @@ export const formatHubFlowResultLines = (
   }
 
   if (selectedTaskCount === 0) {
-    lines.push("No ready tasks selected.");
-    if (!result.resumedBatchId) {
-      lines.push(`No unfinished ${result.flowId} batch found to resume.`);
+    if (result.mode === "resumed_batch") {
+      lines.push("No new tasks claimed; resuming prior merge-ready batch.");
+    } else {
+      lines.push("No ready tasks selected.");
+      if (!result.resumedBatchId) {
+        lines.push(`No unfinished ${result.flowId} batch found to resume.`);
+      }
     }
   } else {
     for (const taskResult of result.results) {
