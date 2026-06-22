@@ -30,14 +30,13 @@ import {
 } from "./taskBoard.js";
 import * as taskBoard from "./taskBoard.js";
 import * as WorktreeManager from "./WorktreeManager.js";
-import {
-  leaseLockPath,
-  leaseNameFromBranch,
-} from "./WorktreeLease.js";
+import { leaseLockPath, leaseNameFromBranch } from "./WorktreeLease.js";
 
 const execAsync = promisify(exec);
 
-const runLeaseEffect = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem>) =>
+const runLeaseEffect = <A, E>(
+  effect: Effect.Effect<A, E, FileSystem.FileSystem>,
+) =>
   Effect.runPromise(
     effect.pipe(Effect.provide(NodeFileSystem.layer)) as Effect.Effect<
       A,
@@ -373,16 +372,83 @@ describe("Hub flow planner", () => {
     const finalState = JSON.parse(
       await readFile(stateFile, "utf-8"),
     ) as MockBeadsTask[];
-    expect(finalState.find((task) => task.id === "bd-first")?.metadata.hubStatus).toBe(
-      "waiting_for_merge",
+    expect(
+      finalState.find((task) => task.id === "bd-first")?.metadata.hubStatus,
+    ).toBe("waiting_for_merge");
+    expect(
+      finalState.find((task) => task.id === "bd-second")?.labels,
+    ).toContain("ready-for-agent");
+  });
+
+  it("defaults to planned batch strategy with max 3 and conservative fallback until planner is wired", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-default-batch-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-first",
+        title: "First ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-second",
+        title: "Second ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    const invocations: HubImplementTaskInput[] = [];
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "default-batch",
     );
-    expect(finalState.find((task) => task.id === "bd-second")?.labels).toContain(
-      "ready-for-agent",
-    );
+
+    const result = await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      implementer: async (input) => {
+        invocations.push(input);
+        return {
+          outcome: "success",
+          commits: [{ sha: "abc123" }],
+          completionSignal: "<promise>COMPLETE</promise>",
+        };
+      },
+      runMergePhase: false,
+    });
+
+    expect(result.selectedTaskIds).toEqual(["bd-first"]);
+    expect(result.batchSelection).toMatchObject({
+      batchStrategyRequested: "planned",
+      batchStrategyUsed: "conservative",
+      maxTasks: 3,
+      fallbackReason: "planner_unavailable",
+      deferredTasks: [{ taskId: "bd-second", reason: "over_max_tasks" }],
+    });
+    expect(invocations).toHaveLength(1);
+
+    const output = formatHubFlowResultLines(result).join("\n");
+    expect(output).toContain("Batch strategy: conservative (max 3)");
+    expect(output).toContain("Batch strategy requested: planned");
+    expect(output).toContain("Batch fallback: planner_unavailable");
   });
 
   it("fresh-validates conservative selection before claim and falls back when the first task gains an active claim", async () => {
-    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-fresh-validate-claim-"));
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-flow-fresh-validate-claim-"),
+    );
     await initRepo(repoDir);
     await commitFile(repoDir, "hello.txt", "hello", "initial commit");
 
@@ -482,7 +548,9 @@ describe("Hub flow planner", () => {
   });
 
   it("fresh-validates conservative selection before claim and falls back when status changes", async () => {
-    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-fresh-validate-status-"));
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-flow-fresh-validate-status-"),
+    );
     await initRepo(repoDir);
     await commitFile(repoDir, "hello.txt", "hello", "initial commit");
 

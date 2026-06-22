@@ -39,6 +39,9 @@ import {
   prepareHubTaskRetry,
 } from "./hubTaskRetry.js";
 import {
+  HUB_BATCH_DEFAULT_MAX_TASKS,
+  HUB_BATCH_DEFAULT_STRATEGY,
+  resolveEffectiveHubBatchSelection,
   selectHubFlowTasksWithBatchOptions,
   resolveFreshValidatedHubBatchSelection,
   type HubBatchPlannerResult,
@@ -646,26 +649,32 @@ export const runHubFlow = async (
     input.hubProjectDir ??
     resolveHubProjectDir(resolveArchloopUserDataDir(input.env), repoRoot);
   const readyBoard = loadHubReadyQueue(repoRoot, input.env);
+  const effectiveBatchSelection = resolveEffectiveHubBatchSelection({
+    flowKind: flowDefinition.kind,
+    batchStrategy: input.batchStrategy,
+    maxTasks: input.maxTasks,
+  });
+  const batchStrategy =
+    effectiveBatchSelection.batchStrategy ?? HUB_BATCH_DEFAULT_STRATEGY;
+  const maxTasks =
+    effectiveBatchSelection.maxTasks ?? HUB_BATCH_DEFAULT_MAX_TASKS;
   const {
     selectedTasks: initiallySelectedTasks,
     batchSelection: initialBatchSelection,
   } = selectHubFlowTasksWithBatchOptions({
     candidates: readyBoard.tasks,
-    batchStrategy: input.batchStrategy,
-    maxTasks: input.maxTasks,
+    batchStrategy,
+    maxTasks,
   });
   const freshBoard = loadHubReadyQueue(repoRoot, input.env);
-  const {
-    selectedTasks,
-    batchSelection,
-    fallbackReason,
-  } = resolveFreshValidatedHubBatchSelection({
-    initialSelectedTaskIds: initiallySelectedTasks.map((task) => task.id),
-    freshCandidates: freshBoard.tasks,
-    batchStrategy: input.batchStrategy,
-    maxTasks: input.maxTasks,
-    batchSelection: initialBatchSelection,
-  });
+  const { selectedTasks, batchSelection, fallbackReason } =
+    resolveFreshValidatedHubBatchSelection({
+      initialSelectedTaskIds: initiallySelectedTasks.map((task) => task.id),
+      freshCandidates: freshBoard.tasks,
+      batchStrategy,
+      maxTasks,
+      batchSelection: initialBatchSelection,
+    });
   const selectedTaskIds = selectedTasks.map((task) => task.id);
   const unfinishedBatches = findResumableHubFlowBatches({
     hubProjectDir,
@@ -675,12 +684,14 @@ export const runHubFlow = async (
   const unfinishedBatchIds = unfinishedBatches.map((batch) => batch.batchId);
   const resumedBatchId =
     selectedTasks.length === 0 ? unfinishedBatches[0]?.batchId : undefined;
-  const mode =
-    selectedTasks.length > 0
-      ? "new_batch"
-      : resumedBatchId
-        ? "resumed_batch"
-        : "no_ready";
+  let mode: RunHubFlowResult["mode"];
+  if (selectedTasks.length > 0) {
+    mode = "new_batch";
+  } else if (resumedBatchId) {
+    mode = "resumed_batch";
+  } else {
+    mode = "no_ready";
+  }
   const startedAt = input.startedAt ?? new Date();
   const context = createHubRunContext({
     cwd: repoRoot,
@@ -785,10 +796,16 @@ export const formatHubFlowResultLines = (
     lines.push(
       `Batch strategy: ${result.batchSelection.batchStrategyUsed} (max ${result.batchSelection.maxTasks})`,
     );
-    if (result.batchSelection.fallbackReason) {
+    if (
+      result.batchSelection.batchStrategyRequested !==
+      result.batchSelection.batchStrategyUsed
+    ) {
       lines.push(
-        `Batch fallback: ${result.batchSelection.fallbackReason}`,
+        `Batch strategy requested: ${result.batchSelection.batchStrategyRequested}`,
       );
+    }
+    if (result.batchSelection.fallbackReason) {
+      lines.push(`Batch fallback: ${result.batchSelection.fallbackReason}`);
     }
     if (result.batchSelection.deferredTasks.length > 0) {
       lines.push(

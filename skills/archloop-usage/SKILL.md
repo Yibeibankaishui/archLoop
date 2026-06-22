@@ -112,42 +112,42 @@ Key APIs: `run()`, `interactive()`, `createSandbox()`, `createWorktree()`; sandb
 
 ## Common CLI
 
-| Command                                        | Purpose                                                                 |
-| ---------------------------------------------- | ----------------------------------------------------------------------- |
-| `archloop init`                                | Generate `.archloop/`                                                   |
-| `archloop project status`                      | Show Hub task board summary                                             |
-| `archloop agent-config path`                   | Show Hub agent config path                                              |
-| `archloop agent-config show`                   | Show configured Hub agent roles                                         |
-| `archloop agent-config init`                   | Interactive Hub agent role setup with model picker and provider options |
-| `archloop agent-config configure`              | Alias for `agent-config init`                                           |
-| `archloop agent-config set-role <role>`        | Save a Hub agent role provider/model                                    |
-| `archloop env path`                            | Show Hub env file path                                                  |
-| `archloop env show`                            | Show configured Hub env keys (hints for empty keys)                     |
-| `archloop env init`                            | Interactive Hub credential setup with per-key guidance                  |
-| `archloop env configure`                       | Alias for `env init`                                                    |
-| `archloop env set <key> [value]`               | Save one Hub env value                                                  |
-| `archloop auth show`                           | Show provider auth source/status                                        |
-| `archloop auth path <provider>`                | Show Hub auth dir for a provider                                        |
-| `archloop auth login codex`                    | Run Codex login with Hub `CODEX_HOME`                                   |
-| `archloop auth login github`                   | Run GitHub login with Hub `GH_CONFIG_DIR`                               |
-| `archloop tasks init`                          | Initialize the local Hub task store                                     |
-| `archloop tasks list`                          | Group Beads tasks by status                                             |
-| `archloop tasks show <selector>`               | Show one Beads task                                                     |
-| `archloop run . --flow <id> [--input <value>]` | Run a Hub flow                                                          |
-| `archloop tasks create <title>`                | Create a local Hub task                                                 |
-| `archloop tasks triage [task-id]`              | Agent-driven triage proposal flow                                       |
-| `archloop tasks pull`                          | Pull open GitHub Issues into Beads                                      |
-| `archloop tasks push`                          | Push local task state to GitHub                                         |
-| `archloop tasks sync`                          | Preview/confirm bidirectional sync                                      |
-| `archloop tasks from-prd <ref>`                | Agent-driven PRD proposal flow                                          |
-| `archloop tasks comment <selector>`            | Append a Beads comment                                                  |
-| `archloop tasks recover <selector>`            | Repair failed/stale task state                                          |
-| `archloop tasks doctor`                        | Read-only audit for Hub task-state drift                                |
-| `archloop tasks repair-state <selector>`       | Preview/confirm local Beads task-state repair                           |
-| `archloop tasks delete <selector> [more...]`   | Delete local Beads tasks                                                |
-| `archloop docker build-image`                  | Build image from Dockerfile                                             |
-| `archloop docker remove-image`                 | Remove image                                                            |
-| `archloop --help`                              | Help                                                                    |
+| Command                                                                 | Purpose                                                                 |
+| ----------------------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------------------- |
+| `archloop init`                                                         | Generate `.archloop/`                                                   |
+| `archloop project status`                                               | Show Hub task board summary                                             |
+| `archloop agent-config path`                                            | Show Hub agent config path                                              |
+| `archloop agent-config show`                                            | Show configured Hub agent roles                                         |
+| `archloop agent-config init`                                            | Interactive Hub agent role setup with model picker and provider options |
+| `archloop agent-config configure`                                       | Alias for `agent-config init`                                           |
+| `archloop agent-config set-role <role>`                                 | Save a Hub agent role provider/model                                    |
+| `archloop env path`                                                     | Show Hub env file path                                                  |
+| `archloop env show`                                                     | Show configured Hub env keys (hints for empty keys)                     |
+| `archloop env init`                                                     | Interactive Hub credential setup with per-key guidance                  |
+| `archloop env configure`                                                | Alias for `env init`                                                    |
+| `archloop env set <key> [value]`                                        | Save one Hub env value                                                  |
+| `archloop auth show`                                                    | Show provider auth source/status                                        |
+| `archloop auth path <provider>`                                         | Show Hub auth dir for a provider                                        |
+| `archloop auth login codex`                                             | Run Codex login with Hub `CODEX_HOME`                                   |
+| `archloop auth login github`                                            | Run GitHub login with Hub `GH_CONFIG_DIR`                               |
+| `archloop tasks init`                                                   | Initialize the local Hub task store                                     |
+| `archloop tasks list`                                                   | Group Beads tasks by status                                             |
+| `archloop tasks show <selector>`                                        | Show one Beads task                                                     |
+| `archloop run . --flow <id> [--input <value>] [--batch-strategy planned | limited                                                                 | conservative] [--max-tasks N]` | Run a Hub flow (task-board flows default to planned batch selection with max 3 tasks) |
+| `archloop tasks create <title>`                                         | Create a local Hub task                                                 |
+| `archloop tasks triage [task-id]`                                       | Agent-driven triage proposal flow                                       |
+| `archloop tasks pull`                                                   | Pull open GitHub Issues into Beads                                      |
+| `archloop tasks push`                                                   | Push local task state to GitHub                                         |
+| `archloop tasks sync`                                                   | Preview/confirm bidirectional sync                                      |
+| `archloop tasks from-prd <ref>`                                         | Agent-driven PRD proposal flow                                          |
+| `archloop tasks comment <selector>`                                     | Append a Beads comment                                                  |
+| `archloop tasks recover <selector>`                                     | Repair failed/stale task state                                          |
+| `archloop tasks doctor`                                                 | Read-only audit for Hub task-state drift                                |
+| `archloop tasks repair-state <selector>`                                | Preview/confirm local Beads task-state repair                           |
+| `archloop tasks delete <selector> [more...]`                            | Delete local Beads tasks                                                |
+| `archloop docker build-image`                                           | Build image from Dockerfile                                             |
+| `archloop docker remove-image`                                          | Remove image                                                            |
+| `archloop --help`                                                       | Help                                                                    |
 
 ## Troubleshooting (known failure modes)
 
@@ -161,6 +161,7 @@ Key APIs: `run()`, `interactive()`, `createSandbox()`, `createWorktree()`; sandb
 - **Hub task state doctor/repair**: `archloop tasks doctor` is read-only and audits local Beads task-board state against Hub run events plus git branch/worktree state. It reports multiple archLoop status labels, stale `metadata.hubStatus`, missing execution claim fields, failed tasks with branch work, reviewed tasks that are not selectable for merge, terminal tasks with stale execution metadata, dirty source worktree gates, worktree lease claim/occupancy mismatches with wait/rerun/repair/recover guidance, and task state that needs `archloop tasks push`. `archloop tasks repair-state <selector>` previews local Beads mutations and requires TTY confirmation or `--yes`; it preserves user labels, rewrites only archLoop-managed status labels/metadata, restores merge-ready event claims when safe, and never mutates remote GitHub Issues.
 - **Hub flow merge selection/preflight**: `archloop run . --flow ...` prints selected/skipped/blocked reasons for merge candidates. `state_inconsistent` means Hub run events and branch work indicate the task reached merge-ready state, but the Beads projection or claim metadata is stale; run `archloop tasks doctor`, then `archloop tasks repair-state <selector>` if doctor marks it repairable, before retrying. If the task is failed or has stale execution state, `archloop tasks recover <selector>` may also apply. Dirty source files block as a Git safety gate, not repairable Beads task-state pollution; commit, stash, or revert the listed files, then rerun the same flow so the batch resumes. Dirty `.beads/` runtime/export files are reported separately and do not block by themselves, but a task branch that changes `.beads/` files is blocked. Keep Beads local state out of code branches and use `archloop tasks pull` / `push` / `sync` for remote task exchange.
 - **Hub flow merge failure / `failed(merge_failed)` / `failed(merge_conflict)`**: `archloop run . --flow ...` includes the first useful Git diagnostic in the merge summary and Hub events. Clean merges use Git directly; merge conflicts require a configured `merge` role and are rechecked for unresolved files and unfinished `MERGE_HEAD` before verification continues. Use the diagnostics to decide whether to configure the merge role, clean the host worktree, inspect the branch state, or rerun `archloop tasks recover <selector>` before retrying the flow.
+- **Hub task-board batch selection**: `ready_for_agent` is the candidate pool; the selected flow batch is the subset chosen before claim. Task-board flows (`no-review`, `with-review`) default to `--batch-strategy planned --max-tasks 3`. `limited` selects ready-queue order up to the max; `conservative` selects one eligible task. `planned` uses a flow-owned planner when wired; until then Hub falls back to conservative and records `planner_unavailable` in batch events/CLI output. Unfinished same-flow merge-ready batches resume before new planning when no ready tasks are selected (**resume-first**). Proposal flows reject `--batch-strategy` and `--max-tasks`.
 - **Merge phase loses local files**: Instruct the merge agent to avoid `git stash push -u`; if stashing tracked app changes, omit `-u` and `git stash pop` afterward. Never stash/delete/`git add` `.archloop/`.
 - **`empty HEAD` / no commits**: The repo needs at least one commit before archLoop can create worktrees.
 

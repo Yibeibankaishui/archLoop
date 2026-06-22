@@ -2463,14 +2463,14 @@ const flowYesOption = Options.boolean("yes").pipe(
 
 const flowBatchStrategyOption = Options.text("batch-strategy").pipe(
   Options.withDescription(
-    "Task-board batch selection strategy (conservative selects one eligible ready task)",
+    "Task-board batch selection strategy (default planned; planned uses an agent planner when available, limited selects ready-queue order up to --max-tasks, conservative selects one eligible ready task)",
   ),
   Options.optional,
 );
 
 const flowMaxTasksOption = Options.text("max-tasks").pipe(
   Options.withDescription(
-    "Maximum tasks to select for a task-board flow batch (1-10)",
+    "Maximum tasks to select for a task-board flow batch (1-10, default 3)",
   ),
   Options.optional,
 );

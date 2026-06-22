@@ -3,14 +3,24 @@ import type { HubFlowKind } from "./hubFlows.js";
 import { isHubFlowEligibleTask, type HubTaskProjection } from "./taskBoard.js";
 
 export const HUB_BATCH_DEFAULT_MAX_TASKS = 3;
+export const HUB_BATCH_DEFAULT_STRATEGY = "planned" as const;
 export const HUB_BATCH_MIN_MAX_TASKS = 1;
 export const HUB_BATCH_MAX_TASKS_UPPER_LIMIT = 10;
 
-export const HUB_BATCH_STRATEGIES = ["conservative"] as const;
+export const HUB_BATCH_STRATEGIES = [
+  "planned",
+  "limited",
+  "conservative",
+] as const;
 export type HubBatchStrategy = (typeof HUB_BATCH_STRATEGIES)[number];
 
 export const HUB_BATCH_DEFERRED_REASONS = ["over_max_tasks"] as const;
-export type HubBatchDeferredReason = (typeof HUB_BATCH_DEFERRED_REASONS)[number];
+export type HubBatchDeferredReason =
+  (typeof HUB_BATCH_DEFERRED_REASONS)[number];
+
+export const HUB_BATCH_FALLBACK_REASONS = ["planner_unavailable"] as const;
+export type HubBatchFallbackReason =
+  (typeof HUB_BATCH_FALLBACK_REASONS)[number];
 
 export interface HubBatchDeferredTask {
   readonly taskId: string;
@@ -55,19 +65,29 @@ const invalidMaxTasksError = (raw: string): HubFlowError =>
     message: `Invalid --max-tasks value "${raw}". Expected an integer between ${HUB_BATCH_MIN_MAX_TASKS} and ${HUB_BATCH_MAX_TASKS_UPPER_LIMIT}.`,
   });
 
-export const parseHubBatchStrategy = (raw: string): HubBatchStrategy => {
-  const normalized = raw.trim().toLowerCase();
-  if (normalized.length === 0) {
-    throw new HubFlowError({
-      message: "Invalid --batch-strategy value. Use conservative.",
-    });
-  }
-  if (normalized === "conservative") {
-    return "conservative";
+const isHubBatchStrategy = (value: string): value is HubBatchStrategy =>
+  (HUB_BATCH_STRATEGIES as readonly string[]).includes(value);
+
+const parseHubBatchStrategyNormalized = (
+  normalized: string,
+  raw: string,
+): HubBatchStrategy => {
+  if (isHubBatchStrategy(normalized)) {
+    return normalized;
   }
   throw new HubFlowError({
     message: `Unknown batch strategy "${raw}". Supported strategies: ${HUB_BATCH_STRATEGIES.join(", ")}.`,
   });
+};
+
+export const parseHubBatchStrategy = (raw: string): HubBatchStrategy => {
+  const normalized = raw.trim().toLowerCase();
+  if (normalized.length === 0) {
+    throw new HubFlowError({
+      message: `Invalid --batch-strategy value. Use ${HUB_BATCH_STRATEGIES.join(", ")}.`,
+    });
+  }
+  return parseHubBatchStrategyNormalized(normalized, raw);
 };
 
 export const parseHubBatchMaxTasks = (raw: string): number => {
@@ -107,38 +127,98 @@ export const resolveHubBatchSelectionOptions = (input: {
 
   const batchStrategy = hasBatchStrategy
     ? parseHubBatchStrategy(input.batchStrategy)
-    : undefined;
+    : HUB_BATCH_DEFAULT_STRATEGY;
 
-  let maxTasks: number | undefined;
-  if (hasMaxTasks) {
-    maxTasks = parseHubBatchMaxTasks(input.maxTasks);
-  } else if (batchStrategy !== undefined) {
-    maxTasks = HUB_BATCH_DEFAULT_MAX_TASKS;
-  }
+  const maxTasks = hasMaxTasks
+    ? parseHubBatchMaxTasks(input.maxTasks)
+    : HUB_BATCH_DEFAULT_MAX_TASKS;
 
   return { batchStrategy, maxTasks };
+};
+
+export const resolveEffectiveHubBatchSelection = (input: {
+  readonly flowKind: HubFlowKind;
+  readonly batchStrategy?: HubBatchStrategy;
+  readonly maxTasks?: number;
+}): ResolvedHubBatchSelectionOptions => {
+  if (input.flowKind !== "task-board") {
+    return {};
+  }
+
+  return {
+    batchStrategy: input.batchStrategy ?? HUB_BATCH_DEFAULT_STRATEGY,
+    maxTasks: input.maxTasks ?? HUB_BATCH_DEFAULT_MAX_TASKS,
+  };
+};
+
+const partitionEligibleCandidates = (
+  candidates: readonly HubTaskProjection[],
+  selectionLimit: number,
+): {
+  readonly selectedTasks: readonly HubTaskProjection[];
+  readonly deferredTasks: readonly HubBatchDeferredTask[];
+} => {
+  const eligible = candidates.filter(isHubFlowEligibleTask);
+  return {
+    selectedTasks: eligible.slice(0, selectionLimit),
+    deferredTasks: eligible.slice(selectionLimit).map((task) => ({
+      taskId: task.id,
+      reason: "over_max_tasks",
+    })),
+  };
+};
+
+const planConservativeBatch = (
+  input: HubBatchPlannerInput,
+): HubBatchPlannerResult => {
+  const { selectedTasks, deferredTasks } = partitionEligibleCandidates(
+    input.candidates,
+    1,
+  );
+
+  return {
+    selectedTasks,
+    deferredTasks,
+    batchStrategyRequested: input.batchStrategy,
+    batchStrategyUsed: "conservative",
+    maxTasks: input.maxTasks,
+  };
+};
+
+const planLimitedBatch = (
+  input: HubBatchPlannerInput,
+): HubBatchPlannerResult => {
+  const { selectedTasks, deferredTasks } = partitionEligibleCandidates(
+    input.candidates,
+    input.maxTasks,
+  );
+
+  return {
+    selectedTasks,
+    deferredTasks,
+    batchStrategyRequested: "limited",
+    batchStrategyUsed: "limited",
+    maxTasks: input.maxTasks,
+  };
 };
 
 export const planHubFlowBatch = (
   input: HubBatchPlannerInput,
 ): HubBatchPlannerResult => {
-  const eligible = input.candidates.filter(isHubFlowEligibleTask);
-
   switch (input.batchStrategy) {
-    case "conservative": {
-      const effectiveLimit = Math.min(input.maxTasks, 1);
-      const selectedTasks = eligible.slice(0, effectiveLimit);
-      const deferredTasks = eligible.slice(effectiveLimit).map((task) => ({
-        taskId: task.id,
-        reason: "over_max_tasks" as const,
-      }));
-
+    case "conservative":
+      return planConservativeBatch(input);
+    case "limited":
+      return planLimitedBatch(input);
+    case "planned": {
+      const conservativeResult = planConservativeBatch({
+        ...input,
+        batchStrategy: "conservative",
+      });
       return {
-        selectedTasks,
-        deferredTasks,
-        batchStrategyRequested: input.batchStrategy,
-        batchStrategyUsed: "conservative",
-        maxTasks: input.maxTasks,
+        ...conservativeResult,
+        batchStrategyRequested: "planned",
+        fallbackReason: "planner_unavailable",
       };
     }
     default: {
@@ -152,22 +232,16 @@ export const planHubFlowBatch = (
 
 export const selectHubFlowTasksWithBatchOptions = (input: {
   readonly candidates: readonly HubTaskProjection[];
-  readonly batchStrategy?: HubBatchStrategy;
-  readonly maxTasks?: number;
+  readonly batchStrategy: HubBatchStrategy;
+  readonly maxTasks: number;
 }): {
   readonly selectedTasks: readonly HubTaskProjection[];
-  readonly batchSelection?: HubBatchPlannerResult;
+  readonly batchSelection: HubBatchPlannerResult;
 } => {
-  if (!input.batchStrategy) {
-    return {
-      selectedTasks: input.candidates.filter(isHubFlowEligibleTask),
-    };
-  }
-
   const batchSelection = planHubFlowBatch({
     candidates: input.candidates,
     batchStrategy: input.batchStrategy,
-    maxTasks: input.maxTasks ?? HUB_BATCH_DEFAULT_MAX_TASKS,
+    maxTasks: input.maxTasks,
   });
 
   return {

@@ -102,6 +102,7 @@ archloop --help
 | 05 triage proposal session     |        |          |       |
 | 06 GitHub sync                 |        |          |       |
 | 07 no-review flow              |        |          |       |
+| 07b task-board batch selection |        |          |       |
 | 08 reviewer flow               |        |          |       |
 | 09 merge success               |        |          |       |
 | 10 merge failure/recovery      |        |          |       |
@@ -468,16 +469,19 @@ archloop project status
 
 Expected:
 
-- Flow reads Beads ready queue.
-- Flow skips blocked/dependency-blocked tasks.
-- Selected task is claimed with `runId`, `batchId`, `branch`, and `claimedAt`.
-- Task moves `ready_for_agent -> implementing -> waiting_for_merge`.
+- Flow reads Beads ready queue as the candidate pool.
+- Flow skips blocked/dependency-blocked tasks and active claims when building candidates.
+- Default batch selection uses `planned` strategy with max 3 tasks (falls back to conservative with `planner_unavailable` until the flow-owned planner is wired).
+- Only the selected batch is claimed with `runId`, `batchId`, `branch`, and `claimedAt`.
+- Unselected ready candidates remain `ready_for_agent`.
+- Selected task moves `ready_for_agent -> implementing -> waiting_for_merge`.
 - Implementer receives task id, title, and branch from orchestration.
 - Flow uses Hub-owned prompts, not repo-local `.archloop/` prompts.
 
 Metrics:
 
-- Unblocked ready tasks selected: expected count.
+- Selected ready tasks match batch strategy output: expected count.
+- Unselected ready tasks remain ready: yes.
 - Blocked tasks selected: `0`.
 - Active duplicate claims: `0`.
 - Repo-local prompt reads: `0`.
@@ -485,8 +489,54 @@ Metrics:
 Fail signals:
 
 - Agent chooses tasks by scanning arbitrary open issues.
+- Flow claims every ready task when batch selection should defer extras.
 - Flow refuses to run without `archloop init`.
 - Claim is represented as a status named `claimed`.
+
+## Scenario 07b: Task-Board Batch Selection And Resume Precedence
+
+Purpose: 验证 task-board flow 的 batch strategy 默认值、override、以及 merge-ready batch 的 resume-first 行为。
+
+Prepare at least three `ready_for_agent` tasks in Beads ready-queue order.
+
+Steps:
+
+```bash
+cd "$TARGET_REPO"
+archloop run . --flow <NO_REVIEW_FLOW_ID>
+archloop run . --flow <NO_REVIEW_FLOW_ID> --batch-strategy limited --max-tasks 2
+archloop run . --flow <NO_REVIEW_FLOW_ID> --batch-strategy conservative
+archloop project status
+```
+
+When an unfinished same-flow merge-ready batch exists alongside new ready tasks, rerun:
+
+```bash
+archloop run . --flow <NO_REVIEW_FLOW_ID>
+```
+
+Expected:
+
+- Default run uses `planned` with max 3; CLI output and batch events record strategy requested/used, deferred tasks, and fallback reason when applicable.
+- `limited` selects the first eligible ready tasks in queue order up to `--max-tasks`.
+- `conservative` selects at most one eligible ready task.
+- Proposal flows reject `--batch-strategy` and `--max-tasks`.
+- When no ready tasks are selected but an unfinished same-flow merge-ready batch exists, Hub resumes merge for that batch before planning new work.
+- When ready tasks exist alongside unfinished merge-ready batches, Hub starts a new batch and reports old batch ids as not resumed.
+
+Metrics:
+
+- Default strategy in CLI/batch events: `planned` requested.
+- Override strategies honored: 100%.
+- Deferred ready tasks remain `ready_for_agent`: 100%.
+- Resume-first merge when no ready selection: yes when merge-ready batch exists.
+
+Fail signals:
+
+- Default run claims every ready task without batch metadata.
+- `limited` order differs from Beads ready queue.
+- Proposal flow accepts batch options.
+- New ready tasks are claimed while an unfinished merge-ready batch should resume first.
 
 ## Scenario 08: Reviewer Hub Flow
 
