@@ -50,7 +50,7 @@ export const resolveWorktreeLeaseLockPath = (
 export const resolveWorktreeLeasesDir = (repoRoot: string): string =>
   join(repoRoot, ".archloop", "locks");
 
-export const defaultProcessAliveChecker: ProcessAliveChecker = (pid) => {
+export const isProcessAlive: ProcessAliveChecker = (pid) => {
   if (!Number.isInteger(pid) || pid <= 0) {
     return false;
   }
@@ -88,7 +88,7 @@ const parseWorktreeLeaseOwner = (
 export const parseWorktreeLeaseFile = (
   lockFileName: string,
   raw: string,
-  isProcessAlive: ProcessAliveChecker = defaultProcessAliveChecker,
+  checkProcessAlive: ProcessAliveChecker = isProcessAlive,
 ): WorktreeLeaseRecord => {
   const worktreeName = lockFileName.endsWith(".lock")
     ? lockFileName.slice(0, -".lock".length)
@@ -121,7 +121,7 @@ export const parseWorktreeLeaseFile = (
       pid,
       acquiredAt,
       owner,
-      state: isProcessAlive(pid) ? "active" : "stale",
+      state: checkProcessAlive(pid) ? "active" : "stale",
       malformed: false,
     };
   } catch {
@@ -139,7 +139,7 @@ export const parseWorktreeLeaseFile = (
 
 export const listWorktreeLeases = (
   repoRoot: string,
-  isProcessAlive: ProcessAliveChecker = defaultProcessAliveChecker,
+  checkProcessAlive: ProcessAliveChecker = isProcessAlive,
 ): readonly WorktreeLeaseRecord[] => {
   const locksDir = resolveWorktreeLeasesDir(repoRoot);
   if (!existsSync(locksDir)) {
@@ -151,7 +151,7 @@ export const listWorktreeLeases = (
     .map((entry) => {
       const lockPath = join(locksDir, entry.name);
       const raw = readFileSync(lockPath, "utf8");
-      return parseWorktreeLeaseFile(entry.name, raw, isProcessAlive);
+      return parseWorktreeLeaseFile(entry.name, raw, checkProcessAlive);
     })
     .sort((left, right) => left.branch.localeCompare(right.branch));
 };
