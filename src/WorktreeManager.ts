@@ -2,6 +2,7 @@ import { Effect, Option } from "effect";
 import { FileSystem } from "@effect/platform";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
+import { pruneStaleWorktreeLeases } from "./WorktreeLease.js";
 import {
   emptyRepoWorktreeError,
   WorktreeError,
@@ -188,6 +189,12 @@ export const create = (
     }
 
     const worktreePath = join(worktreesDir, worktreeName);
+    const realWorktreesDir = yield* fs
+      .realPath(worktreesDir)
+      .pipe(Effect.catchAll(() => Effect.succeed(worktreesDir)));
+    const isUnderManagedWorktrees = (candidatePath: string): boolean =>
+      candidatePath.startsWith(worktreesDir) ||
+      candidatePath.startsWith(realWorktreesDir);
 
     if (opts?.branch) {
       // Proactively detect collision before git produces a confusing error.
@@ -196,10 +203,15 @@ export const create = (
       const existing = yield* listWorktrees(repoDir);
       const collision =
         existing.find((wt) => wt.branch === branch) ??
-        existing.find((wt) => wt.path === worktreePath);
+        existing.find((wt) => wt.path === worktreePath) ??
+        existing.find(
+          (wt) =>
+            isUnderManagedWorktrees(wt.path) &&
+            wt.path.endsWith(`/${worktreeName}`),
+        );
       if (collision) {
         // Only reuse worktrees managed by archloop (under .archloop/worktrees/)
-        const isManagedWorktree = collision.path.startsWith(worktreesDir);
+        const isManagedWorktree = isUnderManagedWorktrees(collision.path);
         if (isManagedWorktree) {
           const dirty = yield* hasUncommittedChanges(collision.path);
           if (dirty) {
@@ -244,6 +256,10 @@ export const create = (
           return Effect.fail(e);
         }),
       );
+      const resolvedWorktreePath = yield* fs
+        .realPath(worktreePath)
+        .pipe(Effect.catchAll(() => Effect.succeed(worktreePath)));
+      return { path: resolvedWorktreePath, branch };
     } else {
       yield* execGit(
         [
@@ -329,6 +345,14 @@ export const pruneStale = (
 > =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
+
+    yield* pruneStaleWorktreeLeases(repoDir).pipe(
+      Effect.mapError((error) =>
+        error._tag === "WorktreeLeaseError"
+          ? new WorktreeError({ message: error.message })
+          : error,
+      ),
+    );
 
     // Let git clean up metadata for worktrees whose directories are gone
     yield* execGit(["worktree", "prune"], repoDir);
