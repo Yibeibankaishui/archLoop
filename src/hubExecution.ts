@@ -61,6 +61,13 @@ export interface HubBatchPlannedEvent {
   readonly flowId: string;
   readonly createdAt: string;
   readonly taskIds: readonly string[];
+  readonly batchStrategyRequested?: string;
+  readonly batchStrategyUsed?: string;
+  readonly maxTasks?: number;
+  readonly deferredTasks?: readonly {
+    readonly taskId: string;
+    readonly reason: string;
+  }[];
 }
 
 export interface HubBatchMergeStartedEvent {

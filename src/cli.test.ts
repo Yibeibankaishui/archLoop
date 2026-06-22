@@ -590,6 +590,52 @@ exit 1
     }
   });
 
+  it("run --flow prd-decomposition rejects task-board batch selection options", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-run-batch-options-"));
+    await initRepo(hostDir);
+    await mkdir(join(hostDir, "docs"), { recursive: true });
+    await writeFile(join(hostDir, "docs", "feature.md"), "# PRD\n");
+
+    try {
+      await runCli(
+        "run . --flow prd-decomposition --input docs/feature.md --batch-strategy conservative",
+        hostDir,
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      expect(cliFailureOutput(err)).toMatch(
+        /Proposal flows do not support --batch-strategy or --max-tasks/i,
+      );
+    }
+
+    try {
+      await runCli(
+        "run . --flow triage --max-tasks 2",
+        hostDir,
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      expect(cliFailureOutput(err)).toMatch(
+        /Proposal flows do not support --batch-strategy or --max-tasks/i,
+      );
+    }
+  });
+
+  it("run --flow no-review rejects invalid --max-tasks values", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-run-max-tasks-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli(
+        "run . --flow no-review --batch-strategy conservative --max-tasks 0",
+        hostDir,
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      expect(cliFailureOutput(err)).toMatch(/Invalid --max-tasks value/i);
+    }
+  });
+
   it("root help exposes the tasks namespace", async () => {
     const { stdout } = await runCli("--help", process.cwd());
     expect(stdout).toContain("tasks");

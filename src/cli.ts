@@ -84,6 +84,7 @@ import {
   formatHubFlowResultLines,
   runHubFlow,
 } from "./hubFlowExecution.js";
+import { resolveHubBatchSelectionOptions } from "./hubBatchPlanner.js";
 import { getHubFlowDefinition, listHubFlows } from "./hubFlows.js";
 import {
   formatValidatedHubFlowInputSummary,
@@ -2460,6 +2461,20 @@ const flowYesOption = Options.boolean("yes").pipe(
   Options.withDefault(false),
 );
 
+const flowBatchStrategyOption = Options.text("batch-strategy").pipe(
+  Options.withDescription(
+    "Task-board batch selection strategy (conservative selects one eligible ready task)",
+  ),
+  Options.optional,
+);
+
+const flowMaxTasksOption = Options.text("max-tasks").pipe(
+  Options.withDescription(
+    "Maximum tasks to select for a task-board flow batch (1-10)",
+  ),
+  Options.optional,
+);
+
 const toHubAgentConfigError = (error: unknown): HubAgentConfigError =>
   error instanceof HubAgentConfigError
     ? error
@@ -2878,8 +2893,10 @@ const runCommand = Command.make(
     flow: flowOption,
     input: flowInputOption,
     yes: flowYesOption,
+    batchStrategy: flowBatchStrategyOption,
+    maxTasks: flowMaxTasksOption,
   },
-  ({ project, flow, input, yes }) =>
+  ({ project, flow, input, yes, batchStrategy, maxTasks }) =>
     Effect.gen(function* () {
       const d = yield* Display;
       const projectDir = project.trim().length > 0 ? project : ".";
@@ -2891,6 +2908,16 @@ const runCommand = Command.make(
           }),
         );
       }
+
+      const batchSelectionOptions = yield* Effect.try({
+        try: () =>
+          resolveHubBatchSelectionOptions({
+            flowKind: flowDefinition.kind,
+            batchStrategy: optionalTextValue(batchStrategy),
+            maxTasks: optionalTextValue(maxTasks),
+          }),
+        catch: toHubFlowError,
+      });
 
       const repoRoot = yield* Effect.try({
         try: () => resolveGitRepoRoot(projectDir),
@@ -2957,6 +2984,8 @@ const runCommand = Command.make(
             reviewer: flowDefinition.hasReviewer
               ? createHubFlowRunReviewer({ cwd: repoRoot })
               : undefined,
+            batchStrategy: batchSelectionOptions.batchStrategy,
+            maxTasks: batchSelectionOptions.maxTasks,
           }),
         catch: toHubFlowError,
       });
