@@ -8,21 +8,21 @@ import {
 } from "./mountUtils.js";
 
 describe("isScaffoldAuthMountHostPath", () => {
-  it("matches relative sandcastle auth mount paths", () => {
-    expect(isScaffoldAuthMountHostPath(".sandcastle/auth/codex")).toBe(true);
-    expect(isScaffoldAuthMountHostPath(".sandcastle/auth/gh")).toBe(true);
+  it("matches relative archloop auth mount paths", () => {
+    expect(isScaffoldAuthMountHostPath(".archloop/auth/codex")).toBe(true);
+    expect(isScaffoldAuthMountHostPath(".archloop/auth/gh")).toBe(true);
   });
 
-  it("matches absolute sandcastle auth mount paths", () => {
+  it("matches absolute archloop auth mount paths", () => {
     expect(
-      isScaffoldAuthMountHostPath("/home/user/proj/.sandcastle/auth/codex"),
+      isScaffoldAuthMountHostPath("/home/user/proj/.archloop/auth/codex"),
     ).toBe(true);
   });
 
   it("does not match arbitrary missing mount paths", () => {
     expect(isScaffoldAuthMountHostPath("nonexistent_dir_xyz")).toBe(false);
     expect(isScaffoldAuthMountHostPath("/mnt/cache")).toBe(false);
-    expect(isScaffoldAuthMountHostPath(".sandcastle/auth")).toBe(false);
+    expect(isScaffoldAuthMountHostPath(".archloop/auth")).toBe(false);
   });
 });
 
@@ -33,7 +33,7 @@ describe("resolveUserMounts scaffold auth host directories", () => {
   beforeEach(async () => {
     previousCwd = process.cwd();
     repoDir = await mkdtemp(join(tmpdir(), "scaffold-auth-mount-"));
-    await mkdir(join(repoDir, ".sandcastle"), { recursive: true });
+    await mkdir(join(repoDir, ".archloop"), { recursive: true });
     process.chdir(repoDir);
   });
 
@@ -42,13 +42,13 @@ describe("resolveUserMounts scaffold auth host directories", () => {
     await rm(repoDir, { recursive: true, force: true });
   });
 
-  it("creates a missing .sandcastle/auth/codex host directory", async () => {
-    const authDir = join(repoDir, ".sandcastle/auth/codex");
+  it("creates a missing .archloop/auth/codex host directory", async () => {
+    const authDir = join(repoDir, ".archloop/auth/codex");
 
     const result = resolveUserMounts(
       [
         {
-          hostPath: ".sandcastle/auth/codex",
+          hostPath: ".archloop/auth/codex",
           sandboxPath: "/home/agent/.codex",
         },
       ],

@@ -1,9 +1,9 @@
-import { run, claudeCode } from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { run, claudeCode } from "@yibeibankaishui/archloop";
+import { docker } from "@yibeibankaishui/archloop/sandboxes/docker";
 
 // Simple loop: an agent that picks open issues one by one and closes them.
-// Run with: npm run sandcastle
-// Or directly: tsx .sandcastle/main.mts
+// Run with: npm run archloop
+// Or directly: tsx .archloop/main.mts
 
 const sandboxProvider = docker({
   mounts: [],
@@ -14,7 +14,7 @@ const hooks = {
   sandbox: {
     onSandboxReady: [
       {
-        command: "bash .sandcastle/bootstrap.sh",
+        command: "bash .archloop/bootstrap.sh",
         timeoutMs: 300_000,
       },
     ],
@@ -35,7 +35,7 @@ await run({
 
   // Path to the prompt file. Shell expressions inside are evaluated inside the
   // sandbox at the start of each iteration, so the agent always sees fresh data.
-  promptFile: "./.sandcastle/prompt.md",
+  promptFile: "./.archloop/prompt.md",
 
   // Maximum number of iterations (agent invocations) to run in a session.
   // Each iteration works on a single issue. Increase this to process more issues

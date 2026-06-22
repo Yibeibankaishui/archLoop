@@ -7,7 +7,7 @@ Structured output is a separate domain concept from the **completion signal**. T
 ## Constraints
 
 - **`maxIterations === 1` only.** `run()` throws at entry if `output` is set and `maxIterations !== 1`. The current iteration/completion-signal API is expected to split off `run()` in future; restricting structured output to single-shot runs from day one keeps those users out of that future blast radius. (See the deferred-work issue tracking the split.)
-- **Caller owns the prompt-side instruction.** Sandcastle does not inject any text describing the expected tag or schema. `run()` throws at entry if the resolved prompt does not contain the configured opening tag — early protection against misconfiguration.
+- **Caller owns the prompt-side instruction.** archLoop does not inject any text describing the expected tag or schema. `run()` throws at entry if the resolved prompt does not contain the configured opening tag — early protection against misconfiguration.
 - **Throw on failure.** Missing tag, invalid JSON, or schema validation failure throws a `StructuredOutputError` carrying `tag`, `rawMatched`, `cause`, `commits`, `branch`, and `preservedWorktreePath?`. No auto-cleanup of worktree or branch — the caller decides recovery.
 - **Last match wins** when the tag occurs multiple times in stdout. Self-correction by the agent is the realistic case, and end-first scanning matches how `Orchestrator.ts` already locates the completion signal.
 - **Fence-aware extraction.** The contents of the tag are stripped of leading/trailing whitespace and unwrapped from an optional ` ```json ... ``` ` (or bare ` ``` ... ``` `) fence before `JSON.parse`. No other tolerance — invalid JSON throws.

@@ -62,19 +62,19 @@ describe("copyToWorktree", () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cw-test-"));
     const worktreeDir = await mkdtemp(join(tmpdir(), "cw-wt-"));
 
-    await mkdir(join(hostDir, ".sandcastle"));
+    await mkdir(join(hostDir, ".archloop"));
     await writeFile(
-      join(hostDir, ".sandcastle", "bootstrap.sh"),
+      join(hostDir, ".archloop", "bootstrap.sh"),
       "#!/bin/bash\n",
     );
 
     try {
       await Effect.runPromise(
-        copyToWorktree([".sandcastle/bootstrap.sh"], hostDir, worktreeDir),
+        copyToWorktree([".archloop/bootstrap.sh"], hostDir, worktreeDir),
       );
-      expect(
-        existsSync(join(worktreeDir, ".sandcastle", "bootstrap.sh")),
-      ).toBe(true);
+      expect(existsSync(join(worktreeDir, ".archloop", "bootstrap.sh"))).toBe(
+        true,
+      );
     } finally {
       await rm(hostDir, { recursive: true, force: true });
       await rm(worktreeDir, { recursive: true, force: true });
@@ -126,12 +126,7 @@ describe("copyToWorktree", () => {
     try {
       const customTimeout = 500;
       const exitPromise = Effect.runPromiseExit(
-        copyToWorktree(
-          ["big-file.txt"],
-          hostDir,
-          worktreeDir,
-          customTimeout,
-        ),
+        copyToWorktree(["big-file.txt"], hostDir, worktreeDir, customTimeout),
       );
 
       // Advance past the custom timeout

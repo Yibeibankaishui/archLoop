@@ -89,10 +89,10 @@ const runScaffold = (repoDir: string, options?: Partial<ScaffoldOptions>) =>
 const runEnsureProjectPackage = (
   repoDir: string,
   mainFilename: string,
-  sandcastleVersion = "0.5.9",
+  archloopVersion = "0.5.9",
 ) =>
   Effect.runPromise(
-    ensureProjectPackage(repoDir, { mainFilename, sandcastleVersion }).pipe(
+    ensureProjectPackage(repoDir, { mainFilename, archloopVersion }).pipe(
       Effect.provide(NodeFileSystem.layer),
     ),
   );
@@ -102,9 +102,9 @@ const countOccurrences = (content: string, pattern: RegExp): number =>
 
 /** Non-blank templates run init-scaffolded bootstrap only (no runtime generation). */
 const expectMainUsesInitBootstrapOnly = (mainTs: string) => {
-  expect(mainTs).toContain("bash .sandcastle/bootstrap.sh");
+  expect(mainTs).toContain("bash .archloop/bootstrap.sh");
   expect(mainTs).toMatch(
-    /onSandboxReady:\s*\[\s*\{\s*command:\s*"bash \.sandcastle\/bootstrap\.sh",\s*timeoutMs:\s*300_000/,
+    /onSandboxReady:\s*\[\s*\{\s*command:\s*"bash \.archloop\/bootstrap\.sh",\s*timeoutMs:\s*300_000/,
   );
   expect(mainTs).toContain("onSandboxReady");
   expect(mainTs).not.toContain("bootstrap-prompt.md");
@@ -117,13 +117,13 @@ const expectMainUsesInitBootstrapOnly = (mainTs: string) => {
 const expectScaffoldedMainUsesDeterministicIssueBranches = (mainTs: string) => {
   expect(mainTs).toContain("canonicalizeIssueBranch");
   expect(mainTs).toContain("canonicalizePlannedIssues");
-  expect(mainTs).toContain("`sandcastle/issue-${");
+  expect(mainTs).toContain("`archloop/issue-${");
 };
 
 const expectScaffoldedPlanPromptOmitsSlugBranches = (prompt: string) => {
-  expect(prompt).not.toContain("sandcastle/issue-{id}-{slug}");
+  expect(prompt).not.toContain("archloop/issue-{id}-{slug}");
   expect(prompt).toMatch(/do \*\*not\*\* assign branch names/i);
-  expect(prompt).toContain("sandcastle/issue-{id}");
+  expect(prompt).toContain("archloop/issue-{id}");
 };
 
 // ---------------------------------------------------------------------------
@@ -261,7 +261,7 @@ describe("Auth requirement collection", () => {
       authMounts: [
         {
           hostPath: expect.stringContaining(
-            join("sandcastle", "hub", "auth", "codex"),
+            join("archloop", "hub", "auth", "codex"),
           ),
           sandboxPath: "/home/agent/.codex",
         },
@@ -274,7 +274,7 @@ describe("Auth requirement collection", () => {
       authMounts: [
         {
           hostPath: expect.stringContaining(
-            join("sandcastle", "hub", "auth", "github"),
+            join("archloop", "hub", "auth", "github"),
           ),
           sandboxPath: "/home/agent/.config/gh",
         },
@@ -292,10 +292,7 @@ describe("InitService scaffold", () => {
   it("BOOTSTRAP_HOOK_TIMEOUT_MS matches the numeric literal in scaffolded main.mts", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop" });
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
+    const mainTs = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
     const match = mainTs.match(/timeoutMs:\s*(\d[\d_]*)/);
     expect(match).not.toBeNull();
     expect(Number(match![1]!.replaceAll("_", ""))).toBe(
@@ -310,7 +307,7 @@ describe("InitService scaffold", () => {
     });
 
     const bootstrap = await readFile(
-      join(dir, ".sandcastle", "bootstrap.sh"),
+      join(dir, ".archloop", "bootstrap.sh"),
       "utf-8",
     );
     expect(bootstrap).toContain("#!/usr/bin/env bash");
@@ -327,7 +324,7 @@ describe("InitService scaffold", () => {
       });
 
       const bootstrap = await readFile(
-        join(dir, ".sandcastle", "bootstrap.sh"),
+        join(dir, ".archloop", "bootstrap.sh"),
         "utf-8",
       );
       expect(bootstrap).toBe(renderBootstrapScript(profileName));
@@ -346,7 +343,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
       expectMainUsesInitBootstrapOnly(mainTs);
@@ -360,7 +357,7 @@ describe("InitService scaffold", () => {
     });
 
     const dockerfile = await readFile(
-      join(dir, ".sandcastle", "Dockerfile"),
+      join(dir, ".archloop", "Dockerfile"),
       "utf-8",
     );
     expect(dockerfile).not.toContain("{{PROJECT_PROFILE_TOOLS}}");
@@ -376,7 +373,7 @@ describe("InitService scaffold", () => {
     });
 
     const dockerfile = await readFile(
-      join(dir, ".sandcastle", "Dockerfile"),
+      join(dir, ".archloop", "Dockerfile"),
       "utf-8",
     );
     expect(dockerfile).toContain("build-essential");
@@ -385,7 +382,7 @@ describe("InitService scaffold", () => {
     expect(dockerfile).not.toContain("{{PROJECT_PROFILE_TOOLS}}");
 
     const bootstrap = await readFile(
-      join(dir, ".sandcastle", "bootstrap.sh"),
+      join(dir, ".archloop", "bootstrap.sh"),
       "utf-8",
     );
     expect(bootstrap).toContain("cmake -S");
@@ -398,17 +395,14 @@ describe("InitService scaffold", () => {
     await runScaffold(dir, { projectProfile: getProjectProfile("cpp")! });
 
     const envExample = await readFile(
-      join(dir, ".sandcastle", ".env.example"),
+      join(dir, ".archloop", ".env.example"),
       "utf-8",
     );
     expect(envExample).toContain("ANTHROPIC_API_KEY=");
     expect(envExample).not.toContain("CCACHE");
     expect(envExample).not.toContain("CMAKE_");
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
+    const mainTs = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
     expect(mainTs).not.toMatch(/copyToWorktree:[\s\S]*build\//);
   });
 
@@ -419,7 +413,7 @@ describe("InitService scaffold", () => {
     });
 
     const envExample = await readFile(
-      join(dir, ".sandcastle", ".env.example"),
+      join(dir, ".archloop", ".env.example"),
       "utf-8",
     );
     expect(envExample).toContain("ANTHROPIC_API_KEY=");
@@ -435,7 +429,7 @@ describe("InitService scaffold", () => {
     });
 
     const bootstrap = await readFile(
-      join(dir, ".sandcastle", "bootstrap.sh"),
+      join(dir, ".archloop", "bootstrap.sh"),
       "utf-8",
     );
     expect(bootstrap).toContain("pnpm-lock.yaml");
@@ -454,7 +448,7 @@ describe("InitService scaffold", () => {
     });
 
     const dockerfile = await readFile(
-      join(dir, ".sandcastle", "Dockerfile"),
+      join(dir, ".archloop", "Dockerfile"),
       "utf-8",
     );
     expect(dockerfile).toContain("FROM node:22-bookworm");
@@ -470,7 +464,7 @@ describe("InitService scaffold", () => {
     await runScaffold(dir, { projectProfile: pythonProfile });
 
     const dockerfile = await readFile(
-      join(dir, ".sandcastle", "Dockerfile"),
+      join(dir, ".archloop", "Dockerfile"),
       "utf-8",
     );
     expect(dockerfile).not.toContain("{{PROJECT_PROFILE_TOOLS}}");
@@ -490,7 +484,7 @@ describe("InitService scaffold", () => {
     });
 
     const containerfile = await readFile(
-      join(dir, ".sandcastle", "Containerfile"),
+      join(dir, ".archloop", "Containerfile"),
       "utf-8",
     );
     expect(containerfile).not.toContain("{{PROJECT_PROFILE_TOOLS}}");
@@ -504,7 +498,7 @@ describe("InitService scaffold", () => {
     await runScaffold(dir, { projectProfile: pythonProfile });
 
     const bootstrap = await readFile(
-      join(dir, ".sandcastle", "bootstrap.sh"),
+      join(dir, ".archloop", "bootstrap.sh"),
       "utf-8",
     );
     expect(bootstrap).toContain("uv sync");
@@ -519,7 +513,7 @@ describe("InitService scaffold", () => {
     await runScaffold(dir, { projectProfile: pythonProfile });
 
     const envExample = await readFile(
-      join(dir, ".sandcastle", ".env.example"),
+      join(dir, ".archloop", ".env.example"),
       "utf-8",
     );
     expect(envExample).toContain("ANTHROPIC_API_KEY=");
@@ -532,11 +526,8 @@ describe("InitService scaffold", () => {
     const pythonProfile = getProjectProfile("python")!;
     await runScaffold(dir, { projectProfile: pythonProfile });
 
-    const prompt = await readFile(
-      join(dir, ".sandcastle", "prompt.md"),
-      "utf-8",
-    );
-    expect(prompt).toContain("sandcastle:profile:python:venv");
+    const prompt = await readFile(join(dir, ".archloop", "prompt.md"), "utf-8");
+    expect(prompt).toContain("archloop:profile:python:venv");
     expect(prompt).toContain(".venv/");
     expect(prompt).toContain("PATH");
   });
@@ -545,11 +536,8 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir, { projectProfile: NODE_PROJECT_PROFILE });
 
-    const prompt = await readFile(
-      join(dir, ".sandcastle", "prompt.md"),
-      "utf-8",
-    );
-    expect(prompt).not.toContain("sandcastle:profile:python:venv");
+    const prompt = await readFile(join(dir, ".archloop", "prompt.md"), "utf-8");
+    expect(prompt).not.toContain("archloop:profile:python:venv");
     expect(prompt).not.toContain("Python venv is bootstrapped");
   });
 
@@ -558,7 +546,7 @@ describe("InitService scaffold", () => {
     await runScaffold(dir);
 
     const dockerfile = await readFile(
-      join(dir, ".sandcastle", "Dockerfile"),
+      join(dir, ".archloop", "Dockerfile"),
       "utf-8",
     );
     // Template has {{BACKLOG_MANAGER_TOOLS}} replaced — should contain GitHub CLI (default backlog manager)
@@ -606,7 +594,7 @@ describe("InitService scaffold", () => {
 
         for (const promptFile of promptFilesWithVerifyGuidance) {
           const content = await readFile(
-            join(dir, ".sandcastle", promptFile),
+            join(dir, ".archloop", promptFile),
             "utf-8",
           );
           expect(content).not.toContain("{{PROJECT_PROFILE_VERIFY_GUIDANCE}}");
@@ -628,7 +616,7 @@ describe("InitService scaffold", () => {
       });
 
       const implementPrompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+        join(dir, ".archloop", "implement-prompt.md"),
         "utf-8",
       );
       expect(implementPrompt).toContain("{{TASK_ID}}");
@@ -649,12 +637,12 @@ describe("InitService scaffold", () => {
       });
 
       const implementPrompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+        join(dir, ".archloop", "implement-prompt.md"),
         "utf-8",
       );
       expect(implementPrompt).toContain("npm run typecheck");
       expect(implementPrompt).toContain(MINIPROGRAM_VERIFICATION_PROMPT_MARKER);
-      expect(implementPrompt).toContain(".sandcastle/verify.sh");
+      expect(implementPrompt).toContain(".archloop/verify.sh");
       expect(implementPrompt).toContain("debug/wx-check.log");
     });
   });
@@ -693,7 +681,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { agent, model: agent.defaultModel });
 
       const envExample = await readFile(
-        join(dir, ".sandcastle", ".env.example"),
+        join(dir, ".archloop", ".env.example"),
         "utf-8",
       );
       expect(envExample).toContain(expectedKey);
@@ -713,7 +701,7 @@ describe("InitService scaffold", () => {
     });
 
     const envExample = await readFile(
-      join(dir, ".sandcastle", ".env.example"),
+      join(dir, ".archloop", ".env.example"),
       "utf-8",
     );
     expect(envExample).toContain("GH_TOKEN=");
@@ -726,7 +714,7 @@ describe("InitService scaffold", () => {
     });
 
     const envExample = await readFile(
-      join(dir, ".sandcastle", ".env.example"),
+      join(dir, ".archloop", ".env.example"),
       "utf-8",
     );
     expect(envExample).not.toContain("GH_TOKEN=");
@@ -738,17 +726,17 @@ describe("InitService scaffold", () => {
 
     const { access } = await import("node:fs/promises");
     await expect(
-      access(join(dir, ".sandcastle", "config.json")),
+      access(join(dir, ".archloop", "config.json")),
     ).rejects.toThrow();
   });
 
-  it("errors if .sandcastle/ already exists", async () => {
+  it("errors if .archloop/ already exists", async () => {
     const dir = await makeDir();
     const { mkdir } = await import("node:fs/promises");
-    await mkdir(join(dir, ".sandcastle"));
+    await mkdir(join(dir, ".archloop"));
 
     await expect(runScaffold(dir)).rejects.toThrow(
-      ".sandcastle/ directory already exists",
+      ".archloop/ directory already exists",
     );
   });
 
@@ -757,7 +745,7 @@ describe("InitService scaffold", () => {
     await runScaffold(dir);
 
     const gitignore = await readFile(
-      join(dir, ".sandcastle", ".gitignore"),
+      join(dir, ".archloop", ".gitignore"),
       "utf-8",
     );
     expect(gitignore).toContain(".env");
@@ -771,7 +759,7 @@ describe("InitService scaffold", () => {
     await runScaffold(dir);
 
     const dockerfile = await readFile(
-      join(dir, ".sandcastle", "Dockerfile"),
+      join(dir, ".archloop", "Dockerfile"),
       "utf-8",
     );
     expect(dockerfile).toContain(SANDBOX_REPO_DIR);
@@ -782,7 +770,7 @@ describe("InitService scaffold", () => {
     await runScaffold(dir);
 
     const dockerfile = await readFile(
-      join(dir, ".sandcastle", "Dockerfile"),
+      join(dir, ".archloop", "Dockerfile"),
       "utf-8",
     );
     expect(dockerfile).not.toContain("corepack");
@@ -793,10 +781,7 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir);
 
-    const prompt = await readFile(
-      join(dir, ".sandcastle", "prompt.md"),
-      "utf-8",
-    );
+    const prompt = await readFile(join(dir, ".archloop", "prompt.md"), "utf-8");
     expect(prompt).toContain("# ");
     expect(prompt).toContain("!`");
     expect(prompt).toContain("<promise>COMPLETE</promise>");
@@ -806,7 +791,7 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "blank" });
 
-    const configDir = join(dir, ".sandcastle");
+    const configDir = join(dir, ".archloop");
     const prompt = await readFile(join(configDir, "prompt.md"), "utf-8");
     expect(prompt).toContain("!`");
     expect(prompt).toContain("<promise>COMPLETE</promise>");
@@ -815,25 +800,19 @@ describe("InitService scaffold", () => {
     await expect(access(join(configDir, "main.mts"))).resolves.toBeUndefined();
   });
 
-  it("blank template main.mts imports from @ai-hero/sandcastle", async () => {
+  it("blank template main.mts imports from @yibeibankaishui/archloop", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "blank" });
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
-    expect(mainTs).toContain('"@ai-hero/sandcastle"');
+    const mainTs = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
+    expect(mainTs).toContain('"@yibeibankaishui/archloop"');
   });
 
   it("blank template main.mts calls run()", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "blank" });
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
+    const mainTs = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
     expect(mainTs).toContain("run(");
   });
 
@@ -844,11 +823,11 @@ describe("InitService scaffold", () => {
     await runScaffold(dir2, { templateName: "blank" });
 
     const prompt1 = await readFile(
-      join(dir1, ".sandcastle", "prompt.md"),
+      join(dir1, ".archloop", "prompt.md"),
       "utf-8",
     );
     const prompt2 = await readFile(
-      join(dir2, ".sandcastle", "prompt.md"),
+      join(dir2, ".archloop", "prompt.md"),
       "utf-8",
     );
     expect(prompt1).toBe(prompt2);
@@ -860,10 +839,7 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir, { model: "claude-sonnet-4-6" });
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
+    const mainTs = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
     expect(mainTs).toContain('claudeCode("claude-sonnet-4-6")');
     // Should not contain the template's original model
     expect(mainTs).not.toContain('claudeCode("claude-opus-4-6")');
@@ -873,10 +849,7 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir);
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
+    const mainTs = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
     expect(mainTs).toContain('claudeCode("claude-opus-4-6")');
   });
 
@@ -890,7 +863,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
       expect(mainTs).toContain("containerUid: 1000");
@@ -909,7 +882,7 @@ describe("InitService scaffold", () => {
       installedRuntimes: [codexRuntime],
     });
 
-    const configDir = join(dir, ".sandcastle");
+    const configDir = join(dir, ".archloop");
     const mainTs = await readFile(join(configDir, "main.mts"), "utf-8");
     const dockerfile = await readFile(join(configDir, "Dockerfile"), "utf-8");
     const envExample = await readFile(join(configDir, ".env.example"), "utf-8");
@@ -932,7 +905,7 @@ describe("InitService scaffold", () => {
       ],
     });
 
-    const configDir = join(dir, ".sandcastle");
+    const configDir = join(dir, ".archloop");
     const mainTs = await readFile(join(configDir, "main.mts"), "utf-8");
     const dockerfile = await readFile(join(configDir, "Dockerfile"), "utf-8");
     const envExample = await readFile(join(configDir, ".env.example"), "utf-8");
@@ -955,7 +928,7 @@ describe("InitService scaffold", () => {
     });
 
     const dockerfile = await readFile(
-      join(dir, ".sandcastle", "Dockerfile"),
+      join(dir, ".archloop", "Dockerfile"),
       "utf-8",
     );
 
@@ -989,7 +962,7 @@ describe("InitService scaffold", () => {
     });
 
     const containerfile = await readFile(
-      join(dir, ".sandcastle", "Containerfile"),
+      join(dir, ".archloop", "Containerfile"),
       "utf-8",
     );
 
@@ -1015,7 +988,7 @@ describe("InitService scaffold", () => {
       });
 
       const containerfile = await readFile(
-        join(dir, ".sandcastle", containerfileName),
+        join(dir, ".archloop", containerfileName),
         "utf-8",
       );
 
@@ -1039,7 +1012,7 @@ describe("InitService scaffold", () => {
       backlogManager: getBacklogManager("github-issues"),
     });
 
-    const configDir = join(dir, ".sandcastle");
+    const configDir = join(dir, ".archloop");
     const envExample = await readFile(join(configDir, ".env.example"), "utf-8");
     const env = await readFile(join(configDir, ".env"), "utf-8");
 
@@ -1070,33 +1043,30 @@ describe("InitService scaffold", () => {
       }
     }
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
+    const mainTs = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
 
     expect(mainTs).toContain(
-      join(dataHome, "sandcastle", "hub", "auth", "codex"),
+      join(dataHome, "archloop", "hub", "auth", "codex"),
     );
     expect(mainTs).toContain("/home/agent/.codex");
     expect(mainTs).toContain(
-      join(dataHome, "sandcastle", "hub", "auth", "github"),
+      join(dataHome, "archloop", "hub", "auth", "github"),
     );
     expect(mainTs).toContain("/home/agent/.config/gh");
-    expect(mainTs).not.toContain(".sandcastle/auth/cursor");
-    expect(mainTs).not.toContain(".sandcastle/auth/cursor-config");
+    expect(mainTs).not.toContain(".archloop/auth/cursor");
+    expect(mainTs).not.toContain(".archloop/auth/cursor-config");
 
     await expect(
-      access(join(dataHome, "sandcastle", "hub", "auth", "codex")),
+      access(join(dataHome, "archloop", "hub", "auth", "codex")),
     ).resolves.toBeUndefined();
     await expect(
-      access(join(dataHome, "sandcastle", "hub", "auth", "github")),
+      access(join(dataHome, "archloop", "hub", "auth", "github")),
     ).resolves.toBeUndefined();
     await expect(
-      access(join(dir, ".sandcastle", "auth", "cursor")),
+      access(join(dir, ".archloop", "auth", "cursor")),
     ).rejects.toThrow();
     await expect(
-      access(join(dir, ".sandcastle", "auth", "cursor-config")),
+      access(join(dir, ".archloop", "auth", "cursor-config")),
     ).rejects.toThrow();
   });
 
@@ -1122,32 +1092,29 @@ describe("InitService scaffold", () => {
       }
     }
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
+    const mainTs = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
 
     expect(mainTs).toContain(
-      join(dataHome, "sandcastle", "hub", "auth", "codex"),
+      join(dataHome, "archloop", "hub", "auth", "codex"),
     );
     expect(mainTs).toContain("/home/agent/.codex");
-    expect(mainTs).not.toContain(".sandcastle/auth/cursor");
+    expect(mainTs).not.toContain(".archloop/auth/cursor");
     expect(mainTs).not.toContain("/home/agent/.cursor");
-    expect(mainTs).not.toContain(".sandcastle/auth/cursor-config");
+    expect(mainTs).not.toContain(".archloop/auth/cursor-config");
     expect(mainTs).not.toContain("/home/agent/.config/cursor");
-    expect(mainTs).not.toContain(".sandcastle/auth/gh");
+    expect(mainTs).not.toContain(".archloop/auth/gh");
 
     await expect(
-      access(join(dataHome, "sandcastle", "hub", "auth", "codex")),
+      access(join(dataHome, "archloop", "hub", "auth", "codex")),
     ).resolves.toBeUndefined();
     await expect(
-      access(join(dir, ".sandcastle", "auth", "cursor")),
+      access(join(dir, ".archloop", "auth", "cursor")),
     ).rejects.toThrow();
     await expect(
-      access(join(dir, ".sandcastle", "auth", "cursor-config")),
+      access(join(dir, ".archloop", "auth", "cursor-config")),
     ).rejects.toThrow();
     await expect(
-      access(join(dir, ".sandcastle", "auth", "gh")),
+      access(join(dir, ".archloop", "auth", "gh")),
     ).rejects.toThrow();
   });
 
@@ -1157,7 +1124,7 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop" });
 
-    const configDir = join(dir, ".sandcastle");
+    const configDir = join(dir, ".archloop");
     const { access } = await import("node:fs/promises");
 
     await expect(access(join(configDir, "main.mts"))).resolves.toBeUndefined();
@@ -1167,25 +1134,19 @@ describe("InitService scaffold", () => {
     ).rejects.toThrow();
   });
 
-  it("simple-loop main.mts imports from @ai-hero/sandcastle", async () => {
+  it("simple-loop main.mts imports from @yibeibankaishui/archloop", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop" });
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
-    expect(mainTs).toContain('"@ai-hero/sandcastle"');
+    const mainTs = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
+    expect(mainTs).toContain('"@yibeibankaishui/archloop"');
   });
 
   it("simple-loop main.mts contains bootstrap hook and run() options", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop" });
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
+    const mainTs = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
     expect(mainTs).toContain("run(");
     expect(mainTs).toContain("maxIterations");
     expect(mainTs).toContain("3");
@@ -1198,10 +1159,7 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop" });
 
-    const prompt = await readFile(
-      join(dir, ".sandcastle", "prompt.md"),
-      "utf-8",
-    );
+    const prompt = await readFile(join(dir, ".archloop", "prompt.md"), "utf-8");
     expect(prompt).toContain("!`gh issue");
     expect(prompt).toContain("!`git log");
     expect(prompt).toContain("<promise>COMPLETE</promise>");
@@ -1212,7 +1170,7 @@ describe("InitService scaffold", () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
-      const configDir = join(dir, ".sandcastle");
+      const configDir = join(dir, ".archloop");
       const { access } = await import("node:fs/promises");
 
       await expect(
@@ -1229,15 +1187,15 @@ describe("InitService scaffold", () => {
       ).rejects.toThrow();
     });
 
-    it("main.mts imports from @ai-hero/sandcastle", async () => {
+    it("main.mts imports from @yibeibankaishui/archloop", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain('"@ai-hero/sandcastle"');
+      expect(mainTs).toContain('"@yibeibankaishui/archloop"');
     });
 
     it("main.mts uses createSandbox so implementer and reviewer share a sandbox", async () => {
@@ -1245,7 +1203,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
       expect(mainTs).toContain("createSandbox");
@@ -1260,7 +1218,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
       expect(mainTs).toContain("const branch =");
@@ -1274,7 +1232,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
       expect(mainTs).toContain("implement.commits.length");
@@ -1285,7 +1243,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+        join(dir, ".archloop", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("gh issue list");
@@ -1300,7 +1258,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "review-prompt.md"),
+        join(dir, ".archloop", "review-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("{{BRANCH}}");
@@ -1318,7 +1276,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
       const standards = await readFile(
-        join(dir, ".sandcastle", "CODING_STANDARDS.md"),
+        join(dir, ".archloop", "CODING_STANDARDS.md"),
         "utf-8",
       );
       expect(standards).toContain("# Coding Standards");
@@ -1326,15 +1284,15 @@ describe("InitService scaffold", () => {
       expect(standards).toContain("Customize");
     });
 
-    it("review-prompt.md references @.sandcastle/CODING_STANDARDS.md", async () => {
+    it("review-prompt.md references @.archloop/CODING_STANDARDS.md", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "review-prompt.md"),
+        join(dir, ".archloop", "review-prompt.md"),
         "utf-8",
       );
-      expect(prompt).toContain("@.sandcastle/CODING_STANDARDS.md");
+      expect(prompt).toContain("@.archloop/CODING_STANDARDS.md");
     });
 
     it("review-prompt.md uses {{SOURCE_BRANCH}} instead of hardcoded main", async () => {
@@ -1342,7 +1300,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "review-prompt.md"),
+        join(dir, ".archloop", "review-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("git diff {{SOURCE_BRANCH}}...{{BRANCH}}");
@@ -1357,7 +1315,7 @@ describe("InitService scaffold", () => {
     await runScaffold(dir, { templateName: "simple-loop" });
 
     const { readdir } = await import("node:fs/promises");
-    const files = await readdir(join(dir, ".sandcastle"));
+    const files = await readdir(join(dir, ".archloop"));
     const compiledFiles = files.filter(
       (f) =>
         f.endsWith(".js") ||
@@ -1369,7 +1327,7 @@ describe("InitService scaffold", () => {
   });
 
   describe("getNextStepsLines", () => {
-    it("blank template returns steps mentioning .env and main filename (not npx sandcastle run)", () => {
+    it("blank template returns steps mentioning .env and main filename (not npx archloop run)", () => {
       const lines = getNextStepsLines("blank", "main.mts");
       expect(lines.length).toBeGreaterThanOrEqual(2);
       const joined = lines.join("\n");
@@ -1377,17 +1335,17 @@ describe("InitService scaffold", () => {
       expect(joined).toContain("main.mts");
       expect(joined).toContain("tsx");
       expect(joined).not.toContain("npm exec --yes --package tsx");
-      expect(joined).not.toContain("npx sandcastle run");
+      expect(joined).not.toContain("npx archloop run");
       expect(joined).not.toContain("npx tsx");
     });
 
-    it("non-blank template returns steps mentioning .env, package.json, and npm run sandcastle", () => {
+    it("non-blank template returns steps mentioning .env, package.json, and npm run archloop", () => {
       const lines = getNextStepsLines("simple-loop", "main.mts");
       const joined = lines.join("\n");
       expect(joined).toContain(".env");
       expect(joined).toMatch(/package\.json/);
       expect(joined).toContain("tsx");
-      expect(joined).toContain("npm run sandcastle");
+      expect(joined).toContain("npm run archloop");
       expect(joined).not.toContain("npm exec --yes --package tsx");
       expect(joined).not.toContain("npx tsx");
     });
@@ -1410,7 +1368,7 @@ describe("InitService scaffold", () => {
       const lines = getNextStepsLines("simple-loop", "main.mts");
       const joined = lines.join("\n");
       expect(joined).toMatch(/Project profile/i);
-      expect(joined).toContain(".sandcastle/bootstrap.sh");
+      expect(joined).toContain(".archloop/bootstrap.sh");
       expect(joined).toContain("onSandboxReady");
       expect(joined).toMatch(/worktree|mounted/i);
       expect(joined).toMatch(/image build|during init/i);
@@ -1422,7 +1380,7 @@ describe("InitService scaffold", () => {
     it("blank template next steps mention scaffolded bootstrap from Project profile", () => {
       const joined = getNextStepsLines("blank", "main.mts").join("\n");
       expect(joined).toMatch(/Project profile/i);
-      expect(joined).toContain(".sandcastle/bootstrap.sh");
+      expect(joined).toContain(".archloop/bootstrap.sh");
       expect(joined).toMatch(/does not run or validate/i);
     });
 
@@ -1502,7 +1460,7 @@ describe("InitService scaffold", () => {
         presetAgentIds: ["reviewer"],
       });
       const joined = lines.join("\n");
-      expect(joined).toContain(".sandcastle/agents/");
+      expect(joined).toContain(".archloop/agents/");
       expect(joined).toContain("agent-profiles.json");
       expect(joined).toContain("recommended provider/model");
       expect(joined).toContain("matching installed runtimes");
@@ -1513,7 +1471,7 @@ describe("InitService scaffold", () => {
         packageSetup: "created",
       }).join("\n");
       expect(joined).toContain("package.json was configured");
-      expect(joined).not.toContain('Add "sandcastle"');
+      expect(joined).not.toContain('Add "archloop"');
     });
 
     it("invalid package setup tells user to fix package.json", () => {
@@ -1521,7 +1479,7 @@ describe("InitService scaffold", () => {
         packageSetup: "invalid-skipped",
       }).join("\n");
       expect(joined).toContain("Fix package.json");
-      expect(joined).toContain("@ai-hero/sandcastle");
+      expect(joined).toContain("@yibeibankaishui/archloop");
     });
   });
 
@@ -1530,7 +1488,7 @@ describe("InitService scaffold", () => {
     await runScaffold(dir, { agent: piAgent, model: "claude-sonnet-4-6" });
 
     const dockerfile = await readFile(
-      join(dir, ".sandcastle", "Dockerfile"),
+      join(dir, ".archloop", "Dockerfile"),
       "utf-8",
     );
     expect(dockerfile).toContain("FROM node:22-bookworm");
@@ -1542,10 +1500,7 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir, { agent: piAgent, model: "claude-sonnet-4-6" });
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
+    const mainTs = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
     expect(mainTs).toContain('pi("claude-sonnet-4-6")');
     expect(mainTs).not.toContain("claudeCode");
   });
@@ -1555,7 +1510,7 @@ describe("InitService scaffold", () => {
     await runScaffold(dir, { agent: codexAgent, model: "gpt-5.4-mini" });
 
     const dockerfile = await readFile(
-      join(dir, ".sandcastle", "Dockerfile"),
+      join(dir, ".archloop", "Dockerfile"),
       "utf-8",
     );
     expect(dockerfile).toContain("FROM node:22-bookworm");
@@ -1570,10 +1525,7 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir, { agent: codexAgent, model: "gpt-5.4-mini" });
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
+    const mainTs = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
     expect(mainTs).toContain('codex("gpt-5.4-mini")');
     expect(mainTs).not.toContain("claudeCode");
   });
@@ -1583,7 +1535,7 @@ describe("InitService scaffold", () => {
     await runScaffold(dir, { agent: cursorAgent, model: "auto" });
 
     const dockerfile = await readFile(
-      join(dir, ".sandcastle", "Dockerfile"),
+      join(dir, ".archloop", "Dockerfile"),
       "utf-8",
     );
     expect(dockerfile).toContain("FROM node:22-bookworm");
@@ -1595,43 +1547,34 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir, { agent: cursorAgent, model: "auto" });
 
-    const mainTs = await readFile(
-      join(dir, ".sandcastle", "main.mts"),
-      "utf-8",
-    );
+    const mainTs = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
     expect(mainTs).toContain('cursor("auto")');
     expect(mainTs).not.toContain("claudeCode");
   });
 
   // --- createLabel option ---
 
-  it("simple-loop prompt.md retains -l Sandcastle when createLabel is true", async () => {
+  it("simple-loop prompt.md retains -l archLoop when createLabel is true", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop", createLabel: true });
 
-    const prompt = await readFile(
-      join(dir, ".sandcastle", "prompt.md"),
-      "utf-8",
-    );
-    expect(prompt).toContain("-l Sandcastle");
+    const prompt = await readFile(join(dir, ".archloop", "prompt.md"), "utf-8");
+    expect(prompt).toContain("-l archLoop");
   });
 
-  it("simple-loop prompt.md strips -l Sandcastle when createLabel is false", async () => {
+  it("simple-loop prompt.md strips -l archLoop when createLabel is false", async () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop", createLabel: false });
 
-    const prompt = await readFile(
-      join(dir, ".sandcastle", "prompt.md"),
-      "utf-8",
-    );
-    expect(prompt).not.toContain("-l Sandcastle");
+    const prompt = await readFile(join(dir, ".archloop", "prompt.md"), "utf-8");
+    expect(prompt).not.toContain("-l archLoop");
     // The gh issue list command should still be valid
     expect(prompt).toContain("gh issue list");
     // No double spaces in gh commands from removal
     expect(prompt).not.toMatch(/gh issue list {2}/);
   });
 
-  it("parallel-planner plan-prompt.md strips -l Sandcastle when createLabel is false", async () => {
+  it("parallel-planner plan-prompt.md strips -l archLoop when createLabel is false", async () => {
     const dir = await makeDir();
     await runScaffold(dir, {
       templateName: "parallel-planner",
@@ -1639,27 +1582,27 @@ describe("InitService scaffold", () => {
     });
 
     const prompt = await readFile(
-      join(dir, ".sandcastle", "plan-prompt.md"),
+      join(dir, ".archloop", "plan-prompt.md"),
       "utf-8",
     );
-    expect(prompt).not.toContain("-l Sandcastle");
+    expect(prompt).not.toContain("-l archLoop");
     expect(prompt).toContain("gh issue list");
   });
 
-  it("parallel-planner main.mts strips only the Sandcastle label when createLabel is false", async () => {
+  it("parallel-planner main.mts strips only the archLoop label when createLabel is false", async () => {
     const dir = await makeDir();
     await runScaffold(dir, {
       templateName: "parallel-planner",
       createLabel: false,
     });
 
-    const main = await readFile(join(dir, ".sandcastle", "main.mts"), "utf-8");
+    const main = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
     expect(main).toContain("gh issue list");
-    expect(main).not.toContain("-l Sandcastle");
+    expect(main).not.toContain("-l archLoop");
     expect(main).toContain("-l ready-for-agent");
   });
 
-  it("sequential-reviewer implement-prompt.md strips -l Sandcastle when createLabel is false", async () => {
+  it("sequential-reviewer implement-prompt.md strips -l archLoop when createLabel is false", async () => {
     const dir = await makeDir();
     await runScaffold(dir, {
       templateName: "sequential-reviewer",
@@ -1667,10 +1610,10 @@ describe("InitService scaffold", () => {
     });
 
     const prompt = await readFile(
-      join(dir, ".sandcastle", "implement-prompt.md"),
+      join(dir, ".archloop", "implement-prompt.md"),
       "utf-8",
     );
-    expect(prompt).not.toContain("-l Sandcastle");
+    expect(prompt).not.toContain("-l archLoop");
     expect(prompt).toContain("gh issue list");
   });
 
@@ -1689,7 +1632,7 @@ describe("InitService scaffold", () => {
     for (const { template, file } of cases) {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: template });
-      const prompt = await readFile(join(dir, ".sandcastle", file), "utf-8");
+      const prompt = await readFile(join(dir, ".archloop", file), "utf-8");
       expect(prompt, `${template}/${file}`).not.toContain("{{TASK_ID}}");
     }
   });
@@ -1698,11 +1641,8 @@ describe("InitService scaffold", () => {
     const dir = await makeDir();
     await runScaffold(dir, { templateName: "simple-loop" });
 
-    const prompt = await readFile(
-      join(dir, ".sandcastle", "prompt.md"),
-      "utf-8",
-    );
-    expect(prompt).toContain("-l Sandcastle");
+    const prompt = await readFile(join(dir, ".archloop", "prompt.md"), "utf-8");
+    expect(prompt).toContain("-l archLoop");
   });
 
   it("unknown template name throws a clear error", async () => {
@@ -1717,7 +1657,7 @@ describe("InitService scaffold", () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner" });
 
-      const configDir = join(dir, ".sandcastle");
+      const configDir = join(dir, ".archloop");
       const { access } = await import("node:fs/promises");
 
       await expect(
@@ -1737,26 +1677,26 @@ describe("InitService scaffold", () => {
       ).rejects.toThrow();
     });
 
-    it("main.mts imports sandcastle namespace", async () => {
+    it("main.mts imports archloop namespace", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain("sandcastle");
+      expect(mainTs).toContain("archloop");
     });
 
-    it("main.mts imports from @ai-hero/sandcastle", async () => {
+    it("main.mts imports from @yibeibankaishui/archloop", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain('"@ai-hero/sandcastle"');
+      expect(mainTs).toContain('"@yibeibankaishui/archloop"');
     });
 
     it("main.mts references the specified model for all factory calls", async () => {
@@ -1764,7 +1704,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
       // All factory calls should use the specified model (default: claude-opus-4-6)
@@ -1776,7 +1716,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+        join(dir, ".archloop", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("{{TASK_ID}}");
@@ -1789,7 +1729,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "merge-prompt.md"),
+        join(dir, ".archloop", "merge-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("{{BRANCHES}}");
@@ -1801,7 +1741,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
       expect(mainTs).not.toContain("completedBranches.length === 1");
@@ -1812,7 +1752,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
       expectScaffoldedMainUsesDeterministicIssueBranches(mainTs);
@@ -1823,7 +1763,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "plan-prompt.md"),
+        join(dir, ".archloop", "plan-prompt.md"),
         "utf-8",
       );
       expectScaffoldedPlanPromptOmitsSlugBranches(prompt);
@@ -1833,7 +1773,7 @@ describe("InitService scaffold", () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner" });
 
-      const configDir = join(dir, ".sandcastle");
+      const configDir = join(dir, ".archloop");
       const dockerfile = await readFile(join(configDir, "Dockerfile"), "utf-8");
       expect(dockerfile).toContain("FROM node:22-bookworm");
       expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
@@ -1853,7 +1793,7 @@ describe("InitService scaffold", () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
-      const configDir = join(dir, ".sandcastle");
+      const configDir = join(dir, ".archloop");
       const { access } = await import("node:fs/promises");
 
       await expect(
@@ -1876,15 +1816,15 @@ describe("InitService scaffold", () => {
       ).rejects.toThrow();
     });
 
-    it("main.mts imports from @ai-hero/sandcastle", async () => {
+    it("main.mts imports from @yibeibankaishui/archloop", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
-      expect(mainTs).toContain('"@ai-hero/sandcastle"');
+      expect(mainTs).toContain('"@yibeibankaishui/archloop"');
     });
 
     it("main.mts uses createSandbox for shared sandbox per branch", async () => {
@@ -1892,7 +1832,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
       expect(mainTs).toContain("createSandbox");
@@ -1905,7 +1845,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
       expect(mainTs).toContain("implement-prompt.md");
@@ -1918,7 +1858,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
       expect(mainTs).toContain("countBranchCommitsAhead");
@@ -1933,7 +1873,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
       expect(mainTs).toContain("branchHasUnmergedWork");
@@ -1947,7 +1887,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
       expect(mainTs).toContain("no new commits this run; branch has");
@@ -1959,7 +1899,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
       // Reviewer result must be captured, not discarded
@@ -1974,7 +1914,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
       expect(mainTs).toContain("Promise.allSettled");
@@ -1985,7 +1925,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
       // Check planner maxIterations: 1 (near "planner" name)
@@ -2022,7 +1962,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+        join(dir, ".archloop", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("{{TASK_ID}}");
@@ -2035,7 +1975,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "review-prompt.md"),
+        join(dir, ".archloop", "review-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("{{BRANCH}}");
@@ -2046,7 +1986,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "merge-prompt.md"),
+        join(dir, ".archloop", "merge-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("{{BRANCHES}}");
@@ -2068,7 +2008,7 @@ describe("InitService scaffold", () => {
       });
 
       const blockerResolution = await readFile(
-        join(dir, ".sandcastle", "blockerResolution.ts"),
+        join(dir, ".archloop", "blockerResolution.ts"),
         "utf-8",
       );
       expect(blockerResolution).toContain("openBlockers");
@@ -2078,7 +2018,7 @@ describe("InitService scaffold", () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
-      const configDir = join(dir, ".sandcastle");
+      const configDir = join(dir, ".archloop");
       const dockerfile = await readFile(join(configDir, "Dockerfile"), "utf-8");
       expect(dockerfile).toContain("FROM node:22-bookworm");
       expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
@@ -2097,7 +2037,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
       expect(mainTs).toContain("claude-opus-4-6");
@@ -2108,22 +2048,22 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const standards = await readFile(
-        join(dir, ".sandcastle", "CODING_STANDARDS.md"),
+        join(dir, ".archloop", "CODING_STANDARDS.md"),
         "utf-8",
       );
       expect(standards).toContain("# Coding Standards");
       expect(standards).toContain("Customize");
     });
 
-    it("review-prompt.md references @.sandcastle/CODING_STANDARDS.md", async () => {
+    it("review-prompt.md references @.archloop/CODING_STANDARDS.md", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "review-prompt.md"),
+        join(dir, ".archloop", "review-prompt.md"),
         "utf-8",
       );
-      expect(prompt).toContain("@.sandcastle/CODING_STANDARDS.md");
+      expect(prompt).toContain("@.archloop/CODING_STANDARDS.md");
     });
 
     it("review-prompt.md uses {{SOURCE_BRANCH}} instead of hardcoded main", async () => {
@@ -2131,7 +2071,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "review-prompt.md"),
+        join(dir, ".archloop", "review-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("git diff {{SOURCE_BRANCH}}...{{BRANCH}}");
@@ -2145,7 +2085,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+        join(dir, ".archloop", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("merge phase");
@@ -2159,12 +2099,12 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "plan-prompt.md"),
+        join(dir, ".archloop", "plan-prompt.md"),
         "utf-8",
       );
       // The planner must only do dependency analysis; deterministic branch
       // detection lives in main.mts. Instructing the LLM to match
-      // `sandcastle/issue-{id}-*` branches caused it to pick up unrelated
+      // `archloop/issue-{id}-*` branches caused it to pick up unrelated
       // same-numbered branches from other remotes.
       expect(prompt).not.toContain("# EXISTING BRANCHES");
       expect(prompt).not.toContain("git rev-list <base>..refs/heads/<branch>");
@@ -2176,7 +2116,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "plan-prompt.md"),
+        join(dir, ".archloop", "plan-prompt.md"),
         "utf-8",
       );
       expectScaffoldedPlanPromptOmitsSlugBranches(prompt);
@@ -2187,7 +2127,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
       expectScaffoldedMainUsesDeterministicIssueBranches(mainTs);
@@ -2198,7 +2138,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
       expect(mainTs).toContain(
@@ -2213,7 +2153,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const mainTs = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
       expect(mainTs).toContain("EMPTY_RUN_CIRCUIT_BREAKER_THRESHOLD");
@@ -2230,7 +2170,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner-with-review" });
 
       const readme = await readFile(
-        join(dir, ".sandcastle", "README.md"),
+        join(dir, ".archloop", "README.md"),
         "utf-8",
       );
       expect(readme).toMatch(/implement.*review.*merge.*close/is);
@@ -2254,9 +2194,7 @@ describe("InitService scaffold", () => {
       expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
         "gh issue list",
       );
-      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
-        "-l Sandcastle",
-      );
+      expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain("-l archLoop");
       expect(manager!.templateArgs.LIST_TASKS_COMMAND).toContain(
         "-l ready-for-agent",
       );
@@ -2321,7 +2259,7 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "prompt.md"),
+        join(dir, ".archloop", "prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("gh issue list");
@@ -2340,7 +2278,7 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "prompt.md"),
+        join(dir, ".archloop", "prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("bd ready --json");
@@ -2351,7 +2289,7 @@ describe("InitService scaffold", () => {
       expect(prompt).not.toContain("{{CLOSE_TASK_COMMAND}}");
     });
 
-    it("simple-loop with beads skips -l Sandcastle (no label to strip)", async () => {
+    it("simple-loop with beads skips -l archLoop (no label to strip)", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
         templateName: "simple-loop",
@@ -2359,13 +2297,13 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "prompt.md"),
+        join(dir, ".archloop", "prompt.md"),
         "utf-8",
       );
-      expect(prompt).not.toContain("-l Sandcastle");
+      expect(prompt).not.toContain("-l archLoop");
     });
 
-    it("simple-loop with github-issues retains -l Sandcastle when createLabel is true", async () => {
+    it("simple-loop with github-issues retains -l archLoop when createLabel is true", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
         templateName: "simple-loop",
@@ -2374,13 +2312,13 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "prompt.md"),
+        join(dir, ".archloop", "prompt.md"),
         "utf-8",
       );
-      expect(prompt).toContain("-l Sandcastle");
+      expect(prompt).toContain("-l archLoop");
     });
 
-    it("simple-loop with github-issues strips -l Sandcastle when createLabel is false", async () => {
+    it("simple-loop with github-issues strips -l archLoop when createLabel is false", async () => {
       const dir = await makeDir();
       await runScaffold(dir, {
         templateName: "simple-loop",
@@ -2389,10 +2327,10 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "prompt.md"),
+        join(dir, ".archloop", "prompt.md"),
         "utf-8",
       );
-      expect(prompt).not.toContain("-l Sandcastle");
+      expect(prompt).not.toContain("-l archLoop");
       expect(prompt).toContain("gh issue list");
     });
 
@@ -2401,7 +2339,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "simple-loop" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "prompt.md"),
+        join(dir, ".archloop", "prompt.md"),
         "utf-8",
       );
       // Should default to github-issues and replace placeholders
@@ -2414,7 +2352,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "simple-loop" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "prompt.md"),
+        join(dir, ".archloop", "prompt.md"),
         "utf-8",
       );
       expect(prompt).not.toContain("GitHub issue");
@@ -2430,7 +2368,7 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+        join(dir, ".archloop", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("gh issue list");
@@ -2449,7 +2387,7 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+        join(dir, ".archloop", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("bd ready --json");
@@ -2465,7 +2403,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "sequential-reviewer" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+        join(dir, ".archloop", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).not.toContain("GitHub issue");
@@ -2481,7 +2419,7 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "prompt.md"),
+        join(dir, ".archloop", "prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("gh issue list");
@@ -2496,7 +2434,7 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "prompt.md"),
+        join(dir, ".archloop", "prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("bd ready --json");
@@ -2514,7 +2452,7 @@ describe("InitService scaffold", () => {
       });
 
       const planPrompt = await readFile(
-        join(dir, ".sandcastle", "plan-prompt.md"),
+        join(dir, ".archloop", "plan-prompt.md"),
         "utf-8",
       );
       expect(planPrompt).toContain("{{ISSUES_JSON}}");
@@ -2533,11 +2471,8 @@ describe("InitService scaffold", () => {
         backlogManager: getBacklogManager("github-issues"),
       });
 
-      const main = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      expect(main).toContain("-l Sandcastle -l ready-for-agent");
+      const main = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
+      expect(main).toContain("-l archLoop -l ready-for-agent");
       expect(main).toContain(
         "const readyIssuesJson = await listReadyIssuesJson()",
       );
@@ -2556,7 +2491,7 @@ describe("InitService scaffold", () => {
       });
 
       const planPrompt = await readFile(
-        join(dir, ".sandcastle", "plan-prompt.md"),
+        join(dir, ".archloop", "plan-prompt.md"),
         "utf-8",
       );
       expect(planPrompt).toContain("{{ISSUES_JSON}}");
@@ -2573,10 +2508,7 @@ describe("InitService scaffold", () => {
         templateName: "parallel-planner",
       });
 
-      const main = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
+      const main = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
       expect(main).toContain("id: string");
       expect(main).toContain("TASK_ID: issue.id");
       expect(main).not.toContain("number: number");
@@ -2591,7 +2523,7 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+        join(dir, ".archloop", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("{{TASK_ID}}");
@@ -2606,7 +2538,7 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+        join(dir, ".archloop", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("gh issue view");
@@ -2621,7 +2553,7 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+        join(dir, ".archloop", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("bd show");
@@ -2637,7 +2569,7 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "merge-prompt.md"),
+        join(dir, ".archloop", "merge-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("gh issue close");
@@ -2652,7 +2584,7 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "merge-prompt.md"),
+        join(dir, ".archloop", "merge-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("bd close");
@@ -2665,7 +2597,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { templateName: "parallel-planner" });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+        join(dir, ".archloop", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).not.toContain("close the issue when done");
@@ -2679,7 +2611,7 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+        join(dir, ".archloop", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).not.toContain("GitHub issue");
@@ -2695,7 +2627,7 @@ describe("InitService scaffold", () => {
       });
 
       const planPrompt = await readFile(
-        join(dir, ".sandcastle", "plan-prompt.md"),
+        join(dir, ".archloop", "plan-prompt.md"),
         "utf-8",
       );
       expect(planPrompt).toContain("{{ISSUES_JSON}}");
@@ -2718,11 +2650,8 @@ describe("InitService scaffold", () => {
         backlogManager: getBacklogManager("github-issues"),
       });
 
-      const main = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
-      expect(main).toContain("-l Sandcastle -l ready-for-agent");
+      const main = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
+      expect(main).toContain("-l archLoop -l ready-for-agent");
       expect(main).toContain("enrichReadyIssuesJson");
       expect(main).toContain("blockerResolution.js");
       expect(main).toContain('execFileAsync("gh"');
@@ -2742,7 +2671,7 @@ describe("InitService scaffold", () => {
       });
 
       const planPrompt = await readFile(
-        join(dir, ".sandcastle", "plan-prompt.md"),
+        join(dir, ".archloop", "plan-prompt.md"),
         "utf-8",
       );
       expect(planPrompt).toContain("{{ISSUES_JSON}}");
@@ -2759,10 +2688,7 @@ describe("InitService scaffold", () => {
         templateName: "parallel-planner-with-review",
       });
 
-      const main = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
+      const main = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
       expect(main).toContain("id: string");
       expect(main).toContain("TASK_ID: issue.id");
       expect(main).not.toContain("number: number");
@@ -2777,7 +2703,7 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+        join(dir, ".archloop", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).not.toContain("close the issue when done");
@@ -2791,7 +2717,7 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+        join(dir, ".archloop", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("{{TASK_ID}}");
@@ -2806,7 +2732,7 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+        join(dir, ".archloop", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("gh issue view");
@@ -2821,7 +2747,7 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+        join(dir, ".archloop", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("bd show");
@@ -2837,7 +2763,7 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "merge-prompt.md"),
+        join(dir, ".archloop", "merge-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("gh issue close");
@@ -2852,7 +2778,7 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "merge-prompt.md"),
+        join(dir, ".archloop", "merge-prompt.md"),
         "utf-8",
       );
       expect(prompt).toContain("bd close");
@@ -2867,7 +2793,7 @@ describe("InitService scaffold", () => {
       });
 
       const prompt = await readFile(
-        join(dir, ".sandcastle", "implement-prompt.md"),
+        join(dir, ".archloop", "implement-prompt.md"),
         "utf-8",
       );
       expect(prompt).not.toContain("GitHub issue");
@@ -2882,7 +2808,7 @@ describe("InitService scaffold", () => {
       });
 
       const dockerfile = await readFile(
-        join(dir, ".sandcastle", "Dockerfile"),
+        join(dir, ".archloop", "Dockerfile"),
         "utf-8",
       );
       expect(dockerfile).toContain("GitHub CLI");
@@ -2897,7 +2823,7 @@ describe("InitService scaffold", () => {
       });
 
       const dockerfile = await readFile(
-        join(dir, ".sandcastle", "Dockerfile"),
+        join(dir, ".archloop", "Dockerfile"),
         "utf-8",
       );
       expect(dockerfile).toContain("beads");
@@ -2922,7 +2848,7 @@ describe("InitService scaffold", () => {
       });
 
       const containerfile = await readFile(
-        join(dir, ".sandcastle", "Containerfile"),
+        join(dir, ".archloop", "Containerfile"),
         "utf-8",
       );
       expect(containerfile).toContain("beads");
@@ -2946,7 +2872,7 @@ describe("InitService scaffold", () => {
       });
 
       const dockerfile = await readFile(
-        join(dir, ".sandcastle", "Dockerfile"),
+        join(dir, ".archloop", "Dockerfile"),
         "utf-8",
       );
       expect(dockerfile).toContain("beads");
@@ -2958,7 +2884,7 @@ describe("InitService scaffold", () => {
   // --- Project package.json setup (issue #35) ---
 
   describe("ensureProjectPackage", () => {
-    it("creates package.json with sandcastle devDependencies when none exists", async () => {
+    it("creates package.json with archloop devDependencies when none exists", async () => {
       const dir = await makeDir();
       const result = await runEnsureProjectPackage(dir, "main.mts");
 
@@ -2970,9 +2896,9 @@ describe("InitService scaffold", () => {
         scripts?: Record<string, string>;
         devDependencies?: Record<string, string>;
       };
-      expect(pkg.devDependencies?.["@ai-hero/sandcastle"]).toBe("^0.5.9");
+      expect(pkg.devDependencies?.["@yibeibankaishui/archloop"]).toBe("^0.5.9");
       expect(pkg.devDependencies?.tsx).toMatch(/^\^/);
-      expect(pkg.scripts?.sandcastle).toBe("tsx .sandcastle/main.mts");
+      expect(pkg.scripts?.archloop).toBe("tsx .archloop/main.mts");
     });
 
     it("adds missing devDependencies and script to existing package.json", async () => {
@@ -2993,9 +2919,9 @@ describe("InitService scaffold", () => {
         devDependencies?: Record<string, string>;
       };
       expect(pkg.name).toBe("my-py-app");
-      expect(pkg.devDependencies?.["@ai-hero/sandcastle"]).toBe("^0.5.9");
+      expect(pkg.devDependencies?.["@yibeibankaishui/archloop"]).toBe("^0.5.9");
       expect(pkg.devDependencies?.tsx).toMatch(/^\^/);
-      expect(pkg.scripts?.sandcastle).toBe("tsx .sandcastle/main.mts");
+      expect(pkg.scripts?.archloop).toBe("tsx .archloop/main.mts");
     });
 
     it("leaves invalid package.json unchanged", async () => {
@@ -3016,20 +2942,20 @@ describe("InitService scaffold", () => {
       const pkg = JSON.parse(
         await readFile(join(dir, "package.json"), "utf-8"),
       ) as { devDependencies?: Record<string, string> };
-      expect(pkg.devDependencies?.["@ai-hero/sandcastle"]).toMatch(/^\^/);
+      expect(pkg.devDependencies?.["@yibeibankaishui/archloop"]).toMatch(/^\^/);
       expect(pkg.devDependencies?.tsx).toMatch(/^\^/);
     });
 
-    it("scaffolded main.mts comments recommend npm run sandcastle, not npm exec tsx", async () => {
+    it("scaffolded main.mts comments recommend npm run archloop, not npm exec tsx", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { templateName: "simple-loop" });
 
       const mainContent = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
-      expect(mainContent).toContain("npm run sandcastle");
-      expect(mainContent).toContain("tsx .sandcastle/main.mts");
+      expect(mainContent).toContain("npm run archloop");
+      expect(mainContent).toContain("tsx .archloop/main.mts");
       expect(mainContent).not.toContain("npm exec --yes --package tsx");
     });
   });
@@ -3044,7 +2970,7 @@ describe("InitService scaffold", () => {
       expect(result.mainFilename).toBe("main.mts");
       const { access } = await import("node:fs/promises");
       await expect(
-        access(join(dir, ".sandcastle", "main.mts")),
+        access(join(dir, ".archloop", "main.mts")),
       ).resolves.toBeUndefined();
     });
 
@@ -3058,10 +2984,10 @@ describe("InitService scaffold", () => {
 
       expect(result.mainFilename).toBe("main.mts");
       const mainContent = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
+        join(dir, ".archloop", "main.mts"),
         "utf-8",
       );
-      expect(mainContent).toContain("@ai-hero/sandcastle");
+      expect(mainContent).toContain("@yibeibankaishui/archloop");
     });
 
     it("scaffolds main.mts when package.json has type: commonjs", async () => {
@@ -3086,11 +3012,11 @@ describe("InitService scaffold", () => {
       expect(result.mainFilename).toBe("main.ts");
       const { access } = await import("node:fs/promises");
       await expect(
-        access(join(dir, ".sandcastle", "main.ts")),
+        access(join(dir, ".archloop", "main.ts")),
       ).resolves.toBeUndefined();
       // main.mts should NOT exist
       await expect(
-        access(join(dir, ".sandcastle", "main.mts")),
+        access(join(dir, ".archloop", "main.mts")),
       ).rejects.toThrow();
     });
 
@@ -3103,10 +3029,10 @@ describe("InitService scaffold", () => {
       await runScaffold(dir);
 
       const mainContent = await readFile(
-        join(dir, ".sandcastle", "main.ts"),
+        join(dir, ".archloop", "main.ts"),
         "utf-8",
       );
-      expect(mainContent).toContain("@ai-hero/sandcastle");
+      expect(mainContent).toContain("@yibeibankaishui/archloop");
       expect(mainContent).toContain('claudeCode("claude-opus-4-6")');
     });
 
@@ -3119,7 +3045,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir, { agent: piAgent, model: "claude-sonnet-4-6" });
 
       const mainContent = await readFile(
-        join(dir, ".sandcastle", "main.ts"),
+        join(dir, ".archloop", "main.ts"),
         "utf-8",
       );
       expect(mainContent).toContain('pi("claude-sonnet-4-6")');
@@ -3135,7 +3061,7 @@ describe("InitService scaffold", () => {
       await runScaffold(dir);
 
       const mainContent = await readFile(
-        join(dir, ".sandcastle", "main.ts"),
+        join(dir, ".archloop", "main.ts"),
         "utf-8",
       );
       expect(mainContent).not.toContain("main.mts");
@@ -3160,24 +3086,24 @@ describe("InitService scaffold", () => {
     const noSandboxProvider = getSandboxProvider("no-sandbox")!;
     const podmanProvider = getSandboxProvider("podman")!;
 
-    it("selecting docker writes Dockerfile to .sandcastle/", async () => {
+    it("selecting docker writes Dockerfile to .archloop/", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { sandboxProvider: dockerProvider });
 
       const dockerfile = await readFile(
-        join(dir, ".sandcastle", "Dockerfile"),
+        join(dir, ".archloop", "Dockerfile"),
         "utf-8",
       );
       expect(dockerfile).toContain("FROM node:22-bookworm");
       expect(dockerfile).not.toContain("{{BACKLOG_MANAGER_TOOLS}}");
     });
 
-    it("selecting podman writes Containerfile to .sandcastle/", async () => {
+    it("selecting podman writes Containerfile to .archloop/", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { sandboxProvider: podmanProvider });
 
       const containerfile = await readFile(
-        join(dir, ".sandcastle", "Containerfile"),
+        join(dir, ".archloop", "Containerfile"),
         "utf-8",
       );
       expect(containerfile).toContain("FROM node:22-bookworm");
@@ -3190,7 +3116,7 @@ describe("InitService scaffold", () => {
 
       const { access } = await import("node:fs/promises");
       await expect(
-        access(join(dir, ".sandcastle", "Dockerfile")),
+        access(join(dir, ".archloop", "Dockerfile")),
       ).rejects.toThrow();
     });
 
@@ -3200,7 +3126,7 @@ describe("InitService scaffold", () => {
 
       const { access } = await import("node:fs/promises");
       await expect(
-        access(join(dir, ".sandcastle", "Containerfile")),
+        access(join(dir, ".archloop", "Containerfile")),
       ).rejects.toThrow();
     });
 
@@ -3211,13 +3137,10 @@ describe("InitService scaffold", () => {
         templateName: "parallel-planner-with-review",
       });
 
-      const main = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
+      const main = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
 
       expect(main).toContain(
-        'import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";',
+        'import { noSandbox } from "@yibeibankaishui/archloop/sandboxes/no-sandbox";',
       );
       expect(main).toContain("const sandboxProvider = noSandbox();");
       expect(main).not.toContain("import { docker }");
@@ -3243,22 +3166,19 @@ describe("InitService scaffold", () => {
       expect(result.mainFilename).toBeDefined();
 
       const agentMd = await readFile(
-        join(dir, ".sandcastle", "agents", "reviewer.md"),
+        join(dir, ".archloop", "agents", "reviewer.md"),
         "utf-8",
       );
-      expect(agentMd).toContain(".sandcastle/skills/role-guidance/SKILL.md");
+      expect(agentMd).toContain(".archloop/skills/role-guidance/SKILL.md");
 
       const skillMd = await readFile(
-        join(dir, ".sandcastle", "skills", "role-guidance", "SKILL.md"),
+        join(dir, ".archloop", "skills", "role-guidance", "SKILL.md"),
         "utf-8",
       );
-      expect(skillMd).toContain("Sandcastle");
+      expect(skillMd).toContain("archLoop");
 
       const manifest = JSON.parse(
-        await readFile(
-          join(dir, ".sandcastle", "agent-profiles.json"),
-          "utf-8",
-        ),
+        await readFile(join(dir, ".archloop", "agent-profiles.json"), "utf-8"),
       ) as {
         version: number;
         profiles: Record<string, { promptRelativePath: string }>;
@@ -3278,7 +3198,7 @@ describe("InitService scaffold", () => {
         presetAgentIds: ["miniprogram"],
       });
 
-      const configDir = join(dir, ".sandcastle");
+      const configDir = join(dir, ".archloop");
       const main = await readFile(join(configDir, "main.mts"), "utf-8");
       const dockerfile = await readFile(join(configDir, "Dockerfile"), "utf-8");
       const envExample = await readFile(
@@ -3309,7 +3229,7 @@ describe("InitService scaffold", () => {
     it("deduplicates shared skills when multiple presets are selected", async () => {
       const dir = await makeDir();
       await runScaffold(dir, { presetAgentIds: ["reviewer", "planner"] });
-      const skillDirs = await readdir(join(dir, ".sandcastle", "skills"));
+      const skillDirs = await readdir(join(dir, ".archloop", "skills"));
       expect(skillDirs.sort()).toEqual(["role-guidance"]);
     });
 
@@ -3319,7 +3239,7 @@ describe("InitService scaffold", () => {
         presetAgentIds: ["reviewer", "merger", "miniprogram"],
       });
       const skillDirs = (
-        await readdir(join(dir, ".sandcastle", "skills"))
+        await readdir(join(dir, ".archloop", "skills"))
       ).sort();
       expect(skillDirs).toEqual([
         "merge-playbook",
@@ -3334,10 +3254,7 @@ describe("InitService scaffold", () => {
         templateName: "simple-loop",
         presetAgentIds: ["reviewer"],
       });
-      const main = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
+      const main = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
       expect(main).not.toContain('copyToWorktree: ["node_modules"');
     });
 
@@ -3347,10 +3264,7 @@ describe("InitService scaffold", () => {
         templateName: "parallel-planner",
         presetAgentIds: ["reviewer"],
       });
-      const main = await readFile(
-        join(dir, ".sandcastle", "main.mts"),
-        "utf-8",
-      );
+      const main = await readFile(join(dir, ".archloop", "main.mts"), "utf-8");
       expect(main).not.toContain('const copyToWorktree = ["node_modules"');
     });
   });
@@ -3414,7 +3328,7 @@ describe("capability pack scaffold", () => {
     await runScaffold(dir, { templateName: "blank" });
 
     await expect(
-      access(join(dir, ".sandcastle", "capability.json")),
+      access(join(dir, ".archloop", "capability.json")),
     ).rejects.toThrow();
   });
 
@@ -3429,7 +3343,7 @@ describe("capability pack scaffold", () => {
     });
 
     const manifest = JSON.parse(
-      await readFile(join(dir, ".sandcastle", "capability.json"), "utf-8"),
+      await readFile(join(dir, ".archloop", "capability.json"), "utf-8"),
     ) as {
       version: number;
       capability: string;
@@ -3443,7 +3357,7 @@ describe("capability pack scaffold", () => {
       setupActions: [],
     });
     expect(
-      await readFile(join(dir, ".sandcastle", "bootstrap.sh"), "utf-8"),
+      await readFile(join(dir, ".archloop", "bootstrap.sh"), "utf-8"),
     ).toContain("no-op");
   });
 
@@ -3460,7 +3374,7 @@ describe("capability pack scaffold", () => {
     });
 
     const manifest = JSON.parse(
-      await readFile(join(dir, ".sandcastle", "capability.json"), "utf-8"),
+      await readFile(join(dir, ".archloop", "capability.json"), "utf-8"),
     ) as {
       capability: string;
       variant: string;
@@ -3470,7 +3384,7 @@ describe("capability pack scaffold", () => {
     expect(manifest.capability).toBe("miniprogram");
     expect(manifest.variant).toBe("native");
     expect(manifest.verification).toEqual({
-      entrypoint: ".sandcastle/verify.sh",
+      entrypoint: ".archloop/verify.sh",
       diagnosticLog: "debug/wx-check.log",
     });
     expect(manifest.setupActions).toEqual(
@@ -3502,7 +3416,7 @@ describe("capability pack scaffold", () => {
     });
 
     const manifest = JSON.parse(
-      await readFile(join(dir, ".sandcastle", "capability.json"), "utf-8"),
+      await readFile(join(dir, ".archloop", "capability.json"), "utf-8"),
     ) as { setupActions: CapabilitySetupAction[] };
     expect(manifest.setupActions).toEqual(
       expect.arrayContaining([
@@ -3538,7 +3452,7 @@ describe("capability pack scaffold", () => {
 
     setMiniprogramCiInstallRunnerForTests(undefined);
     const manifest = JSON.parse(
-      await readFile(join(dir, ".sandcastle", "capability.json"), "utf-8"),
+      await readFile(join(dir, ".archloop", "capability.json"), "utf-8"),
     ) as { setupActions: CapabilitySetupAction[] };
     const installAction = manifest.setupActions.find(
       (action) => action.id === "miniprogram-ci-install",
@@ -3566,7 +3480,7 @@ describe("capability pack scaffold", () => {
       capabilityInit,
     });
 
-    const configDir = join(dir, ".sandcastle");
+    const configDir = join(dir, ".archloop");
     const verifySh = await readFile(join(configDir, "verify.sh"), "utf-8");
     expect(verifySh).toMatch(/^#!\/usr\/bin\/env bash/);
     expect(verifySh).toContain("wx:check");
@@ -3633,10 +3547,7 @@ describe("capability pack scaffold", () => {
     });
 
     expect(result.capabilityBlankTemplateWarning).toMatch(/verify\.sh/);
-    const prompt = await readFile(
-      join(dir, ".sandcastle", "prompt.md"),
-      "utf-8",
-    );
+    const prompt = await readFile(join(dir, ".archloop", "prompt.md"), "utf-8");
     expect(prompt).toContain(MINIPROGRAM_VERIFICATION_PROMPT_MARKER);
     expect(prompt).toContain("debug/wx-check.log");
   });
@@ -3666,13 +3577,13 @@ describe("miniprogram capability prompt assembly", () => {
 
       for (const promptFile of listTemplatePromptFiles(templateName)) {
         const content = await readFile(
-          join(dir, ".sandcastle", promptFile),
+          join(dir, ".archloop", promptFile),
           "utf-8",
         );
         expect(content, promptFile).toContain(
           MINIPROGRAM_VERIFICATION_PROMPT_MARKER,
         );
-        expect(content, promptFile).toContain(".sandcastle/verify.sh");
+        expect(content, promptFile).toContain(".archloop/verify.sh");
         expect(content, promptFile).toContain("debug/wx-check.log");
         expect(content, promptFile).toContain("not_configured");
         expect(content, promptFile).toMatch(/`local`/);
@@ -3697,7 +3608,7 @@ describe("miniprogram capability prompt assembly", () => {
       listTemplatePromptFiles("parallel-planner-with-review").map(
         async (promptFile) => {
           const content = await readFile(
-            join(dir, ".sandcastle", promptFile),
+            join(dir, ".archloop", promptFile),
             "utf-8",
           );
           const markerIndex = content.indexOf(
@@ -3731,9 +3642,7 @@ describe("miniprogram runtime-debug add-on", () => {
     });
 
     await expect(
-      access(
-        join(dir, ".sandcastle", "context", "miniprogram-runtime-debug.md"),
-      ),
+      access(join(dir, ".archloop", "context", "miniprogram-runtime-debug.md")),
     ).rejects.toThrow();
   });
 
@@ -3748,7 +3657,7 @@ describe("miniprogram runtime-debug add-on", () => {
     });
 
     const runtimeDebugContext = await readFile(
-      join(dir, ".sandcastle", "context", "miniprogram-runtime-debug.md"),
+      join(dir, ".archloop", "context", "miniprogram-runtime-debug.md"),
       "utf-8",
     );
     expect(runtimeDebugContext).toContain("WaterTian");
@@ -3769,14 +3678,14 @@ describe("miniprogram runtime-debug add-on", () => {
       runtimeDebugCapabilityInit.templateName,
     )) {
       const prompt = await readFile(
-        join(dir, ".sandcastle", promptFile),
+        join(dir, ".archloop", promptFile),
         "utf-8",
       );
       expect(prompt, promptFile).toContain(
         MINIPROGRAM_RUNTIME_DEBUG_PROMPT_MARKER,
       );
       expect(prompt, promptFile).toContain(
-        ".sandcastle/context/miniprogram-runtime-debug.md",
+        ".archloop/context/miniprogram-runtime-debug.md",
       );
       expect(prompt, promptFile).toMatch(/not.*start WeChat Developer Tools/i);
       expect(prompt, promptFile).toMatch(/only when/i);
@@ -3804,11 +3713,11 @@ describe("miniprogram runtime-debug add-on", () => {
     });
 
     const verifyWithout = await readFile(
-      join(dirWithoutAddon, ".sandcastle", "verify.sh"),
+      join(dirWithoutAddon, ".archloop", "verify.sh"),
       "utf-8",
     );
     const verifyWith = await readFile(
-      join(dirWithAddon, ".sandcastle", "verify.sh"),
+      join(dirWithAddon, ".archloop", "verify.sh"),
       "utf-8",
     );
     expect(verifyWith).toBe(verifyWithout);
@@ -3825,7 +3734,7 @@ describe("miniprogram runtime-debug add-on", () => {
     });
 
     const manifest = JSON.parse(
-      await readFile(join(dir, ".sandcastle", "capability.json"), "utf-8"),
+      await readFile(join(dir, ".archloop", "capability.json"), "utf-8"),
     ) as { addons: string[] };
     expect(manifest.addons).toEqual([RUNTIME_DEBUG_ADDON_ID]);
   });

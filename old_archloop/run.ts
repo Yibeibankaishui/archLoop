@@ -1,4 +1,4 @@
-import * as sandcastle from "@ai-hero/sandcastle";
+import * as archloop from "@yibeibankaishui/archloop";
 import {
   implementerAgent,
   mergerAgent,
@@ -14,11 +14,11 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   console.log(`\n=== Iteration ${iteration}/${MAX_ITERATIONS} ===\n`);
 
   // Phase 1: Plan — orchestrator agent analyzes issues and picks parallelizable work
-  const plan = await sandcastle.run({
+  const plan = await archloop.run({
     sandbox: sandboxProvider,
     name: "Planner",
     agent: plannerAgent,
-    promptFile: "./.sandcastle/plan-prompt.md",
+    promptFile: "./.archloop/plan-prompt.md",
   });
 
   const planMatch = plan.stdout.match(/<plan>([\s\S]*?)<\/plan>/);
@@ -64,7 +64,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
     issues.map(async (issue) => {
       await acquire();
       try {
-        await using sandbox = await sandcastle.createSandbox({
+        await using sandbox = await archloop.createSandbox({
           sandbox: sandboxProvider,
           branch: issue.branch,
           copyToWorktree: ["node_modules"],
@@ -78,7 +78,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         const result = await sandbox.run({
           name: "Implementer #" + issue.number,
           agent: implementerAgent,
-          promptFile: "./.sandcastle/implement-prompt.md",
+          promptFile: "./.archloop/implement-prompt.md",
           promptArgs: {
             ISSUE_NUMBER: String(issue.number),
             TASK_ID: String(issue.number),
@@ -91,7 +91,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           await sandbox.run({
             name: "Reviewer #" + issue.number,
             agent: reviewerAgent,
-            promptFile: "./.sandcastle/review-prompt.md",
+            promptFile: "./.archloop/review-prompt.md",
             promptArgs: {
               ISSUE_NUMBER: String(issue.number),
               TASK_ID: String(issue.number),
@@ -123,7 +123,7 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
         entry,
       ): entry is {
         outcome: PromiseFulfilledResult<
-          Awaited<ReturnType<typeof sandcastle.run>>
+          Awaited<ReturnType<typeof archloop.run>>
         >;
         issue: (typeof issues)[number];
       } =>
@@ -147,12 +147,12 @@ for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
   }
 
   // Phase 3: Merge — one agent merges all branches together
-  await sandcastle.run({
+  await archloop.run({
     sandbox: sandboxProvider,
     name: "Merger",
     maxIterations: 10,
     agent: mergerAgent,
-    promptFile: "./.sandcastle/merge-prompt.md",
+    promptFile: "./.archloop/merge-prompt.md",
     promptArgs: {
       BRANCHES: completedBranches.map((b) => `- ${b}`).join("\n"),
       ISSUES: completedIssues

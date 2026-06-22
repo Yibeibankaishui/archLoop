@@ -63,7 +63,7 @@ const makeRepo = () => mkdtemp(join(tmpdir(), "wx-check-native-"));
 
 const installNativeVerifier = async (repoDir: string) => {
   const bundleRoot = getMiniprogramCapabilityBundlesRoot();
-  const configDir = join(repoDir, ".sandcastle");
+  const configDir = join(repoDir, ".archloop");
   await mkdir(configDir, { recursive: true });
   await copyFile(
     join(bundleRoot, "wx-check-native.mjs"),
@@ -78,7 +78,7 @@ const runNativeCheck = async (
   try {
     await execFileAsync(
       "node",
-      [join(repoDir, ".sandcastle", "wx-check-native.mjs")],
+      [join(repoDir, ".archloop", "wx-check-native.mjs")],
       {
         cwd: repoDir,
         env: { ...process.env, ...env },
@@ -155,7 +155,7 @@ const setupPlatformValidationRepo = async (
   if (options?.withMockCi !== false) {
     await writeMockMiniprogramCi(repoDir);
   }
-  return join(repoDir, ".sandcastle", "mock-ci-state.json");
+  return join(repoDir, ".archloop", "mock-ci-state.json");
 };
 
 const writeHostPackageJson = async (repoDir: string) => {
@@ -170,7 +170,7 @@ const writeUploadKey = async (
   appid: string,
   content = "fake-key",
 ) => {
-  const keyDir = join(repoDir, ".sandcastle", "auth", "wx-upload");
+  const keyDir = join(repoDir, ".archloop", "auth", "wx-upload");
   await mkdir(keyDir, { recursive: true });
   await writeFile(join(keyDir, `private.${appid}.key`), content);
 };
@@ -228,7 +228,7 @@ module.exports = {
 };
 
 const readMockCiState = async (repoDir: string) => {
-  const statePath = join(repoDir, ".sandcastle", "mock-ci-state.json");
+  const statePath = join(repoDir, ".archloop", "mock-ci-state.json");
   const content = await readFile(statePath, "utf-8");
   return JSON.parse(content) as {
     project?: Record<string, unknown>;
@@ -652,7 +652,7 @@ describe("wx-check-native.mjs miniprogram-ci platform validation", () => {
       state.project?.privateKeyPath,
       join(
         repoDir,
-        ".sandcastle",
+        ".archloop",
         "auth",
         "wx-upload",
         `private.${EFFECTIVE_APPID}.key`,

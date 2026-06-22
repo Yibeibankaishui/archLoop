@@ -18,7 +18,7 @@ const fileExists = (path: string): boolean => {
 const resolveEnvBdExecutable = (
   env: NodeJS.ProcessEnv = process.env,
 ): string | undefined => {
-  const override = env.SANDCASTLE_BD_PATH?.trim();
+  const override = env.ARCHLOOP_BD_PATH?.trim();
   if (!override) {
     return undefined;
   }

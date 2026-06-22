@@ -1,5 +1,5 @@
 ---
-"@ai-hero/sandcastle": patch
+"@yibeibankaishui/archloop": patch
 ---
 
 Preserve actionable Hub flow merge diagnostics and keep task lifecycle metadata, labels, and projected statuses aligned across claim and merge transitions.

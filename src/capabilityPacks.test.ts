@@ -51,7 +51,7 @@ describe("capability pack registry", () => {
       "blank",
     ]);
     expect(pack.verification).toEqual({
-      entrypoint: ".sandcastle/verify.sh",
+      entrypoint: ".archloop/verify.sh",
       diagnosticLog: "debug/wx-check.log",
     });
     expect(pack.addons.map((a) => a.id)).toContain(RUNTIME_DEBUG_ADDON_ID);
@@ -227,7 +227,7 @@ describe("miniprogram prompt assembly bundle", () => {
   it("includes verification entrypoint and final summary contract", () => {
     const section = getMiniprogramVerificationPromptSection();
     expect(section).toContain(MINIPROGRAM_VERIFICATION_PROMPT_MARKER);
-    expect(section).toContain(".sandcastle/verify.sh");
+    expect(section).toContain(".archloop/verify.sh");
     expect(section).toContain("debug/wx-check.log");
     expect(section).toContain("local");
     expect(section).toContain("platform");

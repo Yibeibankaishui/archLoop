@@ -28,7 +28,7 @@ An issue B is **blocked by** issue A if:
 An issue is **unblocked** if it has zero blocking dependencies on other open issues.
 
 Do **not** assign branch names. The template derives each issue branch
-deterministically as `sandcastle/issue-{id}` after planning.
+deterministically as `archloop/issue-{id}` after planning.
 
 # OUTPUT
 

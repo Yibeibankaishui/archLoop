@@ -37,9 +37,9 @@ export class WorktreeError extends Data.TaggedError("WorktreeError")<{
   readonly message: string;
 }> {}
 
-/** User-facing message when Sandcastle runs in a Git repo with no commits. */
+/** User-facing message when archLoop runs in a Git repo with no commits. */
 export const EMPTY_REPO_ERROR_MESSAGE =
-  "This directory is a Git repository but has no commits yet. Sandcastle needs at least one commit on the current branch before it can create worktrees or resolve HEAD.\n\n" +
+  "This directory is a Git repository but has no commits yet. archLoop needs at least one commit on the current branch before it can create worktrees or resolve HEAD.\n\n" +
   'Fix: stage your files and run `git commit` (e.g. `git add . && git commit -m "Initial commit"`), then retry.';
 
 export const emptyRepoWorktreeError = (): WorktreeError =>
@@ -61,7 +61,7 @@ export class AgentError extends Data.TaggedError("AgentError")<{
   readonly preservedWorktreePath?: string;
 }> {}
 
-/** .sandcastle/ config directory missing */
+/** .archloop/ config directory missing */
 export class ConfigDirError extends Data.TaggedError("ConfigDirError")<{
   readonly message: string;
 }> {}
@@ -163,7 +163,7 @@ export class HookTimeoutError extends Data.TaggedError("HookTimeoutError")<{
   readonly command: string;
 }> {}
 
-/** Sandbox hook references a .sandcastle script that is missing from the worktree */
+/** Sandbox hook references a .archloop script that is missing from the worktree */
 export class MissingSandboxHookScriptError extends Data.TaggedError(
   "MissingSandboxHookScriptError",
 )<{

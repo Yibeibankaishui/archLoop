@@ -25,7 +25,7 @@ const HUB_ENV_KEY_GUIDANCE: Record<
       "Create an API key in the OpenAI dashboard (Settings → API keys).",
     url: "https://platform.openai.com/api-keys",
     alternate:
-      "For a Codex/ChatGPT CLI login session instead of API billing, run `sandcastle auth login codex`.",
+      "For a Codex/ChatGPT CLI login session instead of API billing, run `archloop auth login codex`.",
   },
   ANTHROPIC_API_KEY: {
     service: "Anthropic Console",
@@ -48,7 +48,7 @@ const HUB_ENV_KEY_GUIDANCE: Record<
       "Use a personal access token with repo and issues access, or run `gh auth token` after `gh auth login`.",
     url: "https://github.com/settings/tokens",
     alternate:
-      "For a reusable Hub-owned GitHub session, run `sandcastle auth login github`.",
+      "For a reusable Hub-owned GitHub session, run `archloop auth login github`.",
   },
   OPENCODE_API_KEY: {
     service: "OpenCode",

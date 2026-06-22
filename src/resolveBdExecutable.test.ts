@@ -15,7 +15,7 @@ describe("resolveBdExecutable", () => {
     expect(PINNED_BEADS_VERSION).toBe("1.0.4");
   });
 
-  it("prefers SANDCASTLE_BD_PATH when the file exists", async () => {
+  it("prefers ARCHLOOP_BD_PATH when the file exists", async () => {
     const dir = await mkdtemp(join(tmpdir(), "resolve-bd-"));
     const bdPath = join(dir, "custom-bd");
     await writeFile(bdPath, "#!/bin/sh\nexit 0\n");
@@ -24,7 +24,7 @@ describe("resolveBdExecutable", () => {
     expect(
       resolveBdExecutable({
         ...process.env,
-        SANDCASTLE_BD_PATH: bdPath,
+        ARCHLOOP_BD_PATH: bdPath,
       }),
     ).toBe(bdPath);
   });
@@ -33,7 +33,7 @@ describe("resolveBdExecutable", () => {
     expect(
       resolveBdExecutable({
         ...process.env,
-        SANDCASTLE_BD_PATH: join(tmpdir(), "missing-bd"),
+        ARCHLOOP_BD_PATH: join(tmpdir(), "missing-bd"),
       }),
     ).toBe(resolveBundledBdExecutable() ?? "bd");
   });
@@ -56,7 +56,7 @@ describe("resolveBundledBdExecutable", () => {
 });
 
 describe("isBdAvailable", () => {
-  it("returns true when SANDCASTLE_BD_PATH points to an existing file", async () => {
+  it("returns true when ARCHLOOP_BD_PATH points to an existing file", async () => {
     const dir = await mkdtemp(join(tmpdir(), "resolve-bd-"));
     const bdPath = join(dir, "custom-bd");
     await writeFile(bdPath, "#!/bin/sh\nexit 0\n");
@@ -65,7 +65,7 @@ describe("isBdAvailable", () => {
     expect(
       isBdAvailable({
         ...process.env,
-        SANDCASTLE_BD_PATH: bdPath,
+        ARCHLOOP_BD_PATH: bdPath,
         PATH: "",
       }),
     ).toBe(true);
@@ -76,7 +76,7 @@ describe("isBdAvailable", () => {
       isBdAvailable({
         ...process.env,
         PATH: "",
-        SANDCASTLE_BD_PATH: "",
+        ARCHLOOP_BD_PATH: "",
       }),
     ).toBe(resolveBundledBdExecutable() !== undefined);
   });

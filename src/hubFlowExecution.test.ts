@@ -164,7 +164,7 @@ process.exit(1);
     env: {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      SANDCASTLE_BD_PATH: bdPath,
+      ARCHLOOP_BD_PATH: bdPath,
       BD_STATE_FILE: stateFile,
       BD_ARGS_FILE: argsFile,
     },
@@ -172,7 +172,7 @@ process.exit(1);
 };
 
 describe("Hub flow registry", () => {
-  it("ships bundled no-review prompts outside repo-local .sandcastle/", () => {
+  it("ships bundled no-review prompts outside repo-local .archloop/", () => {
     validateHubFlowRegistries();
     expectBundledHubFlowPrompt(
       resolveHubFlowPromptPath("no-review", "implement"),
@@ -180,7 +180,7 @@ describe("Hub flow registry", () => {
     );
   });
 
-  it("ships bundled with-review prompts outside repo-local .sandcastle/", () => {
+  it("ships bundled with-review prompts outside repo-local .archloop/", () => {
     validateHubFlowRegistries();
     expectBundledHubFlowPrompt(
       resolveHubFlowPromptPath("with-review", "implement"),
@@ -224,7 +224,7 @@ describe("Hub flow planner", () => {
           claim: {
             runId: "run-existing",
             batchId: "batch-existing",
-            branch: "sandcastle/bd-claimed-other",
+            branch: "archloop/bd-claimed-other",
             claimedAt: "2026-06-11T15:30:00Z",
           },
         },
@@ -237,7 +237,7 @@ describe("Hub flow planner", () => {
       "bd-ready",
     ]);
     expect(resolveHubTaskBranch("bd-ready", "Ready task")).toBe(
-      "sandcastle/bd-ready-ready-task",
+      "archloop/bd-ready-ready-task",
     );
   });
 });
@@ -272,7 +272,7 @@ describe("no-review Hub flow execution", () => {
     const hubProjectDir = join(
       repoDir,
       "data",
-      "sandcastle",
+      "archloop",
       "hub",
       "projects",
       "abc",
@@ -291,7 +291,7 @@ describe("no-review Hub flow execution", () => {
     expect(invocations[0]).toMatchObject({
       taskId: "bd-70",
       title: "Implement me",
-      branch: "sandcastle/bd-70-implement-me",
+      branch: "archloop/bd-70-implement-me",
       flowId: "no-review",
     });
     expectBundledHubFlowPrompt(
@@ -349,7 +349,7 @@ describe("no-review Hub flow execution", () => {
     const hubProjectDir = join(
       repoDir,
       "data",
-      "sandcastle",
+      "archloop",
       "hub",
       "projects",
       "rerun-work",
@@ -417,7 +417,7 @@ describe("no-review Hub flow execution", () => {
     const hubProjectDir = join(
       repoDir,
       "data",
-      "sandcastle",
+      "archloop",
       "hub",
       "projects",
       "agent-fail",
@@ -467,7 +467,7 @@ describe("no-review Hub flow execution", () => {
     const hubProjectDir = join(
       repoDir,
       "data",
-      "sandcastle",
+      "archloop",
       "hub",
       "projects",
       "sandbox-fail",
@@ -554,7 +554,7 @@ describe("with-review Hub flow execution", () => {
 
     const oldRunId = "run-old-resume";
     const oldBatchId = "batch-old-resume";
-    const branch = "sandcastle/bd-resume-resume-old-work";
+    const branch = "archloop/bd-resume-resume-old-work";
     const stateFile = join(repoDir, "bd-state.json");
     const { env } = await writeMockBd(repoDir, stateFile, [
       {
@@ -659,7 +659,7 @@ describe("with-review Hub flow execution", () => {
 
     const oldRunId = "run-old-conflict";
     const oldBatchId = "batch-old-conflict";
-    const oldBranch = "sandcastle/bd-old-conflict-old-ready-work";
+    const oldBranch = "archloop/bd-old-conflict-old-ready-work";
     await mkdir(join(repoDir, ".beads"), { recursive: true });
     const stateFile = join(repoDir, ".beads", "issues.jsonl");
     const { env } = await writeMockBd(
@@ -811,7 +811,7 @@ describe("with-review Hub flow execution", () => {
     const hubProjectDir = join(
       repoDir,
       "data",
-      "sandcastle",
+      "archloop",
       "hub",
       "projects",
       "review-run",
@@ -833,7 +833,7 @@ describe("with-review Hub flow execution", () => {
     expect(reviewInvocations[0]).toMatchObject({
       taskId: "bd-71",
       title: "Review me",
-      branch: "sandcastle/bd-71-review-me",
+      branch: "archloop/bd-71-review-me",
       flowId: "with-review",
       implementCommitCount: 1,
     });
@@ -918,7 +918,7 @@ describe("with-review Hub flow execution", () => {
       hubProjectDir: join(
         repoDir,
         "data",
-        "sandcastle",
+        "archloop",
         "hub",
         "projects",
         "review-stale",
@@ -968,7 +968,7 @@ describe("with-review Hub flow execution", () => {
     const hubProjectDir = join(
       repoDir,
       "data",
-      "sandcastle",
+      "archloop",
       "hub",
       "projects",
       "review-fail",
@@ -1025,14 +1025,14 @@ describe("with-review Hub flow execution", () => {
         flowId: "no-review",
         taskId: "bd-1",
         title: "Test task",
-        branch: "sandcastle/bd-1-test-task",
+        branch: "archloop/bd-1-test-task",
         promptFile: "/tmp/prompt.md",
         cwd,
         runDir: cwd,
       });
 
       expect(result.outcome).toBe("agent_failed");
-      expect(result.message).toContain("sandcastle env init");
+      expect(result.message).toContain("archloop env init");
     } finally {
       vi.unstubAllEnvs();
     }

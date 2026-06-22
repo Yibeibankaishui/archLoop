@@ -605,8 +605,7 @@ export const resolveHubTaskSelector = (
   const trimmedSelector = selector.trim();
   if (trimmedSelector.length === 0) {
     throw new TaskBoardError({
-      message:
-        "sandcastle tasks require a task id, exact title, or list number.",
+      message: "archloop tasks require a task id, exact title, or list number.",
     });
   }
 
@@ -637,7 +636,7 @@ export const resolveHubTaskSelector = (
   }
   if (titleMatches.length > 1) {
     throw new TaskBoardError({
-      message: `sandcastle tasks selector "${selector}" matched multiple tasks with the same exact title: ${formatSelectorCandidates(titleMatches)}. Use a Beads id or the list number instead.`,
+      message: `archloop tasks selector "${selector}" matched multiple tasks with the same exact title: ${formatSelectorCandidates(titleMatches)}. Use a Beads id or the list number instead.`,
     });
   }
 
@@ -646,14 +645,14 @@ export const resolveHubTaskSelector = (
     const position = Number(trimmedSelector);
     if (position < 1 || position > displayTasks.length) {
       throw new TaskBoardError({
-        message: `sandcastle tasks selector ${position} is out of range for the current task list (1-${displayTasks.length}).`,
+        message: `archloop tasks selector ${position} is out of range for the current task list (1-${displayTasks.length}).`,
       });
     }
     return displayTasks[position - 1]!;
   }
 
   throw new TaskBoardError({
-    message: `sandcastle tasks selector "${selector}" did not match a Beads id, an exact task title, or a list number.`,
+    message: `archloop tasks selector "${selector}" did not match a Beads id, an exact task title, or a list number.`,
   });
 };
 
@@ -664,7 +663,7 @@ export const resolveHubTaskSelectors = (
 ): HubTaskProjection[] => {
   if (selectors.length === 0) {
     throw new TaskBoardError({
-      message: "sandcastle tasks delete requires at least one task selector.",
+      message: "archloop tasks delete requires at least one task selector.",
     });
   }
 
@@ -696,7 +695,7 @@ export const loadHubTask = (
 
   if (!task) {
     throw new TaskBoardError({
-      message: `sandcastle tasks show ${resolvedTask.id} did not return a Beads task`,
+      message: `archloop tasks show ${resolvedTask.id} did not return a Beads task`,
     });
   }
 
@@ -794,7 +793,7 @@ export const resolveHubTaskBranch = (taskId: string, title: string): string => {
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, "-")
     .replace(/^-+|-+$/g, "");
-  return `sandcastle/${normalizedId}-${slugifyHubTaskTitle(title)}`;
+  return `archloop/${normalizedId}-${slugifyHubTaskTitle(title)}`;
 };
 
 const HUB_STATUS_LABELS: Readonly<Record<HubTaskStatus, string>> = {
@@ -813,7 +812,7 @@ const HUB_STATUS_LABELS: Readonly<Record<HubTaskStatus, string>> = {
   sync_conflict: "sync-conflict",
 };
 
-const SANDCASTLE_MANAGED_STATUS_LABELS = new Set<string>(
+const ARCHLOOP_MANAGED_STATUS_LABELS = new Set<string>(
   Object.values(HUB_STATUS_LABELS).map(normalizeKey),
 );
 
@@ -871,7 +870,7 @@ const labelsToSetForHubStatus = (
   const labelsToRemoveSet = new Set(labelsToRemove);
   const userLabels = labels.filter(
     (label) =>
-      !SANDCASTLE_MANAGED_STATUS_LABELS.has(normalizeKey(label)) &&
+      !ARCHLOOP_MANAGED_STATUS_LABELS.has(normalizeKey(label)) &&
       !labelsToRemoveSet.has(label),
   );
 
@@ -917,7 +916,7 @@ const assertProjectedHubStatus = (
 ): void => {
   if (task.hubStatus !== expectedStatus) {
     throw new TaskBoardError({
-      message: `sandcastle tasks update ${task.id} wrote ${expectedStatus}, but the projected Hub task board status is ${task.hubStatus}. Clear stale Beads labels/metadata and retry.`,
+      message: `archloop tasks update ${task.id} wrote ${expectedStatus}, but the projected Hub task board status is ${task.hubStatus}. Clear stale Beads labels/metadata and retry.`,
     });
   }
 };
@@ -927,7 +926,7 @@ const assertCanonicalHubStatusLabel = (
   expectedStatus: HubTaskStatus,
 ): void => {
   const statusLabels = task.labels.filter((label) =>
-    SANDCASTLE_MANAGED_STATUS_LABELS.has(normalizeKey(label)),
+    ARCHLOOP_MANAGED_STATUS_LABELS.has(normalizeKey(label)),
   );
   const expectedLabel = HUB_STATUS_LABELS[expectedStatus];
   if (
@@ -935,7 +934,7 @@ const assertCanonicalHubStatusLabel = (
     normalizeKey(statusLabels[0]!) !== normalizeKey(expectedLabel)
   ) {
     throw new TaskBoardError({
-      message: `sandcastle tasks update ${task.id} wrote ${expectedStatus}, but Beads labels contain ${statusLabels.length} Sandcastle status labels (${statusLabels.join(", ")}). Expected exactly ${expectedLabel}.`,
+      message: `archloop tasks update ${task.id} wrote ${expectedStatus}, but Beads labels contain ${statusLabels.length} archLoop status labels (${statusLabels.join(", ")}). Expected exactly ${expectedLabel}.`,
     });
   }
 };
@@ -964,7 +963,7 @@ const assertHubTaskClaimPolicy = (
 ): void => {
   if (shouldClearClaimForStatus(expectedStatus) && task.claim !== undefined) {
     throw new TaskBoardError({
-      message: `sandcastle tasks update ${task.id} wrote ${expectedStatus}, but claim metadata was not cleared.`,
+      message: `archloop tasks update ${task.id} wrote ${expectedStatus}, but claim metadata was not cleared.`,
     });
   }
 
@@ -973,7 +972,7 @@ const assertHubTaskClaimPolicy = (
     (!task.claim?.runId || !task.claim.batchId || !task.claim.branch)
   ) {
     throw new TaskBoardError({
-      message: `sandcastle tasks update ${task.id} wrote ${expectedStatus}, but claim metadata is missing runId, batchId, or branch.`,
+      message: `archloop tasks update ${task.id} wrote ${expectedStatus}, but claim metadata is missing runId, batchId, or branch.`,
     });
   }
 };
@@ -988,7 +987,7 @@ const assertHubFailureMetadataPolicy = (
       typeof task.metadata.failureReason !== "string"
     ) {
       throw new TaskBoardError({
-        message: `sandcastle tasks update ${task.id} wrote failed, but failure metadata is incomplete.`,
+        message: `archloop tasks update ${task.id} wrote failed, but failure metadata is incomplete.`,
       });
     }
     return;
@@ -1000,7 +999,7 @@ const assertHubFailureMetadataPolicy = (
     task.metadata.failure_reason !== undefined
   ) {
     throw new TaskBoardError({
-      message: `sandcastle tasks update ${task.id} wrote ${expectedStatus}, but stale failure metadata remains.`,
+      message: `archloop tasks update ${task.id} wrote ${expectedStatus}, but stale failure metadata remains.`,
     });
   }
 };
@@ -1192,8 +1191,8 @@ const verifyHubTasksDeleted = (
 
   throw new TaskBoardError({
     message: [
-      `sandcastle tasks delete reported success, but Beads still has: ${stillPresent.join(", ")}.`,
-      `Retry with: sandcastle tasks delete ${stillPresent.join(" ")} --yes --force`,
+      `archloop tasks delete reported success, but Beads still has: ${stillPresent.join(", ")}.`,
+      `Retry with: archloop tasks delete ${stillPresent.join(" ")} --yes --force`,
     ].join(" "),
   });
 };
@@ -1202,7 +1201,7 @@ export const deleteHubTasks = (input: DeleteHubTasksInput): string => {
   if (input.taskIds.length === 0) {
     throw new TaskBoardError({
       message:
-        "sandcastle tasks delete requires at least one resolved Beads task id.",
+        "archloop tasks delete requires at least one resolved Beads task id.",
     });
   }
 

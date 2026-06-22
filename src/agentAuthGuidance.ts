@@ -57,7 +57,7 @@ export const detectAgentAuthFailure = (
   return config;
 };
 
-const buildSandcastleEnvGuidanceLines = (input: {
+const buildarchLoopEnvGuidanceLines = (input: {
   readonly providerName: string;
   readonly envKey: string;
   readonly label: string;
@@ -65,19 +65,19 @@ const buildSandcastleEnvGuidanceLines = (input: {
   const lines = [
     `${input.label} agent credentials are missing or invalid.`,
     "",
-    "Sandcastle expects agent credentials in its env stores or Hub auth directories — do not rely on host-global provider login state.",
+    "archLoop expects agent credentials in its env stores or Hub auth directories — do not rely on host-global provider login state.",
     "",
     "Fix one of:",
-    "- Run `sandcastle env init` to set up shared Hub credentials",
-    `- Run \`sandcastle env set ${input.envKey} <value>\` to save a credential`,
-    "- Run `sandcastle env show` to verify configured keys",
-    `- Set \`${input.envKey}\` in \`.sandcastle/.env\` for project sandbox runs`,
+    "- Run `archloop env init` to set up shared Hub credentials",
+    `- Run \`archloop env set ${input.envKey} <value>\` to save a credential`,
+    "- Run `archloop env show` to verify configured keys",
+    `- Set \`${input.envKey}\` in \`.archloop/.env\` for project sandbox runs`,
   ];
 
   if (input.providerName === "codex") {
     return [
       ...lines,
-      "- For Codex CLI session auth: `sandcastle auth login codex`",
+      "- For Codex CLI session auth: `archloop auth login codex`",
     ];
   }
 
@@ -91,7 +91,7 @@ export const formatAgentAuthFailureMessage = (input: {
   readonly originalDetail: string;
 }): string =>
   [
-    ...buildSandcastleEnvGuidanceLines(input),
+    ...buildarchLoopEnvGuidanceLines(input),
     "",
     `Original error: ${input.originalDetail.trim()}`,
   ].join("\n");
@@ -100,7 +100,7 @@ export const formatMissingAgentCredentialsMessage = (input: {
   readonly providerName: string;
   readonly envKey: string;
   readonly label: string;
-}): string => buildSandcastleEnvGuidanceLines(input).join("\n");
+}): string => buildarchLoopEnvGuidanceLines(input).join("\n");
 
 export const enrichAgentFailureDetail = (
   providerName: string,

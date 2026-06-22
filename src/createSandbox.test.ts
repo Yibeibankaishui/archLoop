@@ -200,7 +200,7 @@ describe("createSandbox", () => {
 
     try {
       expect(sandbox.branch).toBe("test-branch");
-      expect(sandbox.worktreePath).toContain(".sandcastle/worktrees");
+      expect(sandbox.worktreePath).toContain(".archloop/worktrees");
       expect(existsSync(sandbox.worktreePath)).toBe(true);
     } finally {
       await sandbox.close();
@@ -223,7 +223,7 @@ describe("createSandbox", () => {
 
     try {
       expect(sandbox.branch).toBe("test-no-sandbox-branch");
-      expect(worktreePath).toContain(".sandcastle/worktrees");
+      expect(worktreePath).toContain(".archloop/worktrees");
       expect(existsSync(worktreePath)).toBe(true);
     } finally {
       const closeResult = await sandbox.close();
@@ -597,7 +597,7 @@ describe("createSandbox", () => {
     await initRepo(hostDir);
     await commitFile(hostDir, "init.txt", "init", "initial commit");
 
-    const bootstrapDir = join(hostDir, ".sandcastle");
+    const bootstrapDir = join(hostDir, ".archloop");
     await mkdir(bootstrapDir, { recursive: true });
     await writeFile(
       join(bootstrapDir, "bootstrap.sh"),
@@ -609,7 +609,7 @@ describe("createSandbox", () => {
       sandbox: testSandbox,
       hooks: {
         sandbox: {
-          onSandboxReady: [{ command: "bash .sandcastle/bootstrap.sh" }],
+          onSandboxReady: [{ command: "bash .archloop/bootstrap.sh" }],
         },
       },
       cwd: hostDir,
@@ -620,7 +620,7 @@ describe("createSandbox", () => {
 
     try {
       expect(
-        existsSync(join(sandbox.worktreePath, ".sandcastle", "bootstrap.sh")),
+        existsSync(join(sandbox.worktreePath, ".archloop", "bootstrap.sh")),
       ).toBe(true);
       const marker = await readFile(
         join(sandbox.worktreePath, "bootstrap-ran.txt"),
@@ -848,7 +848,7 @@ describe("createSandbox", () => {
 
     try {
       expect(sandbox.branch).toBe("test-isolated-branch");
-      expect(sandbox.worktreePath).toContain(".sandcastle/worktrees");
+      expect(sandbox.worktreePath).toContain(".archloop/worktrees");
       expect(existsSync(sandbox.worktreePath)).toBe(true);
     } finally {
       await sandbox.close();

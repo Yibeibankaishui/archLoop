@@ -155,7 +155,7 @@ process.exit(1);
     env: {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      SANDCASTLE_BD_PATH: bdPath,
+      ARCHLOOP_BD_PATH: bdPath,
       BD_STATE_FILE: stateFile,
     },
   };
@@ -205,7 +205,7 @@ describe("Hub batch merge selection", () => {
           claim: {
             runId: "run-1",
             batchId: "batch-1",
-            branch: "sandcastle/bd-merge-merge-me",
+            branch: "archloop/bd-merge-merge-me",
             claimedAt: "2026-06-12T10:00:00Z",
           },
         },
@@ -220,7 +220,7 @@ describe("Hub batch merge selection", () => {
           claim: {
             runId: "run-2",
             batchId: "batch-2",
-            branch: "sandcastle/bd-other-batch-other-batch",
+            branch: "archloop/bd-other-batch-other-batch",
             claimedAt: "2026-06-12T10:00:00Z",
           },
         },
@@ -253,14 +253,14 @@ describe("runHubBatchMerge", () => {
           claim: {
             runId: "run-merge-test",
             batchId,
-            branch: "sandcastle/bd-72-merge-task",
+            branch: "archloop/bd-72-merge-task",
             claimedAt: "2026-06-12T10:00:00Z",
           },
         },
       },
     ]);
 
-    const hubProjectDir = join(repoDir, "data", "sandcastle", "hub");
+    const hubProjectDir = join(repoDir, "data", "archloop", "hub");
     const context = createMergeContext(repoDir, batchId, hubProjectDir);
 
     const result = await runHubBatchMerge({
@@ -417,7 +417,7 @@ describe("runHubBatchMerge", () => {
     const context = createMergeContext(
       repoDir,
       batchId,
-      join(repoDir, "data", "sandcastle", "hub"),
+      join(repoDir, "data", "archloop", "hub"),
     );
 
     const result = await runHubBatchMerge({
@@ -520,7 +520,7 @@ describe("runHubBatchMerge", () => {
     const context = createMergeContext(
       repoDir,
       batchId,
-      join(repoDir, "data", "sandcastle", "hub"),
+      join(repoDir, "data", "archloop", "hub"),
     );
     writeFileSync(
       join(context.runDir, "events", "task.jsonl"),
@@ -565,7 +565,7 @@ describe("runHubBatchMerge", () => {
         branch: "branch-stale",
         hubStatus: "reviewing",
         observedProjectedStatus: "reviewing",
-        suggestedRecovery: "sandcastle tasks repair-state bd-stale",
+        suggestedRecovery: "archloop tasks repair-state bd-stale",
       }),
     );
     expect(formatHubBatchMergeResultLines(result).join("\n")).toContain(
@@ -602,7 +602,7 @@ describe("runHubBatchMerge", () => {
     const context = createMergeContext(
       repoDir,
       batchId,
-      join(repoDir, "data", "sandcastle", "hub"),
+      join(repoDir, "data", "archloop", "hub"),
     );
     writeFileSync(
       join(context.runDir, "events", "task.jsonl"),
@@ -643,7 +643,7 @@ describe("runHubBatchMerge", () => {
         branch: "branch-no-claim",
         observedProjectedStatus: "ready_for_agent",
         missingClaimFields: ["runId", "batchId", "branch"],
-        suggestedRecovery: "sandcastle tasks repair-state bd-no-claim",
+        suggestedRecovery: "archloop tasks repair-state bd-no-claim",
         mergeReadyEventType: "task_implementation_succeeded",
       }),
     );
@@ -673,7 +673,7 @@ describe("runHubBatchMerge", () => {
     const context = createMergeContext(
       repoDir,
       batchId,
-      join(repoDir, "data", "sandcastle", "hub"),
+      join(repoDir, "data", "archloop", "hub"),
     );
     writeFileSync(
       join(context.runDir, "events", "task.jsonl"),
@@ -746,7 +746,7 @@ describe("runHubBatchMerge", () => {
     const context = createMergeContext(
       repoDir,
       batchId,
-      join(repoDir, "data", "sandcastle", "hub"),
+      join(repoDir, "data", "archloop", "hub"),
     );
     writeFileSync(
       join(context.runDir, "events", "task.jsonl"),
@@ -822,7 +822,7 @@ describe("runHubBatchMerge", () => {
     const context = createMergeContext(
       repoDir,
       batchId,
-      join(repoDir, "data", "sandcastle", "hub"),
+      join(repoDir, "data", "archloop", "hub"),
     );
     writeFileSync(
       join(context.runDir, "events", "task.jsonl"),
@@ -899,7 +899,7 @@ describe("runHubBatchMerge", () => {
     const context = createMergeContext(
       repoDir,
       batchId,
-      join(repoDir, "data", "sandcastle", "hub"),
+      join(repoDir, "data", "archloop", "hub"),
     );
     writeFileSync(
       join(context.runDir, "events", "task.jsonl"),
@@ -974,7 +974,7 @@ describe("runHubBatchMerge", () => {
     const context = createMergeContext(
       repoDir,
       batchId,
-      join(repoDir, "data", "sandcastle", "hub"),
+      join(repoDir, "data", "archloop", "hub"),
     );
     let mergeCalls = 0;
 
@@ -1040,7 +1040,7 @@ describe("runHubBatchMerge", () => {
     const context = createMergeContext(
       repoDir,
       batchId,
-      join(repoDir, "data", "sandcastle", "hub"),
+      join(repoDir, "data", "archloop", "hub"),
     );
     let mergeCalls = 0;
 
@@ -1115,7 +1115,7 @@ describe("runHubBatchMerge", () => {
     const context = createMergeContext(
       repoDir,
       batchId,
-      join(repoDir, "data", "sandcastle", "hub"),
+      join(repoDir, "data", "archloop", "hub"),
     );
     let mergeCalls = 0;
 
@@ -1199,7 +1199,7 @@ describe("runHubBatchMerge", () => {
     const context = createMergeContext(
       repoDir,
       batchId,
-      join(repoDir, "data", "sandcastle", "hub"),
+      join(repoDir, "data", "archloop", "hub"),
     );
     let verifyCalls = 0;
     const verifier: HubFlowVerifier = async (input) => {
@@ -1268,7 +1268,7 @@ describe("runHubBatchMerge", () => {
           claim: {
             runId: "run-merge-test",
             batchId,
-            branch: "sandcastle/bd-conflict-conflict-task",
+            branch: "archloop/bd-conflict-conflict-task",
             claimedAt: "2026-06-12T10:00:00Z",
           },
         },
@@ -1283,7 +1283,7 @@ describe("runHubBatchMerge", () => {
           claim: {
             runId: "run-merge-test",
             batchId,
-            branch: "sandcastle/bd-later-later-task",
+            branch: "archloop/bd-later-later-task",
             claimedAt: "2026-06-12T10:00:00Z",
           },
         },
@@ -1293,7 +1293,7 @@ describe("runHubBatchMerge", () => {
     const context = createMergeContext(
       repoDir,
       batchId,
-      join(repoDir, "data", "sandcastle", "hub"),
+      join(repoDir, "data", "archloop", "hub"),
     );
     const merger: HubFlowMerger = async () => ({
       outcome: "merge_conflict",
@@ -1351,7 +1351,7 @@ describe("runHubBatchMerge", () => {
           claim: {
             runId: "run-merge-test",
             batchId,
-            branch: "sandcastle/bd-failed-failed-task",
+            branch: "archloop/bd-failed-failed-task",
             claimedAt: "2026-06-12T10:00:00Z",
           },
         },
@@ -1361,7 +1361,7 @@ describe("runHubBatchMerge", () => {
     const context = createMergeContext(
       repoDir,
       batchId,
-      join(repoDir, "data", "sandcastle", "hub"),
+      join(repoDir, "data", "archloop", "hub"),
     );
     const merger: HubFlowMerger = async () => ({
       outcome: "failed",
@@ -1461,7 +1461,7 @@ describe("runHubBatchMerge", () => {
           claim: {
             runId: "run-merge-test",
             batchId,
-            branch: "sandcastle/bd-close-close-fail-task",
+            branch: "archloop/bd-close-close-fail-task",
             claimedAt: "2026-06-12T10:00:00Z",
           },
         },
@@ -1476,7 +1476,7 @@ describe("runHubBatchMerge", () => {
           claim: {
             runId: "run-merge-test",
             batchId,
-            branch: "sandcastle/bd-queued-queued-task",
+            branch: "archloop/bd-queued-queued-task",
             claimedAt: "2026-06-12T10:00:00Z",
           },
         },
@@ -1486,7 +1486,7 @@ describe("runHubBatchMerge", () => {
     const context = createMergeContext(
       repoDir,
       batchId,
-      join(repoDir, "data", "sandcastle", "hub"),
+      join(repoDir, "data", "archloop", "hub"),
     );
     const closer: HubTaskCloser = async () => {
       throw new Error("close failed");
@@ -1531,7 +1531,7 @@ describe("runHubBatchMerge", () => {
     await initRepo(repoDir);
     await commitFile(repoDir, "main.txt", "main", "initial commit");
 
-    const branch = "sandcastle/bd-git-feature";
+    const branch = "archloop/bd-git-feature";
     await execAsync(`git checkout -b "${branch}"`, { cwd: repoDir });
     await commitFile(repoDir, "feature.txt", "feature", "feature commit");
     await execAsync("git checkout main", { cwd: repoDir });
@@ -1540,7 +1540,7 @@ describe("runHubBatchMerge", () => {
     const context = createMergeContext(
       repoDir,
       "batch-default-git",
-      join(repoDir, "data", "sandcastle", "hub"),
+      join(repoDir, "data", "archloop", "hub"),
     );
     const result = await merger({
       flowId: "no-review",
@@ -1565,7 +1565,7 @@ describe("runHubBatchMerge", () => {
     await initRepo(repoDir);
     await commitFile(repoDir, "shared.txt", "base\n", "initial commit");
 
-    const branch = "sandcastle/bd-agent-conflict";
+    const branch = "archloop/bd-agent-conflict";
     await execAsync(`git checkout -b "${branch}"`, { cwd: repoDir });
     await commitFile(repoDir, "shared.txt", "branch\n", "branch edit");
     await execAsync("git checkout main", { cwd: repoDir });
@@ -1583,7 +1583,7 @@ describe("runHubBatchMerge", () => {
     const context = createMergeContext(
       repoDir,
       "batch-agent-resolve",
-      join(repoDir, "data", "sandcastle", "hub"),
+      join(repoDir, "data", "archloop", "hub"),
     );
 
     const merger = createHubFlowRunMerger({
@@ -1631,7 +1631,7 @@ describe("runHubBatchMerge", () => {
     await initRepo(repoDir);
     await commitFile(repoDir, "shared.txt", "base\n", "initial commit");
 
-    const branch = "sandcastle/bd-agent-unresolved";
+    const branch = "archloop/bd-agent-unresolved";
     await execAsync(`git checkout -b "${branch}"`, { cwd: repoDir });
     await commitFile(repoDir, "shared.txt", "branch\n", "branch edit");
     await execAsync("git checkout main", { cwd: repoDir });
@@ -1640,7 +1640,7 @@ describe("runHubBatchMerge", () => {
     const context = createMergeContext(
       repoDir,
       "batch-agent-unresolved",
-      join(repoDir, "data", "sandcastle", "hub"),
+      join(repoDir, "data", "archloop", "hub"),
     );
     const merger = createHubFlowRunMerger({
       cwd: repoDir,
@@ -1685,7 +1685,7 @@ describe("runHubBatchMerge", () => {
       flowId: "no-review",
       taskId: "bd-verify",
       title: "Verify",
-      branch: "sandcastle/bd-verify-verify",
+      branch: "archloop/bd-verify-verify",
       cwd: repoDir,
       runDir: join(repoDir, "runs"),
     });

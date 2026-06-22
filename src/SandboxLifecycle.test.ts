@@ -86,11 +86,11 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     await execAsync('git commit -m "initial commit"', { cwd: hostDir });
 
     // Create a real git worktree from the host repo
-    const worktreesDir = join(hostDir, ".sandcastle", "worktrees");
+    const worktreesDir = join(hostDir, ".archloop", "worktrees");
     await mkdir(worktreesDir, { recursive: true });
     const worktreeDir = join(worktreesDir, "test-worktree");
     await execAsync(
-      `git worktree add -b "sandcastle/test" "${worktreeDir}" HEAD`,
+      `git worktree add -b "archloop/test" "${worktreeDir}" HEAD`,
       { cwd: hostDir },
     );
 
@@ -204,7 +204,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         {
           hostRepoDir: hostDir,
           sandboxRepoDir: worktreeDir,
-          branch: "sandcastle/test",
+          branch: "archloop/test",
           hooks: {
             sandbox: {
               onSandboxReady: [
@@ -263,7 +263,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         {
           hostRepoDir: hostDir,
           sandboxRepoDir: worktreeDir,
-          branch: "sandcastle/test",
+          branch: "archloop/test",
           hooks: {
             sandbox: {
               onSandboxReady: [
@@ -359,7 +359,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     );
 
     // The temp branch should no longer exist
-    const { stdout } = await execAsync('git branch --list "sandcastle/test"', {
+    const { stdout } = await execAsync('git branch --list "archloop/test"', {
       cwd: hostDir,
     });
     expect(stdout.trim()).toBe("");
@@ -379,7 +379,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     );
 
     // Temp branch deleted even with no commits
-    const { stdout } = await execAsync('git branch --list "sandcastle/test"', {
+    const { stdout } = await execAsync('git branch --list "archloop/test"', {
       cwd: hostDir,
     });
     expect(stdout.trim()).toBe("");
@@ -421,7 +421,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     ).rejects.toThrow(/merge.*failed/i);
 
     // Temp branch should still exist for recovery
-    const { stdout } = await execAsync('git branch --list "sandcastle/test"', {
+    const { stdout } = await execAsync('git branch --list "archloop/test"', {
       cwd: hostDir,
     });
     expect(stdout.trim()).toBeTruthy();
@@ -470,7 +470,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     expect(mainFile.trim()).toBe("main-content");
 
     // Temp branch should be deleted
-    const { stdout } = await execAsync('git branch --list "sandcastle/test"', {
+    const { stdout } = await execAsync('git branch --list "archloop/test"', {
       cwd: hostDir,
     });
     expect(stdout.trim()).toBe("");
@@ -481,7 +481,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
 
     // Simulate a bind-mount provider: sandboxRepoDir is the container mount point,
     // which differs from the actual host worktree path. In production the sandbox
-    // sees /home/agent/workspace while the host sees .sandcastle/worktrees/<name>.
+    // sees /home/agent/workspace while the host sees .archloop/worktrees/<name>.
     //
     // We use a PathTranslating sandbox that maps the container path to the real
     // worktree path — exactly what a bind-mount provider does.
@@ -525,7 +525,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
 
     // Temp branch should be deleted
     const { stdout: branches } = await execAsync(
-      'git branch --list "sandcastle/test"',
+      'git branch --list "archloop/test"',
       { cwd: hostDir },
     );
     expect(branches.trim()).toBe("");
@@ -556,7 +556,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
               { cwd: ctx.sandboxRepoDir },
             );
             yield* ctx.sandbox.exec(
-              'sh -c "git checkout sandcastle/test && git merge --no-ff feature/merge-test -m \\"Merge feature/merge-test\\""',
+              'sh -c "git checkout archloop/test && git merge --no-ff feature/merge-test -m \\"Merge feature/merge-test\\""',
               { cwd: ctx.sandboxRepoDir },
             );
           }),
@@ -609,7 +609,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
 
             // Back to temp branch — merge both (resolving the conflict on file.txt)
             yield* ctx.sandbox.exec(
-              'sh -c "git checkout sandcastle/test && git merge --no-ff branch-a -m \\"Merge branch-a\\""',
+              'sh -c "git checkout archloop/test && git merge --no-ff branch-a -m \\"Merge branch-a\\""',
               { cwd: ctx.sandboxRepoDir },
             );
             // branch-b will conflict on file.txt — resolve it manually
@@ -641,7 +641,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         {
           hostRepoDir: hostDir,
           sandboxRepoDir: worktreeDir,
-          branch: "sandcastle/test",
+          branch: "archloop/test",
         },
         (ctx) =>
           Effect.gen(function* () {
@@ -698,7 +698,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           hostRepoDir: hostDir,
           sandboxRepoDir: worktreeDir,
           // explicit branch — commits stay on that branch, no cherry-pick
-          branch: "sandcastle/test",
+          branch: "archloop/test",
         },
         (ctx) =>
           Effect.gen(function* () {
@@ -717,17 +717,17 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     );
 
     // Branch stays as the explicit branch
-    expect(result.branch).toBe("sandcastle/test");
+    expect(result.branch).toBe("archloop/test");
     expect(result.commits).toHaveLength(1);
 
-    // Commit is on sandcastle/test, NOT cherry-picked to main
+    // Commit is on archloop/test, NOT cherry-picked to main
     const { stdout: mainLog } = await execAsync("git log --oneline main", {
       cwd: hostDir,
     });
     expect(mainLog).not.toContain("explicit branch commit");
 
     const { stdout: branchLog } = await execAsync(
-      'git log --oneline "sandcastle/test"',
+      'git log --oneline "archloop/test"',
       { cwd: hostDir },
     );
     expect(branchLog).toContain("explicit branch commit");
@@ -830,7 +830,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           {
             hostRepoDir: hostDir,
             sandboxRepoDir: worktreeDir,
-            branch: "sandcastle/test",
+            branch: "archloop/test",
             applyToHost: () => Effect.void,
           },
           () => Effect.succeed("ok"),
@@ -856,7 +856,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           {
             hostRepoDir: hostDir,
             sandboxRepoDir: worktreeDir,
-            branch: "sandcastle/test",
+            branch: "archloop/test",
             applyToHost: () => Effect.void,
           },
           (ctx) =>
@@ -888,7 +888,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           {
             hostRepoDir: hostDir,
             sandboxRepoDir: worktreeDir,
-            branch: "sandcastle/test",
+            branch: "archloop/test",
           },
           () => Effect.succeed("ok"),
         );
@@ -899,8 +899,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
     const syncLog = entries.find(
       (e) =>
         e._tag === "taskLog" &&
-        (e.title === "No commits to sync out" ||
-          e.title.startsWith("Syncing")),
+        (e.title === "No commits to sync out" || e.title.startsWith("Syncing")),
     );
     expect(syncLog).toBeUndefined();
   });
@@ -952,7 +951,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           {
             hostRepoDir: hostDir,
             sandboxRepoDir: worktreeDir,
-            branch: "sandcastle/test",
+            branch: "archloop/test",
           },
           () => Effect.succeed("ok"),
         );
@@ -974,7 +973,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         {
           hostRepoDir: hostDir,
           sandboxRepoDir: worktreeDir,
-          branch: "sandcastle/test",
+          branch: "archloop/test",
           hooks: {
             host: {
               onSandboxReady: [
@@ -1003,7 +1002,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         {
           hostRepoDir: hostDir,
           sandboxRepoDir: worktreeDir,
-          branch: "sandcastle/test",
+          branch: "archloop/test",
           hooks: {
             host: {
               onSandboxReady: [{ command: "echo host-ready > host-ready.txt" }],
@@ -1042,7 +1041,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         {
           hostRepoDir: hostDir,
           sandboxRepoDir: worktreeDir,
-          branch: "sandcastle/test",
+          branch: "archloop/test",
           signal: ac.signal,
           hooks: {
             host: {
@@ -1067,7 +1066,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         {
           hostRepoDir: hostDir,
           sandboxRepoDir: worktreeDir,
-          branch: "sandcastle/test",
+          branch: "archloop/test",
           signal: ac.signal,
           hooks: {
             sandbox: {
@@ -1092,7 +1091,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         {
           hostRepoDir: hostDir,
           sandboxRepoDir: worktreeDir,
-          branch: "sandcastle/test",
+          branch: "archloop/test",
           hooks: {
             host: {
               onSandboxReady: [{ command: "echo ok > host-signal-test.txt" }],
@@ -1124,7 +1123,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
           {
             hostRepoDir: hostDir,
             sandboxRepoDir: worktreeDir,
-            branch: "sandcastle/test",
+            branch: "archloop/test",
             hooks: {
               host: {
                 onSandboxReady: [{ command: "exit 1" }],
@@ -1160,12 +1159,10 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         {
           hostRepoDir: hostDir,
           sandboxRepoDir: worktreeDir,
-          branch: "sandcastle/test",
+          branch: "archloop/test",
           hooks: {
             sandbox: {
-              onSandboxReady: [
-                { command: "slow-install", timeoutMs: 500 },
-              ],
+              onSandboxReady: [{ command: "slow-install", timeoutMs: 500 }],
             },
           },
         },
@@ -1184,12 +1181,10 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         {
           hostRepoDir: hostDir,
           sandboxRepoDir: worktreeDir,
-          branch: "sandcastle/test",
+          branch: "archloop/test",
           hooks: {
             host: {
-              onSandboxReady: [
-                { command: "sleep 2", timeoutMs: 500 },
-              ],
+              onSandboxReady: [{ command: "sleep 2", timeoutMs: 500 }],
             },
           },
         },
@@ -1209,7 +1204,7 @@ describe("withSandboxLifecycle (worktree mode)", () => {
         {
           hostRepoDir: hostDir,
           sandboxRepoDir: worktreeDir,
-          branch: "sandcastle/test",
+          branch: "archloop/test",
           hooks: {
             sandbox: {
               onSandboxReady: [{ command: "echo default-timeout > dt.txt" }],
@@ -1305,10 +1300,7 @@ describe("runHostHooks", () => {
     // sleep 2 with a 500ms timeout should fail
     await expect(
       Effect.runPromise(
-        runHostHooks(
-          [{ command: "sleep 2", timeoutMs: 500 }],
-          dir,
-        ),
+        runHostHooks([{ command: "sleep 2", timeoutMs: 500 }], dir),
       ),
     ).rejects.toThrow(/timed out/);
   });

@@ -1,6 +1,6 @@
 # Hub onboarding does not scaffold repo files
 
-**Sandcastle Hub** project onboarding mirrors the configuration choices and setup capabilities of `sandcastle init`, but Hub-owned orchestration assets are stored outside the target repo in the **Sandcastle user data directory**. By default, Hub onboarding does not write `.sandcastle/`, `main.mts`, prompts, package scripts, or Hub flow assets into the repo; any repo mutation or external state change must be an explicit **Hub setup action**.
+**archLoop Hub** project onboarding mirrors the configuration choices and setup capabilities of `archloop init`, but Hub-owned orchestration assets are stored outside the target repo in the **archLoop user data directory**. By default, Hub onboarding does not write `.archloop/`, `main.mts`, prompts, package scripts, or Hub flow assets into the repo; any repo mutation or external state change must be an explicit **Hub setup action**.
 
 ## Considered Options
 

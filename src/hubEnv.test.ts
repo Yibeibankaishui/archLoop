@@ -25,11 +25,9 @@ const makeStore = async () => {
 };
 
 describe("hubEnv", () => {
-  it("resolves Hub env path under the Sandcastle user data directory", async () => {
+  it("resolves Hub env path under the archLoop user data directory", async () => {
     const { dataDir, env } = await makeStore();
-    expect(resolveHubEnvPath({ env })).toBe(
-      join(dataDir, "sandcastle", ".env"),
-    );
+    expect(resolveHubEnvPath({ env })).toBe(join(dataDir, "archloop", ".env"));
   });
 
   it("creates a default Hub env template on first use", async () => {
@@ -120,7 +118,7 @@ describe("hubEnv", () => {
     expect(joined).toMatch(/hint:.*OpenAI API/);
     expect(joined).toMatch(/https:\/\/platform\.openai\.com\/api-keys/);
     expect(joined).toContain(
-      "Run `sandcastle env init` for guided credential setup.",
+      "Run `archloop env init` for guided credential setup.",
     );
   });
 });

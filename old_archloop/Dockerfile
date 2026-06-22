@@ -15,16 +15,14 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
   && apt-get update && apt-get install -y gh \
   && rm -rf /var/lib/apt/lists/*
 
-
-
-# Build-args for UID/GID alignment: sandcastle docker build-image
+# Build-args for UID/GID alignment: archloop docker build-image
 # defaults these to the host user's UID/GID so image-built files
 # and bind-mounted files share an owner without runtime chown.
 ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 
 # Rename the base image's "node" user to "agent" and align UID/GID.
-# macOS commonly uses GID 20 ("staff"), which already exists in Debian images.
+# macOS often uses GID 20 ("staff"), which already exists in Debian images.
 RUN set -eux; \
   if ! getent group "$AGENT_GID" >/dev/null; then \
     groupmod -g "$AGENT_GID" node; \
@@ -34,22 +32,21 @@ RUN set -eux; \
   chown -R "$AGENT_UID:$AGENT_GID" /home/agent
 
 # Install Codex CLI (run as root before USER agent)
-RUN npm install -g @openai/codex \
-  && codex --version
+RUN npm install -g @openai/codex
 
+# Switch to the sandbox user before installing user-scoped agent CLIs.
 USER ${AGENT_UID}:${AGENT_GID}
 ENV HOME="/home/agent"
 
 # Install Cursor Agent CLI
-RUN curl https://cursor.com/install -fsS | bash \
-  && test -x "$HOME/.local/bin/agent"
+RUN curl https://cursor.com/install -fsS | bash
 
-# Add agent CLIs to PATH
+# Add user-scoped agent CLIs to PATH
 ENV PATH="/home/agent/.local/bin:$PATH"
 
 WORKDIR /home/agent
 
-# In worktree sandbox mode, Sandcastle bind-mounts the git worktree at /home/agent/workspace
+# In worktree sandbox mode, archLoop bind-mounts the git worktree at /home/agent/workspace
 # and overrides the working directory to /home/agent/workspace at container start.
 # Structure your Dockerfile so that /home/agent/workspace can serve as the project root.
 ENTRYPOINT ["sleep", "infinity"]

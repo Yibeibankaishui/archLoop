@@ -1,30 +1,30 @@
-# Sandcastle Unified Interface 用户使用指南
+# archLoop Unified Interface 用户使用指南
 
 ## 1 功能概述
 
-Sandcastle unified interface 是 Sandcastle 的新主入口。它把项目管理、共享凭据、agent role 配置、任务表、PRD 拆解、任务 triage 和 flow 执行集中到 `sandcastle` CLI 中。
+archLoop unified interface 是 archLoop 的新主入口。它把项目管理、共享凭据、agent role 配置、任务表、PRD 拆解、任务 triage 和 flow 执行集中到 `archloop` CLI 中。
 
 首版主仓库为：
 
 ```text
-https://github.com/Yibeibankaishui/sandcastle.git
+https://github.com/Yibeibankaishui/archLoop.git
 ```
 
-旧的 `sandcastle init` 方式仍然保留。已经使用 `.sandcastle/main.ts` 或 `.sandcastle/main.mts` 的项目可以继续按原流程运行；新的主要使用方式推荐直接使用 Hub / task board / flow 命令。
+旧的 `archloop init` 方式仍然保留。已经使用 `.archloop/main.ts` 或 `.archloop/main.mts` 的项目可以继续按原流程运行；新的主要使用方式推荐直接使用 Hub / task board / flow 命令。
 
 ## 2 使用边界
 
 Unified interface 面向一个已有 Git 项目运行。目标项目需要满足：
 
-| 条件             | 说明                                                             |
-| ---------------- | ---------------------------------------------------------------- |
-| Git 仓库         | 仓库至少已有一个 commit                                          |
-| Sandcastle CLI   | 示例统一使用 `sandcastle`，没有全局命令时可改用 `npx sandcastle` |
-| Beads task store | Hub task board 使用 Beads 保存本地任务                           |
-| Agent runtime    | 需要至少一个可用的 agent provider 和模型                         |
-| Hub credentials  | 共享凭据保存在 Sandcastle user data directory 中                 |
+| 条件             | 说明                                                         |
+| ---------------- | ------------------------------------------------------------ |
+| Git 仓库         | 仓库至少已有一个 commit                                      |
+| archLoop CLI     | 示例统一使用 `archloop`，没有全局命令时可改用 `npx archloop` |
+| Beads task store | Hub task board 使用 Beads 保存本地任务                       |
+| Agent runtime    | 需要至少一个可用的 agent provider 和模型                     |
+| Hub credentials  | 共享凭据保存在 archLoop user data directory 中               |
 
-Hub flow 使用 Sandcastle 自带的 flow prompt，不读取目标项目里的 `.sandcastle/main.ts` 或 `.sandcastle` prompt。目标项目不需要先执行 `sandcastle init`。
+Hub flow 使用 archLoop 自带的 flow prompt，不读取目标项目里的 `.archloop/main.ts` 或 `.archloop` prompt。目标项目不需要先执行 `archloop init`。
 
 ## 3 首次配置
 
@@ -33,43 +33,43 @@ Hub flow 使用 Sandcastle 自带的 flow prompt，不读取目标项目里的 `
 在目标项目根目录运行：
 
 ```bash
-sandcastle project status
+archloop project status
 ```
 
 这个命令用于确认：
 
-| 输出项                         | 用途                                         |
-| ------------------------------ | -------------------------------------------- |
-| Repo root                      | Sandcastle 识别到的目标项目根目录            |
-| Sandcastle user data directory | Hub 状态、共享凭据、运行记录所在位置         |
-| Hub project directory          | 当前项目的 Hub 运行状态目录                  |
-| Beads availability             | Beads 是否可用                               |
-| Task summary                   | 当前任务表、失败任务、运行批次、同步状态摘要 |
+| 输出项                       | 用途                                         |
+| ---------------------------- | -------------------------------------------- |
+| Repo root                    | archLoop 识别到的目标项目根目录              |
+| archLoop user data directory | Hub 状态、共享凭据、运行记录所在位置         |
+| Hub project directory        | 当前项目的 Hub 运行状态目录                  |
+| Beads availability           | Beads 是否可用                               |
+| Task summary                 | 当前任务表、失败任务、运行批次、同步状态摘要 |
 
 ### 3.2 配置 agent roles
 
 Hub flow 使用统一的 role 配置，配置对所有项目生效。
 
 ```bash
-sandcastle agent-config init
+archloop agent-config init
 ```
 
 也可以单独设置某个 role：
 
 ```bash
-sandcastle agent-config set-role planning --provider cursor --model gpt-5.4
-sandcastle agent-config set-role triage --provider cursor --model gpt-5.4
-sandcastle agent-config set-role implementation --provider cursor --model gpt-5.4
-sandcastle agent-config set-role review --provider cursor --model gpt-5.4
-sandcastle agent-config set-role merge --provider cursor --model gpt-5.4
-sandcastle agent-config set-role recovery --provider cursor --model gpt-5.4
+archloop agent-config set-role planning --provider cursor --model gpt-5.4
+archloop agent-config set-role triage --provider cursor --model gpt-5.4
+archloop agent-config set-role implementation --provider cursor --model gpt-5.4
+archloop agent-config set-role review --provider cursor --model gpt-5.4
+archloop agent-config set-role merge --provider cursor --model gpt-5.4
+archloop agent-config set-role recovery --provider cursor --model gpt-5.4
 ```
 
 查看当前配置：
 
 ```bash
-sandcastle agent-config show
-sandcastle agent-config path
+archloop agent-config show
+archloop agent-config path
 ```
 
 支持的 role：
@@ -85,30 +85,30 @@ sandcastle agent-config path
 
 ### 3.3 配置共享凭据
 
-Hub v1 使用 Sandcastle user data directory 下的本地明文 `.env` 文件保存共享凭据。它不是 secret vault；请按本地敏感文件管理。
+Hub v1 使用 archLoop user data directory 下的本地明文 `.env` 文件保存共享凭据。它不是 secret vault；请按本地敏感文件管理。
 
 ```bash
-sandcastle env init
+archloop env init
 ```
 
-Codex users can choose `sandcastle auth login codex` for a Codex/ChatGPT CLI login session instead of setting `OPENAI_KEY`, which uses OpenAI API billing. GitHub Issues task sync can use `sandcastle auth login github` instead of `GH_TOKEN`.
+Codex users can choose `archloop auth login codex` for a Codex/ChatGPT CLI login session instead of setting `OPENAI_KEY`, which uses OpenAI API billing. GitHub Issues task sync can use `archloop auth login github` instead of `GH_TOKEN`.
 
 也可以单独设置：
 
 ```bash
-sandcastle env set CURSOR_API_KEY
-sandcastle env set ANTHROPIC_API_KEY
-sandcastle env set OPENAI_KEY
-sandcastle env set OPENCODE_API_KEY
-sandcastle env set GH_TOKEN
+archloop env set CURSOR_API_KEY
+archloop env set ANTHROPIC_API_KEY
+archloop env set OPENAI_KEY
+archloop env set OPENCODE_API_KEY
+archloop env set GH_TOKEN
 ```
 
 查看配置：
 
 ```bash
-sandcastle env show
-sandcastle env path
-sandcastle auth show
+archloop env show
+archloop env path
+archloop auth show
 ```
 
 `process.env` 中的同名变量会覆盖 Hub `.env` 中的值。
@@ -120,13 +120,13 @@ sandcastle auth show
 如果目标项目还没有本地任务表，先运行：
 
 ```bash
-sandcastle tasks init
+archloop tasks init
 ```
 
-查看 Sandcastle 投影后的任务表：
+查看 archLoop 投影后的任务表：
 
 ```bash
-sandcastle tasks list
+archloop tasks list
 ```
 
 任务选择器支持三种写法：
@@ -140,9 +140,9 @@ sandcastle tasks list
 查看任务详情：
 
 ```bash
-sandcastle tasks show 1
-sandcastle tasks show "Fix login redirect"
-sandcastle tasks show todo-list-demo-mv2
+archloop tasks show 1
+archloop tasks show "Fix login redirect"
+archloop tasks show todo-list-demo-mv2
 ```
 
 ### 4.2 创建任务
@@ -150,25 +150,25 @@ sandcastle tasks show todo-list-demo-mv2
 创建普通 inbox 任务：
 
 ```bash
-sandcastle tasks create "Fix login redirect"
+archloop tasks create "Fix login redirect"
 ```
 
 创建用户反馈任务：
 
 ```bash
-sandcastle tasks create "Improve empty state copy" --origin user-feedback --kind ux
+archloop tasks create "Improve empty state copy" --origin user-feedback --kind ux
 ```
 
 附带描述：
 
 ```bash
-sandcastle tasks create "Handle expired token" --description "User is redirected to a blank page after token expiry."
+archloop tasks create "Handle expired token" --description "User is redirected to a blank page after token expiry."
 ```
 
 ### 4.3 追加评论
 
 ```bash
-sandcastle tasks comment 1 --body "QA reproduced this on a fresh checkout."
+archloop tasks comment 1 --body "QA reproduced this on a fresh checkout."
 ```
 
 不传 `--body` 时会进入交互输入。
@@ -178,8 +178,8 @@ sandcastle tasks comment 1 --body "QA reproduced this on a fresh checkout."
 删除只影响本地 Beads task，不删除 GitHub Issue。
 
 ```bash
-sandcastle tasks delete 1 --dry-run
-sandcastle tasks delete 1 --yes
+archloop tasks delete 1 --dry-run
+archloop tasks delete 1 --yes
 ```
 
 ## 5 PRD 拆解与 Triage
@@ -189,7 +189,7 @@ sandcastle tasks delete 1 --yes
 推荐入口：
 
 ```bash
-sandcastle tasks from-prd docs/prd/example.md
+archloop tasks from-prd docs/prd/example.md
 ```
 
 这个命令会启动 agent-driven proposal session。你可以在会话里要求 agent 拆分、合并、重排、调整依赖、补充验收标准，确认后才会写入本地 Beads。
@@ -197,7 +197,7 @@ sandcastle tasks from-prd docs/prd/example.md
 非交互一轮模式：
 
 ```bash
-sandcastle tasks from-prd docs/prd/example.md --yes
+archloop tasks from-prd docs/prd/example.md --yes
 ```
 
 `--yes` 仍会调用 agent 并校验结构化输出，默认创建 inbox 任务，不会静默创建 ready 状态任务。
@@ -205,7 +205,7 @@ sandcastle tasks from-prd docs/prd/example.md --yes
 等价 flow 入口：
 
 ```bash
-sandcastle run . --flow prd-decomposition --input docs/prd/example.md
+archloop run . --flow prd-decomposition --input docs/prd/example.md
 ```
 
 ### 5.2 Triage inbox / needs_info 任务
@@ -213,25 +213,25 @@ sandcastle run . --flow prd-decomposition --input docs/prd/example.md
 交互选择任务：
 
 ```bash
-sandcastle tasks triage
+archloop tasks triage
 ```
 
 指定单个任务：
 
 ```bash
-sandcastle tasks triage todo-list-demo-mv2
+archloop tasks triage todo-list-demo-mv2
 ```
 
 按状态查询：
 
 ```bash
-sandcastle tasks triage --query inbox,needs_info
+archloop tasks triage --query inbox,needs_info
 ```
 
 非交互高置信自动应用：
 
 ```bash
-sandcastle tasks triage --yes
+archloop tasks triage --yes
 ```
 
 `triage --yes` 只自动应用高置信、非关闭、非依赖变更的决策。需要人工确认的决策会被跳过并记录为未确认。
@@ -239,32 +239,32 @@ sandcastle tasks triage --yes
 等价 flow 入口：
 
 ```bash
-sandcastle run . --flow triage --input inbox,needs_info
+archloop run . --flow triage --input inbox,needs_info
 ```
 
 ## 6 诊断和修复任务状态
 
 ```bash
-sandcastle tasks doctor
+archloop tasks doctor
 ```
 
-`tasks doctor` 只读检查本地 Beads task board、Hub run events、git 分支和工作区状态，不会修改 Beads、git 或远端 GitHub Issues。它会报告多重 Sandcastle 状态标签、过期的 `metadata.hubStatus`、缺失的 execution claim、failed 任务上仍存在的分支工作、已 review 但无法被 merge 选择的任务、terminal 任务里残留的 execution metadata、dirty worktree gate，以及需要 `tasks push` 的同步状态。
+`tasks doctor` 只读检查本地 Beads task board、Hub run events、git 分支和工作区状态，不会修改 Beads、git 或远端 GitHub Issues。它会报告多重 archLoop 状态标签、过期的 `metadata.hubStatus`、缺失的 execution claim、failed 任务上仍存在的分支工作、已 review 但无法被 merge 选择的任务、terminal 任务里残留的 execution metadata、dirty worktree gate，以及需要 `tasks push` 的同步状态。
 
-每条输出都会说明下一步：重新运行 flow、执行 `sandcastle tasks recover <selector>`、执行 `sandcastle tasks repair-state <selector>`，或推送 task sync。`dirty_worktree` 不是可修复的 Beads 状态污染；先 commit、stash 或 revert 脏文件，再重新运行同一个 flow 让批次恢复。
+每条输出都会说明下一步：重新运行 flow、执行 `archloop tasks recover <selector>`、执行 `archloop tasks repair-state <selector>`，或推送 task sync。`dirty_worktree` 不是可修复的 Beads 状态污染；先 commit、stash 或 revert 脏文件，再重新运行同一个 flow 让批次恢复。
 
 ```bash
-sandcastle tasks repair-state <selector>
-sandcastle tasks repair-state <selector> --yes
+archloop tasks repair-state <selector>
+archloop tasks repair-state <selector> --yes
 ```
 
-`repair-state` 会先预览本地 Beads mutation；TTY 中需要确认，非交互模式需要 `--yes`。它使用和正常 Hub lifecycle 相同的 canonical transition path，只重写 Sandcastle 管理的状态标签和 metadata，保留用户自定义标签，不会修改远端 GitHub Issues。典型用途是修复 Hub event 已记录 `task_review_succeeded`、分支仍有未合并工作，但 Beads labels/metadata/claim 过期导致无法 merge 的 QA incident。`commitCount=0` 且没有 branch work 的 agent failure 不会被提升到 `waiting_for_merge`，应通过 recovery policy 处理。
+`repair-state` 会先预览本地 Beads mutation；TTY 中需要确认，非交互模式需要 `--yes`。它使用和正常 Hub lifecycle 相同的 canonical transition path，只重写 archLoop 管理的状态标签和 metadata，保留用户自定义标签，不会修改远端 GitHub Issues。典型用途是修复 Hub event 已记录 `task_review_succeeded`、分支仍有未合并工作，但 Beads labels/metadata/claim 过期导致无法 merge 的 QA incident。`commitCount=0` 且没有 branch work 的 agent failure 不会被提升到 `waiting_for_merge`，应通过 recovery policy 处理。
 
 ## 7 执行 Flow
 
 ### 7.1 无 reviewer flow
 
 ```bash
-sandcastle run . --flow no-review
+archloop run . --flow no-review
 ```
 
 适合先验证最短闭环：读取 `ready_for_agent` 队列，执行实现任务，成功后进入 `waiting_for_merge`，再按批次合并并关闭本地任务。
@@ -272,12 +272,12 @@ sandcastle run . --flow no-review
 ### 7.2 带 reviewer flow
 
 ```bash
-sandcastle run . --flow with-review
+archloop run . --flow with-review
 ```
 
 适合需要实现后审核的流程：实现成功后进入 `reviewing`，review 完成后进入 `waiting_for_merge`，再进入 merge 阶段。
 
-Merge 阶段会在真正合并前输出 selected / skipped / blocked 诊断。若 Hub 事件显示任务已实现或审核完成、分支仍有未合并工作，但 Beads 投影状态或 claim 元数据已经过期，诊断会显示 `state_inconsistent` 并提示运行 `sandcastle tasks repair-state <selector>`；若任务处于 failed 或 stale execution 状态，`sandcastle tasks recover <selector>` 也可能适用。若被 `dirty_worktree` 阻塞，这是 Git 安全门而不是任务状态不一致；提交、stash 或 revert 列出的脏文件后，重新运行同一个 flow 即可恢复批次。
+Merge 阶段会在真正合并前输出 selected / skipped / blocked 诊断。若 Hub 事件显示任务已实现或审核完成、分支仍有未合并工作，但 Beads 投影状态或 claim 元数据已经过期，诊断会显示 `state_inconsistent` 并提示运行 `archloop tasks repair-state <selector>`；若任务处于 failed 或 stale execution 状态，`archloop tasks recover <selector>` 也可能适用。若被 `dirty_worktree` 阻塞，这是 Git 安全门而不是任务状态不一致；提交、stash 或 revert 列出的脏文件后，重新运行同一个 flow 即可恢复批次。
 
 ### 7.3 Flow 状态
 
@@ -302,8 +302,8 @@ Hub task board 使用这些状态：
 查看当前进度：
 
 ```bash
-sandcastle project status
-sandcastle tasks list
+archloop project status
+archloop tasks list
 ```
 
 ## 8 GitHub Issues 同步
@@ -311,14 +311,14 @@ sandcastle tasks list
 Hub task board 的本地任务源是 Beads。GitHub Issues 是远端协作表，通过同步命令 pull / push。
 
 ```bash
-sandcastle tasks sync
+archloop tasks sync
 ```
 
 同步规则：
 
 | 方向             | 行为                                                                               |
 | ---------------- | ---------------------------------------------------------------------------------- |
-| GitHub -> Beads  | 拉取带 Sandcastle 协作标签的 issue                                                 |
+| GitHub -> Beads  | 拉取带 archLoop 协作标签的 issue                                                   |
 | Beads -> GitHub  | 推送协作标签、关闭 `done` / `wontfix` 任务                                         |
 | Proposal flows   | 只写本地 Beads，不直接改 GitHub                                                    |
 | Execution states | `implementing`、`reviewing`、`waiting_for_merge`、`merging`、`failed` 保持本地状态 |
@@ -330,7 +330,7 @@ sandcastle tasks sync
 任务卡在失败或中间态时，使用 recovery 命令修复。
 
 ```bash
-sandcastle tasks recover 1
+archloop tasks recover 1
 ```
 
 常见用途：
@@ -344,62 +344,62 @@ sandcastle tasks recover 1
 
 ## 10 Legacy Init 兼容路径
 
-`sandcastle init` 继续存在，适用于需要项目内脚手架和自定义 TypeScript 编排的场景。
+`archloop init` 继续存在，适用于需要项目内脚手架和自定义 TypeScript 编排的场景。
 
 ```bash
-sandcastle init
+archloop init
 ```
 
 运行旧流程：
 
 ```bash
-npx tsx ./.sandcastle/main.ts
+npx tsx ./.archloop/main.ts
 ```
 
 如果生成的是 `main.mts`：
 
 ```bash
-npx tsx ./.sandcastle/main.mts
+npx tsx ./.archloop/main.mts
 ```
 
 一旦使用：
 
 ```bash
-sandcastle run . --flow no-review
+archloop run . --flow no-review
 ```
 
-就会使用 Sandcastle Hub 自带的 flow prompt，而不是项目 `.sandcastle/` 中生成的 main 脚本或 prompt。
+就会使用 archLoop Hub 自带的 flow prompt，而不是项目 `.archloop/` 中生成的 main 脚本或 prompt。
 
 ## 11 QA 建议路径
 
 建议按下面顺序做首轮 QA：
 
-1. 在目标 Git 项目中运行 `sandcastle project status`，确认不需要 `.sandcastle/`。
-2. 运行 `sandcastle agent-config init`，配置 `planning`、`triage`、`implementation`、`review`、`merge`、`recovery`。
-3. 运行 `sandcastle env init`，配置 agent 和 GitHub 所需凭据。
-4. 运行 `sandcastle tasks init`，再用 `sandcastle tasks create` 创建 2 到 3 个测试任务。
-5. 用 `sandcastle tasks list` 确认任务带序号，用 `tasks show` 分别测试 id、标题、序号选择。
-6. 用 `sandcastle tasks comment` 追加评论，再用 `tasks show` 验证评论可见。
-7. 准备一个 PRD 文件，运行 `sandcastle tasks from-prd <prd-file>`，人工调整 proposal 后确认写入。
-8. 运行 `sandcastle tasks triage`，确认 agent 能给出状态建议并写入本地 Beads。
-9. 将至少一个任务变为 `ready_for_agent`，运行 `sandcastle run . --flow no-review`。
-10. 再准备一轮任务，运行 `sandcastle run . --flow with-review`。
-11. 运行 `sandcastle tasks sync`，验证 GitHub Issues pull / push 行为。
-12. 人工制造一个失败或 stale 状态，运行 `sandcastle tasks recover <selector>`。
-13. 运行 legacy `sandcastle init`，确认旧的 `.sandcastle/main.ts` 或 `.sandcastle/main.mts` 路径仍可用。
+1. 在目标 Git 项目中运行 `archloop project status`，确认不需要 `.archloop/`。
+2. 运行 `archloop agent-config init`，配置 `planning`、`triage`、`implementation`、`review`、`merge`、`recovery`。
+3. 运行 `archloop env init`，配置 agent 和 GitHub 所需凭据。
+4. 运行 `archloop tasks init`，再用 `archloop tasks create` 创建 2 到 3 个测试任务。
+5. 用 `archloop tasks list` 确认任务带序号，用 `tasks show` 分别测试 id、标题、序号选择。
+6. 用 `archloop tasks comment` 追加评论，再用 `tasks show` 验证评论可见。
+7. 准备一个 PRD 文件，运行 `archloop tasks from-prd <prd-file>`，人工调整 proposal 后确认写入。
+8. 运行 `archloop tasks triage`，确认 agent 能给出状态建议并写入本地 Beads。
+9. 将至少一个任务变为 `ready_for_agent`，运行 `archloop run . --flow no-review`。
+10. 再准备一轮任务，运行 `archloop run . --flow with-review`。
+11. 运行 `archloop tasks sync`，验证 GitHub Issues pull / push 行为。
+12. 人工制造一个失败或 stale 状态，运行 `archloop tasks recover <selector>`。
+13. 运行 legacy `archloop init`，确认旧的 `.archloop/main.ts` 或 `.archloop/main.mts` 路径仍可用。
 
 ## 12 验收指标
 
-| 指标                          | 通过标准                                                                       |
-| ----------------------------- | ------------------------------------------------------------------------------ |
-| Unified interface 不依赖 init | `project status`、`tasks list`、`run --flow` 不要求目标项目已有 `.sandcastle/` |
-| 共享配置可复用                | 不同项目读取同一套 Hub agent config 和 Hub env                                 |
-| Task selector 易用            | id、标题、列表序号都可选中任务                                                 |
-| Proposal flow 有人工确认      | PRD 拆解和 triage 都能反复讨论后再 apply                                       |
-| Proposal flow 不直接改远端    | `from-prd` / `triage` 只写本地 Beads                                           |
-| Flow prompt 来源正确          | `run --flow` 使用 Sandcastle Hub 自带 prompt                                   |
-| Merge 结果可追踪              | 每个任务能区分合并成功、失败或未处理                                           |
-| Legacy init 兼容              | 旧项目仍可运行生成的 main 脚本                                                 |
+| 指标                          | 通过标准                                                                     |
+| ----------------------------- | ---------------------------------------------------------------------------- |
+| Unified interface 不依赖 init | `project status`、`tasks list`、`run --flow` 不要求目标项目已有 `.archloop/` |
+| 共享配置可复用                | 不同项目读取同一套 Hub agent config 和 Hub env                               |
+| Task selector 易用            | id、标题、列表序号都可选中任务                                               |
+| Proposal flow 有人工确认      | PRD 拆解和 triage 都能反复讨论后再 apply                                     |
+| Proposal flow 不直接改远端    | `from-prd` / `triage` 只写本地 Beads                                         |
+| Flow prompt 来源正确          | `run --flow` 使用 archLoop Hub 自带 prompt                                   |
+| Merge 结果可追踪              | 每个任务能区分合并成功、失败或未处理                                         |
+| Legacy init 兼容              | 旧项目仍可运行生成的 main 脚本                                               |
 
 ## 文档修改记录
 

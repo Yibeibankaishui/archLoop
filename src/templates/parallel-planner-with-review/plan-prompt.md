@@ -40,7 +40,7 @@ An issue is **unblocked** when `openBlockers` is empty and it has zero other
 blocking dependencies on open issues in the ready queue.
 
 Do **not** assign branch names. The template derives each issue branch
-deterministically as `sandcastle/issue-{id}` after planning.
+deterministically as `archloop/issue-{id}` after planning.
 
 Include every unblocked issue in your plan. Do **not** inspect git branches or
 try to detect existing implementation work — the template handles that

@@ -112,7 +112,7 @@ describe("PromptPreprocessor", () => {
   it("surfaces actionable GitHub auth guidance when gh commands fail with 401", async () => {
     const { sandboxDir } = await setup();
     const ghCommand =
-      "gh issue list -l Sandcastle --state open --json number,title";
+      "gh issue list -l archLoop --state open --json number,title";
     const ghStderr =
       "HTTP 401: Bad credentials (https://api.github.com/graphql)\n" +
       "gh: To re-authenticate, run: gh auth login -h github.com";
@@ -122,7 +122,7 @@ describe("PromptPreprocessor", () => {
     expect(result).toBeInstanceOf(PromptError);
     expect(result.message).toContain("GitHub authentication failed");
     expect(result.message).toContain("GH_TOKEN");
-    expect(result.message).toContain("sandcastle auth login github");
+    expect(result.message).toContain("archloop auth login github");
     expect(result.message).toContain("host `gh auth status`");
     expect(result.message).not.toContain("FiberFailure");
   });
@@ -137,7 +137,7 @@ describe("PromptPreprocessor", () => {
     expect(result).toBeInstanceOf(PromptError);
     expect(result.message).toContain("GitHub authentication failed");
     expect(result.message).toContain("GH_TOKEN");
-    expect(result.message).toContain("sandcastle auth login github");
+    expect(result.message).toContain("archloop auth login github");
   });
 
   it("runs commands with the provided cwd", async () => {

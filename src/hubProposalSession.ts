@@ -15,7 +15,7 @@ import {
 import {
   resolveGitRepoRoot,
   resolveHubProjectDir,
-  resolveSandcastleUserDataDir,
+  resolveArchloopUserDataDir,
 } from "./projectStatus.js";
 import type { OutputObjectDefinition } from "./Output.js";
 
@@ -461,7 +461,7 @@ export const runProposalSession = async <T>(
     cwd: repoRoot,
     hubProjectDir:
       input.hubProjectDir ??
-      resolveHubProjectDir(resolveSandcastleUserDataDir(input.env), repoRoot),
+      resolveHubProjectDir(resolveArchloopUserDataDir(input.env), repoRoot),
     branch: `proposal/${input.flowId}`,
     startedAt,
     env: input.env,

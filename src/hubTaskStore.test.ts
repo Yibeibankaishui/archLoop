@@ -27,7 +27,7 @@ const initRepo = async (dir: string) => {
 };
 
 describe("isHubTaskStoreInitialized", () => {
-  it("returns false before sandcastle tasks init", async () => {
+  it("returns false before archloop tasks init", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-task-store-"));
     await initRepo(repoDir);
     expect(isHubTaskStoreInitialized(repoDir)).toBe(false);
@@ -47,9 +47,9 @@ describe("isHubTaskStoreInitialized", () => {
 });
 
 describe("formatHubTaskStoreNotInitializedMessage", () => {
-  it("points users to sandcastle tasks init instead of bd init", () => {
+  it("points users to archloop tasks init instead of bd init", () => {
     expect(formatHubTaskStoreNotInitializedMessage("tasks list")).toBe(
-      `sandcastle tasks list requires a local task store. Run \`${HUB_TASK_STORE_INIT_COMMAND}\` in this repository first.`,
+      `archloop tasks list requires a local task store. Run \`${HUB_TASK_STORE_INIT_COMMAND}\` in this repository first.`,
     );
     expect(formatHubTaskStoreNotInitializedMessage("tasks list")).not.toContain(
       "bd init",
@@ -58,7 +58,7 @@ describe("formatHubTaskStoreNotInitializedMessage", () => {
 });
 
 describe("runBdTextForHubTaskStore", () => {
-  it("fails with a Sandcastle-owned init message when the task store is missing", async () => {
+  it("fails with a archLoop-owned init message when the task store is missing", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-task-store-"));
     await initRepo(repoDir);
 
@@ -78,7 +78,7 @@ process.exit(1);
       runBdTextForHubTaskStore(repoDir, ["list", "--json"], "tasks list", {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        SANDCASTLE_BD_PATH: bdPath,
+        ARCHLOOP_BD_PATH: bdPath,
       }),
     ).toThrow(
       new TaskBoardError({
@@ -101,7 +101,7 @@ describe("initHubTaskStore", () => {
 
     const result = initHubTaskStore(repoDir, {
       ...process.env,
-      SANDCASTLE_BD_PATH: bundledBd,
+      ARCHLOOP_BD_PATH: bundledBd,
     });
 
     expect(result.alreadyInitialized).toBe(false);
@@ -126,7 +126,7 @@ describe("initHubTaskStore", () => {
 
     const result = initHubTaskStore(repoDir, {
       ...process.env,
-      SANDCASTLE_BD_PATH: bundledBd,
+      ARCHLOOP_BD_PATH: bundledBd,
     });
 
     expect(result.alreadyInitialized).toBe(true);
@@ -134,7 +134,7 @@ describe("initHubTaskStore", () => {
 });
 
 describe("formatHubTaskStoreCommandFailure", () => {
-  it("maps raw bd init hints to sandcastle tasks init", async () => {
+  it("maps raw bd init hints to archloop tasks init", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-task-store-"));
     await initRepo(repoDir);
 

@@ -10,7 +10,7 @@ import {
   resolveGitRepoRoot,
   resolveHubProjectDir,
   resolveHubProjectStatus,
-  resolveSandcastleUserDataDir,
+  resolveArchloopUserDataDir,
 } from "./projectStatus.js";
 import type { HubTaskProjection } from "./taskBoard.js";
 
@@ -40,17 +40,17 @@ const createTask = (
   ...overrides,
 });
 
-describe("resolveSandcastleUserDataDir", () => {
+describe("resolveArchloopUserDataDir", () => {
   it("prefers XDG_DATA_HOME and falls back to ~/.local/share", () => {
     expect(
-      resolveSandcastleUserDataDir(
+      resolveArchloopUserDataDir(
         { XDG_DATA_HOME: "/tmp/xdg-data" } as NodeJS.ProcessEnv,
         "/home/tester",
       ),
-    ).toBe("/tmp/xdg-data/sandcastle");
+    ).toBe("/tmp/xdg-data/archloop");
     expect(
-      resolveSandcastleUserDataDir({} as NodeJS.ProcessEnv, "/home/tester"),
-    ).toBe("/home/tester/.local/share/sandcastle");
+      resolveArchloopUserDataDir({} as NodeJS.ProcessEnv, "/home/tester"),
+    ).toBe("/home/tester/.local/share/archloop");
   });
 });
 
@@ -77,7 +77,7 @@ describe("resolveFailedTaskNextAction", () => {
         createTask({ id: "bd-1", title: "Task", hubStatus: "failed" }),
         "agent_failed",
       ),
-    ).toContain("sandcastle tasks recover bd-1");
+    ).toContain("archloop tasks recover bd-1");
   });
 });
 
@@ -91,15 +91,15 @@ describe("resolveHubProjectStatus", () => {
     });
 
     const canonicalRepoRoot = resolveGitRepoRoot(repoDir);
-    const sandcastleUserDataDir = join(repoDir, "data", "sandcastle");
+    const archloopUserDataDir = join(repoDir, "data", "archloop");
     const status = resolveHubProjectStatus({
       cwd: repoDir,
-      sandcastleUserDataDir,
+      archloopUserDataDir,
       detectBeadsAvailable: () => false,
     });
 
     expect(status.repoRoot).toBe(canonicalRepoRoot);
-    expect(status.sandcastleUserDataDir).toBe(sandcastleUserDataDir);
+    expect(status.archloopUserDataDir).toBe(archloopUserDataDir);
     expect(status.projectRegistered).toBe(false);
     expect(status.beadsAvailable).toBe(false);
     expect(status.taskStoreInitialized).toBe(false);
@@ -116,13 +116,13 @@ describe("resolveHubProjectStatus", () => {
     expect(status.runDirectories).toEqual([]);
     expect(status.recentEvents).toEqual([]);
     expect(status.hubProjectDir).toContain(
-      join("data", "sandcastle", "hub", "projects"),
+      join("data", "archloop", "hub", "projects"),
     );
-    expect(status.hubProjectDir).toContain(join(repoDir, "data", "sandcastle"));
+    expect(status.hubProjectDir).toContain(join(repoDir, "data", "archloop"));
 
     const secondStatus = resolveHubProjectStatus({
       cwd: repoDir,
-      sandcastleUserDataDir,
+      archloopUserDataDir,
       detectBeadsAvailable: () => false,
     });
     expect(secondStatus.projectRegistered).toBe(true);
@@ -138,7 +138,7 @@ describe("resolveHubProjectStatus", () => {
 
     const status = resolveHubProjectStatus({
       cwd: repoDir,
-      sandcastleUserDataDir: join(repoDir, "data", "sandcastle"),
+      archloopUserDataDir: join(repoDir, "data", "archloop"),
       detectBeadsAvailable: () => true,
       detectTaskStoreInitialized: () => true,
       countReadyTasks: () => 2,
@@ -169,13 +169,13 @@ describe("resolveHubProjectStatus", () => {
     });
   });
 
-  it("reports uninitialized task store guidance in Sandcastle terms", async () => {
+  it("reports uninitialized task store guidance in archLoop terms", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-status-"));
     await initRepo(repoDir);
 
     const status = resolveHubProjectStatus({
       cwd: repoDir,
-      sandcastleUserDataDir: join(repoDir, "data", "sandcastle"),
+      archloopUserDataDir: join(repoDir, "data", "archloop"),
       detectBeadsAvailable: () => true,
       detectTaskStoreInitialized: () => false,
     });
@@ -183,7 +183,7 @@ describe("resolveHubProjectStatus", () => {
     expect(status.taskStoreInitialized).toBe(false);
     expect(status.taskCounts).toEqual({ ready: 0, total: 0 });
     expect(formatHubProjectStatusLines(status).join("\n")).toContain(
-      "sandcastle tasks init",
+      "archloop tasks init",
     );
     expect(formatHubProjectStatusLines(status).join("\n")).not.toContain(
       "bd init",
@@ -194,9 +194,9 @@ describe("resolveHubProjectStatus", () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-status-"));
     await initRepo(repoDir);
     const canonicalRepoRoot = resolveGitRepoRoot(repoDir);
-    const sandcastleUserDataDir = join(repoDir, "data", "sandcastle");
+    const archloopUserDataDir = join(repoDir, "data", "archloop");
     const hubProjectDir = resolveHubProjectDir(
-      sandcastleUserDataDir,
+      archloopUserDataDir,
       canonicalRepoRoot,
     );
     const runDir = join(hubProjectDir, "runs", "run-active");
@@ -241,7 +241,7 @@ describe("resolveHubProjectStatus", () => {
         runId: "run-active",
         batchId: "batch-active",
         taskId: "bd-1",
-        branch: "sandcastle/bd-1-task",
+        branch: "archloop/bd-1-task",
         createdAt: "2026-06-12T10:02:00.000Z",
         status: "implementing",
       })}\n`,
@@ -249,7 +249,7 @@ describe("resolveHubProjectStatus", () => {
 
     const status = resolveHubProjectStatus({
       cwd: repoDir,
-      sandcastleUserDataDir,
+      archloopUserDataDir,
       detectBeadsAvailable: () => true,
       detectTaskStoreInitialized: () => true,
       countReadyTasks: () => 0,
@@ -264,7 +264,7 @@ describe("resolveHubProjectStatus", () => {
             claim: {
               runId: "run-active",
               batchId: "batch-active",
-              branch: "sandcastle/bd-1-task",
+              branch: "archloop/bd-1-task",
               claimedAt: "2026-06-12T10:02:00.000Z",
               raw: {},
             },
@@ -295,7 +295,7 @@ describe("resolveHubProjectStatus", () => {
       expect.objectContaining({
         id: "bd-2",
         failureReason: "agent_failed",
-        nextAction: expect.stringContaining("sandcastle tasks recover bd-2"),
+        nextAction: expect.stringContaining("archloop tasks recover bd-2"),
       }),
     ]);
     expect(status.runDirectories).toContain(runDir);
@@ -310,7 +310,7 @@ describe("resolveHubProjectStatus", () => {
 
     const status = resolveHubProjectStatus({
       cwd: repoDir,
-      sandcastleUserDataDir: join(repoDir, "data", "sandcastle"),
+      archloopUserDataDir: join(repoDir, "data", "archloop"),
       detectBeadsAvailable: () => true,
       detectTaskStoreInitialized: () => true,
       countReadyTasks: () => 0,
@@ -354,20 +354,20 @@ describe("formatHubProjectStatusLines", () => {
     const emptyLines = formatHubProjectStatusLines(
       resolveHubProjectStatus({
         cwd: "/tmp/repo",
-        sandcastleUserDataDir: "/tmp/data/sandcastle",
+        archloopUserDataDir: "/tmp/data/archloop",
         resolveRepoRoot: () => "/tmp/repo",
         detectBeadsAvailable: () => false,
       }),
     );
     expect(emptyLines.join("\n")).toContain(
-      "Sandcastle task runtime unavailable",
+      "archLoop task runtime unavailable",
     );
     expect(emptyLines.join("\n")).toContain("No Hub run directories");
 
     const activeLines = formatHubProjectStatusLines(
       resolveHubProjectStatus({
         cwd: "/tmp/repo",
-        sandcastleUserDataDir: "/tmp/data/sandcastle",
+        archloopUserDataDir: "/tmp/data/archloop",
         resolveRepoRoot: () => "/tmp/repo",
         detectBeadsAvailable: () => true,
         detectTaskStoreInitialized: () => true,
@@ -386,14 +386,14 @@ describe("formatHubProjectStatusLines", () => {
         listRunSummaries: () => [
           {
             runId: "run-1",
-            runDir: "/tmp/data/sandcastle/hub/projects/x/runs/run-1",
+            runDir: "/tmp/data/archloop/hub/projects/x/runs/run-1",
             branch: "main",
             startedAt: "2026-06-12T10:00:00.000Z",
             batches: [
               {
                 runId: "run-1",
                 batchId: "batch-1",
-                runDir: "/tmp/data/sandcastle/hub/projects/x/runs/run-1",
+                runDir: "/tmp/data/archloop/hub/projects/x/runs/run-1",
                 status: "planned",
                 flowId: "no-review",
                 taskCount: 1,
@@ -411,7 +411,7 @@ describe("formatHubProjectStatusLines", () => {
     const failedLines = formatHubProjectStatusLines(
       resolveHubProjectStatus({
         cwd: "/tmp/repo",
-        sandcastleUserDataDir: "/tmp/data/sandcastle",
+        archloopUserDataDir: "/tmp/data/archloop",
         resolveRepoRoot: () => "/tmp/repo",
         detectBeadsAvailable: () => true,
         detectTaskStoreInitialized: () => true,
@@ -432,14 +432,12 @@ describe("formatHubProjectStatusLines", () => {
     );
     expect(failedLines.join("\n")).toContain("bd-fail");
     expect(failedLines.join("\n")).toContain("merge_conflict");
-    expect(failedLines.join("\n")).toContain(
-      "sandcastle tasks recover bd-fail",
-    );
+    expect(failedLines.join("\n")).toContain("archloop tasks recover bd-fail");
 
     const syncLines = formatHubProjectStatusLines(
       resolveHubProjectStatus({
         cwd: "/tmp/repo",
-        sandcastleUserDataDir: "/tmp/data/sandcastle",
+        archloopUserDataDir: "/tmp/data/archloop",
         resolveRepoRoot: () => "/tmp/repo",
         detectBeadsAvailable: () => true,
         detectTaskStoreInitialized: () => true,

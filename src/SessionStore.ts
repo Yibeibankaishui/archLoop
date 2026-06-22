@@ -107,7 +107,7 @@ export const sandboxSessionStore = (
       const sandboxPath = posix.join(projectDir, `${id}.jsonl`);
       const tmpPath = join(
         tmpdir(),
-        `sandcastle-session-${id}-${Date.now()}.jsonl`,
+        `archloop-session-${id}-${Date.now()}.jsonl`,
       );
       await handle.copyFileOut(sandboxPath, tmpPath);
       try {
@@ -120,7 +120,7 @@ export const sandboxSessionStore = (
       const sandboxPath = posix.join(projectDir, `${id}.jsonl`);
       const tmpPath = join(
         tmpdir(),
-        `sandcastle-session-${id}-${Date.now()}.jsonl`,
+        `archloop-session-${id}-${Date.now()}.jsonl`,
       );
       await writeFile(tmpPath, content);
       try {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildRecoveryMessage } from "./RecoveryMessage.js";
 
 describe("buildRecoveryMessage", () => {
-  const patchDir = ".sandcastle/patches/20260324-153000";
+  const patchDir = ".archloop/patches/20260324-153000";
 
   it("git am failure with remaining diff and untracked steps", () => {
     const msg = buildRecoveryMessage({
@@ -166,10 +166,8 @@ describe("buildRecoveryMessage", () => {
         branch,
       });
 
-      expect(msg).toContain(
-        "git worktree add .sandcastle/worktree feature/test",
-      );
-      expect(msg).toContain("cd .sandcastle/worktree");
+      expect(msg).toContain("git worktree add .archloop/worktree feature/test");
+      expect(msg).toContain("cd .archloop/worktree");
       expect(msg).toContain("git am --continue");
     });
 
@@ -183,9 +181,7 @@ describe("buildRecoveryMessage", () => {
         branch,
       });
 
-      expect(msg).toContain(
-        "git worktree add .sandcastle/worktree feature/test",
-      );
+      expect(msg).toContain("git worktree add .archloop/worktree feature/test");
       // Remaining steps should reference paths relative to worktree
       expect(msg).toContain(`git apply ../../${patchDir}/changes.patch`);
       expect(msg).toContain(`cp -r ../../${patchDir}/untracked/* .`);
@@ -202,9 +198,7 @@ describe("buildRecoveryMessage", () => {
       });
 
       // Commits already applied, but still need worktree for remaining steps
-      expect(msg).toContain(
-        "git worktree add .sandcastle/worktree feature/test",
-      );
+      expect(msg).toContain("git worktree add .archloop/worktree feature/test");
       expect(msg).toContain(`git apply ../../${patchDir}/changes.patch`);
       expect(msg).toContain(`cp -r ../../${patchDir}/untracked/* .`);
     });

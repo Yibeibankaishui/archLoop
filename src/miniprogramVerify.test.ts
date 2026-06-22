@@ -49,7 +49,7 @@ const makeRepo = () => mkdtemp(join(tmpdir(), "miniprogram-verify-"));
 
 const installVerifyHarness = async (repoDir: string) => {
   const bundleRoot = getMiniprogramCapabilityBundlesRoot();
-  const configDir = join(repoDir, ".sandcastle");
+  const configDir = join(repoDir, ".archloop");
   await mkdir(configDir, { recursive: true });
   await copyFile(join(bundleRoot, "verify.sh"), join(configDir, "verify.sh"));
   await chmod(join(configDir, "verify.sh"), 0o755);
@@ -61,7 +61,7 @@ const installVerifyHarness = async (repoDir: string) => {
 
 const runVerify = async (repoDir: string): Promise<{ exitCode: number }> => {
   try {
-    await execFileAsync(join(repoDir, ".sandcastle", "verify.sh"), [], {
+    await execFileAsync(join(repoDir, ".archloop", "verify.sh"), [], {
       cwd: repoDir,
     });
     return { exitCode: 0 };

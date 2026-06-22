@@ -50,7 +50,7 @@ describe("remote collaboration mapping", () => {
     expect(
       resolveRemoteCollaborationStatus({
         state: "OPEN",
-        labels: ["needs-triage", "Sandcastle"],
+        labels: ["needs-triage", "archLoop"],
       }),
     ).toBe("inbox");
     expect(
@@ -269,7 +269,7 @@ process.exit(1);
         title: "Sync Hub task state",
         body: "Implement tasks sync",
         state: "OPEN",
-        labels: ["Sandcastle", "ready-for-agent"],
+        labels: ["archLoop", "ready-for-agent"],
         updatedAt: "2026-06-11T12:00:00Z",
       },
     ];
@@ -286,7 +286,7 @@ process.exit(1);
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        ARCHLOOP_BD_PATH: join(binDir, "bd"),
         BD_STATE_FILE: stateFile,
         BD_CREATE_ARGS_FILE: createArgsFile,
         BD_UPDATE_ARGS_FILE: join(repoDir, "bd-update-args.txt"),
@@ -315,7 +315,7 @@ process.exit(1);
         title: "Open issue",
         body: "Keep me",
         state: "OPEN",
-        labels: ["Sandcastle", "ready-for-agent"],
+        labels: ["archLoop", "ready-for-agent"],
         updatedAt: "2026-06-11T12:00:00Z",
       },
       {
@@ -323,7 +323,7 @@ process.exit(1);
         title: "Closed history",
         body: "Do not import me",
         state: "CLOSED",
-        labels: ["Sandcastle"],
+        labels: ["archLoop"],
         updatedAt: "2026-06-11T13:00:00Z",
       },
     ];
@@ -340,7 +340,7 @@ process.exit(1);
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        ARCHLOOP_BD_PATH: join(binDir, "bd"),
         BD_STATE_FILE: stateFile,
         BD_CREATE_ARGS_FILE: createArgsFile,
         BD_UPDATE_ARGS_FILE: join(repoDir, "bd-update-args.txt"),
@@ -375,7 +375,7 @@ process.exit(1);
           title: "Open issue",
           body: "Keep me",
           state: "OPEN",
-          labels: ["Sandcastle", "ready-for-agent"],
+          labels: ["archLoop", "ready-for-agent"],
           updatedAt: "2026-06-11T12:00:00Z",
         },
         {
@@ -383,7 +383,7 @@ process.exit(1);
           title: "Closed history",
           body: "Import me too",
           state: "CLOSED",
-          labels: ["Sandcastle"],
+          labels: ["archLoop"],
           updatedAt: "2026-06-11T13:00:00Z",
         },
       ],
@@ -398,7 +398,7 @@ process.exit(1);
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        ARCHLOOP_BD_PATH: join(binDir, "bd"),
         BD_STATE_FILE: stateFile,
         BD_CREATE_ARGS_FILE: createArgsFile,
         BD_UPDATE_ARGS_FILE: join(repoDir, "bd-update-args.txt"),
@@ -435,7 +435,7 @@ process.exit(1);
           title: "Duplicate candidate",
           body: "Should not create a second task",
           state: "OPEN",
-          labels: ["Sandcastle"],
+          labels: ["archLoop"],
           updatedAt: "2026-06-11T14:00:00Z",
         },
       ],
@@ -449,7 +449,7 @@ process.exit(1);
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        ARCHLOOP_BD_PATH: join(binDir, "bd"),
         BD_STATE_FILE: stateFile,
         BD_CREATE_ARGS_FILE: createArgsFile,
         BD_UPDATE_ARGS_FILE: join(repoDir, "bd-update-args.txt"),
@@ -516,7 +516,7 @@ process.exit(1);
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        ARCHLOOP_BD_PATH: join(binDir, "bd"),
         BD_STATE_FILE: stateFile,
         BD_UPDATE_ARGS_FILE: updateArgsFile,
       },
@@ -557,7 +557,7 @@ process.exit(1);
           number: 10,
           title: "Done task",
           state: "CLOSED",
-          labels: ["Sandcastle"],
+          labels: ["archLoop"],
         },
       ],
       editIssue: () => {},
@@ -572,7 +572,7 @@ process.exit(1);
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        ARCHLOOP_BD_PATH: join(binDir, "bd"),
         BD_STATE_FILE: stateFile,
         BD_UPDATE_ARGS_FILE: updateArgsFile,
       },
@@ -609,7 +609,7 @@ process.exit(1);
           number: 10,
           title: "Done task",
           state: "CLOSED",
-          labels: ["Sandcastle"],
+          labels: ["archLoop"],
         },
       ],
       editIssue: () => {},
@@ -623,7 +623,7 @@ process.exit(1);
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        ARCHLOOP_BD_PATH: join(binDir, "bd"),
         BD_STATE_FILE: stateFile,
         BD_UPDATE_ARGS_FILE: updateArgsFile,
       },
@@ -683,7 +683,7 @@ process.exit(1);
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        ARCHLOOP_BD_PATH: join(binDir, "bd"),
         BD_STATE_FILE: stateFile,
         BD_CREATE_ARGS_FILE: createArgsFile,
         BD_UPDATE_ARGS_FILE: updateArgsFile,
@@ -730,7 +730,7 @@ process.exit(1);
           number: 102,
           title: "Closed target",
           state: "OPEN",
-          labels: ["Sandcastle", "ready-for-agent"],
+          labels: ["archLoop", "ready-for-agent"],
         },
       ],
       editIssue: () => {},
@@ -746,7 +746,7 @@ process.exit(1);
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        ARCHLOOP_BD_PATH: join(binDir, "bd"),
         BD_STATE_FILE: stateFile,
         BD_UPDATE_ARGS_FILE: updateArgsFile,
       },
@@ -794,7 +794,7 @@ process.exit(1);
           number: 102,
           title: "Remote issue",
           state: "OPEN",
-          labels: ["Sandcastle", "ready-for-agent"],
+          labels: ["archLoop", "ready-for-agent"],
         },
       ],
       editIssue: () => {},
@@ -810,7 +810,7 @@ process.exit(1);
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        ARCHLOOP_BD_PATH: join(binDir, "bd"),
         BD_STATE_FILE: stateFile,
         BD_UPDATE_ARGS_FILE: updateArgsFile,
       },
@@ -904,7 +904,7 @@ process.exit(1);
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        ARCHLOOP_BD_PATH: join(binDir, "bd"),
         BD_STATE_FILE: stateFile,
         BD_UPDATE_ARGS_FILE: updateArgsFile,
       },
@@ -972,7 +972,7 @@ process.exit(1);
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        ARCHLOOP_BD_PATH: join(binDir, "bd"),
         BD_STATE_FILE: stateFile,
         BD_UPDATE_ARGS_FILE: updateArgsFile,
       },
@@ -1034,7 +1034,7 @@ process.exit(1);
       env: {
         ...process.env,
         PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        SANDCASTLE_BD_PATH: join(binDir, "bd"),
+        ARCHLOOP_BD_PATH: join(binDir, "bd"),
         BD_STATE_FILE: stateFile,
         BD_UPDATE_ARGS_FILE: updateArgsFile,
       },

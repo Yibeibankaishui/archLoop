@@ -56,7 +56,7 @@ append_project_wx_check_summary() {
 }
 
 run_native_fallback() {
-  node .sandcastle/wx-check-native.mjs
+  node .archloop/wx-check-native.mjs
 }
 
 has_wx_check_script() {

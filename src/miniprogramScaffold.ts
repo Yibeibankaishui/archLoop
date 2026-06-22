@@ -340,7 +340,7 @@ function detectUploadKey(
   if (effectiveAppid) {
     const repoKey = join(
       repoDir,
-      ".sandcastle",
+      ".archloop",
       "auth",
       "wx-upload",
       `private.${effectiveAppid}.key`,
@@ -411,7 +411,7 @@ function formatUserDeclinedInstallSummary(
     return `miniprogram-ci is present but unusable; reinstall with ${MINIPROGRAM_CI_MANUAL_INSTALL_HINT}.`;
   }
   if (globalCliAvailable) {
-    return "miniprogram-ci not installed during init. A global CLI was detected but Sandcastle requires a project-local package for managed verification.";
+    return "miniprogram-ci not installed during init. A global CLI was detected but archLoop requires a project-local package for managed verification.";
   }
   return `miniprogram-ci not installed during init. Run ${MINIPROGRAM_CI_MANUAL_INSTALL_HINT} when you want platform preview validation.`;
 }
@@ -502,7 +502,7 @@ function formatMiniprogramCiSection(snapshot: MiniprogramInitSnapshot): string {
     return "- **miniprogram-ci:** detected but unusable — reinstall or fix the project-local package (expected Node API: Project, preview, packNpm).";
   }
   if (globalCliAvailable) {
-    return "- **miniprogram-ci:** not installed in the project. A global CLI was detected; install project-local `miniprogram-ci` for Sandcastle-managed platform validation (global CLI and `npx` are manual fallbacks only).";
+    return "- **miniprogram-ci:** not installed in the project. A global CLI was detected; install project-local `miniprogram-ci` for archLoop-managed platform validation (global CLI and `npx` are manual fallbacks only).";
   }
   return "- **miniprogram-ci:** not installed. Recommended for platform preview validation (AppID + upload key + IP allowlist).";
 }
@@ -528,7 +528,7 @@ function formatUploadKeySection(snapshot: MiniprogramInitSnapshot): string {
     return `- **Upload key:** repository-local \`${uploadKey.path}\` (gitignored).`;
   }
   const hintAppid = appid.effectiveAppid ?? "{appid}";
-  return `- **Upload key:** not detected. Prefer \`WX_UPLOAD_KEY_PATH\` outside the repo, or place \`.sandcastle/auth/wx-upload/private.${hintAppid}.key\` (never commit \`private.*.key\`).`;
+  return `- **Upload key:** not detected. Prefer \`WX_UPLOAD_KEY_PATH\` outside the repo, or place \`.archloop/auth/wx-upload/private.${hintAppid}.key\` (never commit \`private.*.key\`).`;
 }
 
 /** Init-time setup checklist snapshot (not updated by verify.sh). */
@@ -536,12 +536,12 @@ export function renderMiniprogramSetupChecklist(
   snapshot: MiniprogramInitSnapshot,
 ): string {
   const wxCheck = snapshot.wxCheckScriptPresent
-    ? "- **wx:check:** `npm run wx:check` is defined; `.sandcastle/verify.sh` will run it first."
-    : "- **wx:check:** no project script; `.sandcastle/verify.sh` falls back to `.sandcastle/wx-check-native.mjs`.";
+    ? "- **wx:check:** `npm run wx:check` is defined; `.archloop/verify.sh` will run it first."
+    : "- **wx:check:** no project script; `.archloop/verify.sh` falls back to `.archloop/wx-check-native.mjs`.";
 
   return `# Mini Program setup checklist
 
-> Init-time snapshot — not updated by \`.sandcastle/verify.sh\` or \`.sandcastle/wx-check-native.mjs\`.
+> Init-time snapshot — not updated by \`.archloop/verify.sh\` or \`.archloop/wx-check-native.mjs\`.
 
 ## Detected state
 
@@ -553,7 +553,7 @@ ${wxCheck}
 
 ## Next steps
 
-1. Run \`.sandcastle/verify.sh\` after Mini Program changes; read \`debug/wx-check.log\` on failure.
+1. Run \`.archloop/verify.sh\` after Mini Program changes; read \`debug/wx-check.log\` on failure.
 2. Install project-local \`miniprogram-ci\` when you want automated preview validation (\`npm install -D miniprogram-ci\`).
 3. Configure a real AppID (\`WX_APPID\` or \`project.config.json\`) and upload key for platform validation.
 4. In the [WeChat public platform](https://mp.weixin.qq.com/), configure the code upload private key and **IP allowlist** for CI preview/upload.
@@ -563,7 +563,7 @@ ${wxCheck}
 
 - Never commit WeChat code upload private keys (\`private.*.key\`).
 - Prefer \`WX_UPLOAD_KEY_PATH\` pointing **outside** the repository.
-- Sandcastle does not generate, copy, or manage upload keys during init.
+- archLoop does not generate, copy, or manage upload keys during init.
 `;
 }
 
@@ -592,7 +592,7 @@ export interface MiniprogramScaffoldSetupOptions {
   readonly miniprogramCiInstallApproved?: boolean;
 }
 
-/** Writes Mini Program core capability scaffold into `.sandcastle/`. */
+/** Writes Mini Program core capability scaffold into `.archloop/`. */
 export const scaffoldMiniprogramCapabilityCore = (
   configDir: string,
   repoDir: string,
@@ -657,7 +657,7 @@ export function shouldScaffoldMiniprogramRuntimeDebug(
   return hasRuntimeDebugAddon(capabilityInit.addonIds);
 }
 
-/** Writes runtime-debug add-on context into `.sandcastle/context/`. */
+/** Writes runtime-debug add-on context into `.archloop/context/`. */
 export const scaffoldMiniprogramRuntimeDebugAddon = (
   configDir: string,
 ): Effect.Effect<void, Error, FileSystem.FileSystem> =>

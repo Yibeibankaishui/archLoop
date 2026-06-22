@@ -1,6 +1,6 @@
 # Project profiles generate bootstrap at init time
 
-`sandcastle init` will use a selected project profile to generate both the containerfile and `.sandcastle/bootstrap.sh`. The first profiles are generic, Node, Python, and C++; generic is the default and Sandcastle does not auto-detect the project type in the first version. This keeps initialization predictable: templates run the generated bootstrap script through a sandbox hook, but they do not ask an agent to generate or repair it at run time.
+`archloop init` will use a selected project profile to generate both the containerfile and `.archloop/bootstrap.sh`. The first profiles are generic, Node, Python, and C++; generic is the default and archLoop does not auto-detect the project type in the first version. This keeps initialization predictable: templates run the generated bootstrap script through a sandbox hook, but they do not ask an agent to generate or repair it at run time.
 
 ## Decision
 

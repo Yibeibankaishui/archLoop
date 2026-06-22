@@ -1,6 +1,6 @@
 # Hub-wide agent roles configure flow stages
 
-**Hub agent config** is **Sandcastle Hub**-wide, not project-scoped. It configures reusable **Hub agent roles** such as `planning`, `triage`, `implementation`, `review`, `merge`, and `recovery`. Each role selects an **agent provider**, model, and provider-specific options for stages inside **flows**.
+**Hub agent config** is **archLoop Hub**-wide, not project-scoped. It configures reusable **Hub agent roles** such as `planning`, `triage`, `implementation`, `review`, `merge`, and `recovery`. Each role selects an **agent provider**, model, and provider-specific options for stages inside **flows**.
 
 Flow definitions map their internal stages to Hub agent roles. For example, `prd-decomposition` uses `planning`, `triage` uses `triage`, and implementation flows use `implementation`, `review`, and `merge` as appropriate. The first version exposes role-level CLI commands such as show, path, and set-role. It does not expose project-specific or flow/stage-specific override commands.
 

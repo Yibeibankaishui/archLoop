@@ -25,7 +25,7 @@ const hostIdToAgentBuildArg = (
 };
 
 /**
- * Build-args for `sandcastle docker build-image` that align the image agent UID/GID
+ * Build-args for `archloop docker build-image` that align the image agent UID/GID
  * to the host on Linux/macOS. UID/GID 0 is remapped to {@link DEFAULT_AGENT_UID}
  * because the scaffolded Dockerfile cannot assign the `node` user to UID 0.
  */

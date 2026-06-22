@@ -4,9 +4,9 @@ You are working under the **miniprogram** capability pack (native variant).
 
 ## Verification loop
 
-- After Mini Program code changes, run `.sandcastle/verify.sh` from the repository root.
+- After Mini Program code changes, run `.archloop/verify.sh` from the repository root.
 - On failure, read `debug/wx-check.log` and fix using concrete diagnostics.
-- Prefer `npm run wx:check` when the host project defines it; otherwise the scaffold runs `.sandcastle/wx-check-native.mjs`.
+- Prefer `npm run wx:check` when the host project defines it; otherwise the scaffold runs `.archloop/wx-check-native.mjs`.
 - Verification does not depend on the capability manifest.
 
 ## Tooling layers
@@ -25,8 +25,8 @@ You are working under the **miniprogram** capability pack (native variant).
 
 - Never commit WeChat code upload private keys (`private.*.key`).
 - Prefer `WX_UPLOAD_KEY_PATH` pointing **outside** the repository.
-- Repository-local drop zone: `.sandcastle/auth/wx-upload/private.{appid}.key` (gitignored).
+- Repository-local drop zone: `.archloop/auth/wx-upload/private.{appid}.key` (gitignored).
 
 ## Setup checklist
 
-See `.sandcastle/context/miniprogram-setup.md` for the init-time snapshot of detected setup state and next steps.
+See `.archloop/context/miniprogram-setup.md` for the init-time snapshot of detected setup state and next steps.

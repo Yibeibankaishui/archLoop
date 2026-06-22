@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { TaskBoardError } from "./errors.js";
 import { isBdAvailable, resolveBdExecutable } from "./resolveBdExecutable.js";
 
-export const HUB_TASK_STORE_INIT_COMMAND = "sandcastle tasks init";
+export const HUB_TASK_STORE_INIT_COMMAND = "archloop tasks init";
 
 export const resolveHubTaskStoreDir = (cwd: string): string =>
   join(cwd, ".beads");
@@ -25,12 +25,12 @@ export const seedHubTaskStoreMetadata = (cwd: string): void => {
 export const formatHubTaskStoreNotInitializedMessage = (
   failureLabel: string,
 ): string =>
-  `sandcastle ${failureLabel} requires a local task store. Run \`${HUB_TASK_STORE_INIT_COMMAND}\` in this repository first.`;
+  `archloop ${failureLabel} requires a local task store. Run \`${HUB_TASK_STORE_INIT_COMMAND}\` in this repository first.`;
 
 export const formatHubTaskStoreBdUnavailableMessage = (
   failureLabel: string,
 ): string =>
-  `sandcastle ${failureLabel} requires the Sandcastle task runtime. Install dependencies, set SANDCASTLE_BD_PATH, or ensure the bundled Beads runtime is available.`;
+  `archloop ${failureLabel} requires the archLoop task runtime. Install dependencies, set ARCHLOOP_BD_PATH, or ensure the bundled Beads runtime is available.`;
 
 const readErrorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : "unable to execute the task store";
@@ -48,7 +48,7 @@ export const formatHubTaskStoreCommandFailure = (
     return formatHubTaskStoreNotInitializedMessage(failureLabel);
   }
 
-  return `sandcastle ${failureLabel} failed: ${message}`;
+  return `archloop ${failureLabel} failed: ${message}`;
 };
 
 const execBdText = (
@@ -124,7 +124,7 @@ export const initHubTaskStore = (
     if (!isHubTaskStoreInitialized(cwd)) {
       throw new TaskBoardError({
         message:
-          "sandcastle tasks init reported success, but the local task store is still missing. Retry after checking repository permissions.",
+          "archloop tasks init reported success, but the local task store is still missing. Retry after checking repository permissions.",
       });
     }
 

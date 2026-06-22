@@ -1,5 +1,5 @@
 {
-  "name": "@ai-hero/sandcastle",
+  "name": "@yibeibankaishui/archloop",
   "version": "0.5.9",
   "description": "CLI for orchestrating AI agents in isolated sandbox environments",
   "type": "module",
@@ -32,7 +32,7 @@
     }
   },
   "bin": {
-    "sandcastle": "dist/main.js"
+    "archloop": "dist/main.js"
   },
   "scripts": {
     "build": "tsgo --project tsconfig.build.json",
@@ -44,10 +44,10 @@
     "format:check": "prettier --check .",
     "prepare": "husky",
     "release": "changeset publish",
-    "sandcastle": "npm run build && tsx .sandcastle/run.ts",
-    "test-podman": "npm run build && tsx --env-file=.sandcastle/.env .sandcastle/test-podman.ts",
-    "test-vercel": "npm run build && tsx --env-file=.sandcastle/.env .sandcastle/test-vercel.ts",
-    "test-interactive": "npm run build && tsx --env-file=.sandcastle/.env .sandcastle/test-interactive.ts"
+    "archloop": "npm run build && tsx .archloop/main.ts",
+    "test-podman": "npm run build && tsx --env-file=old_archloop/.env old_archloop/test-podman.ts",
+    "test-vercel": "npm run build && tsx --env-file=old_archloop/.env old_archloop/test-vercel.ts",
+    "test-interactive": "npm run build && tsx --env-file=old_archloop/.env old_archloop/test-interactive.ts"
   },
   "keywords": [
     "cli",
@@ -59,7 +59,7 @@
   "packageManager": "npm@10.9.2",
   "repository": {
     "type": "git",
-    "url": "https://github.com/mattpocock/sandcastle"
+    "url": "https://github.com/Yibeibankaishui/archLoop"
   },
   "license": "MIT",
   "devDependencies": {
@@ -72,7 +72,7 @@
     "prettier": "^3.5.3",
     "tsx": "^4.21.0",
     "vitest": "^3.2.0",
-    "@ai-hero/sandcastle": "^0.5.9"
+    "@yibeibankaishui/archloop": "file:."
   },
   "dependencies": {
     "@beads/bd": "1.0.4",

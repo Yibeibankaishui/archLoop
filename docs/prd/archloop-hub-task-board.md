@@ -1,10 +1,10 @@
-# PRD: Sandcastle Hub Task Board
+# PRD: archLoop Hub Task Board
 
 ## Problem Statement
 
-Sandcastle's current project workflow is centered on `sandcastle init`, a repo-local `.sandcastle/` config directory, and scaffolded `main.mts` scripts. That path works for a single initialized project, but it makes multi-project operation, shared credentials, flexible runtime flow selection, and task progress visibility difficult.
+archLoop's current project workflow is centered on `archloop init`, a repo-local `.archloop/` config directory, and scaffolded `main.mts` scripts. That path works for a single initialized project, but it makes multi-project operation, shared credentials, flexible runtime flow selection, and task progress visibility difficult.
 
-Users need a Sandcastle Hub task board that can manage tasks locally, synchronize with remote task sources such as GitHub Issues, and show how Sandcastle flows move tasks through planning, implementation, review, merge, and completion. The task board must support both PRD-driven task creation and user feedback-driven tasks, while preserving Sandcastle's orchestration principle: agents make local judgments inside a stage, but TypeScript orchestration controls global state transitions.
+Users need a archLoop Hub task board that can manage tasks locally, synchronize with remote task sources such as GitHub Issues, and show how archLoop flows move tasks through planning, implementation, review, merge, and completion. The task board must support both PRD-driven task creation and user feedback-driven tasks, while preserving archLoop's orchestration principle: agents make local judgments inside a stage, but TypeScript orchestration controls global state transitions.
 
 ## Solution
 
@@ -25,7 +25,7 @@ Hub v1 should provide CLI-first task board workflows. GUI can later consume the 
 - Support pull/push task sync with remote task sources such as GitHub Issues.
 - Support PRD decomposition into dependency-aware tasks.
 - Support user feedback and manual task creation.
-- Preserve triage roles while adding Sandcastle execution states.
+- Preserve triage roles while adding archLoop execution states.
 - Show task, batch, and run progress in a stable state model.
 - Make Hub flow merge outcomes observable per task.
 - Keep full run logs and artifacts in Hub run directories, while writing concise task comments.
@@ -51,16 +51,16 @@ Hub v1 should provide CLI-first task board workflows. GUI can later consume the 
 9. As a maintainer, I want merge progress to be observable per task, so that partial batch failures can be recovered safely.
 10. As a maintainer, I want completed tasks to close locally even if remote sync is delayed, so that Beads remains the complete local task source.
 11. As a collaborator using GitHub Issues, I want core triage labels and closure state to sync remotely, so that remote users can still follow task status.
-12. As a developer, I want concise Beads comments for triage and Sandcastle run summaries, so that task history is readable without dumping full logs.
+12. As a developer, I want concise Beads comments for triage and archLoop run summaries, so that task history is readable without dumping full logs.
 
 ## Task Sources
 
 Hub v1 supports two task creation paths:
 
-- `sandcastle tasks from-prd <prd-ref>` runs the agent-driven `prd-decomposition` proposal flow and writes approved vertical slices to local Beads.
-- `sandcastle tasks create` creates a manual or user feedback task.
+- `archloop tasks from-prd <prd-ref>` runs the agent-driven `prd-decomposition` proposal flow and writes approved vertical slices to local Beads.
+- `archloop tasks create` creates a manual or user feedback task.
 
-The original deterministic `from-prd` helper is superseded by the proposal flow user path. It may remain as a test fixture or explicit internal fallback, but product behavior is defined by agent-driven proposal sessions: Sandcastle prepares context, invokes the planning role, lets the user refine the proposal, validates final structured output, detects unexpected mutations, and applies only approved local Beads writes.
+The original deterministic `from-prd` helper is superseded by the proposal flow user path. It may remain as a test fixture or explicit internal fallback, but product behavior is defined by agent-driven proposal sessions: archLoop prepares context, invokes the planning role, lets the user refine the proposal, validates final structured output, detects unexpected mutations, and applies only approved local Beads writes.
 
 PRD proposal sessions follow the tracer-bullet issue style:
 
@@ -88,7 +88,7 @@ Task sync reconciles remote task sources with Beads:
 - Preserve Beads as the complete local state source.
 - Represent sync conflicts explicitly with `sync_conflict`.
 
-Remote task sources should receive core collaboration state, not every Sandcastle execution state.
+Remote task sources should receive core collaboration state, not every archLoop execution state.
 
 Remote label/action mapping:
 
@@ -147,7 +147,7 @@ Status meanings:
 - `merging`: Task is part of a batch currently handed to the merge phase.
 - `done`: Branch merged, verification passed, and local Beads task closed.
 - `wontfix`: Task is explicitly not being actioned and local Beads task is closed.
-- `failed`: Sandcastle execution failed for this task and needs recovery.
+- `failed`: archLoop execution failed for this task and needs recovery.
 - `sync_conflict`: Local and remote task state conflict semantically and need human resolution.
 
 Explicitly excluded task statuses:
@@ -421,10 +421,10 @@ AI triage comments must start with:
 > _This was generated by AI during triage._
 ```
 
-Sandcastle run comments must start with:
+archLoop run comments must start with:
 
 ```md
-> _This was generated by Sandcastle during an agent run._
+> _This was generated by archLoop during an agent run._
 ```
 
 Run comments should include concise fields such as:
@@ -445,17 +445,17 @@ Full logs, events, and artifacts live in the Hub run directory.
 Hub task board v1 should expose:
 
 ```bash
-sandcastle tasks list
-sandcastle tasks show <task-selector>
-sandcastle tasks create
-sandcastle tasks from-prd <prd-ref>
-sandcastle tasks triage
-sandcastle tasks pull
-sandcastle tasks push
-sandcastle tasks sync
-sandcastle tasks comment <task-selector>
-sandcastle tasks recover <task-selector>
-sandcastle project status
+archloop tasks list
+archloop tasks show <task-selector>
+archloop tasks create
+archloop tasks from-prd <prd-ref>
+archloop tasks triage
+archloop tasks pull
+archloop tasks push
+archloop tasks sync
+archloop tasks comment <task-selector>
+archloop tasks recover <task-selector>
+archloop project status
 ```
 
 Command responsibilities:

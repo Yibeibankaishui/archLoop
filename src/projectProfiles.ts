@@ -7,7 +7,7 @@ export interface ProjectProfileEntry {
    * Empty for profiles that do not add language-specific image layers.
    */
   readonly containerfileTools: string;
-  /** Content written to `.sandcastle/bootstrap.sh` during init. */
+  /** Content written to `.archloop/bootstrap.sh` during init. */
   readonly bootstrapScript: string;
   /**
    * Init-time substitution for `{{PROJECT_PROFILE_VERIFY_GUIDANCE}}` in
@@ -22,7 +22,7 @@ const bootstrapScriptPreamble = (
 ): string => `#!/usr/bin/env bash
 set -euo pipefail
 
-# Sandcastle repository bootstrap — ${summary}.
+# archLoop repository bootstrap — ${summary}.
 # ${generationNote}; runs from sandbox.onSandboxReady after the worktree is mounted.
 
 `;
@@ -109,15 +109,15 @@ ensure_venv() {
   local activate=".venv/bin/activate"
 
   if [[ -d .venv && ! -f "$activate" ]]; then
-    echo "Sandcastle bootstrap: removing incomplete .venv"
+    echo "archLoop bootstrap: removing incomplete .venv"
     rm -rf .venv
   fi
 
   if [[ ! -f "$activate" ]]; then
-    echo "Sandcastle bootstrap: creating .venv"
+    echo "archLoop bootstrap: creating .venv"
     if ! python3 -m venv .venv; then
       rm -rf .venv
-      echo "Sandcastle bootstrap: failed to create venv."
+      echo "archLoop bootstrap: failed to create venv."
       echo "Install python3-venv and/or uv on the host (no-sandbox runs bootstrap on the host), or use a Docker sandbox provider."
       exit 1
     fi
@@ -153,28 +153,28 @@ PY
 }
 
 if is_poetry_project; then
-  echo "Sandcastle bootstrap: Poetry project detected."
+  echo "archLoop bootstrap: Poetry project detected."
   echo "Poetry is not installed in the default Python profile image."
-  echo "Customize .sandcastle/Dockerfile (or Containerfile) and bootstrap.sh to add Poetry support."
+  echo "Customize .archloop/Dockerfile (or Containerfile) and bootstrap.sh to add Poetry support."
   exit 0
 fi
 
 if [[ -f uv.lock ]]; then
-  echo "Sandcastle bootstrap: syncing dependencies with uv (uv.lock)"
+  echo "archLoop bootstrap: syncing dependencies with uv (uv.lock)"
   uv sync --frozen
   extra="$(detect_optional_extra)"
   if [[ -n "$extra" ]]; then
-    echo "Sandcastle bootstrap: installing [$extra] extras with uv"
+    echo "archLoop bootstrap: installing [$extra] extras with uv"
     uv sync --frozen --extra "$extra"
   fi
   exit 0
 fi
 
 if [[ -f pyproject.toml ]] && command -v uv >/dev/null 2>&1; then
-  echo "Sandcastle bootstrap: syncing dependencies with uv (pyproject.toml)"
+  echo "archLoop bootstrap: syncing dependencies with uv (pyproject.toml)"
   extra="$(detect_optional_extra)"
   if [[ -n "$extra" ]]; then
-    echo "Sandcastle bootstrap: including [$extra] extras"
+    echo "archLoop bootstrap: including [$extra] extras"
     uv sync --extra "$extra"
   else
     uv sync
@@ -184,7 +184,7 @@ fi
 
 if [[ -f requirements.txt ]]; then
   ensure_venv
-  echo "Sandcastle bootstrap: installing requirements.txt with pip"
+  echo "archLoop bootstrap: installing requirements.txt with pip"
   python -m pip install -r requirements.txt
   exit 0
 fi
@@ -193,16 +193,16 @@ if [[ -f pyproject.toml ]]; then
   ensure_venv
   extra="$(detect_optional_extra)"
   if [[ -n "$extra" ]]; then
-    echo "Sandcastle bootstrap: installing pyproject.toml with pip (including [$extra] extras)"
+    echo "archLoop bootstrap: installing pyproject.toml with pip (including [$extra] extras)"
     python -m pip install -e ".[$extra]"
   else
-    echo "Sandcastle bootstrap: installing pyproject.toml with pip"
+    echo "archLoop bootstrap: installing pyproject.toml with pip"
     python -m pip install -e .
   fi
   exit 0
 fi
 
-echo "Sandcastle bootstrap: no Python dependency manifest found; skipping dependency setup."
+echo "archLoop bootstrap: no Python dependency manifest found; skipping dependency setup."
 exit 0
 `;
 

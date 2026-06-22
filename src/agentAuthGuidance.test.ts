@@ -75,7 +75,7 @@ describe("detectAgentAuthFailure", () => {
 });
 
 describe("formatAgentAuthFailureMessage", () => {
-  it("leads with sandcastle env commands and includes original error", () => {
+  it("leads with archloop env commands and includes original error", () => {
     const message = formatAgentAuthFailureMessage({
       providerName: "cursor",
       envKey: "CURSOR_API_KEY",
@@ -83,10 +83,10 @@ describe("formatAgentAuthFailureMessage", () => {
       originalDetail: "Please run `agent login` first",
     });
 
-    expect(message).toContain("sandcastle env init");
-    expect(message).toContain("sandcastle env set CURSOR_API_KEY");
-    expect(message).toContain("sandcastle env show");
-    expect(message).toContain(".sandcastle/.env");
+    expect(message).toContain("archloop env init");
+    expect(message).toContain("archloop env set CURSOR_API_KEY");
+    expect(message).toContain("archloop env show");
+    expect(message).toContain(".archloop/.env");
     expect(message).toMatch(/not rely on host-global provider login state/i);
     expect(message).toContain("Original error: Please run `agent login` first");
   });
@@ -99,7 +99,7 @@ describe("formatAgentAuthFailureMessage", () => {
       originalDetail: "not logged in",
     });
 
-    expect(message).toContain("sandcastle auth login codex");
+    expect(message).toContain("archloop auth login codex");
     expect(message).toContain("Original error: not logged in");
   });
 });
@@ -112,18 +112,18 @@ describe("formatMissingAgentCredentialsMessage", () => {
       label: "Cursor",
     });
 
-    expect(message).toContain("sandcastle env init");
+    expect(message).toContain("archloop env init");
     expect(message).not.toContain("Original error:");
   });
 });
 
 describe("enrichAgentFailureDetail", () => {
-  it("enriches cursor auth stderr with sandcastle guidance", () => {
+  it("enriches cursor auth stderr with archloop guidance", () => {
     const enriched = enrichAgentFailureDetail(
       "cursor",
       "Please run `agent login` first, or set `CURSOR_API_KEY`",
     );
-    expect(enriched).toContain("sandcastle env init");
+    expect(enriched).toContain("archloop env init");
     expect(enriched).toContain("Original error:");
   });
 
@@ -136,7 +136,7 @@ describe("enrichAgentFailureDetail", () => {
 describe("assertAgentCredentialsConfigured", () => {
   const makeDir = () => mkdtemp(join(tmpdir(), "agent-auth-preflight-"));
 
-  it("throws with sandcastle env guidance when credentials are missing", async () => {
+  it("throws with archloop env guidance when credentials are missing", async () => {
     const dir = await makeDir();
     const dataDir = join(dir, "xdg-data");
     const origXdgDataHome = process.env.XDG_DATA_HOME;
@@ -150,7 +150,7 @@ describe("assertAgentCredentialsConfigured", () => {
           providerName: "cursor",
           cwd: dir,
         }),
-      ).rejects.toThrow(/sandcastle env init/);
+      ).rejects.toThrow(/archloop env init/);
     } finally {
       if (origXdgDataHome === undefined) delete process.env.XDG_DATA_HOME;
       else process.env.XDG_DATA_HOME = origXdgDataHome;
@@ -162,9 +162,9 @@ describe("assertAgentCredentialsConfigured", () => {
   it("passes when hub env file has the required key", async () => {
     const dir = await makeDir();
     const dataDir = join(dir, "xdg-data");
-    await mkdir(join(dataDir, "sandcastle"), { recursive: true });
+    await mkdir(join(dataDir, "archloop"), { recursive: true });
     await writeFile(
-      join(dataDir, "sandcastle", ".env"),
+      join(dataDir, "archloop", ".env"),
       "CURSOR_API_KEY=hub-key\n",
     );
 
@@ -181,11 +181,11 @@ describe("assertAgentCredentialsConfigured", () => {
     }
   });
 
-  it("passes when project .sandcastle/.env has the required key", async () => {
+  it("passes when project .archloop/.env has the required key", async () => {
     const dir = await makeDir();
-    await mkdir(join(dir, ".sandcastle"));
+    await mkdir(join(dir, ".archloop"));
     await writeFile(
-      join(dir, ".sandcastle", ".env"),
+      join(dir, ".archloop", ".env"),
       "CURSOR_API_KEY=project-key\n",
     );
 
@@ -198,7 +198,7 @@ describe("assertAgentCredentialsConfigured", () => {
   it("passes for Codex when a Hub auth session exists without OPENAI_KEY", async () => {
     const dir = await makeDir();
     const dataDir = join(dir, "xdg-data");
-    const codexDir = join(dataDir, "sandcastle", "hub", "auth", "codex");
+    const codexDir = join(dataDir, "archloop", "hub", "auth", "codex");
     await mkdir(codexDir, { recursive: true });
     await writeFile(join(codexDir, "auth.json"), "{}\n");
 

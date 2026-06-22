@@ -31,7 +31,7 @@ const createRealBeadsRepo = async (): Promise<RealBeadsRepo> => {
   const bdPath = resolveBundledBdExecutable();
   expect(bdPath).toBeDefined();
 
-  const cwd = await mkdtemp(join(tmpdir(), "sandcastle-beads-char-"));
+  const cwd = await mkdtemp(join(tmpdir(), "archloop-beads-char-"));
   await execFileAsync("git", ["init", "-b", "main"], { cwd });
   await execFileAsync("git", ["config", "user.email", "test@test.com"], {
     cwd,
@@ -39,8 +39,8 @@ const createRealBeadsRepo = async (): Promise<RealBeadsRepo> => {
   await execFileAsync("git", ["config", "user.name", "Test"], { cwd });
   const env = {
     ...process.env,
-    BEADS_ACTOR: "sandcastle-test",
-    SANDCASTLE_BD_PATH: bdPath!,
+    BEADS_ACTOR: "archloop-test",
+    ARCHLOOP_BD_PATH: bdPath!,
   };
 
   const runBd = async (args: readonly string[]): Promise<CommandResult> =>
@@ -103,7 +103,7 @@ const expectBdFailure = async (
 };
 
 describe("Beads 1.0.4 Hub task state-write characterization", () => {
-  it("contract: bd update --set-labels stores only the full replacement label list Sandcastle supplies", async () => {
+  it("contract: bd update --set-labels stores only the full replacement label list archLoop supplies", async () => {
     const repo = await createRealBeadsRepo();
     const task = await repo.createTask("Label replacement", [
       "--label",
@@ -215,7 +215,7 @@ describe("Beads 1.0.4 Hub task state-write characterization", () => {
     expect(stderr).toContain("unknown flag: --include-comments");
   }, 90_000);
 
-  it("contract: Sandcastle Hub task board projection uses bd list --json --all --limit 0 so closed tasks remain visible", async () => {
+  it("contract: archLoop Hub task board projection uses bd list --json --all --limit 0 so closed tasks remain visible", async () => {
     const repo = await createRealBeadsRepo();
     const openTask = await repo.createTask("Open projection", [
       "--label",

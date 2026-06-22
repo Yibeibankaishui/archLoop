@@ -29,7 +29,7 @@ export const testBindMount = (): BindMountSandboxProvider =>
   createBindMountSandboxProvider({
     name: "test-bind-mount",
     create: async (): Promise<BindMountSandboxHandle> => {
-      const sandboxRoot = await mkdtemp(join(tmpdir(), "sandcastle-test-bm-"));
+      const sandboxRoot = await mkdtemp(join(tmpdir(), "archloop-test-bm-"));
       const worktreePath = join(sandboxRoot, "workspace");
       await mkdir(worktreePath, { recursive: true });
 

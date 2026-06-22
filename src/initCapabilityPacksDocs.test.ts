@@ -27,10 +27,10 @@ describe("Capability pack init documentation", () => {
     expect(readme).toContain("WX_UPLOAD_KEY_PATH");
     expect(readme).toMatch(/upload key/i);
     expect(readme).toMatch(/IP allowlist/i);
-    expect(readme).toContain(".sandcastle/context/miniprogram-setup.md");
+    expect(readme).toContain(".archloop/context/miniprogram-setup.md");
 
     // Verification loop and summary
-    expect(readme).toContain(".sandcastle/verify.sh");
+    expect(readme).toContain(".archloop/verify.sh");
     expect(readme).toContain("debug/wx-check.log");
     expect(readme).toContain("debug/wx-preview.jpg");
     expect(readme).toContain("platform_validation_status");

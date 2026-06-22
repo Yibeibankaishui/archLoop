@@ -13,7 +13,7 @@ import {
   formatHubEnvKeyAcquisitionHint,
   getHubEnvKeyGuidance,
 } from "./hubEnvKeyGuidance.js";
-import { resolveSandcastleUserDataDir } from "./projectStatus.js";
+import { resolveArchloopUserDataDir } from "./projectStatus.js";
 
 export const HUB_ENV_KNOWN_KEYS = [
   "CURSOR_API_KEY",
@@ -33,10 +33,7 @@ export interface HubEnvStoreOptions {
 }
 
 export const resolveHubEnvPath = (options: HubEnvStoreOptions = {}): string => {
-  const userDataDir = resolveSandcastleUserDataDir(
-    options.env,
-    options.homeDir,
-  );
+  const userDataDir = resolveArchloopUserDataDir(options.env, options.homeDir);
   return `${userDataDir}/.env`;
 };
 
@@ -44,10 +41,10 @@ export const buildDefaultHubEnvTemplate = (): string =>
   serializeEnvFile(
     Object.fromEntries(HUB_ENV_KNOWN_KEYS.map((key) => [key, ""])),
     [
-      "# Sandcastle Hub shared credentials",
+      "# archLoop Hub shared credentials",
       "# Values here apply to Hub flows (tasks from-prd, triage, run, and so on).",
       "# process.env overrides non-empty values at runtime.",
-      "# Project .sandcastle/.env overrides Hub values for the same key when set.",
+      "# Project .archloop/.env overrides Hub values for the same key when set.",
     ],
   );
 
@@ -137,10 +134,10 @@ export const writeHubEnvFile = (
   const existing = readHubEnvFile(options);
   const merged = { ...existing, ...vars };
   const header = [
-    "# Sandcastle Hub shared credentials",
+    "# archLoop Hub shared credentials",
     "# Values here apply to Hub flows (tasks from-prd, triage, run, and so on).",
     "# process.env overrides non-empty values at runtime.",
-    "# Project .sandcastle/.env overrides Hub values for the same key when set.",
+    "# Project .archloop/.env overrides Hub values for the same key when set.",
   ];
   writeFileSync(envPath, serializeEnvFile(merged, header), "utf8");
   return envPath;
@@ -226,10 +223,10 @@ export const formatHubEnvShowLines = (
   if (Object.keys(fileEnv).length === 0) {
     lines.push(
       "",
-      "No Hub env file yet. Run `sandcastle env init` to create one.",
+      "No Hub env file yet. Run `archloop env init` to create one.",
     );
   } else if (hasEmptyKnownKey) {
-    lines.push("", "Run `sandcastle env init` for guided credential setup.");
+    lines.push("", "Run `archloop env init` for guided credential setup.");
   }
 
   return lines;

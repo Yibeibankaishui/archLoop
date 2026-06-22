@@ -1,14 +1,14 @@
-# Handoff: Sandcastle WeChat Mini Program Loop
+# Handoff: archLoop WeChat Mini Program Loop
 
 ## User Goal
 
-The user wants to integrate a WeChat Mini Program development feedback loop into Sandcastle's agent orchestration. The current direction is to make it a reusable Sandcastle capability, not just a one-off MCP setup.
+The user wants to integrate a WeChat Mini Program development feedback loop into archLoop's agent orchestration. The current direction is to make it a reusable archLoop capability, not just a one-off MCP setup.
 
 ## Current Repo / Context
 
-- Repo: `/Users/yibeibankaishui/projects/ref/sandcastle`
+- Repo: `/Users/yibeibankaishui/projects/ref/archloop`
 - Core research doc already exists: `docs/research/wx-miniprogram-loop.md`
-- Sandcastle terminology lives in `CONTEXT.md`
+- archLoop terminology lives in `CONTEXT.md`
 - Type checking command from `AGENTS.md`: `npm run typecheck`
 - User-facing changes need a patch changeset under `.changeset`, using `package.json#name`
 - Public behavior changes should check `README.md`
@@ -19,7 +19,7 @@ The user wants to integrate a WeChat Mini Program development feedback loop into
 - Treat `miniprogram-ci` as the stable CLI validation loop.
 - Treat `wechat-devtools-mcp` as runtime debugging enhancement, not the primary loop.
 - Treat `CloudBase MCP` as the cloud development/deployment/log loop.
-- Preferred Sandcastle integration shape:
+- Preferred archLoop integration shape:
   - Expand the existing `miniprogram` preset agent and bundled skill.
   - Add a dedicated workflow template, likely `wx-miniprogram-loop`.
   - Consider a future WeChat Mini Program project profile, but the first useful slice can avoid broad init/profile changes.
@@ -93,7 +93,7 @@ Recommended first implementation slice:
 
 - Keep the primary validation loop inside the sandbox with npm scripts and `miniprogram-ci`.
 - Runtime devtools automation is host-dependent and should be optional.
-- CloudBase MCP is currently available to the outer Codex session, but Sandcastle agents inside a sandbox may need separate MCP/auth wiring; do not assume it is automatically available inside every agent runtime.
+- CloudBase MCP is currently available to the outer Codex session, but archLoop agents inside a sandbox may need separate MCP/auth wiring; do not assume it is automatically available inside every agent runtime.
 - Avoid requiring users to install `wechat-devtools-mcp` just to use the basic mini program template.
 
 ## Likely Next Ask

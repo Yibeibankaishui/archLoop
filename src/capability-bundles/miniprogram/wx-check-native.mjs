@@ -24,7 +24,7 @@ const previewArtifactPath = join(repoRoot, previewArtifact);
 
 const PLACEHOLDER_APPIDS = new Set(["touristappid", "wx0000000000000000"]);
 const MINIPROGRAM_CI_API_MEMBERS = ["Project", "preview", "packNpm"];
-const WX_UPLOAD_DIR = join(repoRoot, ".sandcastle", "auth", "wx-upload");
+const WX_UPLOAD_DIR = join(repoRoot, ".archloop", "auth", "wx-upload");
 
 const UNSUPPORTED_BUILD_ROOTS = [
   "dist",

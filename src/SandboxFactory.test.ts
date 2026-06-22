@@ -79,11 +79,11 @@ beforeEach(() => {
 
 describe("WorktreeDockerSandboxFactory", () => {
   let hostRepoDir: string;
-  const worktreePath = "/tmp/sandcastle-worktrees/sandcastle-123";
+  const worktreePath = "/tmp/archloop-worktrees/archloop-123";
   const tempDirs: string[] = [];
 
   const makeTempRepo = async () => {
-    const dir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+    const dir = await mkdtemp(join(tmpdir(), "archloop-test-"));
     tempDirs.push(dir);
     await mkdir(join(dir, ".git"));
     return dir;
@@ -115,7 +115,7 @@ describe("WorktreeDockerSandboxFactory", () => {
     mockCreate.mockReturnValue(
       Effect.succeed({
         path: worktreePath,
-        branch: "sandcastle/20240101-000000",
+        branch: "archloop/20240101-000000",
       }),
     );
     mockRemove.mockReturnValue(Effect.void);
@@ -168,7 +168,7 @@ describe("WorktreeDockerSandboxFactory", () => {
     mockCreate.mockImplementation(() =>
       Effect.sync(() => {
         callOrder.push("worktree-create");
-        return { path: worktreePath, branch: "sandcastle/20240101-000000" };
+        return { path: worktreePath, branch: "archloop/20240101-000000" };
       }),
     );
     const { provider } = makeMockProvider();
@@ -247,7 +247,7 @@ describe("WorktreeDockerSandboxFactory", () => {
     mockCreate.mockImplementation(() =>
       Effect.sync(() => {
         callOrder.push("create");
-        return { path: worktreePath, branch: "sandcastle/20240101-000000" };
+        return { path: worktreePath, branch: "archloop/20240101-000000" };
       }),
     );
 
@@ -640,7 +640,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
   /** Set up WorktreeManager mocks so the worktree path points at the real repo. */
   const setupWorktreeMocks = (hostDir: string) => {
     mockCreate.mockReturnValue(
-      Effect.succeed({ path: hostDir, branch: "sandcastle/20240101-000000" }),
+      Effect.succeed({ path: hostDir, branch: "archloop/20240101-000000" }),
     );
     mockRemove.mockReturnValue(Effect.void);
     mockPruneStale.mockReturnValue(Effect.void);
@@ -655,7 +655,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
   });
 
   it("copies copyToWorktree files into the isolated sandbox via copyIn", async () => {
-    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+    const hostDir = await mkdtemp(join(tmpdir(), "archloop-test-"));
     tempDirs.push(hostDir);
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial");
@@ -682,7 +682,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
   });
 
   it("copies nested copyToWorktree paths, creating parent directories", async () => {
-    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+    const hostDir = await mkdtemp(join(tmpdir(), "archloop-test-"));
     tempDirs.push(hostDir);
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial");
@@ -712,7 +712,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
   });
 
   it("works without copyToWorktree (no regression)", async () => {
-    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+    const hostDir = await mkdtemp(join(tmpdir(), "archloop-test-"));
     tempDirs.push(hostDir);
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello world", "initial");
@@ -736,7 +736,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
   });
 
   it("copies copyToWorktree directories into the isolated sandbox via copyIn", async () => {
-    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+    const hostDir = await mkdtemp(join(tmpdir(), "archloop-test-"));
     tempDirs.push(hostDir);
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial");
@@ -769,7 +769,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
   });
 
   it("skips missing copyToWorktree paths without error", async () => {
-    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+    const hostDir = await mkdtemp(join(tmpdir(), "archloop-test-"));
     tempDirs.push(hostDir);
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial");
@@ -790,13 +790,13 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
   });
 
   it("creates a worktree before starting the isolated sandbox", async () => {
-    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+    const hostDir = await mkdtemp(join(tmpdir(), "archloop-test-"));
     tempDirs.push(hostDir);
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial");
 
     mockCreate.mockReturnValue(
-      Effect.succeed({ path: hostDir, branch: "sandcastle/20240101-000000" }),
+      Effect.succeed({ path: hostDir, branch: "archloop/20240101-000000" }),
     );
     mockRemove.mockReturnValue(Effect.void);
     mockPruneStale.mockReturnValue(Effect.void);
@@ -813,7 +813,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
   });
 
   it("creates a worktree with a named branch for branch strategy", async () => {
-    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+    const hostDir = await mkdtemp(join(tmpdir(), "archloop-test-"));
     tempDirs.push(hostDir);
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial");
@@ -852,7 +852,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
   });
 
   it("provides hostWorktreePath in SandboxInfo", async () => {
-    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+    const hostDir = await mkdtemp(join(tmpdir(), "archloop-test-"));
     tempDirs.push(hostDir);
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial");
@@ -861,7 +861,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
     mockCreate.mockReturnValue(
       Effect.succeed({
         path: fakeWorktreePath,
-        branch: "sandcastle/20240101-000000",
+        branch: "archloop/20240101-000000",
       }),
     );
     mockRemove.mockReturnValue(Effect.void);
@@ -883,13 +883,13 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
   });
 
   it("removes worktree on success with clean worktree", async () => {
-    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+    const hostDir = await mkdtemp(join(tmpdir(), "archloop-test-"));
     tempDirs.push(hostDir);
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial");
 
     mockCreate.mockReturnValue(
-      Effect.succeed({ path: hostDir, branch: "sandcastle/20240101-000000" }),
+      Effect.succeed({ path: hostDir, branch: "archloop/20240101-000000" }),
     );
     mockRemove.mockReturnValue(Effect.void);
     mockPruneStale.mockReturnValue(Effect.void);
@@ -906,13 +906,13 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
   });
 
   it("preserves worktree on failure with dirty worktree", async () => {
-    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+    const hostDir = await mkdtemp(join(tmpdir(), "archloop-test-"));
     tempDirs.push(hostDir);
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial");
 
     mockCreate.mockReturnValue(
-      Effect.succeed({ path: hostDir, branch: "sandcastle/20240101-000000" }),
+      Effect.succeed({ path: hostDir, branch: "archloop/20240101-000000" }),
     );
     mockRemove.mockReturnValue(Effect.void);
     mockPruneStale.mockReturnValue(Effect.void);
@@ -931,7 +931,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
   });
 
   it("prunes stale worktrees before creating a new one", async () => {
-    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+    const hostDir = await mkdtemp(join(tmpdir(), "archloop-test-"));
     tempDirs.push(hostDir);
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial");
@@ -945,7 +945,7 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
     mockCreate.mockImplementation(() =>
       Effect.sync(() => {
         callOrder.push("create");
-        return { path: hostDir, branch: "sandcastle/20240101-000000" };
+        return { path: hostDir, branch: "archloop/20240101-000000" };
       }),
     );
     mockRemove.mockReturnValue(Effect.void);
@@ -964,14 +964,14 @@ describe("WorktreeDockerSandboxFactory — isolated providers", () => {
   });
 
   it("provides applyToHost callback that syncs commits to worktree", async () => {
-    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+    const hostDir = await mkdtemp(join(tmpdir(), "archloop-test-"));
     tempDirs.push(hostDir);
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial");
 
     // Use hostDir as worktree path — applyToHost runs syncOut targeting the worktree
     mockCreate.mockReturnValue(
-      Effect.succeed({ path: hostDir, branch: "sandcastle/20240101-000000" }),
+      Effect.succeed({ path: hostDir, branch: "archloop/20240101-000000" }),
     );
     mockRemove.mockReturnValue(Effect.void);
     mockPruneStale.mockReturnValue(Effect.void);
@@ -1040,7 +1040,7 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
   });
 
   it("head mode: does not create a worktree and runs in hostRepoDir", async () => {
-    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+    const hostDir = await mkdtemp(join(tmpdir(), "archloop-test-"));
     tempDirs.push(hostDir);
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hi", "initial");
@@ -1068,7 +1068,7 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
   });
 
   it("worktree mode: creates worktree, runs in it, cleans up on success", async () => {
-    const hostDir = await mkdtemp(join(tmpdir(), "sandcastle-test-"));
+    const hostDir = await mkdtemp(join(tmpdir(), "archloop-test-"));
     tempDirs.push(hostDir);
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hi", "initial");
@@ -1076,7 +1076,7 @@ describe("WorktreeDockerSandboxFactory — no-sandbox provider", () => {
     mockCreate.mockReturnValue(
       Effect.succeed({
         path: hostDir,
-        branch: "sandcastle/20240101-000000",
+        branch: "archloop/20240101-000000",
       }),
     );
     mockRemove.mockReturnValue(Effect.void);

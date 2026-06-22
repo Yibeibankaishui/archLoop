@@ -2,7 +2,7 @@
 
 ## Context
 
-When the **branch** strategy is used, the caller supplies a named branch and Sandcastle creates a worktree at `.sandcastle/worktrees/<name>/`. If a worktree for that branch already exists on disk (e.g. because the user re-ran the same command), the previous behaviour was to throw, with an opt-out via `throwOnDuplicateWorktree: false` that silently returned the existing worktree.
+When the **branch** strategy is used, the caller supplies a named branch and archLoop creates a worktree at `.archloop/worktrees/<name>/`. If a worktree for that branch already exists on disk (e.g. because the user re-ran the same command), the previous behaviour was to throw, with an opt-out via `throwOnDuplicateWorktree: false` that silently returned the existing worktree.
 
 Throw-by-default made the common "re-run the same command" case fail loudly, and the opt-out was unsafe — it silently handed the agent whatever arbitrary state happened to be in the worktree, including uncommitted work from a prior run that could be clobbered.
 

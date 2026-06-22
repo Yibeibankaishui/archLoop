@@ -553,9 +553,9 @@ describe("applyTriageProposal", () => {
     };
 
     const previousPath = process.env.PATH;
-    const previousBdPath = process.env.SANDCASTLE_BD_PATH;
+    const previousBdPath = process.env.ARCHLOOP_BD_PATH;
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
-    process.env.SANDCASTLE_BD_PATH = bdPath;
+    process.env.ARCHLOOP_BD_PATH = bdPath;
     process.env.BD_STATE_FILE = stateFile;
     process.env.BD_UPDATE_ARGS_FILE = updateArgsFile;
     process.env.BD_COMMENT_ARGS_FILE = commentArgsFile;
@@ -601,7 +601,7 @@ describe("applyTriageProposal", () => {
       expect(depArgs).toContain("bd-9");
     } finally {
       process.env.PATH = previousPath;
-      process.env.SANDCASTLE_BD_PATH = previousBdPath;
+      process.env.ARCHLOOP_BD_PATH = previousBdPath;
       delete process.env.BD_STATE_FILE;
       delete process.env.BD_UPDATE_ARGS_FILE;
       delete process.env.BD_COMMENT_ARGS_FILE;
@@ -674,9 +674,9 @@ describe("applyTriageProposal", () => {
     };
 
     const previousPath = process.env.PATH;
-    const previousBdPath = process.env.SANDCASTLE_BD_PATH;
+    const previousBdPath = process.env.ARCHLOOP_BD_PATH;
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
-    process.env.SANDCASTLE_BD_PATH = bdPath;
+    process.env.ARCHLOOP_BD_PATH = bdPath;
     process.env.BD_STATE_FILE = stateFile;
     process.env.BD_UPDATE_ARGS_FILE = updateArgsFile;
     process.env.BD_COMMENT_ARGS_FILE = commentArgsFile;
@@ -709,7 +709,7 @@ describe("applyTriageProposal", () => {
       expect(updateArgs).not.toMatch(/--set-labels ready-for-agent/);
     } finally {
       process.env.PATH = previousPath;
-      process.env.SANDCASTLE_BD_PATH = previousBdPath;
+      process.env.ARCHLOOP_BD_PATH = previousBdPath;
       delete process.env.BD_STATE_FILE;
       delete process.env.BD_UPDATE_ARGS_FILE;
       delete process.env.BD_COMMENT_ARGS_FILE;
@@ -810,9 +810,9 @@ describe("runTriageProposalFlow", () => {
     });
 
     const previousPath = process.env.PATH;
-    const previousBdPath = process.env.SANDCASTLE_BD_PATH;
+    const previousBdPath = process.env.ARCHLOOP_BD_PATH;
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
-    process.env.SANDCASTLE_BD_PATH = bdPath;
+    process.env.ARCHLOOP_BD_PATH = bdPath;
     process.env.BD_STATE_FILE = stateFile;
     process.env.BD_UPDATE_ARGS_FILE = updateArgsFile;
     process.env.BD_COMMENT_ARGS_FILE = commentArgsFile;
@@ -842,7 +842,7 @@ describe("runTriageProposalFlow", () => {
       ]);
     } finally {
       process.env.PATH = previousPath;
-      process.env.SANDCASTLE_BD_PATH = previousBdPath;
+      process.env.ARCHLOOP_BD_PATH = previousBdPath;
       delete process.env.BD_STATE_FILE;
       delete process.env.BD_UPDATE_ARGS_FILE;
       delete process.env.BD_COMMENT_ARGS_FILE;
@@ -889,9 +889,9 @@ describe("runTriageProposalFlow", () => {
     await chmod(bdPath, 0o755);
 
     const previousPath = process.env.PATH;
-    const previousBdPath = process.env.SANDCASTLE_BD_PATH;
+    const previousBdPath = process.env.ARCHLOOP_BD_PATH;
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
-    process.env.SANDCASTLE_BD_PATH = bdPath;
+    process.env.ARCHLOOP_BD_PATH = bdPath;
     process.env.BD_STATE_FILE = stateFile;
 
     try {
@@ -913,7 +913,7 @@ describe("runTriageProposalFlow", () => {
       expect(result.outcome).toBe("cancelled");
     } finally {
       process.env.PATH = previousPath;
-      process.env.SANDCASTLE_BD_PATH = previousBdPath;
+      process.env.ARCHLOOP_BD_PATH = previousBdPath;
       delete process.env.BD_STATE_FILE;
     }
   });
@@ -957,9 +957,9 @@ describe("runTriageProposalFlow", () => {
     await chmod(bdPath, 0o755);
 
     const previousPath = process.env.PATH;
-    const previousBdPath = process.env.SANDCASTLE_BD_PATH;
+    const previousBdPath = process.env.ARCHLOOP_BD_PATH;
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
-    process.env.SANDCASTLE_BD_PATH = bdPath;
+    process.env.ARCHLOOP_BD_PATH = bdPath;
     process.env.BD_STATE_FILE = stateFile;
 
     try {
@@ -986,7 +986,7 @@ describe("runTriageProposalFlow", () => {
       }
     } finally {
       process.env.PATH = previousPath;
-      process.env.SANDCASTLE_BD_PATH = previousBdPath;
+      process.env.ARCHLOOP_BD_PATH = previousBdPath;
       delete process.env.BD_STATE_FILE;
     }
   });
@@ -1069,9 +1069,9 @@ describe("runTriageProposalFlow", () => {
     };
 
     const previousPath = process.env.PATH;
-    const previousBdPath = process.env.SANDCASTLE_BD_PATH;
+    const previousBdPath = process.env.ARCHLOOP_BD_PATH;
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
-    process.env.SANDCASTLE_BD_PATH = bdPath;
+    process.env.ARCHLOOP_BD_PATH = bdPath;
     process.env.BD_STATE_FILE = stateFile;
     process.env.BD_UPDATE_ARGS_FILE = updateArgsFile;
     process.env.BD_COMMENT_ARGS_FILE = commentArgsFile;
@@ -1116,7 +1116,7 @@ describe("runTriageProposalFlow", () => {
       expect(depArgs).not.toContain("todo-list-demo-lt2");
     } finally {
       process.env.PATH = previousPath;
-      process.env.SANDCASTLE_BD_PATH = previousBdPath;
+      process.env.ARCHLOOP_BD_PATH = previousBdPath;
       delete process.env.BD_STATE_FILE;
       delete process.env.BD_UPDATE_ARGS_FILE;
       delete process.env.BD_COMMENT_ARGS_FILE;
@@ -1220,9 +1220,9 @@ describe("triage proposal helpers", () => {
     await chmod(bdPath, 0o755);
 
     const previousPath = process.env.PATH;
-    const previousBdPath = process.env.SANDCASTLE_BD_PATH;
+    const previousBdPath = process.env.ARCHLOOP_BD_PATH;
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
-    process.env.SANDCASTLE_BD_PATH = bdPath;
+    process.env.ARCHLOOP_BD_PATH = bdPath;
     process.env.BD_STATE_FILE = stateFile;
 
     try {
@@ -1238,7 +1238,7 @@ describe("triage proposal helpers", () => {
       ]);
     } finally {
       process.env.PATH = previousPath;
-      process.env.SANDCASTLE_BD_PATH = previousBdPath;
+      process.env.ARCHLOOP_BD_PATH = previousBdPath;
       delete process.env.BD_STATE_FILE;
     }
   });
@@ -1281,9 +1281,9 @@ describe("triage proposal helpers", () => {
     await chmod(bdPath, 0o755);
 
     const previousPath = process.env.PATH;
-    const previousBdPath = process.env.SANDCASTLE_BD_PATH;
+    const previousBdPath = process.env.ARCHLOOP_BD_PATH;
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
-    process.env.SANDCASTLE_BD_PATH = bdPath;
+    process.env.ARCHLOOP_BD_PATH = bdPath;
     process.env.BD_STATE_FILE = stateFile;
 
     try {
@@ -1304,7 +1304,7 @@ describe("triage proposal helpers", () => {
       expect(prompt).not.toContain("{{TASK_DETAILS}}");
     } finally {
       process.env.PATH = previousPath;
-      process.env.SANDCASTLE_BD_PATH = previousBdPath;
+      process.env.ARCHLOOP_BD_PATH = previousBdPath;
       delete process.env.BD_STATE_FILE;
     }
   });

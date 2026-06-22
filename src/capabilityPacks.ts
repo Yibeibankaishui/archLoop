@@ -139,7 +139,7 @@ const MINIPROGRAM_CAPABILITY_PACK: CapabilityPackDefinition = {
     "blank",
   ],
   verification: {
-    entrypoint: ".sandcastle/verify.sh",
+    entrypoint: ".archloop/verify.sh",
     diagnosticLog: "debug/wx-check.log",
   },
   addons: [
@@ -191,7 +191,7 @@ export interface ResolvedCapabilityInit {
   readonly projectProfileName: string;
   readonly presetAgentIds: readonly string[];
   readonly verification?: CapabilityVerificationMetadata;
-  /** When true, init should write `.sandcastle/capability.json`. */
+  /** When true, init should write `.archloop/capability.json`. */
   readonly writeCapabilityManifest: boolean;
 }
 

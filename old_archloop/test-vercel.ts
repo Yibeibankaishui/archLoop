@@ -1,5 +1,5 @@
-import * as sandcastle from "@ai-hero/sandcastle";
-import { vercel } from "@ai-hero/sandcastle/sandboxes/vercel";
+import * as archloop from "@yibeibankaishui/archloop";
+import { vercel } from "@yibeibankaishui/archloop/sandboxes/vercel";
 
 const claudeInstallHook = {
   command: "curl -fsSL https://claude.ai/install.sh | bash",
@@ -11,15 +11,15 @@ const ghCliInstallHook = {
   sudo: true,
 };
 
-// /matt-pococks-projects/sandcastle
-const { commits, branch } = await sandcastle.run({
+// /yibeibankaishui-projects/archloop
+const { commits, branch } = await archloop.run({
   sandbox: vercel({
     token: process.env.VERCEL_OIDC_TOKEN,
-    teamId: "matt-pococks-projects",
-    projectId: "sandcastle",
+    teamId: "yibeibankaishui-projects",
+    projectId: "archloop",
   }),
   name: "Test",
-  agent: sandcastle.claudeCode("claude-sonnet-4-6"),
+  agent: archloop.claudeCode("claude-sonnet-4-6"),
   prompt: "Add /foobar to the .gitignore, then commit.",
   hooks: {
     sandbox: {

@@ -2,7 +2,7 @@
  * Docker sandbox provider — wraps DockerLifecycle into a SandboxProvider.
  *
  * Usage:
- *   import { docker } from "sandcastle/sandboxes/docker";
+ *   import { docker } from "archloop/sandboxes/docker";
  *   await run({ agent: claudeCode("claude-opus-4-6"), sandbox: docker() });
  */
 
@@ -106,7 +106,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
     create: async (
       createOptions: BindMountCreateOptions,
     ): Promise<BindMountSandboxHandle> => {
-      const containerName = `sandcastle-${randomUUID()}`;
+      const containerName = `archloop-${randomUUID()}`;
 
       const worktreePath =
         createOptions.mounts.find(
@@ -361,7 +361,7 @@ const checkImageUid = (
         if (error) {
           reject(
             new Error(
-              `Image '${imageName}' not found locally. Build it first with 'sandcastle docker build-image'.`,
+              `Image '${imageName}' not found locally. Build it first with 'archloop docker build-image'.`,
             ),
           );
           return;
@@ -383,7 +383,7 @@ const checkImageUid = (
           const mismatchMessage =
             `UID mismatch: image '${imageName}' was built with UID ${imageUid}, ` +
             `but the expected UID is ${expectedUid}. ` +
-            `Rebuild the image with 'sandcastle docker build-image', ` +
+            `Rebuild the image with 'archloop docker build-image', ` +
             `or pass containerUid: ${imageUid} to docker() to match the image.`;
           reject(
             new Error(

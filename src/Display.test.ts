@@ -183,7 +183,7 @@ describe("SilentDisplay", () => {
 
 describe("FileDisplay", () => {
   const setup = () => {
-    const dir = mkdtempSync(join(tmpdir(), "sandcastle-display-"));
+    const dir = mkdtempSync(join(tmpdir(), "archloop-display-"));
     const logPath = join(dir, "test.log");
     const layer = Layer.provide(
       FileDisplay.layer(logPath),
@@ -200,7 +200,7 @@ describe("FileDisplay", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const d = yield* Display;
-        yield* d.intro("sandcastle");
+        yield* d.intro("archloop");
       }).pipe(Effect.provide(layer)),
     );
 
@@ -334,7 +334,7 @@ describe("FileDisplay", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const d = yield* Display;
-        yield* d.intro("sandcastle");
+        yield* d.intro("archloop");
       }).pipe(Effect.provide(layer)),
     );
 
@@ -421,7 +421,7 @@ describe("FileDisplay", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         const d = yield* Display;
-        yield* d.intro("sandcastle");
+        yield* d.intro("archloop");
       }).pipe(Effect.provide(layer)),
     );
 
@@ -499,7 +499,7 @@ describe("SilentDisplay - toolCall", () => {
 
 describe("FileDisplay - toolCall", () => {
   const setup = () => {
-    const dir = mkdtempSync(join(tmpdir(), "sandcastle-display-"));
+    const dir = mkdtempSync(join(tmpdir(), "archloop-display-"));
     const logPath = join(dir, "test.log");
     const layer = Layer.provide(
       FileDisplay.layer(logPath),

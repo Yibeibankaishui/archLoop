@@ -1,25 +1,25 @@
 <div align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://res.cloudinary.com/total-typescript/image/upload/v1775033787/readme-sandcastle-ondark_2x.png">
-    <source media="(prefers-color-scheme: light)" srcset="https://res.cloudinary.com/total-typescript/image/upload/v1775033787/readme-sandcastle-onlight_2x.png">
-    <img alt="Sandcastle" src="https://res.cloudinary.com/total-typescript/image/upload/v1775033787/readme-sandcastle-onlight_2x.png" height="200" style="margin-bottom: 20px;">
+    <source media="(prefers-color-scheme: dark)" srcset="https://res.cloudinary.com/total-typescript/image/upload/v1775033787/readme-archloop-ondark_2x.png">
+    <source media="(prefers-color-scheme: light)" srcset="https://res.cloudinary.com/total-typescript/image/upload/v1775033787/readme-archloop-onlight_2x.png">
+    <img alt="archLoop" src="https://res.cloudinary.com/total-typescript/image/upload/v1775033787/readme-archloop-onlight_2x.png" height="200" style="margin-bottom: 20px;">
   </picture>
 </div>
 
-## What Is Sandcastle?
+## What Is archLoop?
 
 A TypeScript library for orchestrating AI coding agents in isolated sandboxes:
 
-1. You invoke agents with a single `sandcastle.run()`.
-2. Sandcastle handles sandboxing the agent with a configurable branch strategy.
+1. You invoke agents with a single `archloop.run()`.
+2. archLoop handles sandboxing the agent with a configurable branch strategy.
 3. The commits made on the branches get merged back.
 
-Sandcastle is provider-agnostic — it ships with built-in providers for Docker, Podman, and Vercel, and you can create your own. Great for parallelizing multiple AFK agents, creating review pipelines, or even just orchestrating your own agents.
+archLoop is provider-agnostic — it ships with built-in providers for Docker, Podman, and Vercel, and you can create your own. Great for parallelizing multiple AFK agents, creating review pipelines, or even just orchestrating your own agents.
 
 ## Prerequisites
 
-- [Git](https://git-scm.com/) with at least one commit on the current branch (an initialized repo with no commits yet is not enough — run an initial `git commit` before using Sandcastle)
-- A sandbox provider — Sandcastle needs an isolated environment to run agents in. Built-in options:
+- [Git](https://git-scm.com/) with at least one commit on the current branch (an initialized repo with no commits yet is not enough — run an initial `git commit` before using archLoop)
+- A sandbox provider — archLoop needs an isolated environment to run agents in. Built-in options:
   - [Docker Desktop](https://www.docker.com/) — most common for local development
   - [Podman](https://podman.io/) — rootless alternative to Docker
   - [Vercel](https://vercel.com/) — cloud-based Firecracker microVMs via `@vercel/sandbox`
@@ -30,62 +30,62 @@ Sandcastle is provider-agnostic — it ships with built-in providers for Docker,
 1. Install the package:
 
 ```bash
-npm install --save-dev @ai-hero/sandcastle
+npm install --save-dev @yibeibankaishui/archloop
 ```
 
-Sandcastle bundles a pinned Beads runtime via `@beads/bd@1.0.4`, so Hub and
+archLoop bundles a pinned Beads runtime via `@beads/bd@1.0.4`, so Hub and
 Beads-backed commands can use the packaged `bd` binary without a separate
-system install. Set `SANDCASTLE_BD_PATH` to override the binary path if needed.
+system install. Set `ARCHLOOP_BD_PATH` to override the binary path if needed.
 
-2. Run `sandcastle init`. This scaffolds a `.sandcastle` directory with all the files needed.
+2. Run `archloop init`. This scaffolds a `.archloop` directory with all the files needed.
 
 ```bash
-npx sandcastle init
+npx archloop init
 ```
 
-3. Edit `.sandcastle/.env` and fill in the token values generated for your selected installed agent runtimes and backlog manager.
+3. Edit `.archloop/.env` and fill in the token values generated for your selected installed agent runtimes and backlog manager.
 
 ```bash
-cp .sandcastle/.env.example .sandcastle/.env
+cp .archloop/.env.example .archloop/.env
 ```
 
 4. Install dependencies and run the scaffolded workflow (uses project-local `tsx` from `devDependencies`):
 
 ```bash
 npm install
-npm run sandcastle
+npm run archloop
 ```
 
 ```typescript
 // 3. Run the agent via the JS API
-import { run, claudeCode } from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { run, claudeCode } from "@yibeibankaishui/archloop";
+import { docker } from "@yibeibankaishui/archloop/sandboxes/docker";
 
 await run({
   agent: claudeCode("claude-opus-4-6"),
   sandbox: docker(), // or podman(), vercel(), or your own provider
-  promptFile: ".sandcastle/prompt.md",
+  promptFile: ".archloop/prompt.md",
 });
 ```
 
 ## Sandbox Providers
 
-Sandcastle uses a `SandboxProvider` to create isolated environments. The `sandbox` option on `run()`, `interactive()`, and `createSandbox()` accepts any provider, including `noSandbox()` — opt in to running the agent directly on the host when container isolation is undesired. Built-in providers:
+archLoop uses a `SandboxProvider` to create isolated environments. The `sandbox` option on `run()`, `interactive()`, and `createSandbox()` accepts any provider, including `noSandbox()` — opt in to running the agent directly on the host when container isolation is undesired. Built-in providers:
 
-| Provider   | Import path                                | Type       | Accepted by                                 |
-| ---------- | ------------------------------------------ | ---------- | ------------------------------------------- |
-| Docker     | `@ai-hero/sandcastle/sandboxes/docker`     | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
-| Podman     | `@ai-hero/sandcastle/sandboxes/podman`     | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
-| Vercel     | `@ai-hero/sandcastle/sandboxes/vercel`     | Isolated   | `run()`, `createSandbox()`, `interactive()` |
-| No-sandbox | `@ai-hero/sandcastle/sandboxes/no-sandbox` | None       | `run()`, `createSandbox()`, `interactive()` |
+| Provider   | Import path                                      | Type       | Accepted by                                 |
+| ---------- | ------------------------------------------------ | ---------- | ------------------------------------------- |
+| Docker     | `@yibeibankaishui/archloop/sandboxes/docker`     | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
+| Podman     | `@yibeibankaishui/archloop/sandboxes/podman`     | Bind-mount | `run()`, `createSandbox()`, `interactive()` |
+| Vercel     | `@yibeibankaishui/archloop/sandboxes/vercel`     | Isolated   | `run()`, `createSandbox()`, `interactive()` |
+| No-sandbox | `@yibeibankaishui/archloop/sandboxes/no-sandbox` | None       | `run()`, `createSandbox()`, `interactive()` |
 
 Worktree methods (`wt.run()`, `wt.interactive()`, `wt.createSandbox()`) accept the same providers as their top-level counterparts. `wt.interactive()` defaults to `noSandbox()` when no sandbox is specified.
 
 ```typescript
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
-import { podman } from "@ai-hero/sandcastle/sandboxes/podman";
-import { vercel } from "@ai-hero/sandcastle/sandboxes/vercel";
-import { noSandbox } from "@ai-hero/sandcastle/sandboxes/no-sandbox";
+import { docker } from "@yibeibankaishui/archloop/sandboxes/docker";
+import { podman } from "@yibeibankaishui/archloop/sandboxes/podman";
+import { vercel } from "@yibeibankaishui/archloop/sandboxes/vercel";
+import { noSandbox } from "@yibeibankaishui/archloop/sandboxes/no-sandbox";
 
 // Docker, Podman, and Vercel are interchangeable in run() and createSandbox():
 await run({
@@ -108,16 +108,16 @@ You can also [create your own provider](#custom-sandbox-providers) using `create
 
 ## API
 
-Sandcastle exports a programmatic `run()` function for use in scripts, CI pipelines, or custom tooling. The examples below use `docker()`, but any `SandboxProvider` works in its place.
+archLoop exports a programmatic `run()` function for use in scripts, CI pipelines, or custom tooling. The examples below use `docker()`, but any `SandboxProvider` works in its place.
 
 ```typescript
-import { run, claudeCode } from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { run, claudeCode } from "@yibeibankaishui/archloop";
+import { docker } from "@yibeibankaishui/archloop/sandboxes/docker";
 
 const result = await run({
   agent: claudeCode("claude-opus-4-6"),
   sandbox: docker(),
-  promptFile: ".sandcastle/prompt.md",
+  promptFile: ".archloop/prompt.md",
 });
 
 console.log(result.iterations.length); // number of iterations executed
@@ -129,8 +129,8 @@ console.log(result.branch); // target branch name
 ### All options
 
 ```typescript
-import { run, claudeCode } from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { run, claudeCode } from "@yibeibankaishui/archloop";
+import { docker } from "@yibeibankaishui/archloop/sandboxes/docker";
 
 const result = await run({
   // Agent provider — required. Pass a model string to claudeCode().
@@ -140,7 +140,7 @@ const result = await run({
   // Sandbox provider — required. Any SandboxProvider works (docker, podman, vercel, or custom).
   // Provider-specific config (like imageName, mounts) lives inside the provider factory call.
   sandbox: docker({
-    imageName: "sandcastle:local",
+    imageName: "archloop:local",
     // Optional: override the UID/GID used for --user flag (defaults to host UID/GID).
     // Must match the UID baked into the image. Pre-flight check catches mismatches.
     // containerUid: 1000,
@@ -162,7 +162,7 @@ const result = await run({
   }),
 
   // Host repo directory — replaces process.cwd() as the anchor for
-  // .sandcastle/ artifacts (worktrees, logs, env, patches) and git operations.
+  // .archloop/ artifacts (worktrees, logs, env, patches) and git operations.
   // Relative paths resolve against process.cwd(). Defaults to process.cwd().
   cwd: "../other-repo",
 
@@ -172,7 +172,7 @@ const result = await run({
 
   // Prompt source — provide one of these, not both.
   // Note: promptFile resolves against process.cwd(), NOT cwd.
-  promptFile: ".sandcastle/prompt.md", // path to a prompt file
+  promptFile: ".archloop/prompt.md", // path to a prompt file
   // prompt: "Fix issue #42 in this repo", // OR an inline prompt string
 
   // Values substituted for {{KEY}} placeholders in the prompt.
@@ -207,10 +207,10 @@ const result = await run({
     copyToWorktreeMs: 120_000, // default: 60_000
   },
 
-  // How to record progress. Default: write to a file under .sandcastle/logs/
+  // How to record progress. Default: write to a file under .archloop/logs/
   logging: {
     type: "file",
-    path: ".sandcastle/logs/my-run.log",
+    path: ".archloop/logs/my-run.log",
     // Optional: forward the agent's output stream to your own observability system.
     // Fires for each text chunk and tool call the agent produces. Errors thrown
     // by the callback are swallowed so a broken forwarder cannot kill the run.
@@ -246,13 +246,13 @@ Use `createSandbox()` when you need to run multiple agents (or multiple rounds o
 
 Use `run()` instead when you only need a single one-shot invocation — it handles sandbox lifecycle automatically.
 
-You can also pass `noSandbox()` to `createSandbox()` when Sandcastle is already running inside an isolated environment and you want to avoid a nested container. This runs the agent directly on the host worktree, so isolation is entirely your responsibility.
+You can also pass `noSandbox()` to `createSandbox()` when archLoop is already running inside an isolated environment and you want to avoid a nested container. This runs the agent directly on the host worktree, so isolation is entirely your responsibility.
 
 #### Basic single-run usage
 
 ```typescript
-import { createSandbox, claudeCode } from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { createSandbox, claudeCode } from "@yibeibankaishui/archloop";
+import { docker } from "@yibeibankaishui/archloop/sandboxes/docker";
 
 await using sandbox = await createSandbox({
   branch: "agent/fix-42",
@@ -270,8 +270,8 @@ console.log(result.commits); // [{ sha: "abc123" }]
 #### Multi-run implement-then-review
 
 ```typescript
-import { createSandbox, claudeCode } from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { createSandbox, claudeCode } from "@yibeibankaishui/archloop";
+import { docker } from "@yibeibankaishui/archloop/sandboxes/docker";
 
 await using sandbox = await createSandbox({
   branch: "agent/fix-42",
@@ -282,7 +282,7 @@ await using sandbox = await createSandbox({
 // Step 1: implement
 const implResult = await sandbox.run({
   agent: claudeCode("claude-opus-4-6"),
-  promptFile: ".sandcastle/implement.md",
+  promptFile: ".archloop/implement.md",
   maxIterations: 5,
 });
 
@@ -375,7 +375,7 @@ Only `branch` and `merge-to-head` strategies are accepted; `head` is a compile-t
 Pass `cwd` to target a repo other than `process.cwd()`. Relative paths resolve against `process.cwd()`; absolute paths pass through. A `CwdError` is thrown if the path does not exist or is not a directory.
 
 ```typescript
-import { createWorktree } from "@ai-hero/sandcastle";
+import { createWorktree } from "@yibeibankaishui/archloop";
 
 await using wt = await createWorktree({
   branchStrategy: { type: "branch", branch: "agent/fix-42" },
@@ -395,14 +395,14 @@ await wt.interactive({
 // Run an AFK agent in the worktree (sandbox is required)
 const result = await wt.run({
   agent: claudeCode("claude-opus-4-6"),
-  sandbox: docker({ imageName: "sandcastle:myrepo" }),
+  sandbox: docker({ imageName: "archloop:myrepo" }),
   prompt: "Fix issue #42.",
   maxIterations: 3,
 });
 console.log(result.commits); // commits made during the run
 
 // Create a long-lived sandbox from the worktree
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { docker } from "@yibeibankaishui/archloop/sandboxes/docker";
 
 await using sandbox = await wt.createSandbox({
   sandbox: docker(),
@@ -494,10 +494,10 @@ await sandbox.close();
 
 ## How it works
 
-Sandcastle uses a **branch strategy** configured on the sandbox provider to control how the agent's changes relate to branches. There are three strategies:
+archLoop uses a **branch strategy** configured on the sandbox provider to control how the agent's changes relate to branches. There are three strategies:
 
 - **Head** (`{ type: "head" }`) — The agent writes directly to the host working directory. No worktree, no branch indirection. This is the default for bind-mount providers like `docker()`.
-- **Merge-to-head** (`{ type: "merge-to-head" }`) — Sandcastle creates a temporary branch in a git worktree. The agent works on the temp branch, and changes are merged back to HEAD when done. The temp branch is cleaned up after merge.
+- **Merge-to-head** (`{ type: "merge-to-head" }`) — archLoop creates a temporary branch in a git worktree. The agent works on the temp branch, and changes are merged back to HEAD when done. The temp branch is cleaned up after merge.
 - **Branch** (`{ type: "branch", branch: "foo" }`) — Commits land on an explicitly named branch in a git worktree.
 
 For bind-mount providers (like Docker), the worktree directory is bind-mounted into the container — the agent writes directly to the host filesystem through the mount, so no sync is needed.
@@ -506,7 +506,7 @@ From your point of view, you just configure `branchStrategy: { type: 'branch', b
 
 ## Prompts
 
-Sandcastle uses a flexible prompt system. You write the prompt, and the engine executes it — no opinions about workflow, task management, or context sources are imposed.
+archLoop uses a flexible prompt system. You write the prompt, and the engine executes it — no opinions about workflow, task management, or context sources are imposed.
 
 ### Prompt resolution
 
@@ -521,7 +521,7 @@ You must provide exactly one of:
 
 The substitution and expansion features below apply **only** to prompts sourced from `promptFile`.
 
-> **Convention**: `sandcastle init` scaffolds `.sandcastle/prompt.md` and all templates explicitly reference it via `promptFile: ".sandcastle/prompt.md"`. This is a convention, not an automatic fallback — Sandcastle does not read `.sandcastle/prompt.md` unless you pass it as `promptFile`.
+> **Convention**: `archloop init` scaffolds `.archloop/prompt.md` and all templates explicitly reference it via `promptFile: ".archloop/prompt.md"`. This is a convention, not an automatic fallback — archLoop does not read `.archloop/prompt.md` unless you pass it as `promptFile`.
 
 ### Dynamic context with `` !`command` ``
 
@@ -532,7 +532,7 @@ Commands run **inside the sandbox** after `sandbox.onSandboxReady` hooks complet
 ```markdown
 # Open issues
 
-!`gh issue list --state open --label Sandcastle --json number,title,body,comments,labels --limit 20`
+!`gh issue list --state open --label archLoop --json number,title,body,comments,labels --limit 20`
 
 # Recent commits
 
@@ -546,7 +546,7 @@ If any command exits with a non-zero code, the run fails immediately with an err
 Use `{{KEY}}` placeholders in your prompt to inject values from the `promptArgs` option. This is useful for reusing the same prompt file across multiple runs with different parameters.
 
 ```typescript
-import { run } from "@ai-hero/sandcastle";
+import { run } from "@yibeibankaishui/archloop";
 
 await run({
   promptFile: "./my-prompt.md",
@@ -572,7 +572,7 @@ A `{{KEY}}` placeholder with no matching prompt argument is an error. Unused pro
 
 ### Built-in prompt arguments
 
-Sandcastle automatically injects two built-in prompt arguments into every prompt:
+archLoop automatically injects two built-in prompt arguments into every prompt:
 
 | Placeholder         | Value                                                             |
 | ------------------- | ----------------------------------------------------------------- |
@@ -612,11 +612,11 @@ Tell the agent to output your chosen string(s) in the prompt, and the orchestrat
 
 ### Structured output
 
-Use `Output.object()` to extract a typed, schema-validated JSON payload from the agent's stdout. The agent emits its answer inside an XML tag you specify, and Sandcastle parses, validates, and returns it on `result.output`. See [ADR 0010](docs/adr/0010-structured-output.md) for design rationale.
+Use `Output.object()` to extract a typed, schema-validated JSON payload from the agent's stdout. The agent emits its answer inside an XML tag you specify, and archLoop parses, validates, and returns it on `result.output`. See [ADR 0010](docs/adr/0010-structured-output.md) for design rationale.
 
 ```ts
-import { run, Output, claudeCode } from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { run, Output, claudeCode } from "@yibeibankaishui/archloop";
+import { docker } from "@yibeibankaishui/archloop/sandboxes/docker";
 import { z } from "zod";
 
 const result = await run({
@@ -640,7 +640,7 @@ console.log(result.output.score); // typed as number
 
 ### Templates
 
-`sandcastle init` prompts you to choose a sandbox provider (`docker` or `no-sandbox`), a backlog manager (GitHub Issues or Beads), a workflow template, and a **Project profile** (your repo's language or build-system shape). It scaffolds a ready-to-use prompt and `main.mts` suited to the workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. The scaffolded entrypoint reflects the sandbox choice you made during init: `docker` generates `docker(...)`, while `no-sandbox` generates `noSandbox()`. Five templates are available:
+`archloop init` prompts you to choose a sandbox provider (`docker` or `no-sandbox`), a backlog manager (GitHub Issues or Beads), a workflow template, and a **Project profile** (your repo's language or build-system shape). It scaffolds a ready-to-use prompt and `main.mts` suited to the workflow. If your project's `package.json` has `"type": "module"`, the file will be named `main.ts` instead. The scaffolded entrypoint reflects the sandbox choice you made during init: `docker` generates `docker(...)`, while `no-sandbox` generates `noSandbox()`. Five templates are available:
 
 | Template                       | Description                                                               |
 | ------------------------------ | ------------------------------------------------------------------------- |
@@ -650,30 +650,30 @@ console.log(result.output.score); // typed as number
 | `parallel-planner`             | Plans parallelizable issues, executes on separate branches, then merges   |
 | `parallel-planner-with-review` | Plans parallelizable issues, executes with per-branch review, then merges |
 
-`parallel-planner-with-review` runs review and merge when an issue branch already has commits ahead of your current branch, even if the latest implementer run made no new commits (for example after a prior review failure). Prompts document the implement → review → merge → close lifecycle (only the merge phase closes issues), and the template stops repeated empty implement loops with actionable recovery steps. Re-run `sandcastle init` in an existing project to pick up template updates.
+`parallel-planner-with-review` runs review and merge when an issue branch already has commits ahead of your current branch, even if the latest implementer run made no new commits (for example after a prior review failure). Prompts document the implement → review → merge → close lifecycle (only the merge phase closes issues), and the template stops repeated empty implement loops with actionable recovery steps. Re-run `archloop init` in an existing project to pick up template updates.
 
-For GitHub Issues backlogs, scaffolded planner templates list only issues in the current `ready-for-agent` queue (plus the `Sandcastle` label when label creation is enabled) and fail fast if the planner returns an issue outside that allowed queue.
+For GitHub Issues backlogs, scaffolded planner templates list only issues in the current `ready-for-agent` queue (plus the `archLoop` label when label creation is enabled) and fail fast if the planner returns an issue outside that allowed queue.
 
-Select a template during `sandcastle init` when prompted, or re-run init in a fresh repo to try a different one.
+Select a template during `archloop init` when prompted, or re-run init in a fresh repo to try a different one.
 
-For all templates except `blank`, `.sandcastle/bootstrap.sh` is the repository bootstrap contract. `sandcastle init` scaffolds this user-editable script from your Project profile; non-blank templates run it from `sandbox.onSandboxReady` after the worktree is mounted and before the agent runs. Templates do not generate or repair bootstrap at run time. See [Project profiles](#project-profiles) under `sandcastle init` for the full model.
+For all templates except `blank`, `.archloop/bootstrap.sh` is the repository bootstrap contract. `archloop init` scaffolds this user-editable script from your Project profile; non-blank templates run it from `sandbox.onSandboxReady` after the worktree is mounted and before the agent runs. Templates do not generate or repair bootstrap at run time. See [Project profiles](#project-profiles) under `archloop init` for the full model.
 
 ### Preset agent roles (optional)
 
-After you choose a template, init can optionally add **preset agent roles**. In this mental model, the **template** is the default **workflow**, while a **preset** is an extra **reusable role** (for example reviewer, planner, merger, or WeChat Mini Program–oriented work) with bundled Markdown skills. Selected roles are copied to `.sandcastle/agents/` and `.sandcastle/skills/`, and `.sandcastle/agent-profiles.json` records suggested agent provider, model, and effort. Compose those prompts from `main.mts` with `run()` when you want to involve a role; nothing is auto-wired into the template loop in v1. Provider recommendations are metadata only and may require choosing matching installed runtimes during init.
+After you choose a template, init can optionally add **preset agent roles**. In this mental model, the **template** is the default **workflow**, while a **preset** is an extra **reusable role** (for example reviewer, planner, merger, or WeChat Mini Program–oriented work) with bundled Markdown skills. Selected roles are copied to `.archloop/agents/` and `.archloop/skills/`, and `.archloop/agent-profiles.json` records suggested agent provider, model, and effort. Compose those prompts from `main.mts` with `run()` when you want to involve a role; nothing is auto-wired into the template loop in v1. Provider recommendations are metadata only and may require choosing matching installed runtimes during init.
 
 ### Capability packs
 
-A **capability pack** is an explicit **init** choice that specializes Sandcastle for a class of development work. It composes existing init concepts — **template**, **Project profile**, **preset agents**, **skills**, context files, a verification entrypoint, and optional **capability add-ons** — into one coherent agent environment. Sandcastle does **not** auto-detect or infer a capability pack from repository files in the first version.
+A **capability pack** is an explicit **init** choice that specializes archLoop for a class of development work. It composes existing init concepts — **template**, **Project profile**, **preset agents**, **skills**, context files, a verification entrypoint, and optional **capability add-ons** — into one coherent agent environment. archLoop does **not** auto-detect or infer a capability pack from repository files in the first version.
 
-| Concept               | What it controls                                                                                                           |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| **Project profile**   | Language or build-system shape → Dockerfile/Containerfile tools and `.sandcastle/bootstrap.sh`                             |
-| **Template**          | Orchestration workflow (issue loop, parallel planner, reviewer steps, etc.)                                                |
-| **Preset agent**      | Reusable role with bundled Markdown **skills** (copied to `.sandcastle/agents/` and `.sandcastle/skills/`)                 |
-| **Skill**             | Domain guidance file a preset or capability pack references                                                                |
-| **Capability pack**   | Domain specialization: defaults for template/profile/presets, context files, `.sandcastle/verify.sh`, and optional add-ons |
-| **Capability add-on** | Narrower optional extension (often sandbox-specific); e.g. WeChat DevTools MCP runtime debugging                           |
+| Concept               | What it controls                                                                                                         |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| **Project profile**   | Language or build-system shape → Dockerfile/Containerfile tools and `.archloop/bootstrap.sh`                             |
+| **Template**          | Orchestration workflow (issue loop, parallel planner, reviewer steps, etc.)                                              |
+| **Preset agent**      | Reusable role with bundled Markdown **skills** (copied to `.archloop/agents/` and `.archloop/skills/`)                   |
+| **Skill**             | Domain guidance file a preset or capability pack references                                                              |
+| **Capability pack**   | Domain specialization: defaults for template/profile/presets, context files, `.archloop/verify.sh`, and optional add-ons |
+| **Capability add-on** | Narrower optional extension (often sandbox-specific); e.g. WeChat DevTools MCP runtime debugging                         |
 
 First-version packs:
 
@@ -684,7 +684,7 @@ First-version packs:
 
 Capability packs provide defaults; explicit init flags override them. For example, `--capability miniprogram` defaults to `parallel-planner-with-review`, `node` project profile, and the `miniprogram` preset, but you can still pass `--template`, `--project-profile`, or `--preset-agents` to customize.
 
-When you pass `--capability` explicitly (or choose a non-generic pack interactively), init writes `.sandcastle/capability.json` as scaffold metadata. Generated verification workflows do **not** require reading the manifest at run time.
+When you pass `--capability` explicitly (or choose a non-generic pack interactively), init writes `.archloop/capability.json` as scaffold metadata. Generated verification workflows do **not** require reading the manifest at run time.
 
 #### WeChat Mini Program (`miniprogram`)
 
@@ -693,21 +693,21 @@ Select `miniprogram` during init (`--capability miniprogram`) for native WeChat 
 **Init setup**
 
 - Interactive init asks for a capability pack before template selection. Scripted init uses `--capability miniprogram`.
-- Init detects project-local `miniprogram-ci` and can offer to install it as a dev dependency (`--install-miniprogram-ci true` in scripted mode). Global CLI and `npx` do not satisfy Sandcastle's managed loop — the package must live in the project.
-- Init writes `.sandcastle/context/miniprogram-setup.md` with a snapshot of detected AppID, upload key, `wx:check`, and `miniprogram-ci` state plus next-step guidance (not updated by later verification runs).
+- Init detects project-local `miniprogram-ci` and can offer to install it as a dev dependency (`--install-miniprogram-ci true` in scripted mode). Global CLI and `npx` do not satisfy archLoop's managed loop — the package must live in the project.
+- Init writes `.archloop/context/miniprogram-setup.md` with a snapshot of detected AppID, upload key, `wx:check`, and `miniprogram-ci` state plus next-step guidance (not updated by later verification runs).
 
 **AppID and upload key**
 
 - **AppID:** `WX_APPID` overrides `project.config.json`; placeholder or missing AppID keeps platform validation in `not_configured`.
-- **Upload key:** prefer `WX_UPLOAD_KEY_PATH` pointing **outside** the repo. Repository-local drop zone: `.sandcastle/auth/wx-upload/private.{appid}.key` (gitignored). Never commit `private.*.key` files.
+- **Upload key:** prefer `WX_UPLOAD_KEY_PATH` pointing **outside** the repo. Repository-local drop zone: `.archloop/auth/wx-upload/private.{appid}.key` (gitignored). Never commit `private.*.key` files.
 - On the [WeChat public platform](https://mp.weixin.qq.com/), configure the code upload private key and **IP allowlist** for CI preview/upload when using `miniprogram-ci`.
 
 **Verification loop**
 
-After Mini Program code changes, run `.sandcastle/verify.sh` from the repository root:
+After Mini Program code changes, run `.archloop/verify.sh` from the repository root:
 
 1. If `npm run wx:check` exists, the wrapper runs it and preserves JSONL diagnostics when the script writes them.
-2. Otherwise `.sandcastle/wx-check-native.mjs` runs native structure checks and optional `miniprogram-ci` preview when platform validation is configured.
+2. Otherwise `.archloop/wx-check-native.mjs` runs native structure checks and optional `miniprogram-ci` preview when platform validation is configured.
 
 Artifacts:
 
@@ -730,7 +730,7 @@ Do not claim full platform validation passed when `platform` is `not_configured`
 
 **Runtime-debug add-on (`runtime-debug`)**
 
-Optional **no-sandbox only** add-on for WeChat Developer Tools / MCP runtime debugging (simulator, console, screenshots). Interactive init offers it after you choose the `miniprogram` capability and sandbox provider; scripted init uses `--capability-addons runtime-debug`. With Docker sandbox, the add-on appears disabled with an explanation. Init scaffolds context and prompt guidance but does **not** install MCP servers, configure DevTools, or start login flows. Runtime debugging supplements — it does not replace — `.sandcastle/verify.sh` unless the task explicitly requires runtime evidence.
+Optional **no-sandbox only** add-on for WeChat Developer Tools / MCP runtime debugging (simulator, console, screenshots). Interactive init offers it after you choose the `miniprogram` capability and sandbox provider; scripted init uses `--capability-addons runtime-debug`. With Docker sandbox, the add-on appears disabled with an explanation. Init scaffolds context and prompt guidance but does **not** install MCP servers, configure DevTools, or start login flows. Runtime debugging supplements — it does not replace — `.archloop/verify.sh` unless the task explicitly requires runtime evidence.
 
 **Out of scope (first version)**
 
@@ -740,9 +740,9 @@ Optional **no-sandbox only** add-on for WeChat Developer Tools / MCP runtime deb
 
 ## CLI commands
 
-### `sandcastle init`
+### `archloop init`
 
-Scaffolds the `.sandcastle/` config directory and optionally builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a capability pack (first), default scaffold agent, installed runtimes, sandbox provider, backlog manager, optional capability add-ons (when the pack exposes them), workflow template, and Project profile. Init now offers `docker` and `no-sandbox`: choosing `docker` follows the normal image-build flow, while choosing `no-sandbox` skips image build during init and rewrites the scaffolded `main.mts` or `main.ts` to call `noSandbox()`. After scaffold (and before optional image build), init also points selected tools such as GitHub Issues, Codex, and Cursor toward env keys or Hub-owned auth sessions under the Sandcastle user data directory. When you select the `miniprogram` capability pack, init may also offer project-local `miniprogram-ci` installation and writes Mini Program verification scaffold files.
+Scaffolds the `.archloop/` config directory and optionally builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a capability pack (first), default scaffold agent, installed runtimes, sandbox provider, backlog manager, optional capability add-ons (when the pack exposes them), workflow template, and Project profile. Init now offers `docker` and `no-sandbox`: choosing `docker` follows the normal image-build flow, while choosing `no-sandbox` skips image build during init and rewrites the scaffolded `main.mts` or `main.ts` to call `noSandbox()`. After scaffold (and before optional image build), init also points selected tools such as GitHub Issues, Codex, and Cursor toward env keys or Hub-owned auth sessions under the archLoop user data directory. When you select the `miniprogram` capability pack, init may also offer project-local `miniprogram-ci` installation and writes Mini Program verification scaffold files.
 
 Think of the init agent choices as two layers:
 
@@ -752,12 +752,12 @@ Think of the init agent choices as two layers:
 `main.mts`/`main.ts` remains the orchestration surface after init. If you install multiple runtimes, edit that file to import and call the providers you want for each `run()` or `createSandbox()` flow. For scripted init, omit `--runtimes` to install the selected `--agent` runtime, or pass a comma-separated list.
 
 When you pair `--sandbox no-sandbox` with `--backlog beads`, init validates that
-`bd` is available from the bundled `@beads/bd` dependency, `SANDCASTLE_BD_PATH`,
+`bd` is available from the bundled `@beads/bd` dependency, `ARCHLOOP_BD_PATH`,
 or your host `PATH`. In no-sandbox mode, prompt shell expressions run on the
 host instead of inside a container, so Beads still needs to be reachable from
 the host environment before the generated workflow can run.
 
-With `--sandbox no-sandbox` and `--project-profile python`, bootstrap runs on the host rather than in the Python profile image. Install `python3-venv` and/or `uv` on the host (Debian/Ubuntu: `apt install python3-venv`) so `.sandcastle/bootstrap.sh` can create a working virtualenv, or use the `docker` sandbox provider so the generated image supplies those tools.
+With `--sandbox no-sandbox` and `--project-profile python`, bootstrap runs on the host rather than in the Python profile image. Install `python3-venv` and/or `uv` on the host (Debian/Ubuntu: `apt install python3-venv`) so `.archloop/bootstrap.sh` can create a working virtualenv, or use the `docker` sandbox provider so the generated image supplies those tools.
 
 #### Project profiles
 
@@ -772,12 +772,12 @@ Supported first-version profiles:
 | `python`  | Python, pip, venv, and uv in the image; setup-only Python bootstrap     |
 | `cpp`     | C++ toolchain in the image; setup-only CMake or Makefile bootstrap      |
 
-`generic` is the default. Sandcastle does **not** auto-detect project type in the first version — pick the closest profile or stay on `generic`. AI-generated bootstrap and automatic detection are out of scope for v1.
+`generic` is the default. archLoop does **not** auto-detect project type in the first version — pick the closest profile or stay on `generic`. AI-generated bootstrap and automatic detection are out of scope for v1.
 
 What Project profile affects:
 
 - **Dockerfile or Containerfile** — language-specific tool layers composed with agent runtime and backlog manager layers.
-- **`.sandcastle/bootstrap.sh`** — a deterministic, user-editable scaffold script generated at init.
+- **`.archloop/bootstrap.sh`** — a deterministic, user-editable scaffold script generated at init.
 - **Workflow prompts** — stack-specific verification guidance substituted into scaffolded prompt templates (for example npm checks for `node`, pytest-oriented checks for `python`, CMake/Make checks for `cpp`; `generic` stays user-editable).
 
 What Project profile does **not** affect:
@@ -791,11 +791,11 @@ Bootstrap behavior:
 - Generated during init as an editable scaffold; init does **not** run or validate bootstrap.
 - Bootstrap is **not** part of image build — it is repository setup that runs at sandbox start.
 - Non-blank templates invoke bootstrap from `sandbox.onSandboxReady` after the worktree is mounted and before the agent runs.
-- Scaffolded `main.mts` hooks use `timeoutMs: 300_000` (5 minutes) for bootstrap so typical dependency installs are not cut off by the generic 60 s hook default. Edit `timeoutMs` in `.sandcastle/main.mts` if your setup needs longer.
+- Scaffolded `main.mts` hooks use `timeoutMs: 300_000` (5 minutes) for bootstrap so typical dependency installs are not cut off by the generic 60 s hook default. Edit `timeoutMs` in `.archloop/main.mts` if your setup needs longer.
 
 ```bash
 # Mini Program capability pack (Docker — core verification loop)
-npx sandcastle init \
+npx archloop init \
   --agent claude-code \
   --runtimes claude-code \
   --sandbox docker \
@@ -805,180 +805,180 @@ npx sandcastle init \
   --project-profile node \
   --preset-agents miniprogram \
   --install-miniprogram-ci true \
-  --create-sandcastle-label false \
+  --create-archloop-label false \
   --build-image false
 ```
 
-Omit `--capability` for implicit `generic` without writing `.sandcastle/capability.json`. Add `--capability-addons runtime-debug` only with `--sandbox no-sandbox` when you want WeChat DevTools MCP guidance on the host.
+Omit `--capability` for implicit `generic` without writing `.archloop/capability.json`. Add `--capability-addons runtime-debug` only with `--sandbox no-sandbox` when you want WeChat DevTools MCP guidance on the host.
 
-Existing single-runtime projects remain valid. `sandcastle init` does not automatically migrate an existing `.sandcastle/` config directory; it errors instead of overwriting your customizations.
+Existing single-runtime projects remain valid. `archloop init` does not automatically migrate an existing `.archloop/` config directory; it errors instead of overwriting your customizations.
 
-| Option                      | Required | Default                                           | Description                                                                                                 |
-| --------------------------- | -------- | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `--image-name`              | No       | `sandcastle:<repo-dir-name>`                      | Docker image name                                                                                           |
-| `--agent`                   | No       | Interactive prompt                                | Default scaffold agent (`claude-code`, `pi`, `codex`, `cursor`, `opencode`)                                 |
-| `--runtimes`                | No       | Selected `--agent` runtime, or interactive prompt | Comma-separated runtimes to install (`claude-code,codex`); `--installed-runtimes` is accepted as an alias   |
-| `--model`                   | No       | Agent's default model                             | Model to use (e.g. `claude-sonnet-4-6`). Defaults to agent's default                                        |
-| `--template`                | No       | Interactive prompt                                | Template to scaffold (e.g. `blank`, `simple-loop`)                                                          |
-| `--project-profile`         | No       | `generic`                                         | Project type for containerfile tools and bootstrap (`generic`, `node`, `python`, `cpp`)                     |
-| `--sandbox`                 | No       | Interactive prompt                                | Sandbox provider (`docker` or `no-sandbox`)                                                                 |
-| `--backlog`                 | No       | Interactive prompt                                | Backlog manager (`github-issues` or `beads`)                                                                |
-| `--preset-agents`           | No       | Interactive prompt                                | Comma-separated preset ids (e.g. `reviewer,planner`) or `none`                                              |
-| `--capability`              | No       | Implicit `generic`                                | Capability pack (`generic`, `miniprogram`). Explicit non-generic values write `.sandcastle/capability.json` |
-| `--capability-addons`       | No       | None                                              | Comma-separated add-on ids for the selected pack (e.g. `runtime-debug` for `miniprogram` + no-sandbox)      |
-| `--install-miniprogram-ci`  | No       | Interactive prompt when applicable                | `true`/`false` to install project-local `miniprogram-ci` during `miniprogram` init                          |
-| `--create-sandcastle-label` | No       | Interactive prompt                                | `true`/`false` for creating the `Sandcastle` GitHub label                                                   |
-| `--build-image`             | No       | Interactive prompt                                | `true`/`false` to build sandbox image after scaffold                                                        |
+| Option                     | Required | Default                                           | Description                                                                                               |
+| -------------------------- | -------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `--image-name`             | No       | `archloop:<repo-dir-name>`                        | Docker image name                                                                                         |
+| `--agent`                  | No       | Interactive prompt                                | Default scaffold agent (`claude-code`, `pi`, `codex`, `cursor`, `opencode`)                               |
+| `--runtimes`               | No       | Selected `--agent` runtime, or interactive prompt | Comma-separated runtimes to install (`claude-code,codex`); `--installed-runtimes` is accepted as an alias |
+| `--model`                  | No       | Agent's default model                             | Model to use (e.g. `claude-sonnet-4-6`). Defaults to agent's default                                      |
+| `--template`               | No       | Interactive prompt                                | Template to scaffold (e.g. `blank`, `simple-loop`)                                                        |
+| `--project-profile`        | No       | `generic`                                         | Project type for containerfile tools and bootstrap (`generic`, `node`, `python`, `cpp`)                   |
+| `--sandbox`                | No       | Interactive prompt                                | Sandbox provider (`docker` or `no-sandbox`)                                                               |
+| `--backlog`                | No       | Interactive prompt                                | Backlog manager (`github-issues` or `beads`)                                                              |
+| `--preset-agents`          | No       | Interactive prompt                                | Comma-separated preset ids (e.g. `reviewer,planner`) or `none`                                            |
+| `--capability`             | No       | Implicit `generic`                                | Capability pack (`generic`, `miniprogram`). Explicit non-generic values write `.archloop/capability.json` |
+| `--capability-addons`      | No       | None                                              | Comma-separated add-on ids for the selected pack (e.g. `runtime-debug` for `miniprogram` + no-sandbox)    |
+| `--install-miniprogram-ci` | No       | Interactive prompt when applicable                | `true`/`false` to install project-local `miniprogram-ci` during `miniprogram` init                        |
+| `--create-archloop-label`  | No       | Interactive prompt                                | `true`/`false` for creating the `archLoop` GitHub label                                                   |
+| `--build-image`            | No       | Interactive prompt                                | `true`/`false` to build sandbox image after scaffold                                                      |
 
-### `sandcastle project status`
+### `archloop project status`
 
-Reports the canonical git repo root, the Sandcastle user data directory, the Hub project directory, whether `bd` is available, and a CLI-first Hub task board summary. It works from any git repository, even if you have not run `sandcastle init` yet.
+Reports the canonical git repo root, the archLoop user data directory, the Hub project directory, whether `bd` is available, and a CLI-first Hub task board summary. It works from any git repository, even if you have not run `archloop init` yet.
 
 The summary includes task counts by Hub status, active runs and batch statuses, failed tasks with failure reason and suggested next action, sync state counts such as `push_pending` or `conflict`, recent Hub events, and paths to Hub run directories for full logs and artifacts. Output remains useful when Beads is unavailable, there are no tasks, no active runs, or GitHub sync is not configured.
 
-Sandcastle resolves the user data directory from `XDG_DATA_HOME` when it is set and falls back to `~/.local/share/sandcastle`.
+archLoop resolves the user data directory from `XDG_DATA_HOME` when it is set and falls back to `~/.local/share/archloop`.
 
-### `sandcastle agent-config path`
+### `archloop agent-config path`
 
-Prints the Hub-wide agent role config file path under the Sandcastle user data directory. Hub agent roles configure reusable stage providers and models for planning, triage, implementation, review, merge, and recovery. Credentials and login state stay in Hub env files and auth directories, not in role config.
+Prints the Hub-wide agent role config file path under the archLoop user data directory. Hub agent roles configure reusable stage providers and models for planning, triage, implementation, review, merge, and recovery. Credentials and login state stay in Hub env files and auth directories, not in role config.
 
-### `sandcastle agent-config show`
+### `archloop agent-config show`
 
 Displays configured Hub agent roles and clearly reports missing roles. Use this before running agent-driven Hub flows to confirm provider/model settings are present.
 
-### `sandcastle agent-config init`
+### `archloop agent-config init`
 
-Runs an interactive wizard to configure all Hub agent roles. After you choose a provider, Sandcastle offers a provider-specific model picker (default model marked) with a custom-model escape hatch, then prompts for supported provider options such as Codex/Claude effort or Cursor mode. You can apply one provider/model/options set to every role, or configure each role individually. Use this for first-time Hub agent setup.
+Runs an interactive wizard to configure all Hub agent roles. After you choose a provider, archLoop offers a provider-specific model picker (default model marked) with a custom-model escape hatch, then prompts for supported provider options such as Codex/Claude effort or Cursor mode. You can apply one provider/model/options set to every role, or configure each role individually. Use this for first-time Hub agent setup.
 
-### `sandcastle agent-config configure`
+### `archloop agent-config configure`
 
-Alias for `sandcastle agent-config init`.
+Alias for `archloop agent-config init`.
 
-### `sandcastle agent-config set-role <role> [--provider <provider>] [--model <model>]`
+### `archloop agent-config set-role <role> [--provider <provider>] [--model <model>]`
 
 Persists provider, model, and optional provider options for a supported Hub agent role. In an interactive terminal, omit `--provider` and `--model` to configure the role via prompts. In non-interactive mode, both flags are required. Pass `--options` with comma-separated `key=value` pairs for provider-specific settings such as `effort=medium` or `mode=plan`. Role config stores provider/model/options only and rejects credential-like fields.
 
-### `sandcastle env path`
+### `archloop env path`
 
-Prints the Hub-wide env file path under the Sandcastle user data directory. Hub flows load credentials from this file so you do not need `sandcastle init` in every target repository.
+Prints the Hub-wide env file path under the archLoop user data directory. Hub flows load credentials from this file so you do not need `archloop init` in every target repository.
 
-### `sandcastle env show`
+### `archloop env show`
 
-Displays configured Hub env keys with masked values. `process.env` overrides file values at runtime. Empty known keys include a short acquisition hint and a pointer to `sandcastle env init`.
+Displays configured Hub env keys with masked values. `process.env` overrides file values at runtime. Empty known keys include a short acquisition hint and a pointer to `archloop env init`.
 
-### `sandcastle env init`
+### `archloop env init`
 
-Runs an interactive wizard to configure shared Hub env keys such as `CURSOR_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_KEY`, `OPENCODE_API_KEY`, and `GH_TOKEN`. Before each prompt, the wizard shows provider-specific guidance (including stable documentation URLs) for where to obtain the credential. Leaving a prompt blank keeps the existing value and does not clear it. The wizard prioritizes env keys required by your configured Hub agent roles. For Codex, `OPENAI_KEY` uses OpenAI API billing; use `sandcastle auth login codex` for a Codex/ChatGPT CLI login session.
+Runs an interactive wizard to configure shared Hub env keys such as `CURSOR_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_KEY`, `OPENCODE_API_KEY`, and `GH_TOKEN`. Before each prompt, the wizard shows provider-specific guidance (including stable documentation URLs) for where to obtain the credential. Leaving a prompt blank keeps the existing value and does not clear it. The wizard prioritizes env keys required by your configured Hub agent roles. For Codex, `OPENAI_KEY` uses OpenAI API billing; use `archloop auth login codex` for a Codex/ChatGPT CLI login session.
 
-### `sandcastle env configure`
+### `archloop env configure`
 
-Alias for `sandcastle env init`.
+Alias for `archloop env init`.
 
-### `sandcastle env set <key> [value]`
+### `archloop env set <key> [value]`
 
 Persists one Hub env value. In an interactive terminal, omit `value` to enter it securely at a prompt. In non-interactive mode, `value` is required.
 
-### `sandcastle auth show`
+### `archloop auth show`
 
-Summarizes provider auth for Hub flows. Each provider reports whether auth is satisfied by `process.env`, the Hub env file, a Hub-owned auth directory/session, or is missing. Providers without first-pass login support, such as Cursor and OpenCode, show `sandcastle env set ...` guidance.
+Summarizes provider auth for Hub flows. Each provider reports whether auth is satisfied by `process.env`, the Hub env file, a Hub-owned auth directory/session, or is missing. Providers without first-pass login support, such as Cursor and OpenCode, show `archloop env set ...` guidance.
 
-### `sandcastle auth path <provider>`
+### `archloop auth path <provider>`
 
-Prints the Hub-owned auth directory for login-capable providers. `sandcastle auth path codex` prints the `CODEX_HOME` directory; `sandcastle auth path github` prints the `GH_CONFIG_DIR` directory. Both live under the Sandcastle user data directory and are reusable across Hub projects.
+Prints the Hub-owned auth directory for login-capable providers. `archloop auth path codex` prints the `CODEX_HOME` directory; `archloop auth path github` prints the `GH_CONFIG_DIR` directory. Both live under the archLoop user data directory and are reusable across Hub projects.
 
-### `sandcastle auth login codex`
+### `archloop auth login codex`
 
-Runs `codex login` with `CODEX_HOME` set to Sandcastle's Hub-owned Codex auth directory. This configures a Codex/ChatGPT CLI login session. It is distinct from `OPENAI_KEY`, which remains available through `sandcastle env set OPENAI_KEY <value>` and uses OpenAI API billing.
+Runs `codex login` with `CODEX_HOME` set to archLoop's Hub-owned Codex auth directory. This configures a Codex/ChatGPT CLI login session. It is distinct from `OPENAI_KEY`, which remains available through `archloop env set OPENAI_KEY <value>` and uses OpenAI API billing.
 
-### `sandcastle auth login github`
+### `archloop auth login github`
 
-Runs `gh auth login --insecure-storage` with `GH_CONFIG_DIR` set to Sandcastle's Hub-owned GitHub auth directory for GitHub Issues task sync. In non-interactive mode, both auth login commands fail with the exact command to run from an interactive shell instead of waiting for browser auth.
+Runs `gh auth login --insecure-storage` with `GH_CONFIG_DIR` set to archLoop's Hub-owned GitHub auth directory for GitHub Issues task sync. In non-interactive mode, both auth login commands fail with the exact command to run from an interactive shell instead of waiting for browser auth.
 
-### `sandcastle tasks list`
+### `archloop tasks list`
 
 Shows the Hub task board grouped by canonical Hub task status from Beads data in the current git repository. Use it to inspect inbox, ready, blocked, implementation, review, merge, done, failure, and sync-conflict buckets. Each displayed task includes a 1-based list number that can be used as a task selector in follow-up commands.
 
-### `sandcastle tasks show <task-selector>`
+### `archloop tasks show <task-selector>`
 
 Shows a single Beads task with its Hub status, Beads lifecycle state, claim metadata/state, labels, metadata, comments, remote refs, and run refs when present.
 
-Task selectors resolve in this order: exact Beads id, exact task title, then the 1-based number shown by `sandcastle tasks list`. Ambiguous title matches fail with candidate ids instead of guessing.
+Task selectors resolve in this order: exact Beads id, exact task title, then the 1-based number shown by `archloop tasks list`. Ambiguous title matches fail with candidate ids instead of guessing.
 
-### `sandcastle tasks create <title>`
+### `archloop tasks create <title>`
 
 Creates a local Beads task in the Hub `inbox` bucket with a `needs-triage` label and `origin` metadata. The `origin` flag defaults to `manual`; pass `--origin user-feedback` for feedback-driven tasks. Use `--description` for the task body and `--kind` for optional extra classification metadata when you need it. `--category` is accepted as an alias for `--kind`.
 
-### `sandcastle tasks triage [task-id]`
+### `archloop tasks triage [task-id]`
 
 Runs an agent-driven triage proposal flow for `inbox` and `needs_info` Hub tasks. The flow runs no-sandbox, prepares task and project context, invokes the configured **triage** role, lets you refine the recommendation in a proposal session, validates the final structured proposal, checks for unexpected repo or Beads mutations, and applies approved changes to local Beads only after confirmation. Applied comments start with `> *This was generated by AI during triage.*`.
 
-With no arguments in a TTY, Sandcastle opens a multi-select picker for inbox and needs_info tasks, including an **All inbox and needs_info tasks** option. Pass a Beads task id (for example `bd-42`) to triage one task, or `--query inbox,needs_info` to filter by Hub status. Pass `--yes` or `--approve` for one-shot mode: Sandcastle still invokes the agent and validates structured output, but only high-confidence, non-closing, non-dependency-changing decisions apply automatically. Wontfix, dependency changes, and medium/low confidence decisions require per-decision confirmation in interactive mode or are skipped as `unconfirmed` in non-interactive mode.
+With no arguments in a TTY, archLoop opens a multi-select picker for inbox and needs_info tasks, including an **All inbox and needs_info tasks** option. Pass a Beads task id (for example `bd-42`) to triage one task, or `--query inbox,needs_info` to filter by Hub status. Pass `--yes` or `--approve` for one-shot mode: archLoop still invokes the agent and validates structured output, but only high-confidence, non-closing, non-dependency-changing decisions apply automatically. Wontfix, dependency changes, and medium/low confidence decisions require per-decision confirmation in interactive mode or are skipped as `unconfirmed` in non-interactive mode.
 
-Configure the Hub **triage** agent role before first use (`sandcastle agent-config init` or `set-role triage`).
+Configure the Hub **triage** agent role before first use (`archloop agent-config init` or `set-role triage`).
 
-### `sandcastle tasks pull` / `push` / `sync`
+### `archloop tasks pull` / `push` / `sync`
 
 Use explicit direction commands for GitHub issue exchange:
 
-- `sandcastle tasks pull` imports GitHub Issues labeled `Sandcastle` into Beads. It defaults to open issues only; pass `--include-closed` when you intentionally want closed historical issues.
-- `sandcastle tasks push` sends linked local Hub collaboration state to GitHub. Local `ready_for_agent`, `ready_for_human`, `needs_info`, and `blocked` update GitHub labels; local `done` / `wontfix` closes the linked GitHub issue. It does not pull remote issues or create local tasks.
-- `sandcastle tasks sync --dry-run` previews the combined pull/push plan. `sandcastle tasks sync` asks for confirmation in a TTY, and non-interactive sync requires `--yes`.
+- `archloop tasks pull` imports GitHub Issues labeled `archLoop` into Beads. It defaults to open issues only; pass `--include-closed` when you intentionally want closed historical issues.
+- `archloop tasks push` sends linked local Hub collaboration state to GitHub. Local `ready_for_agent`, `ready_for_human`, `needs_info`, and `blocked` update GitHub labels; local `done` / `wontfix` closes the linked GitHub issue. It does not pull remote issues or create local tasks.
+- `archloop tasks sync --dry-run` previews the combined pull/push plan. `archloop tasks sync` asks for confirmation in a TTY, and non-interactive sync requires `--yes`.
 
-Beads remains the local task store. Execution statuses such as `implementing`, `reviewing`, `waiting_for_merge`, `merging`, and `failed` stay local. Tasks imported from GitHub remain linked through metadata such as `remote_refs` and `github_issue`. If an unlinked GitHub issue has the same normalized title as a local task, Sandcastle reports a duplicate link candidate instead of silently creating another local task.
+Beads remains the local task store. Execution statuses such as `implementing`, `reviewing`, `waiting_for_merge`, `merging`, and `failed` stay local. Tasks imported from GitHub remain linked through metadata such as `remote_refs` and `github_issue`. If an unlinked GitHub issue has the same normalized title as a local task, archLoop reports a duplicate link candidate instead of silently creating another local task.
 
-### `sandcastle tasks from-prd <prd-ref>`
+### `archloop tasks from-prd <prd-ref>`
 
 Runs the `prd-decomposition` proposal flow for a local PRD file. The flow runs no-sandbox, prepares PRD and project context, invokes the configured **planning** role, opens an interactive proposal session for tracer-bullet vertical slices, asks the agent for a final schema-validated task proposal, checks for unexpected repo or Beads mutations, and writes approved Beads tasks and dependency edges locally.
 
-Interactive sessions let you ask the agent to split, merge, reorder, reclassify, or clarify slices before approval. PRD-derived tasks default to `inbox` (`needs-triage`) unless you explicitly confirm direct `ready_for_agent` / `ready_for_human` creation after reviewing slice granularity, dependency suggestions, AFK/HITL classification, acceptance criteria, and warnings. Pass `--yes` for one-shot mode: Sandcastle still invokes the agent and validates structured output, creates inbox tasks by default, and does not silently create ready-state tasks.
+Interactive sessions let you ask the agent to split, merge, reorder, reclassify, or clarify slices before approval. PRD-derived tasks default to `inbox` (`needs-triage`) unless you explicitly confirm direct `ready_for_agent` / `ready_for_human` creation after reviewing slice granularity, dependency suggestions, AFK/HITL classification, acceptance criteria, and warnings. Pass `--yes` for one-shot mode: archLoop still invokes the agent and validates structured output, creates inbox tasks by default, and does not silently create ready-state tasks.
 
-Configure the Hub **planning** agent role before first use (`sandcastle agent-config init` or `set-role planning`).
+Configure the Hub **planning** agent role before first use (`archloop agent-config init` or `set-role planning`).
 
-Proposal flows never update GitHub Issues directly. They write local Beads tasks, comments, metadata, and dependency edges only; use `sandcastle tasks push` when you want collaboration labels or closures pushed to a remote issue tracker.
+Proposal flows never update GitHub Issues directly. They write local Beads tasks, comments, metadata, and dependency edges only; use `archloop tasks push` when you want collaboration labels or closures pushed to a remote issue tracker.
 
-### `sandcastle tasks comment <task-selector>`
+### `archloop tasks comment <task-selector>`
 
 Appends a readable Beads comment to the task without changing its status. Pass the comment text with `--body`, or omit it to enter the body interactively.
 
-### `sandcastle tasks recover <task-selector>`
+### `archloop tasks recover <task-selector>`
 
-Repairs failed or stale Hub execution state for a single Beads task. Recovery is the explicit command allowed to release stale claim metadata, reset abandoned execution statuses such as `implementing` or `reviewing`, and move recoverable `failed` tasks back to an appropriate collaboration state (`ready_for_agent`, `ready_for_human`, `blocked`, or `wontfix`). If a failed task still has unmerged work on its claimed task branch, recovery moves it back to `waiting_for_merge` instead of rerunning implementation. For `failed(close_failed)`, recovery checks whether the task branch is already merged into `HEAD`, reruns verification, retries local Beads close, and marks the task `done` without repeating merge. Each recovery appends a concise Beads comment starting with `> *This was generated by Sandcastle during task recovery.*`.
+Repairs failed or stale Hub execution state for a single Beads task. Recovery is the explicit command allowed to release stale claim metadata, reset abandoned execution statuses such as `implementing` or `reviewing`, and move recoverable `failed` tasks back to an appropriate collaboration state (`ready_for_agent`, `ready_for_human`, `blocked`, or `wontfix`). If a failed task still has unmerged work on its claimed task branch, recovery moves it back to `waiting_for_merge` instead of rerunning implementation. For `failed(close_failed)`, recovery checks whether the task branch is already merged into `HEAD`, reruns verification, retries local Beads close, and marks the task `done` without repeating merge. Each recovery appends a concise Beads comment starting with `> *This was generated by archLoop during task recovery.*`.
 
-### `sandcastle tasks doctor`
+### `archloop tasks doctor`
 
-Audits local Beads task-board state against Hub run events and git branch/worktree state without mutating Beads, git, or remote GitHub Issues. It reports multiple Sandcastle status labels, stale `metadata.hubStatus`, missing execution claim fields, failed tasks that still have branch work, merge-ready run history that is not selectable for merge, terminal tasks that still carry execution claim metadata, dirty source worktree gates, and task state that still needs `sandcastle tasks push`.
+Audits local Beads task-board state against Hub run events and git branch/worktree state without mutating Beads, git, or remote GitHub Issues. It reports multiple archLoop status labels, stale `metadata.hubStatus`, missing execution claim fields, failed tasks that still have branch work, merge-ready run history that is not selectable for merge, terminal tasks that still carry execution claim metadata, dirty source worktree gates, and task state that still needs `archloop tasks push`.
 
 Doctor output includes the next action for each finding: rerun the flow, recover a failed task, repair local state, or push task sync. Dirty source files are a Git safety gate, not repairable Beads task-state pollution; commit, stash, or revert them, then rerun the same flow so the batch resumes.
 
-### `sandcastle tasks repair-state <task-selector>`
+### `archloop tasks repair-state <task-selector>`
 
 Previews local Beads mutations that would repair task-state pollution for one task. In a TTY it asks for confirmation; in non-interactive mode, pass `--yes` after reviewing the preview. The command does not mutate remote GitHub Issues.
 
-Repair uses the same canonical task transition path as normal Hub lifecycle changes, preserving user custom labels while rewriting only Sandcastle-managed status labels and metadata. It can restore the QA incident shape where Hub events show `task_review_succeeded`, branch work is still unmerged, but Beads labels/metadata or claim fields are stale, moving the task back to `waiting_for_merge` with the correct claim. Failed agent attempts with `commitCount=0` and no branch work are not promoted by repair-state; use normal recovery policy for failed tasks.
+Repair uses the same canonical task transition path as normal Hub lifecycle changes, preserving user custom labels while rewriting only archLoop-managed status labels and metadata. It can restore the QA incident shape where Hub events show `task_review_succeeded`, branch work is still unmerged, but Beads labels/metadata or claim fields are stale, moving the task back to `waiting_for_merge` with the correct claim. Failed agent attempts with `commitCount=0` and no branch work are not promoted by repair-state; use normal recovery policy for failed tasks.
 
-### `sandcastle tasks delete <task-selector> [task-selector...]`
+### `archloop tasks delete <task-selector> [task-selector...]`
 
 Permanently deletes one or more local Beads tasks. This is destructive removal, not lifecycle close: Hub merge/triage/recovery use close to mark work done locally while keeping the Beads record. Delete removes the task from Beads and does not delete remote GitHub issues.
 
-Task selectors match `tasks show` and `tasks comment` (Beads id, exact title, or `tasks list` number). Pass multiple selectors in one command to batch-delete. In a TTY, Sandcastle previews with Beads dry-run output and asks for confirmation. In non-interactive mode, pass `--yes` to confirm or `--dry-run` to preview only. `--cascade` passes through to Beads to recursively delete dependent tasks when a blocker would otherwise fail deletion.
+Task selectors match `tasks show` and `tasks comment` (Beads id, exact title, or `tasks list` number). Pass multiple selectors in one command to batch-delete. In a TTY, archLoop previews with Beads dry-run output and asks for confirmation. In non-interactive mode, pass `--yes` to confirm or `--dry-run` to preview only. `--cascade` passes through to Beads to recursively delete dependent tasks when a blocker would otherwise fail deletion.
 
-### `sandcastle run <project> --flow <id>`
+### `archloop run <project> --flow <id>`
 
-Runs a Hub-owned flow against the Beads task board in the target git repository. Use `.` for the current repository. Hub flows use bundled prompts from Sandcastle itself, not repo-local `.sandcastle/` prompt files.
+Runs a Hub-owned flow against the Beads task board in the target git repository. Use `.` for the current repository. Hub flows use bundled prompts from archLoop itself, not repo-local `.archloop/` prompt files.
 
-The first available task-board flows are `no-review` and `with-review`. Proposal flows `prd-decomposition` and `triage` run through the shared proposal session runtime: `sandcastle run . --flow prd-decomposition --input <prd-ref>` and `sandcastle run . --flow triage --input <task-id|statuses>` execute end-to-end. The matching `sandcastle tasks` shortcuts remain the recommended entry points.
+The first available task-board flows are `no-review` and `with-review`. Proposal flows `prd-decomposition` and `triage` run through the shared proposal session runtime: `archloop run . --flow prd-decomposition --input <prd-ref>` and `archloop run . --flow triage --input <task-id|statuses>` execute end-to-end. The matching `archloop tasks` shortcuts remain the recommended entry points.
 
-When `--flow` targets `prd-decomposition` or `triage`, Sandcastle runs the same agent-driven proposal path as the task shortcut: no-sandbox execution, Hub-wide role config, structured output validation, proposal artifacts in the Hub run directory, mutation detection before apply, and local-only Beads writes. Remote issue updates remain outside proposal flows and happen through explicit `sandcastle tasks pull`, `tasks push`, or confirmed `tasks sync`.
+When `--flow` targets `prd-decomposition` or `triage`, archLoop runs the same agent-driven proposal path as the task shortcut: no-sandbox execution, Hub-wide role config, structured output validation, proposal artifacts in the Hub run directory, mutation detection before apply, and local-only Beads writes. Remote issue updates remain outside proposal flows and happen through explicit `archloop tasks pull`, `tasks push`, or confirmed `tasks sync`.
 
 The `no-review` flow reads the Beads ready queue, claims unblocked `ready_for_agent` tasks, runs an implementer with task id/title/branch supplied by TypeScript orchestration, and advances successful work to `waiting_for_merge`. Agent or sandbox failures move tasks to `failed` with a failure reason.
 
 The `with-review` flow adds a reviewer stage after implementation: successful work moves to `reviewing`, the reviewer receives the task branch and diff/commit context from orchestration, and completed review advances the task to `waiting_for_merge`. Review failures move tasks to `failed` with a failure reason.
 
-If a later `sandcastle run . --flow <id>` finds no `ready_for_agent` tasks but does find an unfinished previous batch for the same flow with tasks still in `waiting_for_merge`, it creates a fresh Hub run directory for the retry and resumes the old batch's merge selection by its original batch id. If ready tasks exist at the same time as unfinished previous batches, Sandcastle starts a normal new batch and reports the old batch ids as not resumed instead of silently merging unrelated old work.
+If a later `archloop run . --flow <id>` finds no `ready_for_agent` tasks but does find an unfinished previous batch for the same flow with tasks still in `waiting_for_merge`, it creates a fresh Hub run directory for the retry and resumes the old batch's merge selection by its original batch id. If ready tasks exist at the same time as unfinished previous batches, archLoop starts a normal new batch and reports the old batch ids as not resumed instead of silently merging unrelated old work.
 
-After implementation and review complete, Hub evaluates all merge candidates and records selected/skipped/blocked reasons in batch events and CLI output. It selects tasks only when they are `waiting_for_merge`, belong to the current batch, have claim branch metadata, and the branch still has unmerged work. Status mismatches, batch mismatches, missing claims, missing branches, and branches with no unmerged work are explained before merge starts. If Hub run events show a task reached merge-ready state but the Beads projection is stale or missing claim fields while branch work still exists, merge selection reports `state_inconsistent` with the projected status, claim drift, branch, and an explicit `sandcastle tasks repair-state <selector>` repair hint instead of silently skipping it.
+After implementation and review complete, Hub evaluates all merge candidates and records selected/skipped/blocked reasons in batch events and CLI output. It selects tasks only when they are `waiting_for_merge`, belong to the current batch, have claim branch metadata, and the branch still has unmerged work. Status mismatches, batch mismatches, missing claims, missing branches, and branches with no unmerged work are explained before merge starts. If Hub run events show a task reached merge-ready state but the Beads projection is stale or missing claim fields while branch work still exists, merge selection reports `state_inconsistent` with the projected status, claim drift, branch, and an explicit `archloop tasks repair-state <selector>` repair hint instead of silently skipping it.
 
-Before merging, Hub preflights the source worktree. Dirty source files block the merge as a Git safety gate with a summary telling you to commit, stash, or revert the listed files and rerun the same flow so the batch resumes. Dirty Beads runtime/export files such as `.beads/issues.jsonl` and `.beads/interactions.jsonl` are classified separately and do not block by themselves, because Hub task-board state is local task-store state. If a task branch changes `.beads/` runtime/export files, that branch is blocked before merge; use `sandcastle tasks pull` / `push` / `sync` for remote task exchange instead of carrying Beads local state through code branches.
+Before merging, Hub preflights the source worktree. Dirty source files block the merge as a Git safety gate with a summary telling you to commit, stash, or revert the listed files and rerun the same flow so the batch resumes. Dirty Beads runtime/export files such as `.beads/issues.jsonl` and `.beads/interactions.jsonl` are classified separately and do not block by themselves, because Hub task-board state is local task-store state. If a task branch changes `.beads/` runtime/export files, that branch is blocked before merge; use `archloop tasks pull` / `push` / `sync` for remote task exchange instead of carrying Beads local state through code branches.
 
 Hub moves selected tasks to `merging`, merges each branch with per-task events, runs verification after each merge, and closes the local Beads task only when merge, verification, and close all succeed. Clean merges use Git directly. When Git reports a merge conflict, Hub invokes the configured `merge` agent role to resolve the conflicted worktree, then checks that no unmerged files or unfinished merge state remain before continuing to verification and task close. Generic merge failures, unresolved merge conflicts, verification failures, or close failures stop the selected batch: the current task becomes `failed`, unprocessed selected tasks return to `waiting_for_merge`, and the batch becomes `partial_failed`. Merge failures preserve a concise Git diagnostic summary in task/batch events and in CLI output so you can decide whether to configure the merge role, clean the worktree, resolve a conflict, or retry.
 
@@ -987,12 +987,12 @@ Hub moves selected tasks to `merging`, merges each branch with per-task events, 
 | `--flow`  | Yes      | Hub flow id (`no-review`, `with-review`, `prd-decomposition`, `triage`)                                                         |
 | `--input` | No       | Flow-specific input (`<prd-ref>` for `prd-decomposition`; Beads task id or task query for `triage`, default `inbox,needs_info`) |
 
-Hub flow runs write run, batch, and task event records into the Hub run directory under the Sandcastle user data directory. The task board uses that run history to keep claims and execution progress separate from normal Beads task status.
+Hub flow runs write run, batch, and task event records into the Hub run directory under the archLoop user data directory. The task board uses that run history to keep claims and execution progress separate from normal Beads task status.
 
 Creates the following files (plus optional `agents/`, `skills/`, `agent-profiles.json`, and Mini Program capability files when applicable):
 
 ```
-.sandcastle/
+.archloop/
 ├── Dockerfile      # Sandbox environment (customize as needed)
 ├── bootstrap.sh    # Repo setup hook (from Project profile; customize as needed)
 ├── main.mts        # Orchestration entry (or main.ts)
@@ -1010,51 +1010,51 @@ Creates the following files (plus optional `agents/`, `skills/`, `agent-profiles
 └── auth/wx-upload/             # Gitignored upload-key drop zone
 ```
 
-Errors if `.sandcastle/` already exists to prevent overwriting customizations.
+Errors if `.archloop/` already exists to prevent overwriting customizations.
 
-### `sandcastle docker build-image`
+### `archloop docker build-image`
 
-Rebuilds the Docker image from an existing `.sandcastle/` directory. Use this after modifying the Dockerfile. On Linux/macOS, the build automatically passes `--build-arg AGENT_UID=$(id -u)` and `AGENT_GID=$(id -g)` so the image's `agent` user matches the host UID — this prevents permission errors on image-built files without runtime chown.
+Rebuilds the Docker image from an existing `.archloop/` directory. Use this after modifying the Dockerfile. On Linux/macOS, the build automatically passes `--build-arg AGENT_UID=$(id -u)` and `AGENT_GID=$(id -g)` so the image's `agent` user matches the host UID — this prevents permission errors on image-built files without runtime chown.
 
-**WSL2 / root (UID 0):** Sandcastle cannot bake UID 0 into the image (`usermod` would conflict with root). When the host process is root, `build-image` uses `AGENT_UID=1000` and `AGENT_GID=1000` instead and prints guidance. Pass `containerUid: 1000` and `containerGid: 1000` to `docker()` in `.sandcastle/main.mts` so the runtime `--user` matches the image (see the Docker provider pre-flight check if they diverge).
+**WSL2 / root (UID 0):** archLoop cannot bake UID 0 into the image (`usermod` would conflict with root). When the host process is root, `build-image` uses `AGENT_UID=1000` and `AGENT_GID=1000` instead and prints guidance. Pass `containerUid: 1000` and `containerGid: 1000` to `docker()` in `.archloop/main.mts` so the runtime `--user` matches the image (see the Docker provider pre-flight check if they diverge).
 
-| Option         | Required | Default                      | Description                                                                       |
-| -------------- | -------- | ---------------------------- | --------------------------------------------------------------------------------- |
-| `--image-name` | No       | `sandcastle:<repo-dir-name>` | Docker image name                                                                 |
-| `--dockerfile` | No       | —                            | Path to a custom Dockerfile (build context will be the current working directory) |
+| Option         | Required | Default                    | Description                                                                       |
+| -------------- | -------- | -------------------------- | --------------------------------------------------------------------------------- |
+| `--image-name` | No       | `archloop:<repo-dir-name>` | Docker image name                                                                 |
+| `--dockerfile` | No       | —                          | Path to a custom Dockerfile (build context will be the current working directory) |
 
-### `sandcastle docker remove-image`
+### `archloop docker remove-image`
 
 Removes the Docker image.
 
-| Option         | Required | Default                      | Description       |
-| -------------- | -------- | ---------------------------- | ----------------- |
-| `--image-name` | No       | `sandcastle:<repo-dir-name>` | Docker image name |
+| Option         | Required | Default                    | Description       |
+| -------------- | -------- | -------------------------- | ----------------- |
+| `--image-name` | No       | `archloop:<repo-dir-name>` | Docker image name |
 
-### `sandcastle podman build-image`
+### `archloop podman build-image`
 
-Builds the Podman image from an existing `.sandcastle/` directory. Use this after modifying the Containerfile.
+Builds the Podman image from an existing `.archloop/` directory. Use this after modifying the Containerfile.
 
-| Option            | Required | Default                      | Description                                                                          |
-| ----------------- | -------- | ---------------------------- | ------------------------------------------------------------------------------------ |
-| `--image-name`    | No       | `sandcastle:<repo-dir-name>` | Podman image name                                                                    |
-| `--containerfile` | No       | —                            | Path to a custom Containerfile (build context will be the current working directory) |
+| Option            | Required | Default                    | Description                                                                          |
+| ----------------- | -------- | -------------------------- | ------------------------------------------------------------------------------------ |
+| `--image-name`    | No       | `archloop:<repo-dir-name>` | Podman image name                                                                    |
+| `--containerfile` | No       | —                          | Path to a custom Containerfile (build context will be the current working directory) |
 
-### `sandcastle podman remove-image`
+### `archloop podman remove-image`
 
 Removes the Podman image.
 
-| Option         | Required | Default                      | Description       |
-| -------------- | -------- | ---------------------------- | ----------------- |
-| `--image-name` | No       | `sandcastle:<repo-dir-name>` | Podman image name |
+| Option         | Required | Default                    | Description       |
+| -------------- | -------- | -------------------------- | ----------------- |
+| `--image-name` | No       | `archloop:<repo-dir-name>` | Podman image name |
 
 ### `RunOptions`
 
 | Option               | Type               | Default                       | Description                                                                                                                                                                  |
 | -------------------- | ------------------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `agent`              | AgentProvider      | —                             | **Required.** Agent provider (e.g. `claudeCode("claude-opus-4-6")`, `pi("claude-sonnet-4-6")`, `codex("gpt-5.4-mini")`, `cursor("auto")`, `opencode("opencode/big-pickle")`) |
-| `sandbox`            | SandboxProvider    | —                             | **Required.** Sandbox provider (e.g. `docker()`, `podman()`, `docker({ imageName: "sandcastle:local" })`)                                                                    |
-| `cwd`                | string             | `process.cwd()`               | Host repo directory — anchor for `.sandcastle/` artifacts and git operations. Relative paths resolve against `process.cwd()`.                                                |
+| `sandbox`            | SandboxProvider    | —                             | **Required.** Sandbox provider (e.g. `docker()`, `podman()`, `docker({ imageName: "archloop:local" })`)                                                                      |
+| `cwd`                | string             | `process.cwd()`               | Host repo directory — anchor for `.archloop/` artifacts and git operations. Relative paths resolve against `process.cwd()`.                                                  |
 | `prompt`             | string             | —                             | Inline prompt (mutually exclusive with `promptFile`)                                                                                                                         |
 | `promptFile`         | string             | —                             | Path to prompt file (mutually exclusive with `prompt`). Resolves against `process.cwd()`, **not** `cwd`.                                                                     |
 | `maxIterations`      | number             | `1`                           | Maximum iterations to run                                                                                                                                                    |
@@ -1102,7 +1102,7 @@ Removes the Podman image.
 
 ### Session capture
 
-After each Claude Code iteration, Sandcastle automatically captures the agent's session JSONL from the sandbox to the host at `~/.claude/projects/<encoded-path>/sessions/<session-id>.jsonl`. The `cwd` fields inside each JSONL entry are rewritten to match the host repo root, so `claude --resume` works natively.
+After each Claude Code iteration, archLoop automatically captures the agent's session JSONL from the sandbox to the host at `~/.claude/projects/<encoded-path>/sessions/<session-id>.jsonl`. The `cwd` fields inside each JSONL entry are rewritten to match the host repo root, so `claude --resume` works natively.
 
 Session capture is enabled by default for `claudeCode()` and can be opted out via `captureSessions: false`. Non-Claude agent providers never attempt capture. Capture failure fails the run.
 
@@ -1119,7 +1119,7 @@ const result = await run({
 });
 ```
 
-Before the sandbox starts, Sandcastle validates that the session file exists on the host and transfers it into the sandbox with `cwd` fields rewritten to match the sandbox-side path. The Claude Code agent receives `--resume <id>` on its print command for iteration 1.
+Before the sandbox starts, archLoop validates that the session file exists on the host and transfers it into the sandbox with `cwd` fields rewritten to match the sandbox-side path. The Claude Code agent receives `--resume <id>` on its print command for iteration 1.
 
 Constraints:
 
@@ -1170,7 +1170,7 @@ agent: cursor("auto", { mode: "plan" });
 
 ### Provider `env`
 
-Both **agent providers** and **sandbox providers** accept an optional `env: Record<string, string>` in their options. These environment variables are merged with the `.sandcastle/.env` resolver output at launch time:
+Both **agent providers** and **sandbox providers** accept an optional `env: Record<string, string>` in their options. These environment variables are merged with the `.archloop/.env` resolver output at launch time:
 
 ```typescript
 await run({
@@ -1186,17 +1186,17 @@ await run({
 
 **Merge rules:**
 
-- Provider env (agent + sandbox) overrides `.sandcastle/.env` resolver output for shared keys
+- Provider env (agent + sandbox) overrides `.archloop/.env` resolver output for shared keys
 - Agent provider env and sandbox provider env **must not overlap** — if they share any key, `run()` throws an error
 - When `env` is not provided, it defaults to `{}`
 
-Environment variables are also resolved automatically from `.sandcastle/.env` and `process.env` — no need to pass them to the API. The required variables depend on the **agent provider** (see `sandcastle init` output for details).
+Environment variables are also resolved automatically from `.archloop/.env` and `process.env` — no need to pass them to the API. The required variables depend on the **agent provider** (see `archloop init` output for details).
 
 ## Custom Sandbox Providers
 
-Sandcastle ships with built-in providers for Docker, Podman, and Vercel, but you can create your own. A sandbox provider tells Sandcastle how to execute commands in an isolated environment. There are two kinds:
+archLoop ships with built-in providers for Docker, Podman, and Vercel, but you can create your own. A sandbox provider tells archLoop how to execute commands in an isolated environment. There are two kinds:
 
-- **Bind-mount** — the sandbox can mount a host directory. Sandcastle creates a worktree on the host and the provider mounts it in. No file sync needed. Use this for Docker, Podman, or any local container runtime.
+- **Bind-mount** — the sandbox can mount a host directory. archLoop creates a worktree on the host and the provider mounts it in. No file sync needed. Use this for Docker, Podman, or any local container runtime.
 - **Isolated** — the sandbox has its own filesystem (e.g. a cloud VM). The provider handles syncing code in and out via `copyIn` and `copyFileOut`. Use this when the sandbox cannot access the host filesystem.
 
 ### The sandbox handle contract
@@ -1234,7 +1234,7 @@ import {
   type BindMountCreateOptions,
   type BindMountSandboxHandle,
   type ExecResult,
-} from "@ai-hero/sandcastle";
+} from "@yibeibankaishui/archloop";
 import { execFile, spawn } from "node:child_process";
 import { copyFile as fsCopyFile, mkdir as fsMkdir } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -1269,7 +1269,7 @@ const localProcess = () =>
               const rl = createInterface({ input: proc.stdout! });
               rl.on("line", (line) => {
                 stdoutChunks.push(line);
-                onLine(line); // forward each line to Sandcastle
+                onLine(line); // forward each line to archLoop
               });
 
               proc.stderr!.on("data", (chunk: Buffer) => {
@@ -1334,7 +1334,7 @@ import {
   createIsolatedSandboxProvider,
   type IsolatedSandboxHandle,
   type ExecResult,
-} from "@ai-hero/sandcastle";
+} from "@yibeibankaishui/archloop";
 import { execFile, spawn } from "node:child_process";
 import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1438,7 +1438,7 @@ A branch strategy controls where the agent's commits land. Configure it when con
 | Strategy        | Behavior                                                                 | Bind-mount | Isolated  |
 | --------------- | ------------------------------------------------------------------------ | ---------- | --------- |
 | `head`          | Agent writes directly to the host working directory. No worktree created | Default    | N/A       |
-| `merge-to-head` | Sandcastle creates a temp branch, merges back to HEAD when done          | Supported  | Default   |
+| `merge-to-head` | archLoop creates a temp branch, merges back to HEAD when done            | Supported  | Default   |
 | `branch`        | Commits land on an explicit named branch you provide                     | Supported  | Supported |
 
 **When to use each:**
@@ -1450,8 +1450,8 @@ A branch strategy controls where the agent's commits land. Configure it when con
 Branch strategy is now configured on `run()`, not on the provider:
 
 ```typescript
-import { run, claudeCode } from "@ai-hero/sandcastle";
-import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { run, claudeCode } from "@yibeibankaishui/archloop";
+import { docker } from "@yibeibankaishui/archloop/sandboxes/docker";
 
 // head — direct write, bind-mount only (default for bind-mount providers)
 await run({
@@ -1479,7 +1479,7 @@ await run({
 Pass your custom provider via the `sandbox` option — it works the same as the built-in `docker()` provider:
 
 ```typescript
-import { run, claudeCode } from "@ai-hero/sandcastle";
+import { run, claudeCode } from "@yibeibankaishui/archloop";
 
 const result = await run({
   agent: claudeCode("claude-opus-4-6"),
@@ -1499,13 +1499,13 @@ For real-world examples, see:
 
 ## Configuration
 
-### Config directory (`.sandcastle/`)
+### Config directory (`.archloop/`)
 
-All per-repo sandbox configuration lives in `.sandcastle/`. Run `sandcastle init` to create it.
+All per-repo sandbox configuration lives in `.archloop/`. Run `archloop init` to create it.
 
 ### Custom Dockerfile
 
-The `.sandcastle/Dockerfile` controls the sandbox environment. The default template installs:
+The `.archloop/Dockerfile` controls the sandbox environment. The default template installs:
 
 - **Node.js 22** (base image)
 - **git**, **curl**, **jq** (system dependencies)
@@ -1558,19 +1558,19 @@ hooks: {
 
 ## Agent skill
 
-This repo ships a portable agent skill at [`skills/sandcastle-usage/SKILL.md`](./skills/sandcastle-usage/SKILL.md) that teaches AI coding agents (Cursor, Claude, Codex, and others) how to set up and run Sandcastle in a target project.
+This repo ships a portable agent skill at [`skills/archloop-usage/SKILL.md`](./skills/archloop-usage/SKILL.md) that teaches AI coding agents (Cursor, Claude, Codex, and others) how to set up and run archLoop in a target project.
 
 It is **not auto-installed**. To make it available to your agent, copy the skill directory into one of your agent's skills directories:
 
 ```bash
 # Pick the directory matching your agent (create it if missing):
-cp -R skills/sandcastle-usage ~/.agents/skills/sandcastle-usage    # portable / shared
-cp -R skills/sandcastle-usage ~/.cursor/skills/sandcastle-usage    # Cursor
-cp -R skills/sandcastle-usage ~/.claude/skills/sandcastle-usage    # Claude
-cp -R skills/sandcastle-usage ~/.codex/skills/sandcastle-usage     # Codex
+cp -R skills/archloop-usage ~/.agents/skills/archloop-usage    # portable / shared
+cp -R skills/archloop-usage ~/.cursor/skills/archloop-usage    # Cursor
+cp -R skills/archloop-usage ~/.claude/skills/archloop-usage    # Claude
+cp -R skills/archloop-usage ~/.codex/skills/archloop-usage     # Codex
 ```
 
-After a Sandcastle release that changes CLI, init flow, templates, or APIs, re-copy the updated skill to pick up the changes.
+After a archLoop release that changes CLI, init flow, templates, or APIs, re-copy the updated skill to pick up the changes.
 
 ## Development
 

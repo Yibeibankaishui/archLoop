@@ -344,7 +344,7 @@ describe("syncOut", () => {
     }
   });
 
-  it("successful sync-out leaves no patch artifacts in .sandcastle/patches", async () => {
+  it("successful sync-out leaves no patch artifacts in .archloop/patches", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "host-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "initial.txt", "initial", "initial commit");
@@ -371,7 +371,7 @@ describe("syncOut", () => {
       expect(log[0]).toContain("add new file");
 
       // Verify no patch artifacts remain
-      const patchesDir = join(hostDir, ".sandcastle", "patches");
+      const patchesDir = join(hostDir, ".archloop", "patches");
       expect(existsSync(patchesDir)).toBe(false);
     } finally {
       await handle.close();
@@ -412,7 +412,7 @@ describe("syncOut", () => {
       }
 
       // Verify patch artifacts are preserved
-      const patchesDir = join(hostDir, ".sandcastle", "patches");
+      const patchesDir = join(hostDir, ".archloop", "patches");
       expect(existsSync(patchesDir)).toBe(true);
 
       const timestampDirs = await readdir(patchesDir);
@@ -465,7 +465,7 @@ describe("syncOut", () => {
       }
 
       // Verify patch artifacts are preserved
-      const patchesDir = join(hostDir, ".sandcastle", "patches");
+      const patchesDir = join(hostDir, ".archloop", "patches");
       expect(existsSync(patchesDir)).toBe(true);
 
       const timestampDirs = await readdir(patchesDir);

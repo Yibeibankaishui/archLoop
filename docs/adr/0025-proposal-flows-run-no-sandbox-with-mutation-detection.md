@@ -2,7 +2,7 @@
 
 **Proposal flows** always run with the **no-sandbox provider**. They produce **task proposals** and must not directly modify code or write to the **local task store**. They may still use normal agent exploration and prompt expansion to inspect useful host context, but prompts must clearly instruct the agent not to perform dangerous or mutating actions.
 
-Sandcastle does not impose a shell-expression allowlist for proposal flows in v1. Instead, it provides required context up front, trusts high-capability agents to explore responsibly, and enforces the proposal-only contract after the run. Sandcastle snapshots relevant repository state and local task store state before and after the proposal flow. If unexpected repo or Beads mutations are detected, the flow fails, the proposal is not applied, and Sandcastle reports the detected changes without automatically reverting them.
+archLoop does not impose a shell-expression allowlist for proposal flows in v1. Instead, it provides required context up front, trusts high-capability agents to explore responsibly, and enforces the proposal-only contract after the run. archLoop snapshots relevant repository state and local task store state before and after the proposal flow. If unexpected repo or Beads mutations are detected, the flow fails, the proposal is not applied, and archLoop reports the detected changes without automatically reverting them.
 
 ## Considered Options
 

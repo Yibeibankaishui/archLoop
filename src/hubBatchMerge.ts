@@ -637,9 +637,9 @@ const maybeBuildStateInconsistentDiagnostic = async (input: {
     missingClaimFields:
       missingClaimFields.length > 0 ? missingClaimFields : undefined,
     staleClaimFields,
-    suggestedRecovery: `sandcastle tasks repair-state ${input.task.id}`,
+    suggestedRecovery: `archloop tasks repair-state ${input.task.id}`,
     mergeReadyEventType: event.type,
-    message: `Hub run events show ${event.type} for ${branch}, but the projected task status is ${input.task.hubStatus}. Repair Beads labels/metadata before merging: sandcastle tasks repair-state ${input.task.id}. If the task is failed or has stale execution state, sandcastle tasks recover ${input.task.id} may also apply.`,
+    message: `Hub run events show ${event.type} for ${branch}, but the projected task status is ${input.task.hubStatus}. Repair Beads labels/metadata before merging: archloop tasks repair-state ${input.task.id}. If the task is failed or has stale execution state, archloop tasks recover ${input.task.id} may also apply.`,
   });
 };
 
@@ -772,7 +772,7 @@ const evaluateHubBatchMergeSelection = async (input: {
           decision: "blocked",
           reason: "task_store_dirty",
           branch,
-          message: `Task branch changes Beads runtime/export files (${taskStoreBranchFiles.join(", ")}). Keep local task-store state out of normal Hub merges; remove those files from the branch or sync task state through Sandcastle task sync before retrying.`,
+          message: `Task branch changes Beads runtime/export files (${taskStoreBranchFiles.join(", ")}). Keep local task-store state out of normal Hub merges; remove those files from the branch or sync task state through archLoop task sync before retrying.`,
           taskStoreBranchFiles,
         }),
       );
@@ -1133,7 +1133,7 @@ const buildMergeConflictPrompt = (
   input: HubMergeConflictResolutionInput,
 ): string => `# Hub merge conflict resolution
 
-You are Sandcastle's Hub merge agent. A deterministic merge already ran and left this repository in a merge-conflict state.
+You are archLoop's Hub merge agent. A deterministic merge already ran and left this repository in a merge-conflict state.
 
 ## Task
 
@@ -1163,7 +1163,7 @@ ${formatPromptBlock(input.diagnostics?.stderr ?? input.diagnostics?.stdout ?? in
 
 1. Inspect the conflicted files and understand both sides of the merge.
 2. Resolve conflicts intelligently, preserving behavior from both the base branch and ${input.branch} where appropriate.
-3. Do not close tasks, update Beads directly, create unrelated branches, or stash/delete Sandcastle runtime files.
+3. Do not close tasks, update Beads directly, create unrelated branches, or stash/delete archLoop runtime files.
 4. After resolving conflicts, run \`git status --short\` and ensure there are no unmerged files.
 5. Complete the merge commit with the existing merge message, for example \`git commit --no-edit\` after staging resolved files.
 6. Run the repository verification command if one is obvious from project docs or scripts. If verification is not available, explain that in your final response.
@@ -1185,7 +1185,7 @@ export const createHubMergeConflictResolver = (options: {
       return {
         outcome: "failed",
         message:
-          "Missing Hub agent role config: merge. Run `sandcastle agent-config set-role merge --provider <provider> --model <model>`.",
+          "Missing Hub agent role config: merge. Run `archloop agent-config set-role merge --provider <provider> --model <model>`.",
       };
     }
 
@@ -1380,7 +1380,7 @@ export const createHubFlowRunVerifier = (options: {
   readonly cwd: string;
 }): HubFlowVerifier => {
   return async () => {
-    const verifyScript = join(options.cwd, ".sandcastle", "verify.sh");
+    const verifyScript = join(options.cwd, ".archloop", "verify.sh");
     if (!existsSync(verifyScript)) {
       return { outcome: "success" };
     }

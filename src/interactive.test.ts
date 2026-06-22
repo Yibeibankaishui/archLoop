@@ -83,7 +83,7 @@ describe("interactive()", () => {
 
   beforeEach(() => {
     originalCwd = process.cwd();
-    hostDir = mkdtempSync(join(tmpdir(), "sandcastle-interactive-test-"));
+    hostDir = mkdtempSync(join(tmpdir(), "archloop-interactive-test-"));
     // Initialize a git repo
     execSync("git init", { cwd: hostDir, stdio: "ignore" });
     execSync('git config user.email "test@test.com"', {
@@ -695,7 +695,7 @@ describe("interactive()", () => {
 
   it("uses cwd as host repo directory for worktree placement", async () => {
     // Create a second git repo in a separate temp dir
-    const otherRepo = mkdtempSync(join(tmpdir(), "sandcastle-cwd-test-"));
+    const otherRepo = mkdtempSync(join(tmpdir(), "archloop-cwd-test-"));
     execSync("git init", { cwd: otherRepo, stdio: "ignore" });
     execSync('git config user.email "test@test.com"', {
       cwd: otherRepo,
@@ -724,7 +724,7 @@ describe("interactive()", () => {
     });
 
     expect(result.exitCode).toBe(0);
-    // The worktree should be under the other repo's .sandcastle/worktrees/ dir
+    // The worktree should be under the other repo's .archloop/worktrees/ dir
     expect(worktreeCwd).toBeDefined();
     expect(worktreeCwd!.startsWith(otherRepo)).toBe(true);
   });

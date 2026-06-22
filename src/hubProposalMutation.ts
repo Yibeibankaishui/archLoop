@@ -343,7 +343,7 @@ export const formatProposalFlowMutationLines = (
   }
 
   const lines = [
-    "Proposal flow detected forbidden mutations. The proposal was not applied and Sandcastle did not revert the changes.",
+    "Proposal flow detected forbidden mutations. The proposal was not applied and archLoop did not revert the changes.",
   ];
 
   for (const mutation of report.repoMutations) {

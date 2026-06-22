@@ -7,9 +7,6 @@ debug/wx-check.log
 debug/wx-preview.jpg
 debug/wx-check-*
 debug/wx-preview-*
-./.sandcastle/
-
-
 # Beads / Dolt files (added by bd init)
 .dolt/
 *.db

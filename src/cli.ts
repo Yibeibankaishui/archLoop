@@ -189,7 +189,7 @@ const toTaskBoardError = (error: unknown): TaskBoardError =>
 
 // --- Config directory check ---
 
-const CONFIG_DIR = ".sandcastle";
+const CONFIG_DIR = ".archloop";
 
 const requireConfigDir = (
   cwd: string,
@@ -202,7 +202,7 @@ const requireConfigDir = (
     if (!exists) {
       yield* Effect.fail(
         new ConfigDirError({
-          message: "No .sandcastle/ found. Run `sandcastle init` first.",
+          message: "No .archloop/ found. Run `archloop init` first.",
         }),
       );
     }
@@ -279,8 +279,8 @@ const initCapabilityAddonsOption = Options.text("capability-addons").pipe(
   Options.optional,
 );
 
-const initCreateSandcastleLabelOption = Options.text(
-  "create-sandcastle-label",
+const initCreatearchLoopLabelOption = Options.text(
+  "create-archloop-label",
 ).pipe(
   Options.withDescription(
     "true or false when using github-issues (skips prompt when set). Omit to be prompted.",
@@ -523,43 +523,43 @@ const buildAuthSetupNextStepLines = (options: {
 
   if (options.githubChoice === "env") {
     lines.push(
-      "Add GH_TOKEN to .sandcastle/.env before running GitHub Issues templates.",
+      "Add GH_TOKEN to .archloop/.env before running GitHub Issues templates.",
     );
   } else if (options.githubChoice === "skip") {
     lines.push(
-      "Set up GitHub auth later with GH_TOKEN in .sandcastle/.env or `sandcastle auth login github`.",
+      "Set up GitHub auth later with GH_TOKEN in .archloop/.env or `archloop auth login github`.",
     );
   } else if (options.githubChoice === "deferred") {
     lines.push(
-      "This scripted init skipped interactive GitHub auth setup. Use GH_TOKEN in .sandcastle/.env or `sandcastle auth login github` before running GitHub Issues templates.",
+      "This scripted init skipped interactive GitHub auth setup. Use GH_TOKEN in .archloop/.env or `archloop auth login github` before running GitHub Issues templates.",
     );
   }
 
   if (options.codexChoice === "env") {
     lines.push(
-      "Add OPENAI_KEY to .sandcastle/.env before running Codex in the sandbox.",
+      "Add OPENAI_KEY to .archloop/.env before running Codex in the sandbox.",
     );
   } else if (options.codexChoice === "skip") {
     lines.push(
-      "Set up Codex auth later with OPENAI_KEY in .sandcastle/.env for OpenAI API billing or `sandcastle auth login codex` for a Codex/ChatGPT CLI login session.",
+      "Set up Codex auth later with OPENAI_KEY in .archloop/.env for OpenAI API billing or `archloop auth login codex` for a Codex/ChatGPT CLI login session.",
     );
   } else if (options.codexChoice === "deferred") {
     lines.push(
-      "This scripted init skipped interactive Codex auth setup. Use OPENAI_KEY in .sandcastle/.env for OpenAI API billing or `sandcastle auth login codex` for a Codex/ChatGPT CLI login session before running Codex in the sandbox.",
+      "This scripted init skipped interactive Codex auth setup. Use OPENAI_KEY in .archloop/.env for OpenAI API billing or `archloop auth login codex` for a Codex/ChatGPT CLI login session before running Codex in the sandbox.",
     );
   }
 
   if (options.cursorChoice === "env") {
     lines.push(
-      "Add CURSOR_API_KEY to .sandcastle/.env before the first Cursor sandbox run. Bootstrap and task runs will fail without it.",
+      "Add CURSOR_API_KEY to .archloop/.env before the first Cursor sandbox run. Bootstrap and task runs will fail without it.",
     );
   } else if (options.cursorChoice === "skip") {
     lines.push(
-      "Set CURSOR_API_KEY in .sandcastle/.env before the first Cursor sandbox run. Bootstrap and task runs will fail until it is set.",
+      "Set CURSOR_API_KEY in .archloop/.env before the first Cursor sandbox run. Bootstrap and task runs will fail until it is set.",
     );
   } else if (options.cursorChoice === "deferred") {
     lines.push(
-      "This scripted init skipped interactive Cursor auth setup. Set CURSOR_API_KEY in .sandcastle/.env before the first Cursor sandbox run, or bootstrap will fail.",
+      "This scripted init skipped interactive Cursor auth setup. Set CURSOR_API_KEY in .archloop/.env before the first Cursor sandbox run, or bootstrap will fail.",
     );
   }
 
@@ -578,7 +578,7 @@ const validateHostRequirementsForInit = (options: {
     return Effect.fail(
       new InitError({
         message:
-          "Using --sandbox no-sandbox with backlog manager beads requires `bd` to be available from the bundled @beads/bd dependency, SANDCASTLE_BD_PATH, or the host PATH because backlog commands run on the host in this mode. Install dependencies, set SANDCASTLE_BD_PATH, install Beads locally, or choose docker.",
+          "Using --sandbox no-sandbox with backlog manager beads requires `bd` to be available from the bundled @beads/bd dependency, ARCHLOOP_BD_PATH, or the host PATH because backlog commands run on the host in this mode. Install dependencies, set ARCHLOOP_BD_PATH, install Beads locally, or choose docker.",
       }),
     );
   }
@@ -599,7 +599,7 @@ const buildHostRequirementNextStepLines = (options: {
   if (options.sandboxProvider.name === "no-sandbox") {
     if (options.backlogManager.name === "beads") {
       lines.push(
-        "Keep `bd` available via the bundled @beads/bd install, `SANDCASTLE_BD_PATH`, or your host PATH when using no-sandbox + beads. Prompt shell expressions run on the host in this mode, not in a container.",
+        "Keep `bd` available via the bundled @beads/bd install, `ARCHLOOP_BD_PATH`, or your host PATH when using no-sandbox + beads. Prompt shell expressions run on the host in this mode, not in a container.",
       );
     }
 
@@ -755,7 +755,7 @@ const resolveMiniprogramCiInstallApproval = (options: {
     const approved = yield* Effect.promise(() =>
       clack.confirm({
         message:
-          "Install project-local miniprogram-ci as a dev dependency? (Recommended for platform preview validation; global CLI and npx do not satisfy Sandcastle's managed loop.)",
+          "Install project-local miniprogram-ci as a dev dependency? (Recommended for platform preview validation; global CLI and npx do not satisfy archLoop's managed loop.)",
         initialValue: false,
       }),
     );
@@ -777,7 +777,7 @@ const isFullyScriptedInit = (options: {
   template: OptionalTextFlag;
   presetAgentsCli: OptionalTextFlag;
   buildImageCli: OptionalTextFlag;
-  createSandcastleLabelCli: OptionalTextFlag;
+  createarchLoopLabelCli: OptionalTextFlag;
   selectedBacklogManagerName: string;
 }): boolean =>
   options.agentFlag._tag === "Some" &&
@@ -788,7 +788,7 @@ const isFullyScriptedInit = (options: {
   options.buildImageCli._tag === "Some" &&
   (options.runtimesFlag._tag === "Some" || options.agentFlag._tag === "Some") &&
   (options.selectedBacklogManagerName !== "github-issues" ||
-    options.createSandcastleLabelCli._tag === "Some");
+    options.createarchLoopLabelCli._tag === "Some");
 
 const initCommand = Command.make(
   "init",
@@ -804,7 +804,7 @@ const initCommand = Command.make(
     presetAgents: initPresetAgentsOption,
     capability: initCapabilityOption,
     capabilityAddons: initCapabilityAddonsOption,
-    createSandcastleLabel: initCreateSandcastleLabelOption,
+    createarchLoopLabel: initCreatearchLoopLabelOption,
     buildImage: initBuildImageOption,
     installMiniprogramCi: initInstallMiniprogramCiOption,
   },
@@ -820,7 +820,7 @@ const initCommand = Command.make(
     presetAgents: presetAgentsCli,
     capability: capabilityCli,
     capabilityAddons: capabilityAddonsCli,
-    createSandcastleLabel: createSandcastleLabelCli,
+    createarchLoopLabel: createarchLoopLabelCli,
     buildImage: buildImageCli,
     installMiniprogramCi: installMiniprogramCiCli,
   }) =>
@@ -997,7 +997,7 @@ const initCommand = Command.make(
         template,
         presetAgentsCli,
         buildImageCli,
-        createSandcastleLabelCli,
+        createarchLoopLabelCli,
         selectedBacklogManagerName: selectedBacklogManager.name,
       });
 
@@ -1151,19 +1151,19 @@ const initCommand = Command.make(
         }
       }
 
-      // Offer to create the "Sandcastle" label on the repo (skip for non-GitHub backlog managers)
+      // Offer to create the "archLoop" label on the repo (skip for non-GitHub backlog managers)
       let shouldCreateLabel: boolean | symbol = false;
       if (selectedBacklogManager.name === "github-issues") {
-        if (createSandcastleLabelCli._tag === "Some") {
+        if (createarchLoopLabelCli._tag === "Some") {
           shouldCreateLabel = yield* parseStrictBoolean(
-            "create-sandcastle-label",
-            createSandcastleLabelCli.value,
+            "create-archloop-label",
+            createarchLoopLabelCli.value,
           );
         } else {
           shouldCreateLabel = yield* Effect.promise(() =>
             clack.confirm({
               message:
-                'Create a "Sandcastle" GitHub label? (Templates filter issues by this label)',
+                'Create a "archLoop" GitHub label? (Templates filter issues by this label)',
               initialValue: true,
             }),
           );
@@ -1173,7 +1173,7 @@ const initCommand = Command.make(
           yield* Effect.try({
             try: () =>
               execSync(
-                'gh label create "Sandcastle" --description "Issues for Sandcastle to work on" --color "F9A825" 2>/dev/null',
+                'gh label create "archLoop" --description "Issues for archLoop to work on" --color "F9A825" 2>/dev/null',
                 { cwd, stdio: "ignore" },
               ),
             catch: () => undefined,
@@ -1190,7 +1190,7 @@ const initCommand = Command.make(
         });
 
       const scaffoldResult = yield* d.spinner(
-        "Scaffolding .sandcastle/ config directory...",
+        "Scaffolding .archloop/ config directory...",
         scaffold(cwd, {
           agent: selectedAgent,
           model: selectedModel,
@@ -1200,7 +1200,7 @@ const initCommand = Command.make(
           sandboxProvider: selectedSandboxProvider,
           installedRuntimes: selectedInstalledRuntimes,
           projectProfile: selectedProjectProfile,
-          sandcastleVersion: VERSION,
+          archloopVersion: VERSION,
           ...(presetAgentIds !== undefined && presetAgentIds.length > 0
             ? { presetAgentIds }
             : {}),
@@ -1220,7 +1220,7 @@ const initCommand = Command.make(
 
       if (scaffoldResult.dependencyInstallFailed) {
         yield* d.status(
-          "package.json was updated but `npm install` failed. Run `npm install` in the project root before `npm run sandcastle`.",
+          "package.json was updated but `npm install` failed. Run `npm install` in the project root before `npm run archloop`.",
           "warn",
         );
       }
@@ -1259,7 +1259,7 @@ const initCommand = Command.make(
               options: [
                 {
                   value: "env",
-                  label: "Use GH_TOKEN in .sandcastle/.env",
+                  label: "Use GH_TOKEN in .archloop/.env",
                 },
                 {
                   value: "login",
@@ -1281,7 +1281,7 @@ const initCommand = Command.make(
           if (authChoice === "env") {
             githubAuthChoice = "env";
             yield* d.status(
-              "Add GH_TOKEN to .sandcastle/.env when you're ready. Sandcastle will not write secrets for you.",
+              "Add GH_TOKEN to .archloop/.env when you're ready. archLoop will not write secrets for you.",
               "info",
             );
           } else if (authChoice === "login") {
@@ -1299,7 +1299,7 @@ const initCommand = Command.make(
               catch: () =>
                 new InitError({
                   message:
-                    "GitHub login failed. You can retry with `sandcastle auth login github`.",
+                    "GitHub login failed. You can retry with `archloop auth login github`.",
                 }),
             });
           } else {
@@ -1323,7 +1323,7 @@ const initCommand = Command.make(
               options: [
                 {
                   value: "env",
-                  label: "Use OPENAI_KEY in .sandcastle/.env",
+                  label: "Use OPENAI_KEY in .archloop/.env",
                 },
                 {
                   value: "login",
@@ -1345,7 +1345,7 @@ const initCommand = Command.make(
           if (authChoice === "env") {
             codexAuthChoice = "env";
             yield* d.status(
-              "Add OPENAI_KEY to .sandcastle/.env when you're ready. Sandcastle will not write secrets for you.",
+              "Add OPENAI_KEY to .archloop/.env when you're ready. archLoop will not write secrets for you.",
               "info",
             );
           } else if (authChoice === "login") {
@@ -1363,7 +1363,7 @@ const initCommand = Command.make(
               catch: () =>
                 new InitError({
                   message:
-                    "Codex login failed. You can retry with `sandcastle auth login codex`.",
+                    "Codex login failed. You can retry with `archloop auth login codex`.",
                 }),
             });
           } else {
@@ -1387,7 +1387,7 @@ const initCommand = Command.make(
               options: [
                 {
                   value: "env",
-                  label: "Use CURSOR_API_KEY in .sandcastle/.env",
+                  label: "Use CURSOR_API_KEY in .archloop/.env",
                 },
                 {
                   value: "skip",
@@ -1405,7 +1405,7 @@ const initCommand = Command.make(
           if (authChoice === "env") {
             cursorAuthChoice = "env";
             yield* d.status(
-              "Set CURSOR_API_KEY in .sandcastle/.env before the first Cursor sandbox run. Sandcastle will not write secrets for you, and bootstrap will fail without it.",
+              "Set CURSOR_API_KEY in .archloop/.env before the first Cursor sandbox run. archLoop will not write secrets for you, and bootstrap will fail without it.",
               "warn",
             );
           } else {
@@ -1483,7 +1483,7 @@ const initCommand = Command.make(
         );
       } else {
         yield* d.status(
-          `Init complete! Run \`sandcastle ${selectedSandboxProvider.cliNamespace} build-image\` to build the ${providerLabel} image later.`,
+          `Init complete! Run \`archloop ${selectedSandboxProvider.cliNamespace} build-image\` to build the ${providerLabel} image later.`,
           "success",
         );
       }
@@ -1586,7 +1586,7 @@ const formatHubProjectStatusRows = (
   status: Awaited<ReturnType<typeof resolveHubProjectStatus>>,
 ): Record<string, string> => ({
   "Repository root": status.repoRoot,
-  "Sandcastle user data dir": status.sandcastleUserDataDir,
+  "archLoop user data dir": status.archloopUserDataDir,
   "Hub project dir": status.hubProjectDir,
   "Hub project registration": status.projectRegistered ? "existing" : "created",
   "Beads available": status.beadsAvailable ? "yes" : "no",
@@ -1860,7 +1860,7 @@ const tasksTriageCommand = Command.make(
         return yield* Effect.fail(
           new TaskBoardError({
             message:
-              "Use either a task id argument or --query, not both. Example: sandcastle tasks triage bd-42",
+              "Use either a task id argument or --query, not both. Example: archloop tasks triage bd-42",
           }),
         );
       }
@@ -1905,7 +1905,7 @@ const tasksTriageCommand = Command.make(
         return yield* Effect.fail(
           new TaskBoardError({
             message:
-              "Non-interactive triage requires a task id, --query, or --yes. Example: sandcastle tasks triage bd-42, sandcastle tasks triage --query inbox,needs_info, or sandcastle tasks triage --yes",
+              "Non-interactive triage requires a task id, --query, or --yes. Example: archloop tasks triage bd-42, archloop tasks triage --query inbox,needs_info, or archloop tasks triage --yes",
           }),
         );
       }
@@ -2044,7 +2044,7 @@ const runHubTaskSyncCommand = (input: {
           return yield* Effect.fail(
             new TaskBoardError({
               message:
-                "sandcastle tasks sync mutates local Beads and GitHub state. Re-run with --yes in non-interactive mode, or use --dry-run to preview.",
+                "archloop tasks sync mutates local Beads and GitHub state. Re-run with --yes in non-interactive mode, or use --dry-run to preview.",
             }),
           );
         }
@@ -2239,7 +2239,7 @@ const tasksRepairStateCommand = Command.make(
         return yield* Effect.fail(
           new TaskBoardError({
             message:
-              "sandcastle tasks repair-state mutates local Beads state. Re-run with --yes in non-interactive mode after reviewing the preview.",
+              "archloop tasks repair-state mutates local Beads state. Re-run with --yes in non-interactive mode after reviewing the preview.",
           }),
         );
       }
@@ -2303,7 +2303,7 @@ const tasksDeleteCommand = Command.make(
         return yield* Effect.fail(
           new TaskBoardError({
             message:
-              "sandcastle tasks delete is destructive. Re-run with --yes in non-interactive mode, or use --dry-run to preview.",
+              "archloop tasks delete is destructive. Re-run with --yes in non-interactive mode, or use --dry-run to preview.",
           }),
         );
       }
@@ -2648,7 +2648,7 @@ const runEnvInit = () =>
       return yield* Effect.fail(
         new HubEnvError({
           message:
-            "Interactive Hub env setup requires a TTY. Use `sandcastle env set <key> <value>` in scripts. For Codex CLI session auth, use `sandcastle auth login codex` instead of `OPENAI_KEY`; `OPENAI_KEY` uses OpenAI API billing.",
+            "Interactive Hub env setup requires a TTY. Use `archloop env set <key> <value>` in scripts. For Codex CLI session auth, use `archloop auth login codex` instead of `OPENAI_KEY`; `OPENAI_KEY` uses OpenAI API billing.",
         }),
       );
     }
@@ -2698,7 +2698,7 @@ const envSetCommand = Command.make(
         if (!process.stdin.isTTY || !process.stdout.isTTY) {
           return yield* Effect.fail(
             new HubEnvError({
-              message: `sandcastle env set ${envKey} <value> requires a value in non-interactive mode.`,
+              message: `archloop env set ${envKey} <value> requires a value in non-interactive mode.`,
             }),
           );
         }
@@ -2732,7 +2732,7 @@ const envCommand = Command.make("env", {}, () =>
   Effect.gen(function* () {
     const d = yield* Display;
     yield* d.status(
-      "Hub-wide environment variables for Sandcastle flows. Use --help to see available subcommands.",
+      "Hub-wide environment variables for archLoop flows. Use --help to see available subcommands.",
       "info",
     );
   }),
@@ -2790,7 +2790,7 @@ const runHubAuthLogin = (provider: "codex" | "github") =>
 
     if (provider === "codex") {
       yield* d.status(
-        "Codex supports either OPENAI_KEY API billing through `sandcastle env set OPENAI_KEY <value>` or a Codex/ChatGPT CLI login session through this command.",
+        "Codex supports either OPENAI_KEY API billing through `archloop env set OPENAI_KEY <value>` or a Codex/ChatGPT CLI login session through this command.",
         "info",
       );
     }
@@ -2798,7 +2798,7 @@ const runHubAuthLogin = (provider: "codex" | "github") =>
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
       return yield* Effect.fail(
         new HubAuthError({
-          message: `Interactive ${provider} login requires a TTY. Run \`${actionableCommand}\` from an interactive shell, or use \`sandcastle env set ${provider === "codex" ? "OPENAI_KEY" : "GH_TOKEN"} <value>\`.`,
+          message: `Interactive ${provider} login requires a TTY. Run \`${actionableCommand}\` from an interactive shell, or use \`archloop env set ${provider === "codex" ? "OPENAI_KEY" : "GH_TOKEN"} <value>\`.`,
         }),
       );
     }
@@ -3070,15 +3070,15 @@ const podmanCommand = Command.make("podman", {}, () =>
 
 // --- Root command ---
 
-const rootCommand = Command.make("sandcastle", {}, () =>
+const rootCommand = Command.make("archloop", {}, () =>
   Effect.gen(function* () {
     const d = yield* Display;
-    yield* d.status(`Sandcastle v${VERSION}`, "info");
+    yield* d.status(`archLoop v${VERSION}`, "info");
     yield* d.status("Use --help to see available commands.", "info");
   }),
 );
 
-export const sandcastle = rootCommand.pipe(
+export const archloop = rootCommand.pipe(
   Command.withSubcommands([
     initCommand,
     runCommand,
@@ -3092,7 +3092,7 @@ export const sandcastle = rootCommand.pipe(
   ]),
 );
 
-export const cli = Command.run(sandcastle, {
-  name: "sandcastle",
+export const cli = Command.run(archloop, {
+  name: "archloop",
   version: VERSION,
 });

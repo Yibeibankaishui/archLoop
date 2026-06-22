@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 import { getAgent, listAgents } from "./InitService.js";
-import { resolveSandcastleUserDataDir } from "./projectStatus.js";
+import { resolveArchloopUserDataDir } from "./projectStatus.js";
 
 export const HUB_AGENT_ROLES = [
   "planning",
@@ -122,10 +122,7 @@ export const formatHubAgentRoleOptions = (
 export const resolveHubAgentConfigPath = (
   options: HubAgentConfigStoreOptions = {},
 ): string => {
-  const userDataDir = resolveSandcastleUserDataDir(
-    options.env,
-    options.homeDir,
-  );
+  const userDataDir = resolveArchloopUserDataDir(options.env, options.homeDir);
   return `${userDataDir}/hub/agent-roles.json`;
 };
 
@@ -220,7 +217,7 @@ export const formatSetHubAgentRoleMissingFlagsMessage = (
 ): string =>
   [
     `Hub agent role "${role}" requires --provider and --model in non-interactive mode.`,
-    `Run: sandcastle agent-config set-role ${role} --provider <provider> --model <model>`,
+    `Run: archloop agent-config set-role ${role} --provider <provider> --model <model>`,
     "Or run the same command in an interactive terminal to configure via prompts.",
   ].join("\n");
 
@@ -343,16 +340,16 @@ export const formatMissingHubAgentRolesMessage = (
   const examples = missingRoles
     .map(
       (role) =>
-        `sandcastle agent-config set-role ${role} --provider <provider> --model <model>`,
+        `archloop agent-config set-role ${role} --provider <provider> --model <model>`,
     )
     .join("\n");
 
   return [
     `Missing Hub agent role config: ${missingRoles.join(", ")}`,
     "Configure the required roles before running this flow:",
-    "Run `sandcastle agent-config init` for an interactive setup wizard, or configure roles individually:",
+    "Run `archloop agent-config init` for an interactive setup wizard, or configure roles individually:",
     examples,
-    "Run `sandcastle agent-config show` to inspect current Hub agent roles.",
+    "Run `archloop agent-config show` to inspect current Hub agent roles.",
   ].join("\n");
 };
 
@@ -383,7 +380,7 @@ export const formatHubAgentConfigShowLines = (
   if (missingRoles.length > 0) {
     lines.push("", `Missing roles: ${missingRoles.join(", ")}`);
     lines.push(
-      "Run `sandcastle agent-config init` for an interactive setup wizard, or configure a role with `sandcastle agent-config set-role <role> --provider <provider> --model <model>`.",
+      "Run `archloop agent-config init` for an interactive setup wizard, or configure a role with `archloop agent-config set-role <role> --provider <provider> --model <model>`.",
     );
   }
 

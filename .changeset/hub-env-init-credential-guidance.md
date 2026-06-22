@@ -1,5 +1,5 @@
 ---
-"@ai-hero/sandcastle": patch
+"@yibeibankaishui/archloop": patch
 ---
 
-Add provider-specific credential acquisition guidance to `sandcastle env init` and short hints for empty keys in `sandcastle env show`.
+Add provider-specific credential acquisition guidance to `archloop env init` and short hints for empty keys in `archloop env show`.

@@ -1,11 +1,11 @@
-# @ai-hero/sandcastle
+# @yibeibankaishui/archloop
 
 ## 0.5.9
 
 ### Patch Changes
 
 - 1b742cb: Replace hardcoded "GitHub issues" language in simple-loop and sequential-reviewer templates with backlog-agnostic wording so scaffolded projects read correctly regardless of the chosen backlog manager.
-- a85d6c0: Add Docker UID alignment via build-arg and pre-flight diagnostic. Dockerfile templates now accept `AGENT_UID`/`AGENT_GID` build-args (default 1000) and `sandcastle docker build-image` defaults them to the host UID/GID. The Docker provider gains `containerUid`/`containerGid` options and a pre-flight `docker image inspect` check that catches UID mismatches before container start. See ADR-0014.
+- a85d6c0: Add Docker UID alignment via build-arg and pre-flight diagnostic. Dockerfile templates now accept `AGENT_UID`/`AGENT_GID` build-args (default 1000) and `archloop docker build-image` defaults them to the host UID/GID. The Docker provider gains `containerUid`/`containerGid` options and a pre-flight `docker image inspect` check that catches UID mismatches before container start. See ADR-0014.
 - 856e6b7: fix: unescape `\n`, `\r`, `\t`, and `\\` in double-quoted `.env` values to match standard dotenv semantics
 - 77590d0: fix: sequential-reviewer template uses createSandbox so implementer and reviewer share a branch
 
@@ -27,7 +27,7 @@
 
 ### Patch Changes
 
-- 904ad82: Fix `PromptError: Prompt argument "{{TASK_ID}}" has no matching value in promptArgs` thrown on every iteration of the `simple-loop`, `sequential-reviewer`, and `parallel-planner*` merge flows after `sandcastle init`. The `VIEW_TASK_COMMAND` and `CLOSE_TASK_COMMAND` registry values used to embed `{{TASK_ID}}`, which got baked into prompts whose runtime promptArgs do not include `TASK_ID`. They now use a plain `<ID>` placeholder for the agent to fill in from surrounding context.
+- 904ad82: Fix `PromptError: Prompt argument "{{TASK_ID}}" has no matching value in promptArgs` thrown on every iteration of the `simple-loop`, `sequential-reviewer`, and `parallel-planner*` merge flows after `archloop init`. The `VIEW_TASK_COMMAND` and `CLOSE_TASK_COMMAND` registry values used to embed `{{TASK_ID}}`, which got baked into prompts whose runtime promptArgs do not include `TASK_ID`. They now use a plain `<ID>` placeholder for the agent to fill in from surrounding context.
 
 ## 0.5.6
 
@@ -35,11 +35,11 @@
 
 - 54b5111: Add `timeouts.copyToWorktreeMs` option to override the host-to-worktree copy timeout (default: 60 000 ms).
 - d8484ca: Surface fallback `cp -R` failures from `copyToWorktree` as a typed `CopyToWorktreeError` instead of silently swallowing them
-- b6cc84f: Fix `WorktreeManager.pruneStale` deleting active worktrees when `.sandcastle` (or any ancestor of the repo directory) is a symlink. `git worktree list` returns canonicalized paths, so the un-canonicalized prefix never matched the active set and parallel `createSandbox()` calls would wipe each other's worktrees mid-run, surfacing as `spawn /bin/sh ENOENT`.
-- 26920ca: Fix `branchStrategy.baseBranch` being silently dropped when calling `sandcastle.run()` with a worktree-based sandbox. New branches now correctly fork from the requested `baseBranch` instead of the host's HEAD.
+- b6cc84f: Fix `WorktreeManager.pruneStale` deleting active worktrees when `.archloop` (or any ancestor of the repo directory) is a symlink. `git worktree list` returns canonicalized paths, so the un-canonicalized prefix never matched the active set and parallel `createSandbox()` calls would wipe each other's worktrees mid-run, surfacing as `spawn /bin/sh ENOENT`.
+- 26920ca: Fix `branchStrategy.baseBranch` being silently dropped when calling `archloop.run()` with a worktree-based sandbox. New branches now correctly fork from the requested `baseBranch` instead of the host's HEAD.
 - bbb0f39: Fix `encodeProjectPath` to handle Windows paths by replacing backslashes with hyphens and stripping drive-letter colons, producing a valid single directory-name component on Windows.
 - b2123e4: Add optional `timeoutMs` field to hook objects, allowing per-hook timeout overrides with fallback to the default 60s
-- a658fcc: Update Quick Start install command to recommend `--save-dev` and note that Sandcastle is a dev/CI tool
+- a658fcc: Update Quick Start install command to recommend `--save-dev` and note that archLoop is a dev/CI tool
 - 425b77e: Use APFS clonefile (`cp -cR`) on macOS for copy-to-worktree instead of GNU `--reflink=auto`, giving Mac users instant copy-on-write on APFS volumes
 
 ## 0.5.5
@@ -92,8 +92,8 @@
 
 ### Patch Changes
 
-- ba6121e: Add a `cwd` option to `createSandbox()`, `createWorktree()`, `run()`, and `interactive()`. When provided, `cwd` replaces `process.cwd()` as the host repo directory used for worktrees, `.sandcastle/.env`, logs, patches, and git operations, letting you drive Sandcastle from outside the target repo. Relative paths resolve against `process.cwd()`; absolute paths pass through. A `CwdError` is raised when the path does not exist or is not a directory.
-- f872268: Fix session capture, which always failed with "Could not find the file". Sandcastle was looking for session JSONLs under a `sessions/` subdirectory that Claude Code does not actually use.
+- ba6121e: Add a `cwd` option to `createSandbox()`, `createWorktree()`, `run()`, and `interactive()`. When provided, `cwd` replaces `process.cwd()` as the host repo directory used for worktrees, `.archloop/.env`, logs, patches, and git operations, letting you drive archLoop from outside the target repo. Relative paths resolve against `process.cwd()`; absolute paths pass through. A `CwdError` is raised when the path does not exist or is not a directory.
+- f872268: Fix session capture, which always failed with "Could not find the file". archLoop was looking for session JSONLs under a `sessions/` subdirectory that Claude Code does not actually use.
 
 ## 0.5.0
 
@@ -118,7 +118,7 @@
 - c8cfcc6: Add timeout to the isolated provider `copyPaths` loop in `startSandbox`. The entire copy loop is now wrapped with `withTimeout` (120s), producing a `CopyToWorktreeTimeoutError` on expiry, consistent with the per-step timeout pattern used elsewhere in the sandbox lifecycle.
 - bab11e9: Add `network` option to Docker and Podman sandbox providers for custom container networking
 - a2c580f: Make Dockerfile generation aware of the selected backlog manager. When "beads" is chosen, the Dockerfile installs beads CLI tools instead of GitHub CLI.
-- a2fd5ad: Generate `.env.example` dynamically during `sandcastle init` based on selected agent and backlog manager instead of copying a static file from the template directory.
+- a2fd5ad: Generate `.env.example` dynamically during `archloop init` based on selected agent and backlog manager instead of copying a static file from the template directory.
 - 20741fe: Fix parallel-planner templates to use {{CLOSE_TASK_COMMAND}} placeholder instead of hardcoded "close the issue" language, and replace "GitHub issue" with backlog-agnostic wording
 - b7880ec: Make `prompt`/`promptFile` optional in `interactive()` — when neither is provided, the agent TUI launches with no initial prompt (the full prompt pipeline is skipped).
 - aea1131: Add per-step timeouts across the sandbox lifecycle. Every lifecycle step is now wrapped with `Effect.timeoutFail` via a `withTimeout` utility, producing a step-specific tagged error on expiry. Breaking: `TimeoutError` renamed to `AgentIdleTimeoutError` with `timeoutMs` field replacing `idleTimeoutSeconds`.
@@ -138,17 +138,17 @@
 ### Patch Changes
 
 - fdeccd4: Change agent provider `buildPrintCommand` and `buildInteractiveArgs` to accept an options object `{ prompt, dangerouslySkipPermissions }` instead of a bare prompt string. The `claudeCode()` factory now conditionally includes `--dangerously-skip-permissions` based on the boolean.
-- f413493: Add backlog manager selection to `sandcastle init` (GitHub Issues or Beads). All templates use placeholders (`{{LIST_TASKS_COMMAND}}`, `{{VIEW_TASK_COMMAND}}`, `{{CLOSE_TASK_COMMAND}}`) replaced at scaffold time with the correct commands for the chosen manager. Parallel-planner uses `{ id: string }` instead of `{ number: number }` in plan JSON, `TASK_ID` instead of `ISSUE_NUMBER` in prompt args, and raw IDs in log output. Selecting Beads skips the "Create Sandcastle label" step.
-- 0e2e5fe: Fix `sandcastle init` to strip `--label Sandcastle` from scaffolded prompt files when user declines label creation
+- f413493: Add backlog manager selection to `archloop init` (GitHub Issues or Beads). All templates use placeholders (`{{LIST_TASKS_COMMAND}}`, `{{VIEW_TASK_COMMAND}}`, `{{CLOSE_TASK_COMMAND}}`) replaced at scaffold time with the correct commands for the chosen manager. Parallel-planner uses `{ id: string }` instead of `{ number: number }` in plan JSON, `TASK_ID` instead of `ISSUE_NUMBER` in prompt args, and raw IDs in log output. Selecting Beads skips the "Create archLoop label" step.
+- 0e2e5fe: Fix `archloop init` to strip `--label archLoop` from scaffolded prompt files when user declines label creation
 - f413493: Add `interactive()` API for launching interactive agent sessions inside sandboxes, replacing the old `interactive` CLI command. Includes the `sandbox.interactive()` method on `createSandbox()`, full prompt preprocessing (promptFile, shell expressions, argument substitution), all three branch strategies, `onSandboxReady` hooks, `copyToWorkspace` for worktree providers, env resolution, and `interactiveExec` on Docker and Podman providers. ClackDisplay now shows intro/summary and progress (creating worktree, copying files, starting sandbox, syncing, merging, commit collection) for interactive sessions.
 - 29d224d: Add interactive arg collection for missing prompt arguments. When `interactive()` encounters `{{KEY}}` placeholders with no matching prompt argument, it prompts the user at the terminal via `@clack/prompts` text input. Built-in args (`SOURCE_BRANCH`, `TARGET_BRANCH`) are excluded from prompting. `run()` behavior is unchanged.
-- 83a86f6: Add no-sandbox provider for interactive mode. `noSandbox()` runs the agent directly on the host with no container isolation — only accepted by `interactive()`, not `run()` or `createSandbox()`. The agent does not receive `--dangerously-skip-permissions`, so the user manages permissions themselves. Import from `@ai-hero/sandcastle/sandboxes/no-sandbox`.
+- 83a86f6: Add no-sandbox provider for interactive mode. `noSandbox()` runs the agent directly on the host with no container isolation — only accepted by `interactive()`, not `run()` or `createSandbox()`. The agent does not receive `--dangerously-skip-permissions`, so the user manages permissions themselves. Import from `@yibeibankaishui/archloop/sandboxes/no-sandbox`.
 - f413493: Fix Podman integration: rootless mode support with `--userns=keep-id` flag (configurable via `userns` option), pre-flight image existence check, Podman Machine detection on macOS/Windows, 5s timeout on signal handler cleanup, correct `:ro,z` syntax for SELinux-labeled readonly bind mounts, and `interactiveExec` for interactive agent sessions via `podman exec -it`.
-- 0cde1a2: Add PodmanLifecycle module and `sandcastle podman build-image` / `sandcastle podman remove-image` CLI commands, mirroring the existing Docker CLI commands for Podman users.
+- 0cde1a2: Add PodmanLifecycle module and `archloop podman build-image` / `archloop podman remove-image` CLI commands, mirroring the existing Docker CLI commands for Podman users.
 - 530a8af: Fix Podman container crashes: rename base image's `node` user (UID 1000) to `agent` instead of creating a new user, so `--userns=keep-id` maps to the correct home directory owner. Override entrypoint in `podman run` to avoid double-sleep when the image already defines `ENTRYPOINT ["sleep", "infinity"]`.
 - 8bcb78e: Add post-agent logging to withSandboxLifecycle for syncing, merging, and commit collection phases
 - 1844288: Rename `copyToSandbox` option to `copyToWorkspace` across the public API (`run()`, `interactive()`, `createSandbox()`) and rename internal module `CopyToSandbox.ts` to `CopyToWorkspace.ts`. This aligns with the formalized distinction between "sandbox" (isolation boundary) and "workspace" (directory where the agent runs). No behavior changes.
-- 35feb6f: Add sandbox provider selection (Docker / Podman) to `sandcastle init`. Selecting Podman writes `Containerfile` instead of `Dockerfile` and uses Podman-specific build commands.
+- 35feb6f: Add sandbox provider selection (Docker / Podman) to `archloop init`. Selecting Podman writes `Containerfile` instead of `Dockerfile` and uses Podman-specific build commands.
 - c54e389: Show per-command estimated token counts in the "Expanding shell expressions" taskLog after shell expressions resolve
 
 ## 0.4.5
@@ -189,13 +189,13 @@
 
 - 0bb95e2: Add CODING_STANDARDS.md to reviewer-based templates (sequential-reviewer, parallel-planner-with-review) so the reviewer agent has concrete standards to enforce during code review.
 - bb444af: Add optional `mounts` config to `docker()` and `podman()` providers for mounting host directories (e.g. package manager caches) into sandbox containers. Each mount supports `hostPath` (with `~` expansion), `sandboxPath`, and optional `readonly` flag. Throws a clear error if a host path does not exist.
-- 16315da: Add Daytona isolated sandbox provider (`@ai-hero/sandcastle/sandboxes/daytona`)
+- 16315da: Add Daytona isolated sandbox provider (`@yibeibankaishui/archloop/sandboxes/daytona`)
 - a8e7d72: Add OpenCode as a built-in agent provider. The `opencode()` factory returns an `AgentProvider` that invokes `opencode run` with raw stdout passthrough (no JSON stream parsing). Includes CLI registry entry, init scaffold with Dockerfile template, and documentation.
 - 9d6dfba: Add `parallel-planner-with-review` template that combines parallel execution with per-branch code review using `createSandbox`. Also fix `maxIterations` defaults: sequential-reviewer reviewer 10→1, parallel-planner merger 10→1.
-- 859f2f5: Add Podman sandbox provider (`sandcastle/sandboxes/podman`) as a bind-mount provider mirroring Docker's behavior with SELinux label support
-- d917d69: Allow sandbox providers and agent providers to accept `env: Record<string, string>` at construction time. Provider env is merged with the `.sandcastle/.env` resolver output at launch, with provider values taking precedence. Agent and sandbox provider env must not have overlapping keys.
+- 859f2f5: Add Podman sandbox provider (`archloop/sandboxes/podman`) as a bind-mount provider mirroring Docker's behavior with SELinux label support
+- d917d69: Allow sandbox providers and agent providers to accept `env: Record<string, string>` at construction time. Provider env is merged with the `.archloop/.env` resolver output at launch, with provider values taking precedence. Agent and sandbox provider env must not have overlapping keys.
 - 6192024: Add `throwOnDuplicateWorktree` option to `RunOptions` and `CreateSandboxOptions`. When set to `false`, a worktree collision reuses the existing worktree instead of failing. Defaults to `true` (current behavior).
-- 22ec222: Add Vercel isolated sandbox provider (`sandcastle/sandboxes/vercel`) using `@vercel/sandbox` SDK
+- 22ec222: Add Vercel isolated sandbox provider (`archloop/sandboxes/vercel`) using `@vercel/sandbox` SDK
 - 0d08a33: Buffer Pi provider text deltas before display to prevent one-word-per-line terminal output in stdout mode
 - 448c9da: Support directories in `copyIn` for isolated sandbox providers and rename `copyOut` to `copyFileOut`
 - c30f690: Derive CLI version from package.json instead of hardcoding it.
@@ -230,8 +230,8 @@
 - 5b04e73: ### Breaking changes
   - `sandbox` is now a required option on `run()` and `createSandbox()`
   - `imageName` removed from top-level `RunOptions` and `CreateSandboxOptions` — image configuration now lives inside the sandbox provider (e.g. `docker({ imageName })`)
-  - `docker()` factory is exported exclusively from `@ai-hero/sandcastle/sandboxes/docker`
-  - `sandcastle build-image` and `sandcastle remove-image` are now `sandcastle docker build-image` and `sandcastle docker remove-image`
+  - `docker()` factory is exported exclusively from `@yibeibankaishui/archloop/sandboxes/docker`
+  - `archloop build-image` and `archloop remove-image` are now `archloop docker build-image` and `archloop docker remove-image`
 
   ### New features
   - Pluggable sandbox provider abstraction with bind-mount and isolated provider types
@@ -242,7 +242,7 @@
   - Git format-patch/am sync-out for committed changes
   - Git diff/apply sync-out for uncommitted changes
   - Untracked file extraction via `copyOut` back to the host
-  - Artifact persistence and recovery for failed sync-out (patches saved to `.sandcastle/patches/<timestamp>/`)
+  - Artifact persistence and recovery for failed sync-out (patches saved to `.archloop/patches/<timestamp>/`)
 
 ## 0.2.4
 
@@ -277,14 +277,14 @@
 ### Patch Changes
 
 - 77765bb: Add codex agent provider: `codex(model)` factory, stream parser for Codex CLI's `--json` JSONL output, Dockerfile template, init scaffolding, and CLI support
-- 1f2134d: Add pi as a supported agent provider. `pi(model)` factory function is exported from `@ai-hero/sandcastle`. Pi's `--mode json` JSONL output is parsed correctly (message_update, tool_execution_start, agent_end events). `sandcastle init --agent pi` scaffolds a working setup with pi's Dockerfile and correct `main.ts`. `sandcastle interactive --agent pi` launches an interactive pi session.
+- 1f2134d: Add pi as a supported agent provider. `pi(model)` factory function is exported from `@yibeibankaishui/archloop`. Pi's `--mode json` JSONL output is parsed correctly (message_update, tool_execution_start, agent_end events). `archloop init --agent pi` scaffolds a working setup with pi's Dockerfile and correct `main.ts`. `archloop interactive --agent pi` launches an interactive pi session.
 - 3aff5f5: Refactor AgentProvider to runtime-only factory pattern. `run()` now requires `agent: claudeCode("model")` instead of `model: "..."`. The `claudeCode` factory and `AgentProvider` type are now exported from the package. Removed: `getAgentProvider`, `parseStreamJsonLine`, `formatToolCall`, `DEFAULT_MODEL` from public API.
 - 75b4400: Bump default idle timeout from 5 minutes to 10 minutes to reduce spurious TimeoutError failures during long agent operations
 - c62b429: Wire CLI interactive command for multi-agent support. The `interactive` command now accepts `--agent` and `--model` flags, uses the provider's `buildInteractiveArgs()` for docker exec, and displays the provider name in status messages.
 - b1dd427: Add `createSandbox()` programmatic API for reusable sandboxes across multiple `run()` calls
-- 54e76e0: Decouple init scaffolding from runtime providers. `envManifest` and `dockerfileTemplate` removed from `AgentProvider` interface. `sandcastle init` now has `--agent` and `--model` flags with interactive agent selection. Dockerfile templates owned by init's internal registry. Each template carries a static `.env.example` file copied as-is during scaffold. Scaffolded `main.ts` is rewritten with the selected agent factory and model.
+- 54e76e0: Decouple init scaffolding from runtime providers. `envManifest` and `dockerfileTemplate` removed from `AgentProvider` interface. `archloop init` now has `--agent` and `--model` flags with interactive agent selection. Dockerfile templates owned by init's internal registry. Each template carries a static `.env.example` file copied as-is during scaffold. Scaffolded `main.ts` is rewritten with the selected agent factory and model.
 - f35fa48: Log periodic idle warnings every minute of agent inactivity
-- fabf0f7: Use run name instead of agent name in worktree and branch naming. When a `name` is provided to `run()`, worktree directories and temp branches now include the run name (e.g. `sandcastle/<name>/<timestamp>`) instead of the agent provider name. Renamed `sanitizeAgentName` to `sanitizeName`.
+- fabf0f7: Use run name instead of agent name in worktree and branch naming. When a `name` is provided to `run()`, worktree directories and temp branches now include the run name (e.g. `archloop/<name>/<timestamp>`) instead of the agent provider name. Renamed `sanitizeAgentName` to `sanitizeName`.
 - cce183a: Replace top-level `branch` option on `RunOptions` with a `worktree` discriminated union that explicitly models two workspace modes: `{ mode: 'temp-branch' }` (default) and `{ mode: 'branch', branch: string }`. This is a breaking change — the old `branch` field is removed.
 
 ## 0.1.8
@@ -341,12 +341,12 @@
 ### Patch Changes
 
 - 8e08f7e: Document custom completion signal in the Early termination README section
-- 6f9d3be: Fix CLI option tables to show correct default `--image-name` as `sandcastle:<repo-dir-name>` instead of `sandcastle:local`
-- 4c94c5f: Fix README incorrectly describing `.sandcastle/prompt.md` as a default for `promptFile`. Neither `prompt` nor `promptFile` has a default — omitting both causes an error. The `.sandcastle/prompt.md` path is a convention scaffolded by `sandcastle init`, not an automatic fallback.
+- 6f9d3be: Fix CLI option tables to show correct default `--image-name` as `archloop:<repo-dir-name>` instead of `archloop:local`
+- 4c94c5f: Fix README incorrectly describing `.archloop/prompt.md` as a default for `promptFile`. Neither `prompt` nor `promptFile` has a default — omitting both causes an error. The `.archloop/prompt.md` path is a convention scaffolded by `archloop init`, not an automatic fallback.
 - 0d93587: Include run name in log filename to prevent overwrites in multi-agent workflows. When `name` is passed to `run()`, it is appended to the log filename (e.g. `main-implementer.log` instead of `main.log`).
 - 26683b5: Lead the API section with a simple run() example before the full options reference.
-- 3e32b7b: Remove `sandcastle interactive` CLI command documentation from README
-- 762642e: Remove stale `patches/` entry from scaffolded `.sandcastle/.gitignore`. Nothing in Sandcastle creates a `.sandcastle/patches/` directory — the worktree-based architecture eliminated patch-based sync.
+- 3e32b7b: Remove `archloop interactive` CLI command documentation from README
+- 762642e: Remove stale `patches/` entry from scaffolded `.archloop/.gitignore`. Nothing in archLoop creates a `.archloop/patches/` directory — the worktree-based architecture eliminated patch-based sync.
 
 ## 0.1.3
 
@@ -366,7 +366,7 @@
 
 ### Patch Changes
 
-- 0f61f59: Filter issue lists by `Sandcastle` label in all templates. `sandcastle init` now offers to create the label on the repo.
+- 0f61f59: Filter issue lists by `archLoop` label in all templates. `archloop init` now offers to create the label on the repo.
 
 ## 0.1.0
 
@@ -377,19 +377,19 @@
 ### Patch Changes
 
 - f11fd90: Add JSDoc comments to all public-facing type properties: `RunResult`, `LoggingOption`, and `PromptArgs`.
-- 1fc5e32: Add kitchen-sink `run()` example to README with inline JSDoc-style comments on every option. Also updates the `RunOptions` table to remove the hidden `agent` field, fix the `maxIterations` default (1, not 5), fix the `timeoutSeconds` default (1200, not 900), update the `imageName` default, and add the missing `name` and `copyToSandbox` fields. Removes the removed `--agent` flag from the `sandcastle init` and `sandcastle interactive` CLI tables.
+- 1fc5e32: Add kitchen-sink `run()` example to README with inline JSDoc-style comments on every option. Also updates the `RunOptions` table to remove the hidden `agent` field, fix the `maxIterations` default (1, not 5), fix the `timeoutSeconds` default (1200, not 900), update the `imageName` default, and add the missing `name` and `copyToSandbox` fields. Removes the removed `--agent` flag from the `archloop init` and `archloop interactive` CLI tables.
 - b713226: Migrate from npm to pnpm across the project (issue #168).
   - Added `packageManager: "pnpm@10.7.0"` to `package.json`
   - Generated `pnpm-lock.yaml` (replaces `package-lock.json`)
   - Updated CI and release workflows to use `pnpm/action-setup` and `pnpm` commands
   - Updated all template `main.ts` files to use `pnpm install` in `onSandboxReady` hooks
-  - Updated all prompt files (`.sandcastle/` and `src/templates/`) to reference `pnpm run typecheck` and `pnpm run test`
+  - Updated all prompt files (`.archloop/` and `src/templates/`) to reference `pnpm run typecheck` and `pnpm run test`
   - Updated `README.md` development and hooks examples to use pnpm
   - Updated `InitService.ts` next-steps text to reference pnpm
 
 - cd429c0: Replace --ff-only with regular merge for worktree merge-back (issue #162)
 
-  When the agent finishes, Sandcastle now uses `git merge` instead of `git merge --ff-only` to integrate the temp branch back into the host branch. This allows users to make commits on the host branch while Sandcastle is running without causing merge-back failures. Fast-forward still happens naturally when the host branch hasn't moved; only the requirement that it _must_ fast-forward is removed.
+  When the agent finishes, archLoop now uses `git merge` instead of `git merge --ff-only` to integrate the temp branch back into the host branch. This allows users to make commits on the host branch while archLoop is running without causing merge-back failures. Fast-forward still happens naturally when the host branch hasn't moved; only the requirement that it _must_ fast-forward is removed.
 
 - db3adec: Show run name instead of provider name in log-to-file summary (issue #160).
 

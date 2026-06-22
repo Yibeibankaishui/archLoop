@@ -61,7 +61,7 @@ export interface HubProjectRunSummary {
 
 export interface HubProjectStatus {
   readonly repoRoot: string;
-  readonly sandcastleUserDataDir: string;
+  readonly archloopUserDataDir: string;
   readonly hubProjectDir: string;
   readonly projectRegistered: boolean;
   readonly beadsAvailable: boolean;
@@ -77,7 +77,7 @@ export interface HubProjectStatus {
 
 export interface HubProjectStatusOptions {
   readonly cwd?: string;
-  readonly sandcastleUserDataDir?: string;
+  readonly archloopUserDataDir?: string;
   readonly resolveRepoRoot?: (cwd: string) => string;
   readonly detectBeadsAvailable?: () => boolean;
   readonly detectTaskStoreInitialized?: (repoRoot: string) => boolean;
@@ -208,7 +208,7 @@ export const resolveFailedTaskNextAction = (
   task: Pick<HubTaskProjection, "id">,
   failureReason: HubFailureReason | undefined,
 ): string => {
-  const recoverCmd = `sandcastle tasks recover ${task.id}`;
+  const recoverCmd = `archloop tasks recover ${task.id}`;
   switch (failureReason) {
     case "agent_failed":
     case "sandbox_failed":
@@ -449,7 +449,7 @@ const appendTaskCountLines = (lines: string[], status: HubProjectStatus) => {
   lines.push("Task counts by Hub status");
   if (!status.beadsAvailable) {
     lines.push(
-      "  Sandcastle task runtime unavailable — install dependencies, set SANDCASTLE_BD_PATH, or ensure the bundled Beads runtime is available.",
+      "  archLoop task runtime unavailable — install dependencies, set ARCHLOOP_BD_PATH, or ensure the bundled Beads runtime is available.",
     );
     return;
   }
@@ -593,7 +593,7 @@ export const formatHubProjectStatusLines = (
   return lines;
 };
 
-export const resolveSandcastleUserDataDir = (
+export const resolveArchloopUserDataDir = (
   env: NodeJS.ProcessEnv = process.env,
   homeDir: string = homedir(),
 ): string => {
@@ -602,18 +602,18 @@ export const resolveSandcastleUserDataDir = (
     xdgDataHome && xdgDataHome.length > 0
       ? xdgDataHome
       : join(homeDir, ".local", "share");
-  return join(baseDir, "sandcastle");
+  return join(baseDir, "archloop");
 };
 
 export const resolveHubProjectDir = (
-  sandcastleUserDataDir: string,
+  archloopUserDataDir: string,
   repoRoot: string,
 ): string => {
   const projectId = createHash("sha256")
     .update(repoRoot)
     .digest("hex")
     .slice(0, 12);
-  return join(sandcastleUserDataDir, "hub", "projects", projectId);
+  return join(archloopUserDataDir, "hub", "projects", projectId);
 };
 
 export const resolveGitRepoRoot = (cwd: string): string => {
@@ -630,7 +630,7 @@ export const resolveGitRepoRoot = (cwd: string): string => {
         ? error.message
         : "unable to resolve git repo root";
     throw new Error(
-      `sandcastle project status requires a git repository: ${message}`,
+      `archloop project status requires a git repository: ${message}`,
     );
   }
 };
@@ -725,8 +725,8 @@ const resolveRepoRoot = (
   resolveRepoRootOption ? resolveRepoRootOption(cwd) : resolveGitRepoRoot(cwd);
 
 const resolveUserDataDir = (
-  sandcastleUserDataDir: HubProjectStatusOptions["sandcastleUserDataDir"],
-): string => sandcastleUserDataDir ?? resolveSandcastleUserDataDir();
+  archloopUserDataDir: HubProjectStatusOptions["archloopUserDataDir"],
+): string => archloopUserDataDir ?? resolveArchloopUserDataDir();
 
 const loadTaskBoardSafe = (
   repoRoot: string,
@@ -754,10 +754,8 @@ export const resolveHubProjectStatus = (
 ): HubProjectStatus => {
   const cwd = options.cwd ?? process.cwd();
   const repoRoot = resolveRepoRoot(cwd, options.resolveRepoRoot);
-  const sandcastleUserDataDir = resolveUserDataDir(
-    options.sandcastleUserDataDir,
-  );
-  const hubProjectDir = resolveHubProjectDir(sandcastleUserDataDir, repoRoot);
+  const archloopUserDataDir = resolveUserDataDir(options.archloopUserDataDir);
+  const hubProjectDir = resolveHubProjectDir(archloopUserDataDir, repoRoot);
   const projectRegistered = resolveProjectRegistration(
     hubProjectDir,
     options.ensureHubProjectDir,
@@ -797,7 +795,7 @@ export const resolveHubProjectStatus = (
 
   return {
     repoRoot,
-    sandcastleUserDataDir,
+    archloopUserDataDir,
     hubProjectDir,
     projectRegistered,
     beadsAvailable,

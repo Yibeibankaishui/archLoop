@@ -23,7 +23,7 @@ import { getHubFlowDefinition, resolveHubFlowPromptPath } from "./hubFlows.js";
 import {
   resolveGitRepoRoot,
   resolveHubProjectDir,
-  resolveSandcastleUserDataDir,
+  resolveArchloopUserDataDir,
 } from "./projectStatus.js";
 import {
   claimHubTaskForImplementation,
@@ -543,7 +543,7 @@ export const runHubFlow = async (
   }
   if (flowDefinition.kind === "proposal") {
     throw new Error(
-      `Hub flow "${input.flowId}" is a proposal flow and must be executed through sandcastle run --flow or its task shortcut.`,
+      `Hub flow "${input.flowId}" is a proposal flow and must be executed through archloop run --flow or its task shortcut.`,
     );
   }
   if (flowDefinition.hasReviewer && !input.reviewer) {
@@ -562,7 +562,7 @@ export const runHubFlow = async (
 
   const hubProjectDir =
     input.hubProjectDir ??
-    resolveHubProjectDir(resolveSandcastleUserDataDir(input.env), repoRoot);
+    resolveHubProjectDir(resolveArchloopUserDataDir(input.env), repoRoot);
   const readyBoard = loadHubReadyQueue(repoRoot, input.env);
   const selectedTasks = selectHubFlowTasks(readyBoard);
   const selectedTaskIds = selectedTasks.map((task) => task.id);

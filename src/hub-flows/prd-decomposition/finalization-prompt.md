@@ -5,7 +5,7 @@ decomposition into a single structured proposal. Do not introduce new slices,
 dependencies, or scope that the user did not agree to.
 
 This is still a proposal-only step. Do NOT create Beads tasks, write GitHub
-issues, or modify the repository. Sandcastle validates this proposal and
+issues, or modify the repository. archLoop validates this proposal and
 applies it after you emit it.
 
 ## Requirements
