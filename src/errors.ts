@@ -37,6 +37,17 @@ export class WorktreeError extends Data.TaggedError("WorktreeError")<{
   readonly message: string;
 }> {}
 
+/** Worktree lease acquisition, release, or recovery failed */
+export class WorktreeLeaseError extends Data.TaggedError("WorktreeLeaseError")<{
+  readonly message: string;
+  readonly reason: "active" | "malformed" | "recovery";
+  readonly branch?: string;
+  readonly worktreePath?: string;
+  readonly leasePath?: string;
+  readonly pid?: number;
+  readonly acquiredAt?: string;
+}> {}
+
 /** User-facing message when archLoop runs in a Git repo with no commits. */
 export const EMPTY_REPO_ERROR_MESSAGE =
   "This directory is a Git repository but has no commits yet. archLoop needs at least one commit on the current branch before it can create worktrees or resolve HEAD.\n\n" +
