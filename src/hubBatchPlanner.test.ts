@@ -3,10 +3,12 @@ import { describe, expect, it } from "vitest";
 import { HubFlowError } from "./errors.js";
 import {
   HUB_BATCH_DEFAULT_MAX_TASKS,
+  HUB_BATCH_DEFAULT_STRATEGY,
   HUB_BATCH_MAX_TASKS_UPPER_LIMIT,
   parseHubBatchMaxTasks,
   parseHubBatchStrategy,
   planHubFlowBatch,
+  resolveEffectiveHubBatchSelection,
   resolveHubBatchSelectionOptions,
   selectHubFlowTasksWithBatchOptions,
 } from "./hubBatchPlanner.js";
@@ -38,10 +40,12 @@ describe("hubBatchPlanner", () => {
     expect(() => parseHubBatchMaxTasks("abc")).toThrow(HubFlowError);
   });
 
-  it("parses conservative batch strategy", () => {
+  it("parses planned, limited, and conservative batch strategies", () => {
+    expect(parseHubBatchStrategy("planned")).toBe("planned");
+    expect(parseHubBatchStrategy("limited")).toBe("limited");
     expect(parseHubBatchStrategy("conservative")).toBe("conservative");
     expect(parseHubBatchStrategy(" Conservative ")).toBe("conservative");
-    expect(() => parseHubBatchStrategy("planned")).toThrow(HubFlowError);
+    expect(() => parseHubBatchStrategy("random")).toThrow(HubFlowError);
   });
 
   it("rejects batch selection options for proposal flows", () => {
@@ -60,15 +64,46 @@ describe("hubBatchPlanner", () => {
     ).toThrow(/Proposal flows do not support --batch-strategy or --max-tasks/);
   });
 
-  it("defaults max-tasks when batch strategy is provided for task-board flows", () => {
+  it("defaults task-board flows to planned strategy and max 3 tasks", () => {
     expect(
       resolveHubBatchSelectionOptions({
         flowKind: "task-board",
-        batchStrategy: "conservative",
       }),
     ).toEqual({
-      batchStrategy: "conservative",
+      batchStrategy: HUB_BATCH_DEFAULT_STRATEGY,
       maxTasks: HUB_BATCH_DEFAULT_MAX_TASKS,
+    });
+
+    expect(
+      resolveEffectiveHubBatchSelection({
+        flowKind: "task-board",
+      }),
+    ).toEqual({
+      batchStrategy: HUB_BATCH_DEFAULT_STRATEGY,
+      maxTasks: HUB_BATCH_DEFAULT_MAX_TASKS,
+    });
+  });
+
+  it("allows overriding task-board batch strategy and max tasks", () => {
+    expect(
+      resolveHubBatchSelectionOptions({
+        flowKind: "task-board",
+        batchStrategy: "limited",
+        maxTasks: "2",
+      }),
+    ).toEqual({
+      batchStrategy: "limited",
+      maxTasks: 2,
+    });
+
+    expect(
+      resolveHubBatchSelectionOptions({
+        flowKind: "task-board",
+        maxTasks: "5",
+      }),
+    ).toEqual({
+      batchStrategy: HUB_BATCH_DEFAULT_STRATEGY,
+      maxTasks: 5,
     });
   });
 
@@ -91,6 +126,46 @@ describe("hubBatchPlanner", () => {
       { taskId: "bd-second", reason: "over_max_tasks" },
     ]);
     expect(result.batchStrategyUsed).toBe("conservative");
+  });
+
+  it("selects ready queue order up to max tasks for limited strategy", () => {
+    const candidates = [
+      readyTask("bd-a"),
+      readyTask("bd-b"),
+      readyTask("bd-c"),
+      readyTask("bd-d"),
+    ];
+
+    const result = planHubFlowBatch({
+      candidates,
+      batchStrategy: "limited",
+      maxTasks: 2,
+    });
+
+    expect(result.selectedTasks.map((task) => task.id)).toEqual([
+      "bd-a",
+      "bd-b",
+    ]);
+    expect(result.deferredTasks).toEqual([
+      { taskId: "bd-c", reason: "over_max_tasks" },
+      { taskId: "bd-d", reason: "over_max_tasks" },
+    ]);
+    expect(result.batchStrategyUsed).toBe("limited");
+  });
+
+  it("falls back to conservative when planned strategy has no planner", () => {
+    const candidates = [readyTask("bd-a"), readyTask("bd-b")];
+
+    const result = planHubFlowBatch({
+      candidates,
+      batchStrategy: "planned",
+      maxTasks: HUB_BATCH_DEFAULT_MAX_TASKS,
+    });
+
+    expect(result.selectedTasks.map((task) => task.id)).toEqual(["bd-a"]);
+    expect(result.batchStrategyRequested).toBe("planned");
+    expect(result.batchStrategyUsed).toBe("conservative");
+    expect(result.fallbackReason).toBe("planner_unavailable");
   });
 
   it("preserves ready queue order for conservative selection", () => {

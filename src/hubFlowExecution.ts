@@ -39,6 +39,7 @@ import {
   prepareHubTaskRetry,
 } from "./hubTaskRetry.js";
 import {
+  resolveEffectiveHubBatchSelection,
   selectHubFlowTasksWithBatchOptions,
   type HubBatchPlannerResult,
   type HubBatchStrategy,
@@ -644,10 +645,15 @@ export const runHubFlow = async (
     input.hubProjectDir ??
     resolveHubProjectDir(resolveArchloopUserDataDir(input.env), repoRoot);
   const readyBoard = loadHubReadyQueue(repoRoot, input.env);
-  const { selectedTasks, batchSelection } = selectHubFlowTasksWithBatchOptions({
-    candidates: readyBoard.tasks,
+  const effectiveBatchSelection = resolveEffectiveHubBatchSelection({
+    flowKind: flowDefinition.kind,
     batchStrategy: input.batchStrategy,
     maxTasks: input.maxTasks,
+  });
+  const { selectedTasks, batchSelection } = selectHubFlowTasksWithBatchOptions({
+    candidates: readyBoard.tasks,
+    batchStrategy: effectiveBatchSelection.batchStrategy!,
+    maxTasks: effectiveBatchSelection.maxTasks!,
   });
   const selectedTaskIds = selectedTasks.map((task) => task.id);
   const unfinishedBatches = findResumableHubFlowBatches({
@@ -689,6 +695,9 @@ export const runHubFlow = async (
           batchStrategyUsed: batchSelection.batchStrategyUsed,
           maxTasks: batchSelection.maxTasks,
           deferredTasks: batchSelection.deferredTasks,
+          ...(batchSelection.fallbackReason
+            ? { fallbackReason: batchSelection.fallbackReason }
+            : {}),
         }
       : {}),
   });
@@ -754,6 +763,14 @@ export const formatHubFlowResultLines = (
     lines.push(
       `Batch strategy: ${result.batchSelection.batchStrategyUsed} (max ${result.batchSelection.maxTasks})`,
     );
+    if (result.batchSelection.batchStrategyRequested !== result.batchSelection.batchStrategyUsed) {
+      lines.push(
+        `Batch strategy requested: ${result.batchSelection.batchStrategyRequested}`,
+      );
+    }
+    if (result.batchSelection.fallbackReason) {
+      lines.push(`Batch fallback: ${result.batchSelection.fallbackReason}`);
+    }
     if (result.batchSelection.deferredTasks.length > 0) {
       lines.push(
         `Deferred tasks: ${result.batchSelection.deferredTasks
