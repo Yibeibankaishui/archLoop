@@ -39,9 +39,13 @@ import {
   prepareHubTaskRetry,
 } from "./hubTaskRetry.js";
 import {
+  selectHubFlowTasksWithBatchOptions,
+  type HubBatchPlannerResult,
+  type HubBatchStrategy,
+} from "./hubBatchPlanner.js";
+import {
   loadHubTaskBoard,
   resolveHubTaskBranch,
-  selectHubFlowTasks,
   loadHubReadyQueue,
   type HubFailureReason,
   type HubTaskProjection,
@@ -108,6 +112,8 @@ export interface RunHubFlowInput {
   readonly merger?: HubFlowMerger;
   readonly verifier?: HubFlowVerifier;
   readonly runMergePhase?: boolean;
+  readonly batchStrategy?: HubBatchStrategy;
+  readonly maxTasks?: number;
 }
 
 export interface HubFlowTaskResult {
@@ -138,6 +144,7 @@ export interface RunHubFlowResult {
   readonly mergeResult?: RunHubBatchMergeResult;
   readonly resumedBatchId?: string;
   readonly unfinishedBatchIds: readonly string[];
+  readonly batchSelection?: HubBatchPlannerResult;
 }
 
 interface ResumableHubFlowBatch {
@@ -637,7 +644,11 @@ export const runHubFlow = async (
     input.hubProjectDir ??
     resolveHubProjectDir(resolveArchloopUserDataDir(input.env), repoRoot);
   const readyBoard = loadHubReadyQueue(repoRoot, input.env);
-  const selectedTasks = selectHubFlowTasks(readyBoard);
+  const { selectedTasks, batchSelection } = selectHubFlowTasksWithBatchOptions({
+    candidates: readyBoard.tasks,
+    batchStrategy: input.batchStrategy,
+    maxTasks: input.maxTasks,
+  });
   const selectedTaskIds = selectedTasks.map((task) => task.id);
   const unfinishedBatches = findResumableHubFlowBatches({
     hubProjectDir,
@@ -672,6 +683,14 @@ export const runHubFlow = async (
     flowId: input.flowId,
     createdAt: startedAt.toISOString(),
     taskIds: selectedTaskIds,
+    ...(batchSelection
+      ? {
+          batchStrategyRequested: batchSelection.batchStrategyRequested,
+          batchStrategyUsed: batchSelection.batchStrategyUsed,
+          maxTasks: batchSelection.maxTasks,
+          deferredTasks: batchSelection.deferredTasks,
+        }
+      : {}),
   });
 
   const results: HubFlowTaskResult[] = [];
@@ -716,6 +735,7 @@ export const runHubFlow = async (
     mergeResult,
     resumedBatchId,
     unfinishedBatchIds,
+    batchSelection,
   };
 };
 
@@ -730,6 +750,18 @@ export const formatHubFlowResultLines = (
     `Mode: ${result.mode}`,
     `Selected tasks: ${selectedTaskCount}`,
   ];
+  if (result.batchSelection) {
+    lines.push(
+      `Batch strategy: ${result.batchSelection.batchStrategyUsed} (max ${result.batchSelection.maxTasks})`,
+    );
+    if (result.batchSelection.deferredTasks.length > 0) {
+      lines.push(
+        `Deferred tasks: ${result.batchSelection.deferredTasks
+          .map((entry) => `${entry.taskId} (${entry.reason})`)
+          .join(", ")}`,
+      );
+    }
+  }
   if (result.resumedBatchId) {
     lines.push(`Resumed batch id: ${result.resumedBatchId}`);
   } else if (result.unfinishedBatchIds.length > 0) {

@@ -289,6 +289,95 @@ describe("Hub flow planner", () => {
       "archloop/bd-ready-ready-task",
     );
   });
+
+  it("conservative batch strategy selects and claims only one eligible ready task", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-conservative-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-first",
+        title: "First ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-second",
+        title: "Second ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    const invocations: HubImplementTaskInput[] = [];
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "conservative",
+    );
+
+    const result = await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      batchStrategy: "conservative",
+      maxTasks: 3,
+      implementer: async (input) => {
+        invocations.push(input);
+        return {
+          outcome: "success",
+          commits: [{ sha: "abc123" }],
+          completionSignal: "<promise>COMPLETE</promise>",
+        };
+      },
+      runMergePhase: false,
+    });
+
+    expect(result.selectedTaskIds).toEqual(["bd-first"]);
+    expect(result.batchSelection).toMatchObject({
+      batchStrategyUsed: "conservative",
+      maxTasks: 3,
+      deferredTasks: [{ taskId: "bd-second", reason: "over_max_tasks" }],
+    });
+    expect(invocations).toHaveLength(1);
+    expect(invocations[0]?.taskId).toBe("bd-first");
+
+    const batchEvents = await readJsonl(
+      join(result.runDir, "events", "batch.jsonl"),
+    );
+    const plannedEvent = batchEvents.find(
+      (event) => (event as { type?: string }).type === "batch_planned",
+    );
+    expect(plannedEvent).toMatchObject({
+      type: "batch_planned",
+      taskIds: ["bd-first"],
+      batchStrategyUsed: "conservative",
+      maxTasks: 3,
+      deferredTasks: [{ taskId: "bd-second", reason: "over_max_tasks" }],
+    });
+
+    expect(formatHubFlowResultLines(result).join("\n")).toContain(
+      "Batch strategy: conservative (max 3)",
+    );
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(finalState.find((task) => task.id === "bd-first")?.metadata.hubStatus).toBe(
+      "waiting_for_merge",
+    );
+    expect(finalState.find((task) => task.id === "bd-second")?.labels).toContain(
+      "ready-for-agent",
+    );
+  });
 });
 
 describe("no-review Hub flow execution", () => {
