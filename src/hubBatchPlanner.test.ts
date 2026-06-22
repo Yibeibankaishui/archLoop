@@ -7,8 +7,10 @@ import {
   parseHubBatchMaxTasks,
   parseHubBatchStrategy,
   planHubFlowBatch,
+  resolveFreshValidatedHubBatchSelection,
   resolveHubBatchSelectionOptions,
   selectHubFlowTasksWithBatchOptions,
+  validateHubBatchSelectionFreshness,
 } from "./hubBatchPlanner.js";
 import type { HubTaskProjection } from "./taskBoard.js";
 
@@ -101,5 +103,96 @@ describe("hubBatchPlanner", () => {
     });
 
     expect(selectedTasks.map((task) => task.id)).toEqual(["bd-a"]);
+  });
+
+  it("rejects duplicate selected task ids during fresh validation", () => {
+    const result = validateHubBatchSelectionFreshness({
+      selectedTaskIds: ["bd-a", "bd-a"],
+      freshCandidates: [readyTask("bd-a"), readyTask("bd-b")],
+      maxTasks: 3,
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.invalidReasons).toContain("duplicate_selection");
+  });
+
+  it("rejects selections over the configured max task count", () => {
+    const result = validateHubBatchSelectionFreshness({
+      selectedTaskIds: ["bd-a", "bd-b"],
+      freshCandidates: [readyTask("bd-a"), readyTask("bd-b")],
+      maxTasks: 1,
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.invalidReasons).toContain("over_max_tasks");
+  });
+
+  it("rejects selections outside the fresh candidate set", () => {
+    const result = validateHubBatchSelectionFreshness({
+      selectedTaskIds: ["bd-missing"],
+      freshCandidates: [readyTask("bd-a")],
+      maxTasks: 3,
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.invalidReasons).toContain("not_in_candidate_set");
+  });
+
+  it("rejects tasks that are no longer ready_for_agent before claim", () => {
+    const result = validateHubBatchSelectionFreshness({
+      selectedTaskIds: ["bd-a"],
+      freshCandidates: [
+        readyTask("bd-a", { hubStatus: "ready_for_human" }),
+        readyTask("bd-b"),
+      ],
+      maxTasks: 3,
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.invalidReasons).toContain("not_ready_for_agent");
+  });
+
+  it("rejects tasks with active claims before claim", () => {
+    const result = validateHubBatchSelectionFreshness({
+      selectedTaskIds: ["bd-a"],
+      freshCandidates: [
+        readyTask("bd-a", { claimState: "active" }),
+        readyTask("bd-b"),
+      ],
+      maxTasks: 3,
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.invalidReasons).toContain("active_claim");
+  });
+
+  it("falls back to conservative selection when fresh validation fails", () => {
+    const initialBatchSelection = planHubFlowBatch({
+      candidates: [readyTask("bd-a"), readyTask("bd-b")],
+      batchStrategy: "conservative",
+      maxTasks: 3,
+    });
+    const freshCandidates = [
+      readyTask("bd-a", { claimState: "active" }),
+      readyTask("bd-b"),
+    ];
+
+    const resolved = resolveFreshValidatedHubBatchSelection({
+      initialSelectedTaskIds: initialBatchSelection.selectedTasks.map(
+        (task) => task.id,
+      ),
+      freshCandidates,
+      batchStrategy: "conservative",
+      maxTasks: 3,
+      batchSelection: initialBatchSelection,
+    });
+
+    expect(resolved.selectedTasks.map((task) => task.id)).toEqual(["bd-b"]);
+    expect(resolved.batchSelection).toMatchObject({
+      batchStrategyRequested: "conservative",
+      batchStrategyUsed: "conservative",
+      fallbackReason: "active_claim",
+    });
+    expect(resolved.fallbackReason).toBe("active_claim");
   });
 });

@@ -40,6 +40,7 @@ import {
 } from "./hubTaskRetry.js";
 import {
   selectHubFlowTasksWithBatchOptions,
+  resolveFreshValidatedHubBatchSelection,
   type HubBatchPlannerResult,
   type HubBatchStrategy,
 } from "./hubBatchPlanner.js";
@@ -145,6 +146,7 @@ export interface RunHubFlowResult {
   readonly resumedBatchId?: string;
   readonly unfinishedBatchIds: readonly string[];
   readonly batchSelection?: HubBatchPlannerResult;
+  readonly fallbackReason?: string;
 }
 
 interface ResumableHubFlowBatch {
@@ -644,10 +646,25 @@ export const runHubFlow = async (
     input.hubProjectDir ??
     resolveHubProjectDir(resolveArchloopUserDataDir(input.env), repoRoot);
   const readyBoard = loadHubReadyQueue(repoRoot, input.env);
-  const { selectedTasks, batchSelection } = selectHubFlowTasksWithBatchOptions({
+  const {
+    selectedTasks: initiallySelectedTasks,
+    batchSelection: initialBatchSelection,
+  } = selectHubFlowTasksWithBatchOptions({
     candidates: readyBoard.tasks,
     batchStrategy: input.batchStrategy,
     maxTasks: input.maxTasks,
+  });
+  const freshBoard = loadHubReadyQueue(repoRoot, input.env);
+  const {
+    selectedTasks,
+    batchSelection,
+    fallbackReason,
+  } = resolveFreshValidatedHubBatchSelection({
+    initialSelectedTaskIds: initiallySelectedTasks.map((task) => task.id),
+    freshCandidates: freshBoard.tasks,
+    batchStrategy: input.batchStrategy,
+    maxTasks: input.maxTasks,
+    batchSelection: initialBatchSelection,
   });
   const selectedTaskIds = selectedTasks.map((task) => task.id);
   const unfinishedBatches = findResumableHubFlowBatches({
@@ -689,8 +706,13 @@ export const runHubFlow = async (
           batchStrategyUsed: batchSelection.batchStrategyUsed,
           maxTasks: batchSelection.maxTasks,
           deferredTasks: batchSelection.deferredTasks,
+          ...(batchSelection.fallbackReason
+            ? { fallbackReason: batchSelection.fallbackReason }
+            : {}),
         }
-      : {}),
+      : fallbackReason
+        ? { fallbackReason }
+        : {}),
   });
 
   const results: HubFlowTaskResult[] = [];
@@ -736,6 +758,7 @@ export const runHubFlow = async (
     resumedBatchId,
     unfinishedBatchIds,
     batchSelection,
+    ...(fallbackReason ? { fallbackReason } : {}),
   };
 };
 
@@ -754,6 +777,11 @@ export const formatHubFlowResultLines = (
     lines.push(
       `Batch strategy: ${result.batchSelection.batchStrategyUsed} (max ${result.batchSelection.maxTasks})`,
     );
+    if (result.batchSelection.fallbackReason) {
+      lines.push(
+        `Batch fallback: ${result.batchSelection.fallbackReason}`,
+      );
+    }
     if (result.batchSelection.deferredTasks.length > 0) {
       lines.push(
         `Deferred tasks: ${result.batchSelection.deferredTasks
@@ -761,6 +789,8 @@ export const formatHubFlowResultLines = (
           .join(", ")}`,
       );
     }
+  } else if (result.fallbackReason) {
+    lines.push(`Batch fallback: ${result.fallbackReason}`);
   }
   if (result.resumedBatchId) {
     lines.push(`Resumed batch id: ${result.resumedBatchId}`);

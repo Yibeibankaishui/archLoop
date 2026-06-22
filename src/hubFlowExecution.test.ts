@@ -26,7 +26,9 @@ import {
   loadHubReadyQueue,
   resolveHubTaskBranch,
   selectHubFlowTasks,
+  type HubTaskProjection,
 } from "./taskBoard.js";
+import * as taskBoard from "./taskBoard.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import {
   leaseLockPath,
@@ -377,6 +379,191 @@ describe("Hub flow planner", () => {
     expect(finalState.find((task) => task.id === "bd-second")?.labels).toContain(
       "ready-for-agent",
     );
+  });
+
+  it("fresh-validates conservative selection before claim and falls back when the first task gains an active claim", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-fresh-validate-claim-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-first",
+        title: "First ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-second",
+        title: "Second ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    const invocations: HubImplementTaskInput[] = [];
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "fresh-validate-claim",
+    );
+
+    let readyLoadCount = 0;
+    const originalLoadHubReadyQueue = taskBoard.loadHubReadyQueue;
+    const loadReadyQueueSpy = vi
+      .spyOn(taskBoard, "loadHubReadyQueue")
+      .mockImplementation((cwd, loadEnv) => {
+        readyLoadCount += 1;
+        const board = originalLoadHubReadyQueue(cwd, loadEnv);
+        if (readyLoadCount === 1) {
+          return board;
+        }
+
+        const claimedFirstTask = {
+          ...board.tasks.find((task) => task.id === "bd-first")!,
+          claimState: "active",
+          hubStatus: "implementing",
+        } as HubTaskProjection;
+
+        return {
+          ...board,
+          tasks: board.tasks.map((task) =>
+            task.id === "bd-first" ? claimedFirstTask : task,
+          ),
+        };
+      });
+
+    try {
+      const result = await runHubFlow({
+        flowId: "no-review",
+        cwd: repoDir,
+        hubProjectDir,
+        env,
+        batchStrategy: "conservative",
+        maxTasks: 3,
+        implementer: async (input) => {
+          invocations.push(input);
+          return {
+            outcome: "success",
+            commits: [{ sha: "abc123" }],
+            completionSignal: "<promise>COMPLETE</promise>",
+          };
+        },
+        runMergePhase: false,
+      });
+
+      expect(readyLoadCount).toBeGreaterThanOrEqual(2);
+      expect(result.selectedTaskIds).toEqual(["bd-second"]);
+      expect(result.batchSelection?.fallbackReason).toBe("active_claim");
+      expect(invocations).toHaveLength(1);
+      expect(invocations[0]?.taskId).toBe("bd-second");
+
+      const batchEvents = await readJsonl(
+        join(result.runDir, "events", "batch.jsonl"),
+      );
+      const plannedEvent = batchEvents.find(
+        (event) => (event as { type?: string }).type === "batch_planned",
+      );
+      expect(plannedEvent).toMatchObject({
+        taskIds: ["bd-second"],
+        batchStrategyRequested: "conservative",
+        batchStrategyUsed: "conservative",
+        fallbackReason: "active_claim",
+      });
+    } finally {
+      loadReadyQueueSpy.mockRestore();
+    }
+  });
+
+  it("fresh-validates conservative selection before claim and falls back when status changes", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-fresh-validate-status-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-first",
+        title: "First ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-second",
+        title: "Second ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    const invocations: HubImplementTaskInput[] = [];
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "fresh-validate-status",
+    );
+
+    let readyLoadCount = 0;
+    const originalLoadHubReadyQueue = taskBoard.loadHubReadyQueue;
+    const loadReadyQueueSpy = vi
+      .spyOn(taskBoard, "loadHubReadyQueue")
+      .mockImplementation((cwd, loadEnv) => {
+        readyLoadCount += 1;
+        const board = originalLoadHubReadyQueue(cwd, loadEnv);
+        if (readyLoadCount === 1) {
+          return board;
+        }
+
+        const staleFirstTask = {
+          ...board.tasks.find((task) => task.id === "bd-first")!,
+          hubStatus: "ready_for_human",
+        } as HubTaskProjection;
+
+        return {
+          ...board,
+          tasks: board.tasks.map((task) =>
+            task.id === "bd-first" ? staleFirstTask : task,
+          ),
+        };
+      });
+
+    try {
+      const result = await runHubFlow({
+        flowId: "no-review",
+        cwd: repoDir,
+        hubProjectDir,
+        env,
+        batchStrategy: "conservative",
+        maxTasks: 3,
+        implementer: async (input) => {
+          invocations.push(input);
+          return {
+            outcome: "success",
+            commits: [{ sha: "abc123" }],
+            completionSignal: "<promise>COMPLETE</promise>",
+          };
+        },
+        runMergePhase: false,
+      });
+
+      expect(result.selectedTaskIds).toEqual(["bd-second"]);
+      expect(result.batchSelection?.fallbackReason).toBe("not_ready_for_agent");
+      expect(invocations).toHaveLength(1);
+      expect(invocations[0]?.taskId).toBe("bd-second");
+    } finally {
+      loadReadyQueueSpy.mockRestore();
+    }
   });
 });
 
