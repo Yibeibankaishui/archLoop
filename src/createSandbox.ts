@@ -50,6 +50,11 @@ import type {
 import { startSandbox } from "./startSandbox.js";
 import { syncOut } from "./syncOut.js";
 import * as WorktreeManager from "./WorktreeManager.js";
+import {
+  acquireWorktreeLease,
+  releaseWorktreeLease,
+} from "./WorktreeLease.js";
+import { WorktreeError } from "./errors.js";
 import { copyToWorktree } from "./CopyToWorktree.js";
 import { resolveCwd } from "./resolveCwd.js";
 import { patchGitMountsForWindows } from "./mountUtils.js";
@@ -717,20 +722,56 @@ export const createSandbox = async (
   const { branch } = options;
   const isTestMode = !!options._test?.buildSandboxLayer;
 
+  const mapLeaseError = (error: { message: string }): WorktreeError =>
+    new WorktreeError({ message: error.message });
+
+  let leaseHeld = false;
+  let leaseRepoDir: string | undefined;
+
+  const releaseHeldLease = () =>
+    leaseHeld && leaseRepoDir
+      ? Effect.runPromise(
+          releaseWorktreeLease(leaseRepoDir, branch).pipe(
+            Effect.catchAll(() => Effect.void),
+            Effect.provide(NodeFileSystem.layer),
+          ),
+        ).then(() => {
+          leaseHeld = false;
+        })
+      : Promise.resolve();
+
   // 1. Resolve cwd, prune stale worktrees + create worktree on the explicit branch
-  const { hostRepoDir, worktreeInfo } = await Effect.runPromise(
-    Effect.gen(function* () {
+  let hostRepoDir: string;
+  let worktreeInfo: WorktreeManager.WorktreeInfo;
+
+  try {
+    const created = await Effect.gen(function* () {
       const hostRepoDir = yield* resolveCwd(options.cwd);
+      leaseRepoDir = hostRepoDir;
       yield* WorktreeManager.pruneStale(hostRepoDir).pipe(
         Effect.catchAll(() => Effect.void),
       );
+      yield* acquireWorktreeLease(hostRepoDir, { branch }).pipe(
+        Effect.mapError(mapLeaseError),
+      );
+      leaseHeld = true;
       const worktreeInfo = yield* WorktreeManager.create(hostRepoDir, {
         branch,
         baseBranch: options.baseBranch,
       });
       return { hostRepoDir, worktreeInfo };
-    }).pipe(Effect.provide(NodeContext.layer)),
-  );
+    }).pipe(
+      Effect.provide(NodeContext.layer),
+      Effect.provide(NodeFileSystem.layer),
+      Effect.runPromise,
+    );
+
+    hostRepoDir = created.hostRepoDir;
+    worktreeInfo = created.worktreeInfo;
+  } catch (error) {
+    await releaseHeldLease();
+    throw error;
+  }
 
   const worktreePath = worktreeInfo.path;
 
@@ -896,6 +937,7 @@ export const createSandbox = async (
     );
 
     if (isDirty) {
+      await releaseHeldLease();
       return { preservedWorktreePath: worktreePath };
     }
 
@@ -906,6 +948,7 @@ export const createSandbox = async (
       ),
     );
 
+    await releaseHeldLease();
     return { preservedWorktreePath: undefined };
   };
 

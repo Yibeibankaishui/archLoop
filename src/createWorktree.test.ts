@@ -154,7 +154,7 @@ describe("createWorktree", () => {
     }
   });
 
-  it("reuses existing clean worktree when called twice with the same branch", async () => {
+  it("reuses existing clean worktree after the first handle closes", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "ws-test-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "init.txt", "init", "initial commit");
@@ -164,29 +164,45 @@ describe("createWorktree", () => {
       cwd: hostDir,
     });
 
-    // Close the first handle (worktree is clean, so it gets removed)
+    const path1 = ws1.worktreePath;
     await ws1.close();
 
-    // Re-create the branch so worktree collision can happen
-    const ws1b = await createWorktree({
-      branchStrategy: { type: "branch", branch: "reuse-branch" },
-      cwd: hostDir,
-    });
-
-    // Now create a second handle while the first is still alive
     const ws2 = await createWorktree({
       branchStrategy: { type: "branch", branch: "reuse-branch" },
       cwd: hostDir,
     });
 
-    expect(ws2.worktreePath).toBe(ws1b.worktreePath);
+    expect(ws2.worktreePath).toBe(path1);
     expect(ws2.branch).toBe("reuse-branch");
 
-    await ws1b.close();
+    await ws2.close();
     await rm(hostDir, { recursive: true, force: true });
   });
 
-  it("reuses dirty worktree with a warning", async () => {
+  it("rejects a second open handle for the same branch", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "ws-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const ws1 = await createWorktree({
+      branchStrategy: { type: "branch", branch: "reuse-branch" },
+      cwd: hostDir,
+    });
+
+    await expect(
+      createWorktree({
+        branchStrategy: { type: "branch", branch: "reuse-branch" },
+        cwd: hostDir,
+      }),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("in use"),
+    });
+
+    await ws1.close();
+    await rm(hostDir, { recursive: true, force: true });
+  });
+
+  it("reuses dirty worktree with a warning after the first handle closes", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "ws-test-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "init.txt", "init", "initial commit");
@@ -198,15 +214,18 @@ describe("createWorktree", () => {
 
     // Make the worktree dirty
     await writeFile(join(ws1.worktreePath, "dirty.txt"), "uncommitted");
+    const path1 = ws1.worktreePath;
+    await ws1.close();
 
     const ws2 = await createWorktree({
       branchStrategy: { type: "branch", branch: "dirty-branch" },
       cwd: hostDir,
     });
 
-    expect(ws2.worktreePath).toBe(ws1.worktreePath);
+    expect(ws2.worktreePath).toBe(path1);
 
     // Clean up
+    await ws2.close();
     await rm(ws1.worktreePath, { recursive: true, force: true });
     await execAsync("git worktree prune", { cwd: hostDir });
     await rm(hostDir, { recursive: true, force: true });
