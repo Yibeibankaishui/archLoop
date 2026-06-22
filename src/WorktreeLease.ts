@@ -3,10 +3,10 @@ import { FileSystem } from "@effect/platform";
 import { open } from "node:fs/promises";
 import { join } from "node:path";
 import { WorktreeError, WorktreeLeaseError } from "./errors.js";
+import { branchToWorktreeName, isProcessAlive } from "./worktreeLeaseStore.js";
 
 /** Lease file name segment derived from a branch name (matches WorktreeManager). */
-export const leaseNameFromBranch = (branch: string): string =>
-  branch.replace(/\//g, "-");
+export const leaseNameFromBranch = branchToWorktreeName;
 
 /** Host path to the managed worktree directory for a lease/worktree name. */
 export const worktreePathForLeaseName = (
@@ -133,24 +133,7 @@ const readLocksDirectory = (
     ),
     Effect.mapError((error) => mapFsError(error.message)),
   );
-
-/** Returns true when `pid` refers to a live process. */
-export const isProcessAlive = (pid: number): boolean => {
-  if (!Number.isInteger(pid) || pid <= 0) {
-    return false;
-  }
-
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    const err = error as NodeJS.ErrnoException;
-    if (err.code === "EPERM") {
-      return true;
-    }
-    return false;
-  }
-};
+export { isProcessAlive };
 
 /** Build lease metadata from owner input, omitting sensitive execution content. */
 export const buildWorktreeLeaseMetadata = (
@@ -508,7 +491,7 @@ export const recoverStaleWorktreeLeaseIfNeeded = (
     return "removed" as const;
   });
 
-const ensureLeaseNotActive = (
+const ensureLeaseAvailableForAcquisition = (
   repoDir: string,
   branch: string,
 ): Effect.Effect<
@@ -600,12 +583,12 @@ export const acquireWorktreeLease = (
       FileSystem.FileSystem
     > => createLeaseFileAtomic(repoDir, branch, metadata);
 
-    yield* ensureLeaseNotActive(repoDir, branch);
+    yield* ensureLeaseAvailableForAcquisition(repoDir, branch);
 
     yield* tryAcquire().pipe(
       Effect.catchTag("WorktreeLeaseError", (error) =>
         error.reason === "recovery"
-          ? ensureLeaseNotActive(repoDir, branch).pipe(
+          ? ensureLeaseAvailableForAcquisition(repoDir, branch).pipe(
               Effect.flatMap(() => tryAcquire()),
             )
           : Effect.fail(error),

@@ -474,7 +474,7 @@ const buildWorktreeLeaseDiagnostic = (
   message: diagnostic.message,
 });
 
-const collectarchLoopStatusLabels = (
+const collectArchLoopStatusLabels = (
   task: HubTaskProjection,
 ): readonly string[] =>
   task.labels.filter((label) =>
@@ -514,7 +514,7 @@ export const doctorHubTaskState = async (
   }
 
   for (const task of board.tasks) {
-    const statusLabels = collectarchLoopStatusLabels(task);
+    const statusLabels = collectArchLoopStatusLabels(task);
     if (statusLabels.length > 1) {
       diagnostics.push(buildMultipleStatusLabelsDiagnostic(task, statusLabels));
     }
