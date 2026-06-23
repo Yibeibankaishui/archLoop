@@ -79,10 +79,11 @@ queue (`archLoop` + `ready-for-agent` when label creation is enabled) and the
 generated TypeScript fails fast if a planner returns an issue outside that
 allowed queue. Hub batch planner candidate enrichment computes
 `blockersResolved`, `openBlockers`, and `unknownBlockers` from live blocker
-state before planning, so stale `## Blocked by` prose does not skip work whose
-blockers are already closed. The blocker parser recognizes GitHub issue refs
-such as `#152` or issue URLs as well as Beads ids, and unresolved refs are
-treated conservatively.
+state before planning, and the planner payload only exposes those structured
+fields. `openBlockers=[]` and `unknownBlockers=[]` mean the candidate is
+unblocked, even if the task body still contains stale `## Blocked by` prose.
+The blocker parser recognizes GitHub issue refs such as `#152` or issue URLs
+as well as Beads ids, and unresolved refs are treated conservatively.
 
 ## Project profiles
 
