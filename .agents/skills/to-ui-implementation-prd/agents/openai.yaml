@@ -1,0 +1,4 @@
+interface:
+  display_name: "To UI Implementation PRD"
+  short_description: "Turn design artifacts into a UI PRD"
+  default_prompt: "Use $to-ui-implementation-prd to convert these design artifacts into an implementation PRD."

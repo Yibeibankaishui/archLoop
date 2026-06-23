@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>archLoop GUI Prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell" data-density="comfortable">
+      <aside class="sidebar" aria-label="Project navigation">
+        <div class="brand-row">
+          <div class="brand-mark" aria-hidden="true">aL</div>
+          <div>
+            <div class="brand-name">archLoop</div>
+            <div class="brand-meta">Yibeibankaishui/archLoop</div>
+          </div>
+        </div>
+
+        <button class="workspace-switcher" type="button">
+          <span class="workspace-dot" aria-hidden="true"></span>
+          <span>
+            <strong>archLoop repo</strong>
+            <small>main · clean source gate</small>
+          </span>
+          <svg aria-hidden="true" viewBox="0 0 20 20">
+            <path d="M6 8l4 4 4-4" />
+          </svg>
+        </button>
+
+        <nav class="nav-list" aria-label="Primary">
+          <button class="nav-item is-active" type="button" data-nav="hub">
+            <span class="nav-icon" aria-hidden="true">⌁</span>
+            Hub runs
+          </button>
+          <button class="nav-item" type="button" data-nav="tasks">
+            <span class="nav-icon" aria-hidden="true">□</span>
+            Tasks
+          </button>
+          <button class="nav-item" type="button" data-nav="agents">
+            <span class="nav-icon" aria-hidden="true">◇</span>
+            Agents
+          </button>
+          <button class="nav-item" type="button" data-nav="sandboxes">
+            <span class="nav-icon" aria-hidden="true">▣</span>
+            Sandboxes
+          </button>
+          <button class="nav-item" type="button" data-nav="settings">
+            <span class="nav-icon" aria-hidden="true">⚙</span>
+            Settings
+          </button>
+        </nav>
+
+        <section class="sidebar-section" aria-labelledby="status-title">
+          <div class="section-title" id="status-title">Project status</div>
+          <div class="status-stack">
+            <div class="status-row">
+              <span>Ready queue</span>
+              <strong>7</strong>
+            </div>
+            <div class="status-row">
+              <span>Active leases</span>
+              <strong>2</strong>
+            </div>
+            <div class="status-row">
+              <span>Failed tasks</span>
+              <strong class="warning-text">1</strong>
+            </div>
+          </div>
+        </section>
+
+        <section
+          class="sidebar-section recent-runs"
+          aria-labelledby="runs-title"
+        >
+          <div class="section-heading">
+            <div class="section-title" id="runs-title">Recent runs</div>
+            <button class="icon-button" type="button" aria-label="Refresh runs">
+              <svg aria-hidden="true" viewBox="0 0 20 20">
+                <path d="M15 7a5 5 0 1 0 1 4M15 7h-4M15 7V3" />
+              </svg>
+            </button>
+          </div>
+          <div class="run-list" id="runList"></div>
+        </section>
+      </aside>
+
+      <main class="workbench">
+        <header class="topbar">
+          <button
+            class="icon-button mobile-menu"
+            type="button"
+            aria-label="Open navigation"
+          >
+            <svg aria-hidden="true" viewBox="0 0 20 20">
+              <path d="M4 6h12M4 10h12M4 14h12" />
+            </svg>
+          </button>
+          <label class="command-box">
+            <svg aria-hidden="true" viewBox="0 0 20 20">
+              <path d="m8 14 4-4-4-4" />
+            </svg>
+            <input
+              id="commandInput"
+              type="text"
+              value="archloop run . --flow with-review --batch-strategy planned"
+              aria-label="Command"
+            />
+          </label>
+          <div class="topbar-actions">
+            <button class="quiet-button" type="button" id="densityToggle">
+              Compact
+            </button>
+            <button class="primary-button" type="button" id="runButton">
+              <svg aria-hidden="true" viewBox="0 0 20 20">
+                <path d="M7 4l9 6-9 6V4z" />
+              </svg>
+              Run
+            </button>
+          </div>
+        </header>
+
+        <section class="run-header" aria-labelledby="run-title">
+          <div>
+            <div class="crumb">
+              Hub run / with-review / batch b-2026-06-23-01
+            </div>
+            <h1 id="run-title">Issue #148 · planned batch selection</h1>
+            <p>
+              Planner selected a conservative merge path after validating ready
+              queue freshness and worktree leases.
+            </p>
+          </div>
+          <div class="run-pills" aria-label="Run summary">
+            <span class="pill success">ready_for_agent</span>
+            <span class="pill neutral">docker</span>
+            <span class="pill warning">1 warning</span>
+          </div>
+        </section>
+
+        <section class="content-grid">
+          <article
+            class="panel transcript-panel"
+            aria-labelledby="transcript-title"
+          >
+            <div class="panel-header">
+              <div>
+                <h2 id="transcript-title">Agent transcript</h2>
+                <span>Live orchestration stream</span>
+              </div>
+              <div
+                class="segmented-control"
+                role="tablist"
+                aria-label="Transcript mode"
+              >
+                <button class="is-selected" type="button" role="tab">
+                  Run
+                </button>
+                <button type="button" role="tab">Review</button>
+                <button type="button" role="tab">Merge</button>
+              </div>
+            </div>
+
+            <div class="message-list" id="messageList">
+              <div class="message message-agent">
+                <div class="avatar">A</div>
+                <div class="message-body">
+                  <div class="message-meta">
+                    <strong>Hub planner</strong>
+                    <span>09:42</span>
+                  </div>
+                  <p>
+                    Validated ready queue candidates. Issue #148 is safe to
+                    execute with a planned batch of one task.
+                  </p>
+                </div>
+              </div>
+              <div class="message message-system">
+                <div class="avatar">S</div>
+                <div class="message-body">
+                  <div class="message-meta">
+                    <strong>System</strong>
+                    <span>09:43</span>
+                  </div>
+                  <p>
+                    Worktree lease acquired for <code>archloop/issue-148</code>.
+                    Sandbox provider: <code>docker</code>.
+                  </p>
+                </div>
+              </div>
+              <div class="message message-user">
+                <div class="avatar">U</div>
+                <div class="message-body">
+                  <div class="message-meta">
+                    <strong>Operator</strong>
+                    <span>09:45</span>
+                  </div>
+                  <p>
+                    Continue through review, but stop before merge if typecheck
+                    fails.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <form class="composer" id="composer">
+              <label class="composer-input">
+                <span class="sr-only">Message to agent</span>
+                <textarea
+                  id="composerText"
+                  rows="1"
+                  placeholder="Ask the run to inspect logs, recover a task, or adjust the merge plan..."
+                ></textarea>
+              </label>
+              <button class="primary-button" type="submit">Send</button>
+            </form>
+          </article>
+
+          <aside class="panel plan-panel" aria-labelledby="plan-title">
+            <div class="panel-header">
+              <div>
+                <h2 id="plan-title">Plan</h2>
+                <span>Current batch checklist</span>
+              </div>
+            </div>
+            <ol class="checklist" id="checklist">
+              <li class="is-done">
+                <button type="button" aria-label="Toggle task">
+                  <span></span>
+                </button>
+                <div>
+                  <strong>Fresh-validate ready queue</strong>
+                  <small>7 candidates loaded from Beads</small>
+                </div>
+              </li>
+              <li class="is-done">
+                <button type="button" aria-label="Toggle task">
+                  <span></span>
+                </button>
+                <div>
+                  <strong>Claim Issue #148</strong>
+                  <small>metadata.hubStatus = implementing</small>
+                </div>
+              </li>
+              <li class="is-active">
+                <button type="button" aria-label="Toggle task">
+                  <span></span>
+                </button>
+                <div>
+                  <strong>Run verification</strong>
+                  <small>npm run typecheck</small>
+                </div>
+              </li>
+              <li>
+                <button type="button" aria-label="Toggle task">
+                  <span></span>
+                </button>
+                <div>
+                  <strong>Move to waiting_for_merge</strong>
+                  <small>requires clean source gate</small>
+                </div>
+              </li>
+            </ol>
+          </aside>
+
+          <article
+            class="panel terminal-panel"
+            aria-labelledby="terminal-title"
+          >
+            <div class="panel-header">
+              <div>
+                <h2 id="terminal-title">Run output</h2>
+                <span id="terminalSubtitle">Verification stream</span>
+              </div>
+              <div
+                class="terminal-tabs"
+                role="tablist"
+                aria-label="Output tabs"
+              >
+                <button class="is-selected" type="button" data-tab="terminal">
+                  Terminal
+                </button>
+                <button type="button" data-tab="events">Events</button>
+                <button type="button" data-tab="patch">Patch</button>
+              </div>
+            </div>
+            <pre class="terminal" id="terminalOutput" aria-live="polite"></pre>
+          </article>
+        </section>
+      </main>
+
+      <aside class="inspector" aria-label="Run inspector">
+        <div class="inspector-header">
+          <div>
+            <div class="crumb">Inspector</div>
+            <h2>Hub run</h2>
+          </div>
+          <span class="live-indicator">
+            <span></span>
+            live
+          </span>
+        </div>
+
+        <section class="inspector-section">
+          <div class="section-title">Run metadata</div>
+          <dl class="metadata-list">
+            <div>
+              <dt>Task</dt>
+              <dd id="metaTask">Issue #148</dd>
+            </div>
+            <div>
+              <dt>Status</dt>
+              <dd>
+                <span class="status-token success" id="metaStatus"
+                  >waiting_for_merge</span
+                >
+              </dd>
+            </div>
+            <div>
+              <dt>Branch</dt>
+              <dd><code id="metaBranch">archloop/issue-148</code></dd>
+            </div>
+            <div>
+              <dt>Sandbox</dt>
+              <dd id="metaSandbox">docker · archloop:local</dd>
+            </div>
+            <div>
+              <dt>Flow</dt>
+              <dd id="metaFlow">with-review</dd>
+            </div>
+          </dl>
+        </section>
+
+        <section class="inspector-section">
+          <div class="section-heading">
+            <div class="section-title">Verification</div>
+            <span class="muted-text">3 / 4</span>
+          </div>
+          <div class="verification-list">
+            <div class="verification-row pass">
+              <span></span>
+              <div>
+                <strong>Typecheck</strong>
+                <small>npm run typecheck</small>
+              </div>
+            </div>
+            <div class="verification-row pass">
+              <span></span>
+              <div>
+                <strong>Source gate</strong>
+                <small>no dirty tracked files</small>
+              </div>
+            </div>
+            <div class="verification-row pass">
+              <span></span>
+              <div>
+                <strong>Lease check</strong>
+                <small>single active owner</small>
+              </div>
+            </div>
+            <div class="verification-row wait">
+              <span></span>
+              <div>
+                <strong>Merge approval</strong>
+                <small>operator confirmation pending</small>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="inspector-section">
+          <div class="section-title">Actions</div>
+          <div class="action-stack">
+            <button
+              class="primary-button full-width"
+              id="approveMerge"
+              type="button"
+            >
+              Approve merge
+            </button>
+            <button
+              class="danger-button full-width"
+              id="recoverTask"
+              type="button"
+            >
+              Recover task
+            </button>
+            <button class="quiet-button full-width" type="button">
+              Open run directory
+            </button>
+          </div>
+        </section>
+
+        <section class="inspector-section">
+          <div class="section-title">Batch candidates</div>
+          <div class="candidate-list">
+            <button class="candidate-row is-selected" type="button">
+              <span class="candidate-index">148</span>
+              <span>
+                <strong>planned batch selection</strong>
+                <small>ready_for_agent · selected</small>
+              </span>
+            </button>
+            <button class="candidate-row" type="button">
+              <span class="candidate-index">147</span>
+              <span>
+                <strong>planned Hub flow batch</strong>
+                <small>blocked by active lease</small>
+              </span>
+            </button>
+            <button class="candidate-row" type="button">
+              <span class="candidate-index">145</span>
+              <span>
+                <strong>resume merge-ready batches</strong>
+                <small>already merged</small>
+              </span>
+            </button>
+          </div>
+        </section>
+      </aside>
+    </div>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>
