@@ -628,6 +628,75 @@ code,
   gap: var(--hub-space-3);
   overflow-x: auto;
   padding-bottom: var(--hub-space-2);
+  scroll-behavior: smooth;
+}
+
+.hub-task-board-grid {
+  display: grid;
+  gap: var(--hub-space-3);
+}
+
+.hub-task-board-grid-narrow .hub-task-board-toolbar {
+  grid-template-columns: 1fr;
+}
+
+.hub-task-board-toolbar {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.5fr) repeat(3, minmax(120px, 1fr)) auto;
+  gap: var(--hub-space-2);
+  align-items: end;
+}
+
+.hub-task-board-search,
+.hub-task-board-filter {
+  display: grid;
+  gap: 4px;
+}
+
+.hub-input {
+  width: 100%;
+  border: 1px solid var(--hub-border);
+  border-radius: var(--hub-radius);
+  background: var(--hub-surface);
+  padding: 6px 8px;
+  font: inherit;
+}
+
+.hub-task-board-count {
+  margin: 0;
+  align-self: center;
+}
+
+.hub-card-labels,
+.hub-card-markers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.hub-task-board-actions h2,
+.hub-inspector-action-list {
+  margin-top: 0;
+}
+
+.hub-task-board-action-list,
+.hub-inspector-action-list {
+  display: grid;
+  gap: var(--hub-space-2);
+}
+
+.hub-task-board-action,
+.hub-inspector-action {
+  display: grid;
+  gap: var(--hub-space-2);
+  border-top: 1px solid var(--hub-border);
+  padding-top: var(--hub-space-2);
+}
+
+.hub-task-board-action-controls,
+.hub-inspector-action-controls {
+  display: flex;
+  gap: var(--hub-space-2);
 }
 
 .hub-board-column {

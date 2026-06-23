@@ -69,7 +69,7 @@ describe("hubProjectOverview", () => {
       beadsAvailable: true,
       taskStoreInitialized: true,
     });
-    expect(model.taskCounts).toEqual({ ready: 1, total: 3 });
+    expect(model.taskCounts).toEqual({ ready: 1, total: 5 });
     expect(model.statusCountEntries).toEqual(
       expect.arrayContaining([
         { status: "ready_for_agent", count: 1 },

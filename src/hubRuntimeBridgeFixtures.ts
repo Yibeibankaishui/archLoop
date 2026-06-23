@@ -28,13 +28,26 @@ export const createHubDesktopFixtureTasks = (): readonly HubTaskProjection[] => 
     title: "Wire project overview",
     hubStatus: "ready_for_agent",
     labels: ["hub-gui"],
+    metadata: { sync_state: "synced" },
+    remoteRefs: ["github#140"],
   }),
   fixtureTask({
     id: "arch-2",
     title: "Recover stale claim",
     hubStatus: "failed",
     labels: ["recovery"],
-    metadata: { failure_reason: "agent_failed" },
+    metadata: {
+      failure_reason: "agent_failed",
+      sync_state: "push_pending",
+    },
+    comments: [
+      {
+        author: "operator",
+        body: "Agent run failed during implementation.",
+        createdAt: "2026-06-23T09:45:00.000Z",
+      },
+    ],
+    runRefs: ["run-fixture-1"],
   }),
   fixtureTask({
     id: "arch-3",
@@ -48,6 +61,41 @@ export const createHubDesktopFixtureTasks = (): readonly HubTaskProjection[] => 
       raw: {},
     },
     claimState: "active",
+    metadata: { sync_state: "synced" },
+    runRefs: ["run-fixture-1"],
+  }),
+  fixtureTask({
+    id: "arch-4",
+    title: "Blocked by dependency",
+    hubStatus: "blocked",
+    labels: ["hub-gui"],
+    metadata: {
+      blocked_reason: "blocked by arch-1",
+      blocked_by: "arch-1",
+      sync_state: "local_only",
+    },
+  }),
+  fixtureTask({
+    id: "arch-5",
+    title: "Remote-linked inbox task",
+    hubStatus: "inbox",
+    labels: ["prd-warning-medium"],
+    metadata: {
+      sync_state: "synced",
+      slice_temp_id: "slice-5",
+      warning_severity: "medium",
+      warning_message: "Acceptance criteria need review",
+      remote_refs: ["github#156"],
+    },
+    remoteRefs: ["github#156"],
+    runRefs: ["run-proposal-fixture-1"],
+    comments: [
+      {
+        author: "maintainer",
+        body: "Needs clearer acceptance criteria before triage.",
+        createdAt: "2026-06-23T08:00:00.000Z",
+      },
+    ],
   }),
 ];
 
@@ -71,9 +119,11 @@ export const createHubDesktopFixtureProjectStatus = (options?: {
   projectRegistered: true,
   beadsAvailable: true,
   taskStoreInitialized: true,
-  taskCounts: { ready: 1, total: 3 },
+  taskCounts: { ready: 1, total: 5 },
   statusCounts: {
+    inbox: 1,
     ready_for_agent: 1,
+    blocked: 1,
     failed: 1,
     waiting_for_merge: 1,
   },
