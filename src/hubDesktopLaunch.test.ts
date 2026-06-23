@@ -95,6 +95,12 @@ describe("hub desktop launch", () => {
 
     expect(packageJson.main).toBe("dist-electron/main.js");
     expect(packageJson.scripts.dev).toContain("electron");
+    expect(packageJson.scripts["dev:renderer-fixtures"]).toContain(
+      "VITE_HUB_DESKTOP_FIXTURES=1",
+    );
+    expect(packageJson.scripts["build:renderer-fixtures"]).toContain(
+      "dist-fixtures",
+    );
     expect(packageJson.scripts.build).toContain("vite build");
     expect(HUB_RUNTIME_BRIDGE_CHANNELS.invoke).toBe("hub-runtime:invoke");
   });

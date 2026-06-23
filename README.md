@@ -75,7 +75,11 @@ uses `npm ci` for the deterministic install path used by QA and CI. Run
 tree stays clean.
 
 Set `ARCHLOOP_HUB_DESKTOP_FIXTURES=1` to load fixture data for demos and empty
-states. The older static `gui/` prototype remains a historical reference only.
+states through the Electron shell. For agent-run QA on hosts that cannot launch
+macOS AppKit/Electron windows, use `npm run dev:renderer-fixtures` in
+`hub-desktop/` and open `http://127.0.0.1:5173/`; this exercises the React
+renderer against browser-safe fixture bridge data without requiring Electron.
+The older static `gui/` prototype remains a historical reference only.
 
 ## GUI prototype
 

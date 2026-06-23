@@ -8,8 +8,12 @@
   "scripts": {
     "predev": "npm --prefix .. run build",
     "dev": "npm run build:electron && concurrently -k \"vite\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "predev:renderer-fixtures": "npm --prefix .. run build",
+    "dev:renderer-fixtures": "cross-env VITE_HUB_DESKTOP_FIXTURES=1 vite --host 127.0.0.1 --port 5173",
     "prebuild": "npm --prefix .. run build",
     "build": "vite build && npm run build:electron",
+    "prebuild:renderer-fixtures": "npm --prefix .. run build",
+    "build:renderer-fixtures": "cross-env VITE_HUB_DESKTOP_FIXTURES=1 vite build --outDir dist-fixtures",
     "build:electron": "tsc -p tsconfig.electron.json",
     "preview": "npm run build && electron .",
     "pretypecheck": "npm --prefix .. run build",

@@ -85,7 +85,21 @@ Pass criteria:
 
 ## Desktop Launch Smoke
 
-Visual fixture mode verifies the app shell and all primary screens without needing a populated target repo:
+Renderer fixture mode verifies the app shell and all primary screens without needing a populated target repo or Electron/AppKit. Use this path for agent-run QA, CI-style browser automation, and hosts where macOS LaunchServices is unavailable:
+
+```bash
+cd "$ARCHLOOP_REPO/hub-desktop"
+npm run dev:renderer-fixtures
+```
+
+Expected renderer fixture behavior:
+
+- Open `http://127.0.0.1:5173/` in a browser automation harness.
+- Navigation exposes exactly four primary sections: Overview, Task Board, Run Workbench, Proposal Session.
+- Fixture mode shows representative non-empty Hub data.
+- No runtime unavailable banner appears while `VITE_HUB_DESKTOP_FIXTURES=1` is active.
+
+Electron fixture mode verifies the real desktop shell, preload bridge, IPC channel, window chrome, and packaged renderer path. Run it from an interactive macOS GUI session with a working LaunchServices/AppKit environment:
 
 ```bash
 cd "$ARCHLOOP_REPO"
@@ -108,9 +122,9 @@ Expected:
 - Electron window title is `archLoop Hub`.
 - Navigation exposes exactly four primary sections: Overview, Task Board, Run Workbench, Proposal Session.
 - Window starts at desktop size and remains usable down to the configured minimum window size.
-- Fixture mode shows representative non-empty Hub data.
 - Real mode reads from `ARCHLOOP_HUB_REPO_ROOT`, not from the desktop app directory.
 - If the runtime bridge fails, the UI shows a runtime unavailable state with CLI fallback copy.
+- If `/usr/bin/open` reports `kLSServerCommunicationErr` or Electron aborts in `_RegisterApplication` before app code runs, the host cannot perform Electron smoke QA; record the host failure and use renderer fixture smoke for automated renderer coverage.
 
 ## Test Data Setup
 
