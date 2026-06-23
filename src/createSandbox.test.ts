@@ -337,7 +337,7 @@ describe("createSandbox", () => {
     await rm(hostDir, { recursive: true, force: true });
   });
 
-  it("reuses clean worktree when branch is already checked out", async () => {
+  it("reuses clean worktree after the first sandbox handle closes", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "init.txt", "init", "initial commit");
@@ -351,26 +351,56 @@ describe("createSandbox", () => {
       },
     });
 
-    try {
-      const sandbox2 = await createSandbox({
+    const path1 = sandbox1.worktreePath;
+    await sandbox1.close();
+
+    const sandbox2 = await createSandbox({
+      branch: "collision-branch",
+      sandbox: testSandbox,
+      cwd: hostDir,
+      _test: {
+        buildSandboxLayer: (sandboxDir) => makeLocalSandboxLayer(sandboxDir),
+      },
+    });
+
+    expect(sandbox2.worktreePath).toBe(path1);
+    expect(sandbox2.branch).toBe("collision-branch");
+    await sandbox2.close();
+    await rm(hostDir, { recursive: true, force: true });
+  });
+
+  it("rejects a second open sandbox handle for the same branch", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "init.txt", "init", "initial commit");
+
+    const sandbox1 = await createSandbox({
+      branch: "collision-branch",
+      sandbox: testSandbox,
+      cwd: hostDir,
+      _test: {
+        buildSandboxLayer: (sandboxDir) => makeLocalSandboxLayer(sandboxDir),
+      },
+    });
+
+    await expect(
+      createSandbox({
         branch: "collision-branch",
         sandbox: testSandbox,
         cwd: hostDir,
         _test: {
           buildSandboxLayer: (sandboxDir) => makeLocalSandboxLayer(sandboxDir),
         },
-      });
+      }),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining("in use"),
+    });
 
-      expect(sandbox2.worktreePath).toBe(sandbox1.worktreePath);
-      expect(sandbox2.branch).toBe("collision-branch");
-      await sandbox2.close();
-    } finally {
-      await sandbox1.close();
-      await rm(hostDir, { recursive: true, force: true });
-    }
+    await sandbox1.close();
+    await rm(hostDir, { recursive: true, force: true });
   });
 
-  it("reuses dirty worktree with warning (ADR 0003)", async () => {
+  it("reuses dirty worktree with warning after close (ADR 0003)", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "sandbox-test-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "init.txt", "init", "initial commit");
@@ -386,27 +416,26 @@ describe("createSandbox", () => {
 
     // Make the worktree dirty
     await writeFile(join(sandbox1.worktreePath, "dirty.txt"), "uncommitted");
+    const path1 = sandbox1.worktreePath;
+    await sandbox1.close();
 
-    try {
-      const sandbox2 = await createSandbox({
-        branch: "dirty-collision",
-        sandbox: testSandbox,
-        cwd: hostDir,
-        _test: {
-          buildSandboxLayer: (sandboxDir) => makeLocalSandboxLayer(sandboxDir),
-        },
-      });
+    const sandbox2 = await createSandbox({
+      branch: "dirty-collision",
+      sandbox: testSandbox,
+      cwd: hostDir,
+      _test: {
+        buildSandboxLayer: (sandboxDir) => makeLocalSandboxLayer(sandboxDir),
+      },
+    });
 
-      // Should reuse the same worktree path
-      expect(sandbox2.worktreePath).toBe(sandbox1.worktreePath);
-      expect(sandbox2.branch).toBe("dirty-collision");
+    // Should reuse the same worktree path
+    expect(sandbox2.worktreePath).toBe(path1);
+    expect(sandbox2.branch).toBe("dirty-collision");
 
-      await sandbox2.close();
-    } finally {
-      await rm(sandbox1.worktreePath, { recursive: true, force: true });
-      await execAsync("git worktree prune", { cwd: hostDir });
-      await rm(hostDir, { recursive: true, force: true });
-    }
+    await sandbox2.close();
+    await rm(sandbox1.worktreePath, { recursive: true, force: true });
+    await execAsync("git worktree prune", { cwd: hostDir });
+    await rm(hostDir, { recursive: true, force: true });
   });
 
   it("sandbox.run() returns commits made during the run", async () => {

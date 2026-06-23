@@ -15,6 +15,7 @@ import {
   loadHubTaskBoard,
   projectHubTask,
   projectHubTaskBoard,
+  projectHubReadyQueueBoard,
   resolveHubTaskSelectors,
   selectHubBatchMergeTasks,
 } from "./taskBoard.js";
@@ -492,6 +493,15 @@ fs.writeSync(1, JSON.stringify(tasks));
     expect(lines).toContain("  1. bd-1: High warning [high]");
     expect(lines.some((line) => line.includes("bd-2"))).toBe(false);
   });
+
+  it("preserves bd ready queue order in projectHubReadyQueueBoard", () => {
+    const board = projectHubReadyQueueBoard([
+      { id: "bd-z", title: "Later in queue", status: "open" },
+      { id: "bd-a", title: "Earlier alphabetically", status: "open" },
+    ]);
+
+    expect(board.tasks.map((task) => task.id)).toEqual(["bd-z", "bd-a"]);
+  });
 });
 
 describe("task lifecycle transitions", () => {
@@ -576,7 +586,15 @@ if (command === "update" && id) {
   }
   const metadataIndex = args.indexOf("--metadata");
   if (metadataIndex >= 0) {
-    task.metadata = JSON.parse(args[metadataIndex + 1]);
+    task.metadata = {
+      ...task.metadata,
+      ...JSON.parse(args[metadataIndex + 1]),
+    };
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--unset-metadata") {
+      delete task.metadata[args[index + 1]];
+    }
   }
   writeState(state);
   process.exit(0);

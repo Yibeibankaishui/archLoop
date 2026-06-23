@@ -115,6 +115,7 @@ describe("resolveHubProjectStatus", () => {
     expect(status.activeBatches).toEqual([]);
     expect(status.runDirectories).toEqual([]);
     expect(status.recentEvents).toEqual([]);
+    expect(status.worktreeLeaseDiagnostics).toEqual([]);
     expect(status.hubProjectDir).toContain(
       join("data", "archloop", "hub", "projects"),
     );
@@ -346,6 +347,70 @@ describe("resolveHubProjectStatus", () => {
       localOnly: 0,
       synced: 1,
     });
+  });
+
+  it("reports worktree lease diagnostics for hub-owned executions", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-status-lease-"));
+    await initRepo(repoDir);
+
+    const status = resolveHubProjectStatus({
+      cwd: repoDir,
+      archloopUserDataDir: join(repoDir, "data", "archloop"),
+      detectBeadsAvailable: () => true,
+      detectTaskStoreInitialized: () => true,
+      countReadyTasks: () => 0,
+      countTotalTasks: () => 1,
+      loadTaskBoard: () => ({
+        tasks: [
+          createTask({
+            id: "bd-1",
+            title: "Active task",
+            hubStatus: "implementing",
+            claimState: "active",
+            claim: {
+              runId: "run-1",
+              batchId: "batch-1",
+              branch: "archloop/bd-1-active-task",
+              claimedAt: "2026-06-22T10:00:00.000Z",
+              raw: {},
+            },
+          }),
+        ],
+        groups: [],
+      }),
+      listWorktreeLeases: () => [
+        {
+          lockFileName: "archloop-bd-1-active-task.lock",
+          worktreeName: "archloop-bd-1-active-task",
+          branch: "archloop/bd-1-active-task",
+          pid: 4242,
+          acquiredAt: "2026-06-22T10:00:00.000Z",
+          owner: {
+            kind: "hub",
+            taskId: "bd-1",
+            flowId: "no-review",
+            batchId: "batch-1",
+            runId: "run-1",
+          },
+          state: "active",
+          malformed: false,
+        },
+      ],
+    });
+
+    expect(status.worktreeLeaseDiagnostics).toEqual([
+      expect.objectContaining({
+        taskId: "bd-1",
+        reason: "worktree_lease_active_execution",
+        nextAction: expect.stringContaining("Wait"),
+      }),
+    ]);
+    expect(formatHubProjectStatusLines(status).join("\n")).toContain(
+      "Worktree lease diagnostics",
+    );
+    expect(formatHubProjectStatusLines(status).join("\n")).toContain(
+      "worktree_lease_active_execution",
+    );
   });
 });
 

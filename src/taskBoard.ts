@@ -16,7 +16,11 @@ import {
   resolveHubTaskClaimState,
   type HubTaskClaimMetadata,
 } from "./hubExecution.js";
-import { appendBdMetadataArg, appendBdSetLabelsArgs } from "./bdCliArgs.js";
+import {
+  appendBdMetadataArg,
+  appendBdSetLabelsArgs,
+  appendBdUnsetMetadataArgs,
+} from "./bdCliArgs.js";
 import { TaskBoardError } from "./errors.js";
 import { runBdTextForHubTaskStore } from "./hubTaskStore.js";
 
@@ -482,15 +486,27 @@ export const groupHubTasks = (
       .sort(compareTaskIds),
   })).filter((group) => group.tasks.length > 0);
 
-export const projectHubTaskBoard = (
+const buildHubTaskBoard = (
   tasks: readonly BeadsTaskRecord[],
+  sortByTaskId: boolean,
 ): HubTaskBoard => {
-  const projected = tasks.map(projectHubTask).sort(compareTaskIds);
+  const projected = tasks.map(projectHubTask);
+  const orderedTasks = sortByTaskId
+    ? [...projected].sort(compareTaskIds)
+    : projected;
   return {
-    tasks: projected,
-    groups: groupHubTasks(projected),
+    tasks: orderedTasks,
+    groups: groupHubTasks(orderedTasks),
   };
 };
+
+export const projectHubTaskBoard = (
+  tasks: readonly BeadsTaskRecord[],
+): HubTaskBoard => buildHubTaskBoard(tasks, true);
+
+export const projectHubReadyQueueBoard = (
+  tasks: readonly BeadsTaskRecord[],
+): HubTaskBoard => buildHubTaskBoard(tasks, false);
 
 const parseBdJsonOutput = (output: string): unknown[] => {
   const parsed = JSON.parse(output) as unknown;
@@ -752,7 +768,7 @@ export const loadHubReadyQueue = (
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
 ): HubTaskBoard =>
-  projectHubTaskBoard(
+  projectHubReadyQueueBoard(
     runBdJson(
       cwd,
       ["ready", "--json"],
@@ -761,13 +777,12 @@ export const loadHubReadyQueue = (
     ) as BeadsTaskRecord[],
   );
 
+export const isHubFlowEligibleTask = (task: HubTaskProjection): boolean =>
+  task.hubStatus === "ready_for_agent" && task.claimState !== "active";
+
 export const selectHubFlowTasks = (
   board: HubTaskBoard,
-): readonly HubTaskProjection[] =>
-  board.tasks.filter(
-    (task) =>
-      task.hubStatus === "ready_for_agent" && task.claimState !== "active",
-  );
+): readonly HubTaskProjection[] => board.tasks.filter(isHubFlowEligibleTask);
 
 export const selectHubBatchMergeTasks = (
   board: HubTaskBoard,
@@ -1066,6 +1081,11 @@ const resolveTransitionClaim = (
   return patchClaim ? { ...patchClaim } : undefined;
 };
 
+const removedMetadataKeys = (
+  previous: Readonly<Record<string, unknown>>,
+  next: Readonly<Record<string, unknown>>,
+): string[] => Object.keys(previous).filter((key) => !(key in next));
+
 export interface UpdateHubTaskStatusInput {
   readonly cwd: string;
   readonly taskId: string;
@@ -1128,6 +1148,13 @@ export const transitionHubTaskStatus = (
 
   appendBdMetadataArg(args, metadata);
   runBdText(input.cwd, args, `tasks update ${input.taskId}`, input.env);
+
+  const metadataKeysToUnset = removedMetadataKeys(task.metadata, metadata);
+  if (metadataKeysToUnset.length > 0) {
+    const unsetArgs = ["update", input.taskId];
+    appendBdUnsetMetadataArgs(unsetArgs, metadataKeysToUnset);
+    runBdText(input.cwd, unsetArgs, `tasks update ${input.taskId}`, input.env);
+  }
 
   const updatedTask = loadHubTask(input.cwd, input.taskId, input.env);
   assertHubTaskTransition(updatedTask, input.hubStatus);

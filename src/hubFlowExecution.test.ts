@@ -1,8 +1,11 @@
-import { exec } from "node:child_process";
+import { exec, spawn } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
+import { Effect } from "effect";
+import { FileSystem } from "@effect/platform";
+import { NodeFileSystem } from "@effect/platform-node";
 import { describe, expect, it, vi } from "vitest";
 import { appendHubBatchEvent, createHubRunContext } from "./hubExecution.js";
 import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
@@ -23,9 +26,48 @@ import {
   loadHubReadyQueue,
   resolveHubTaskBranch,
   selectHubFlowTasks,
+  type HubTaskProjection,
 } from "./taskBoard.js";
+import * as taskBoard from "./taskBoard.js";
+import * as WorktreeManager from "./WorktreeManager.js";
+import { leaseLockPath, leaseNameFromBranch } from "./WorktreeLease.js";
 
 const execAsync = promisify(exec);
+
+const runLeaseEffect = <A, E>(
+  effect: Effect.Effect<A, E, FileSystem.FileSystem>,
+) =>
+  Effect.runPromise(
+    effect.pipe(Effect.provide(NodeFileSystem.layer)) as Effect.Effect<
+      A,
+      never
+    >,
+  );
+
+const spawnExitedPid = async (): Promise<number> =>
+  await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ["-e", "process.exit(0)"], {
+      stdio: "ignore",
+    });
+    child.on("error", reject);
+    child.on("exit", () => {
+      if (child.pid === undefined) {
+        reject(new Error("child pid missing"));
+        return;
+      }
+      resolve(child.pid);
+    });
+  });
+
+const writeLeaseFile = async (
+  repoDir: string,
+  branch: string,
+  content: string,
+) => {
+  const lockPath = leaseLockPath(repoDir, leaseNameFromBranch(branch));
+  await mkdir(join(repoDir, ".archloop", "locks"), { recursive: true });
+  await writeFile(lockPath, content, "utf-8");
+};
 
 const expectBundledHubFlowPrompt = (promptPath: string, segment: string) => {
   expect(promptPath).toContain(segment);
@@ -146,7 +188,15 @@ if (command === "update" && id) {
   }
   const metadataIndex = args.indexOf("--metadata");
   if (metadataIndex >= 0) {
-    task.metadata = JSON.parse(args[metadataIndex + 1]);
+    task.metadata = {
+      ...task.metadata,
+      ...JSON.parse(args[metadataIndex + 1]),
+    };
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--unset-metadata") {
+      delete task.metadata[args[index + 1]];
+    }
   }
   writeState(state);
   process.exit(0);
@@ -177,6 +227,10 @@ describe("Hub flow registry", () => {
     expectBundledHubFlowPrompt(
       resolveHubFlowPromptPath("no-review", "implement"),
       "hub-flows/no-review/implement-prompt.md",
+    );
+    expectBundledHubFlowPrompt(
+      resolveHubFlowPromptPath("no-review", "batchPlanner"),
+      "hub-flows/no-review/batch-planner-prompt.md",
     );
   });
 
@@ -239,6 +293,556 @@ describe("Hub flow planner", () => {
     expect(resolveHubTaskBranch("bd-ready", "Ready task")).toBe(
       "archloop/bd-ready-ready-task",
     );
+  });
+
+  it("conservative batch strategy selects and claims only one eligible ready task", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-conservative-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-first",
+        title: "First ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-second",
+        title: "Second ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    const invocations: HubImplementTaskInput[] = [];
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "conservative",
+    );
+
+    const result = await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      batchStrategy: "conservative",
+      maxTasks: 3,
+      implementer: async (input) => {
+        invocations.push(input);
+        return {
+          outcome: "success",
+          commits: [{ sha: "abc123" }],
+          completionSignal: "<promise>COMPLETE</promise>",
+        };
+      },
+      runMergePhase: false,
+    });
+
+    expect(result.selectedTaskIds).toEqual(["bd-first"]);
+    expect(result.batchSelection).toMatchObject({
+      batchStrategyUsed: "conservative",
+      maxTasks: 3,
+      deferredTasks: [{ taskId: "bd-second", reason: "over_max_tasks" }],
+    });
+    expect(invocations).toHaveLength(1);
+    expect(invocations[0]?.taskId).toBe("bd-first");
+
+    const batchEvents = await readJsonl(
+      join(result.runDir, "events", "batch.jsonl"),
+    );
+    const plannedEvent = batchEvents.find(
+      (event) => (event as { type?: string }).type === "batch_planned",
+    );
+    expect(plannedEvent).toMatchObject({
+      type: "batch_planned",
+      taskIds: ["bd-first"],
+      batchStrategyUsed: "conservative",
+      maxTasks: 3,
+      deferredTasks: [{ taskId: "bd-second", reason: "over_max_tasks" }],
+    });
+
+    expect(formatHubFlowResultLines(result).join("\n")).toContain(
+      "Batch strategy: conservative (max 3)",
+    );
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(
+      finalState.find((task) => task.id === "bd-first")?.metadata.hubStatus,
+    ).toBe("waiting_for_merge");
+    expect(
+      finalState.find((task) => task.id === "bd-second")?.labels,
+    ).toContain("ready-for-agent");
+  });
+
+  it("defaults to planned batch strategy with max 3 and conservative fallback until planner is wired", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-default-batch-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-first",
+        title: "First ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-second",
+        title: "Second ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    const invocations: HubImplementTaskInput[] = [];
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "default-batch",
+    );
+
+    const result = await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      implementer: async (input) => {
+        invocations.push(input);
+        return {
+          outcome: "success",
+          commits: [{ sha: "abc123" }],
+          completionSignal: "<promise>COMPLETE</promise>",
+        };
+      },
+      runMergePhase: false,
+    });
+
+    expect(result.selectedTaskIds).toEqual(["bd-first"]);
+    expect(result.batchSelection).toMatchObject({
+      batchStrategyRequested: "planned",
+      batchStrategyUsed: "conservative",
+      maxTasks: 3,
+      fallbackReason: "planner_unavailable",
+      deferredTasks: [{ taskId: "bd-second", reason: "over_max_tasks" }],
+    });
+    expect(invocations).toHaveLength(1);
+
+    const output = formatHubFlowResultLines(result).join("\n");
+    expect(output).toContain("Batch strategy: conservative (max 3)");
+    expect(output).toContain("Batch strategy requested: planned");
+    expect(output).toContain("Batch fallback: planner_unavailable");
+  });
+
+  it("fresh-validates conservative selection before claim and falls back when the first task gains an active claim", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-flow-fresh-validate-claim-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-first",
+        title: "First ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-second",
+        title: "Second ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    const invocations: HubImplementTaskInput[] = [];
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "fresh-validate-claim",
+    );
+
+    let readyLoadCount = 0;
+    const originalLoadHubReadyQueue = taskBoard.loadHubReadyQueue;
+    const loadReadyQueueSpy = vi
+      .spyOn(taskBoard, "loadHubReadyQueue")
+      .mockImplementation((cwd, loadEnv) => {
+        readyLoadCount += 1;
+        const board = originalLoadHubReadyQueue(cwd, loadEnv);
+        if (readyLoadCount === 1) {
+          return board;
+        }
+
+        const claimedFirstTask = {
+          ...board.tasks.find((task) => task.id === "bd-first")!,
+          claimState: "active",
+          hubStatus: "implementing",
+        } as HubTaskProjection;
+
+        return {
+          ...board,
+          tasks: board.tasks.map((task) =>
+            task.id === "bd-first" ? claimedFirstTask : task,
+          ),
+        };
+      });
+
+    try {
+      const result = await runHubFlow({
+        flowId: "no-review",
+        cwd: repoDir,
+        hubProjectDir,
+        env,
+        batchStrategy: "conservative",
+        maxTasks: 3,
+        implementer: async (input) => {
+          invocations.push(input);
+          return {
+            outcome: "success",
+            commits: [{ sha: "abc123" }],
+            completionSignal: "<promise>COMPLETE</promise>",
+          };
+        },
+        runMergePhase: false,
+      });
+
+      expect(readyLoadCount).toBeGreaterThanOrEqual(2);
+      expect(result.selectedTaskIds).toEqual(["bd-second"]);
+      expect(result.batchSelection?.fallbackReason).toBe("active_claim");
+      expect(invocations).toHaveLength(1);
+      expect(invocations[0]?.taskId).toBe("bd-second");
+
+      const batchEvents = await readJsonl(
+        join(result.runDir, "events", "batch.jsonl"),
+      );
+      const plannedEvent = batchEvents.find(
+        (event) => (event as { type?: string }).type === "batch_planned",
+      );
+      expect(plannedEvent).toMatchObject({
+        taskIds: ["bd-second"],
+        batchStrategyRequested: "conservative",
+        batchStrategyUsed: "conservative",
+        fallbackReason: "active_claim",
+      });
+    } finally {
+      loadReadyQueueSpy.mockRestore();
+    }
+  });
+
+  it("fresh-validates conservative selection before claim and falls back when status changes", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-flow-fresh-validate-status-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-first",
+        title: "First ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-second",
+        title: "Second ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    const invocations: HubImplementTaskInput[] = [];
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "fresh-validate-status",
+    );
+
+    let readyLoadCount = 0;
+    const originalLoadHubReadyQueue = taskBoard.loadHubReadyQueue;
+    const loadReadyQueueSpy = vi
+      .spyOn(taskBoard, "loadHubReadyQueue")
+      .mockImplementation((cwd, loadEnv) => {
+        readyLoadCount += 1;
+        const board = originalLoadHubReadyQueue(cwd, loadEnv);
+        if (readyLoadCount === 1) {
+          return board;
+        }
+
+        const staleFirstTask = {
+          ...board.tasks.find((task) => task.id === "bd-first")!,
+          hubStatus: "ready_for_human",
+        } as HubTaskProjection;
+
+        return {
+          ...board,
+          tasks: board.tasks.map((task) =>
+            task.id === "bd-first" ? staleFirstTask : task,
+          ),
+        };
+      });
+
+    try {
+      const result = await runHubFlow({
+        flowId: "no-review",
+        cwd: repoDir,
+        hubProjectDir,
+        env,
+        batchStrategy: "conservative",
+        maxTasks: 3,
+        implementer: async (input) => {
+          invocations.push(input);
+          return {
+            outcome: "success",
+            commits: [{ sha: "abc123" }],
+            completionSignal: "<promise>COMPLETE</promise>",
+          };
+        },
+        runMergePhase: false,
+      });
+
+      expect(result.selectedTaskIds).toEqual(["bd-second"]);
+      expect(result.batchSelection?.fallbackReason).toBe("not_ready_for_agent");
+      expect(invocations).toHaveLength(1);
+      expect(invocations[0]?.taskId).toBe("bd-second");
+    } finally {
+      loadReadyQueueSpy.mockRestore();
+    }
+  });
+
+  it("planned batch strategy uses the flow-owned batch planner before claim", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-planned-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-first",
+        title: "First ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-second",
+        title: "Second ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-third",
+        title: "Third ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    const invocations: HubImplementTaskInput[] = [];
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "planned",
+    );
+
+    const result = await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      batchStrategy: "planned",
+      maxTasks: 2,
+      batchPlanner: async () =>
+        `<batch-plan>${JSON.stringify({
+          selectedTaskIds: ["bd-first", "bd-second"],
+          deferred: [{ taskId: "bd-third", reason: "same_core_module" }],
+          rationale: "Two independent tasks can run in parallel.",
+        })}</batch-plan>`,
+      implementer: async (input) => {
+        invocations.push(input);
+        return {
+          outcome: "success",
+          commits: [{ sha: "abc123" }],
+          completionSignal: "<promise>COMPLETE</promise>",
+        };
+      },
+      runMergePhase: false,
+    });
+
+    expect(result.selectedTaskIds).toEqual(["bd-first", "bd-second"]);
+    expect(result.batchSelection).toMatchObject({
+      batchStrategyUsed: "planned",
+      maxTasks: 2,
+      deferredTasks: [{ taskId: "bd-third", reason: "same_core_module" }],
+      rationale: "Two independent tasks can run in parallel.",
+    });
+    expect(invocations.map((input) => input.taskId)).toEqual([
+      "bd-first",
+      "bd-second",
+    ]);
+
+    const batchEvents = await readJsonl(
+      join(result.runDir, "events", "batch.jsonl"),
+    );
+    const plannedEvent = batchEvents.find(
+      (event) => (event as { type?: string }).type === "batch_planned",
+    );
+    expect(plannedEvent).toMatchObject({
+      type: "batch_planned",
+      taskIds: ["bd-first", "bd-second"],
+      batchStrategyUsed: "planned",
+      maxTasks: 2,
+      deferredTasks: [{ taskId: "bd-third", reason: "same_core_module" }],
+      rationale: "Two independent tasks can run in parallel.",
+    });
+
+    expect(formatHubFlowResultLines(result).join("\n")).toContain(
+      "Batch strategy: planned (max 2)",
+    );
+  });
+
+  it("limited batch strategy selects eligible ready tasks in ready queue order up to max-tasks", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-limited-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-z-queue-first",
+        title: "Queue first",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-m-queue-second",
+        title: "Queue second",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-a-queue-third",
+        title: "Queue third",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-claimed",
+        title: "Already claimed",
+        status: "in_progress",
+        labels: ["ready-for-agent", "implementing"],
+        metadata: {
+          claim: {
+            runId: "run-existing",
+            batchId: "batch-existing",
+            branch: "archloop/bd-claimed-other",
+            claimedAt: "2026-06-11T15:30:00Z",
+          },
+        },
+      },
+    ]);
+
+    const invocations: HubImplementTaskInput[] = [];
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "limited",
+    );
+
+    const result = await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      batchStrategy: "limited",
+      maxTasks: 2,
+      implementer: async (input) => {
+        invocations.push(input);
+        return {
+          outcome: "success",
+          commits: [{ sha: "abc123" }],
+          completionSignal: "<promise>COMPLETE</promise>",
+        };
+      },
+      runMergePhase: false,
+    });
+
+    expect(result.selectedTaskIds).toEqual([
+      "bd-z-queue-first",
+      "bd-m-queue-second",
+    ]);
+    expect(result.batchSelection).toMatchObject({
+      batchStrategyUsed: "limited",
+      maxTasks: 2,
+      deferredTasks: [{ taskId: "bd-a-queue-third", reason: "over_max_tasks" }],
+    });
+    expect(invocations.map((input) => input.taskId)).toEqual([
+      "bd-z-queue-first",
+      "bd-m-queue-second",
+    ]);
+
+    const batchEvents = await readJsonl(
+      join(result.runDir, "events", "batch.jsonl"),
+    );
+    const plannedEvent = batchEvents.find(
+      (event) => (event as { type?: string }).type === "batch_planned",
+    );
+    expect(plannedEvent).toMatchObject({
+      type: "batch_planned",
+      taskIds: ["bd-z-queue-first", "bd-m-queue-second"],
+      batchStrategyUsed: "limited",
+      maxTasks: 2,
+    });
+
+    expect(formatHubFlowResultLines(result).join("\n")).toContain(
+      "Batch strategy: limited (max 2)",
+    );
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(
+      finalState.find((task) => task.id === "bd-a-queue-third")?.labels,
+    ).toContain("ready-for-agent");
   });
 });
 
@@ -652,7 +1256,7 @@ describe("with-review Hub flow execution", () => {
     );
   });
 
-  it("starts a new batch when ready tasks exist and reports unfinished batches that were not resumed", async () => {
+  it("resumes merge-ready batch before claiming ready tasks when both exist", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-ready-conflict-"));
     await initRepo(repoDir);
     await commitFile(repoDir, "hello.txt", "hello", "initial commit");
@@ -717,29 +1321,24 @@ describe("with-review Hub flow execution", () => {
     await commitFile(repoDir, "old-work.txt", "old", "old conflict work");
     await execAsync("git checkout main", { cwd: repoDir });
 
+    let implementCalls = 0;
+    let reviewCalls = 0;
     const mergedTaskIds: string[] = [];
     const result = await runHubFlow({
       flowId: "with-review",
       cwd: repoDir,
       hubProjectDir,
       env,
-      implementer: async (input) => {
-        await execAsync(`git checkout -B ${input.branch} main`, {
-          cwd: repoDir,
-        });
-        await commitFile(repoDir, "ready-work.txt", "ready", "ready work");
-        await execAsync("git checkout main", { cwd: repoDir });
-        return {
-          outcome: "success",
-          commits: [{ sha: "abc123" }],
-          completionSignal: "<promise>COMPLETE</promise>",
-        };
+      implementer: async () => {
+        implementCalls += 1;
+        throw new Error(
+          "implementer should not run while resuming merge batch",
+        );
       },
-      reviewer: async () => ({
-        outcome: "success",
-        commits: [],
-        completionSignal: "<promise>COMPLETE</promise>",
-      }),
+      reviewer: async () => {
+        reviewCalls += 1;
+        throw new Error("reviewer should not run while resuming merge batch");
+      },
       merger: async (input) => {
         mergedTaskIds.push(input.taskId);
         return { outcome: "success" };
@@ -747,31 +1346,37 @@ describe("with-review Hub flow execution", () => {
       verifier: async () => ({ outcome: "success" }),
     });
 
-    expect(result.mode).toBe("new_batch");
-    expect(result.selectedTaskIds).toEqual(["bd-ready"]);
-    expect(result.resumedBatchId).toBeUndefined();
+    expect(result.mode).toBe("resumed_batch");
+    expect(result.selectedTaskIds).toEqual([]);
+    expect(result.resumedBatchId).toBe(oldBatchId);
+    expect(result.batchId).toBe(oldBatchId);
     expect(result.unfinishedBatchIds).toEqual([oldBatchId]);
     expect(result.mergeResult).toMatchObject({
-      batchId: result.batchId,
-      selectedTaskIds: ["bd-ready"],
+      batchId: oldBatchId,
+      selectedTaskIds: ["bd-old-conflict"],
       batchStatus: "done",
     });
-    expect(mergedTaskIds).toEqual(["bd-ready"]);
+    expect(mergedTaskIds).toEqual(["bd-old-conflict"]);
+    expect(implementCalls).toBe(0);
+    expect(reviewCalls).toBe(0);
 
     const finalState = JSON.parse(
       await readFile(stateFile, "utf-8"),
     ) as MockBeadsTask[];
     expect(finalState.find((task) => task.id === "bd-ready")?.status).toBe(
-      "closed",
+      "open",
     );
+    expect(finalState.find((task) => task.id === "bd-ready")?.labels).toEqual([
+      "ready-for-agent",
+    ]);
     expect(
-      finalState.find((task) => task.id === "bd-old-conflict")?.metadata
-        .hubStatus,
-    ).toBe("waiting_for_merge");
+      finalState.find((task) => task.id === "bd-old-conflict")?.status,
+    ).toBe("closed");
 
     const summary = formatHubFlowResultLines(result).join("\n");
-    expect(summary).toContain(`Unfinished batches not resumed: ${oldBatchId}`);
-    expect(summary).not.toContain(`Resumed batch id: ${oldBatchId}`);
+    expect(summary).toContain(`Mode: resumed_batch`);
+    expect(summary).toContain(`Resumed batch id: ${oldBatchId}`);
+    expect(summary).not.toContain("Unfinished batches not resumed");
   });
 
   it("advances successful work through reviewing to waiting_for_merge", async () => {
@@ -1023,6 +1628,7 @@ describe("with-review Hub flow execution", () => {
     try {
       const result = await implementer({
         flowId: "no-review",
+        batchId: "batch-test",
         taskId: "bd-1",
         title: "Test task",
         branch: "archloop/bd-1-test-task",
@@ -1036,5 +1642,166 @@ describe("with-review Hub flow execution", () => {
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it("reports active execution instead of starting a retry when a live worktree lease exists", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-retry-active-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const taskId = "bd-retry-active";
+    const branch = resolveHubTaskBranch(taskId, "Retry active task");
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: taskId,
+        title: "Retry active task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    await runLeaseEffect(WorktreeManager.create(repoDir, { branch }));
+    await writeLeaseFile(
+      repoDir,
+      branch,
+      JSON.stringify({
+        owner: "hub",
+        taskId,
+        flowId: "no-review",
+        batchId: "batch-live",
+        branch,
+        pid: process.pid,
+        acquiredAt: "2026-06-22T10:00:00.000Z",
+      }),
+    );
+
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "retry-active",
+    );
+    const implementer = vi.fn<HubFlowImplementer>(async () => ({
+      outcome: "success",
+      commits: [{ sha: "abc" }],
+      completionSignal: "<promise>COMPLETE</promise>",
+    }));
+
+    const result = await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      implementer,
+      runMergePhase: false,
+    });
+
+    expect(implementer).not.toHaveBeenCalled();
+    expect(result.results[0]).toMatchObject({
+      taskId,
+      outcome: "active_execution",
+      hubStatus: "ready_for_agent",
+      commitCount: 0,
+    });
+
+    const taskEvents = await readJsonl(
+      join(result.runDir, "events", "task.jsonl"),
+    );
+    expect(taskEvents).toContainEqual(
+      expect.objectContaining({
+        type: "task_retry_blocked",
+        taskId,
+        reason: "active_worktree_lease",
+      }),
+    );
+  });
+
+  it("retries from a preserved dirty worktree after clearing a stale lease", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-retry-preserved-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const taskId = "bd-retry-preserved";
+    const title = "Retry preserved task";
+    const branch = resolveHubTaskBranch(taskId, title);
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: taskId,
+        title,
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    const worktree = await runLeaseEffect(
+      WorktreeManager.create(repoDir, { branch }),
+    );
+    await writeFile(join(worktree.path, "partial.txt"), "wip\n");
+    const deadPid = await spawnExitedPid();
+    await writeLeaseFile(
+      repoDir,
+      branch,
+      JSON.stringify({
+        owner: "hub",
+        taskId,
+        flowId: "no-review",
+        batchId: "batch-dead",
+        branch,
+        pid: deadPid,
+        acquiredAt: "2026-06-22T09:00:00.000Z",
+      }),
+    );
+
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "retry-preserved",
+    );
+    let capturedInput: HubImplementTaskInput | undefined;
+    const implementer = vi.fn<HubFlowImplementer>(async (input) => {
+      capturedInput = input;
+      return {
+        outcome: "success",
+        commits: [],
+        completionSignal: "<promise>COMPLETE</promise>",
+        branchHasUnmergedWork: true,
+      };
+    });
+
+    const result = await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      implementer,
+      runMergePhase: false,
+    });
+
+    expect(implementer).toHaveBeenCalledTimes(1);
+    expect(capturedInput?.branch).toBe(branch);
+    expect(capturedInput?.preservedWorktreePath).toContain(
+      "archloop-bd-retry-preserved",
+    );
+    expect(capturedInput?.retryContext?.toLowerCase()).toContain(
+      "inspect existing work",
+    );
+    expect(capturedInput?.retryContext?.toLowerCase()).toContain(
+      "uncommitted changes",
+    );
+    expect(result.results[0]).toMatchObject({
+      taskId,
+      outcome: "implemented",
+      hubStatus: "waiting_for_merge",
+      implementationWork: "existing_unmerged_work",
+    });
   });
 });

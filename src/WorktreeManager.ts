@@ -3,6 +3,10 @@ import { FileSystem } from "@effect/platform";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import {
+  pruneStaleWorktreeLeases,
+  leaseNameFromBranch,
+} from "./WorktreeLease.js";
+import {
   emptyRepoWorktreeError,
   WorktreeError,
   WorktreeTimeoutError,
@@ -143,8 +147,8 @@ const listWorktrees = (
  * - If not, creates a temporary `archloop/<timestamp>` branch.
  *
  * When `branch` collides with an existing managed worktree:
- * - Clean → reuses the existing worktree.
- * - Dirty (uncommitted changes) → reuses with a console warning (ADR 0003).
+ * - Clean -> reuses the existing worktree.
+ * - Dirty (uncommitted changes) -> reuses with a console warning (ADR 0003).
  *
  * Collisions with the main working tree or external worktrees always throw.
  */
@@ -174,7 +178,7 @@ export const create = (
 
     if (opts?.branch) {
       branch = opts.branch;
-      worktreeName = branch.replace(/\//g, "-");
+      worktreeName = leaseNameFromBranch(branch);
     } else {
       const timestamp = formatTimestamp(new Date());
       if (opts?.name) {
@@ -188,6 +192,12 @@ export const create = (
     }
 
     const worktreePath = join(worktreesDir, worktreeName);
+    const realWorktreesDir = yield* fs
+      .realPath(worktreesDir)
+      .pipe(Effect.catchAll(() => Effect.succeed(worktreesDir)));
+    const isUnderManagedWorktrees = (candidatePath: string): boolean =>
+      candidatePath.startsWith(worktreesDir) ||
+      candidatePath.startsWith(realWorktreesDir);
 
     if (opts?.branch) {
       // Proactively detect collision before git produces a confusing error.
@@ -196,15 +206,20 @@ export const create = (
       const existing = yield* listWorktrees(repoDir);
       const collision =
         existing.find((wt) => wt.branch === branch) ??
-        existing.find((wt) => wt.path === worktreePath);
+        existing.find((wt) => wt.path === worktreePath) ??
+        existing.find(
+          (wt) =>
+            isUnderManagedWorktrees(wt.path) &&
+            wt.path.endsWith(`/${worktreeName}`),
+        );
       if (collision) {
         // Only reuse worktrees managed by archloop (under .archloop/worktrees/)
-        const isManagedWorktree = collision.path.startsWith(worktreesDir);
+        const isManagedWorktree = isUnderManagedWorktrees(collision.path);
         if (isManagedWorktree) {
           const dirty = yield* hasUncommittedChanges(collision.path);
           if (dirty) {
             console.warn(
-              `Reusing worktree at ${collision.path} (branch '${branch}') — worktree has uncommitted changes`,
+              `Reusing worktree at ${collision.path} (branch '${branch}') - worktree has uncommitted changes`,
             );
           } else {
             console.log(
@@ -244,6 +259,10 @@ export const create = (
           return Effect.fail(e);
         }),
       );
+      const resolvedWorktreePath = yield* fs
+        .realPath(worktreePath)
+        .pipe(Effect.catchAll(() => Effect.succeed(worktreePath)));
+      return { path: resolvedWorktreePath, branch };
     } else {
       yield* execGit(
         [
@@ -330,12 +349,20 @@ export const pruneStale = (
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
 
+    yield* pruneStaleWorktreeLeases(repoDir).pipe(
+      Effect.mapError((error) =>
+        error._tag === "WorktreeLeaseError"
+          ? new WorktreeError({ message: error.message })
+          : error,
+      ),
+    );
+
     // Let git clean up metadata for worktrees whose directories are gone
     yield* execGit(["worktree", "prune"], repoDir);
 
     const worktreesDir = join(repoDir, ".archloop", "worktrees");
 
-    // Read directory entries — return null if directory doesn't exist
+    // Read directory entries - return null if directory doesn't exist
     const entries: string[] | null = yield* fs.readDirectory(worktreesDir).pipe(
       Effect.map((es): string[] | null => es),
       Effect.catchSome((e) =>

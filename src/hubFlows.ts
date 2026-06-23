@@ -33,6 +33,7 @@ export const HUB_FLOW_DEFINITIONS: readonly HubFlowDefinition[] = [
     hasReviewer: false,
     prompts: {
       implement: "implement-prompt.md",
+      batchPlanner: "batch-planner-prompt.md",
     },
   },
   {
@@ -44,6 +45,7 @@ export const HUB_FLOW_DEFINITIONS: readonly HubFlowDefinition[] = [
     prompts: {
       implement: "implement-prompt.md",
       review: "review-prompt.md",
+      batchPlanner: "batch-planner-prompt.md",
     },
   },
   {

@@ -35,9 +35,22 @@ import {
   type HubTaskLifecycleContext,
 } from "./hubTaskLifecycle.js";
 import {
+  formatHubRetryPromptContext,
+  prepareHubTaskRetry,
+} from "./hubTaskRetry.js";
+import {
+  HUB_BATCH_DEFAULT_MAX_TASKS,
+  HUB_BATCH_DEFAULT_STRATEGY,
+  resolveEffectiveHubBatchSelection,
+  selectHubFlowTasksWithBatchOptions,
+  resolveFreshValidatedHubBatchSelection,
+  type HubBatchPlannerResult,
+  type HubBatchStrategy,
+} from "./hubBatchPlanner.js";
+import type { HubBatchPlannerInvoker } from "./hubBatchPlannerAgent.js";
+import {
   loadHubTaskBoard,
   resolveHubTaskBranch,
-  selectHubFlowTasks,
   loadHubReadyQueue,
   type HubFailureReason,
   type HubTaskProjection,
@@ -47,12 +60,15 @@ const execFileAsync = promisify(execFile);
 
 export interface HubImplementTaskInput {
   readonly flowId: string;
+  readonly batchId: string;
   readonly taskId: string;
   readonly title: string;
   readonly branch: string;
   readonly promptFile: string;
   readonly cwd: string;
   readonly runDir: string;
+  readonly retryContext?: string;
+  readonly preservedWorktreePath?: string;
 }
 
 export interface HubImplementTaskResult {
@@ -69,6 +85,7 @@ export type HubFlowImplementer = (
 
 export interface HubReviewTaskInput {
   readonly flowId: string;
+  readonly batchId: string;
   readonly taskId: string;
   readonly title: string;
   readonly branch: string;
@@ -100,6 +117,9 @@ export interface RunHubFlowInput {
   readonly merger?: HubFlowMerger;
   readonly verifier?: HubFlowVerifier;
   readonly runMergePhase?: boolean;
+  readonly batchStrategy?: HubBatchStrategy;
+  readonly maxTasks?: number;
+  readonly batchPlanner?: HubBatchPlannerInvoker;
 }
 
 export interface HubFlowTaskResult {
@@ -110,6 +130,7 @@ export interface HubFlowTaskResult {
     | "implemented"
     | "reviewed"
     | "claim_skipped"
+    | "active_execution"
     | "agent_failed"
     | "sandbox_failed";
   readonly hubStatus: string;
@@ -129,6 +150,8 @@ export interface RunHubFlowResult {
   readonly mergeResult?: RunHubBatchMergeResult;
   readonly resumedBatchId?: string;
   readonly unfinishedBatchIds: readonly string[];
+  readonly batchSelection?: HubBatchPlannerResult;
+  readonly fallbackReason?: string;
 }
 
 interface ResumableHubFlowBatch {
@@ -252,17 +275,23 @@ const isSandboxFailureTag = (tag: string | undefined): boolean =>
   tag !== undefined && SANDBOX_FAILURE_TAGS.has(tag);
 
 const buildHubAgentPromptArgs = (
-  input: Pick<HubImplementTaskInput, "taskId" | "title" | "branch">,
+  input: Pick<
+    HubImplementTaskInput,
+    "taskId" | "title" | "branch" | "retryContext"
+  >,
 ): Readonly<Record<string, string>> => ({
   TASK_ID: input.taskId,
   TASK_TITLE: input.title,
   BRANCH: input.branch,
   VIEW_TASK_COMMAND: `bd show ${input.taskId}`,
+  RETRY_CONTEXT: input.retryContext ?? "",
 });
 
 const runHubAgent = async (input: {
   readonly cwd: string;
   readonly promptFile: string;
+  readonly flowId: string;
+  readonly batchId: string;
   readonly taskId: string;
   readonly title: string;
   readonly branch: string;
@@ -270,6 +299,7 @@ const runHubAgent = async (input: {
   readonly name: string;
   readonly logFileName: string;
   readonly env?: NodeJS.ProcessEnv;
+  readonly retryContext?: string;
 }) => {
   await assertAgentCredentialsConfigured({
     providerName: "cursor",
@@ -289,6 +319,12 @@ const runHubAgent = async (input: {
     promptArgs: buildHubAgentPromptArgs(input),
     branchStrategy: { type: "branch", branch: input.branch },
     name: input.name,
+    worktreeLeaseOwner: {
+      kind: "hub",
+      taskId: input.taskId,
+      flowId: input.flowId,
+      batchId: input.batchId,
+    },
     logging: {
       type: "file",
       path: join(input.runDir, "logs", input.logFileName),
@@ -331,6 +367,7 @@ const reviewSelectedTask = async (
   try {
     reviewResult = await reviewer({
       flowId: input.flowId,
+      batchId: context.batchId,
       taskId: task.id,
       title: task.title,
       branch,
@@ -395,6 +432,53 @@ const implementSelectedTask = async (
 ): Promise<HubFlowTaskResult> => {
   const cwd = input.cwd ?? process.cwd();
   const branch = resolveHubTaskBranch(task.id, task.title);
+  const retryPreparation = await prepareHubTaskRetry({
+    repoDir: cwd,
+    branch,
+    taskId: task.id,
+  });
+
+  if (retryPreparation.status === "active_execution") {
+    appendHubTaskEvent(context.runDir, {
+      type: "task_retry_blocked",
+      runId: context.runId,
+      batchId: context.batchId,
+      taskId: task.id,
+      branch,
+      createdAt: new Date().toISOString(),
+      status: task.hubStatus,
+      reason: "active_worktree_lease",
+      message: retryPreparation.message,
+    });
+
+    return {
+      taskId: task.id,
+      title: task.title,
+      branch,
+      outcome: "active_execution",
+      hubStatus: task.hubStatus,
+      commitCount: 0,
+    };
+  }
+
+  if (retryPreparation.status === "lease_malformed") {
+    return {
+      taskId: task.id,
+      title: task.title,
+      branch,
+      outcome: "sandbox_failed",
+      hubStatus: task.hubStatus,
+      failureReason: "sandbox_failed",
+      commitCount: 0,
+    };
+  }
+
+  const retryContext = formatHubRetryPromptContext({
+    branch,
+    preservedWorktreePath: retryPreparation.preservedWorktreePath,
+    hasDirtyWork: retryPreparation.hasDirtyWork,
+  });
+
   const claimResult = claimHubTaskForImplementation({
     cwd,
     taskId: task.id,
@@ -443,12 +527,15 @@ const implementSelectedTask = async (
   try {
     implementationResult = await input.implementer({
       flowId: input.flowId,
+      batchId: context.batchId,
       taskId: task.id,
       title: task.title,
       branch,
       promptFile,
       cwd,
       runDir: context.runDir,
+      retryContext,
+      preservedWorktreePath: retryPreparation.preservedWorktreePath,
     });
   } catch (error) {
     const message =
@@ -563,24 +650,15 @@ export const runHubFlow = async (
   const hubProjectDir =
     input.hubProjectDir ??
     resolveHubProjectDir(resolveArchloopUserDataDir(input.env), repoRoot);
-  const readyBoard = loadHubReadyQueue(repoRoot, input.env);
-  const selectedTasks = selectHubFlowTasks(readyBoard);
-  const selectedTaskIds = selectedTasks.map((task) => task.id);
+  const startedAt = input.startedAt ?? new Date();
   const unfinishedBatches = findResumableHubFlowBatches({
     hubProjectDir,
     flowId: input.flowId,
     tasks: loadHubTaskBoard(repoRoot, input.env).tasks,
   });
   const unfinishedBatchIds = unfinishedBatches.map((batch) => batch.batchId);
-  const resumedBatchId =
-    selectedTasks.length === 0 ? unfinishedBatches[0]?.batchId : undefined;
-  const mode =
-    selectedTasks.length > 0
-      ? "new_batch"
-      : resumedBatchId
-        ? "resumed_batch"
-        : "no_ready";
-  const startedAt = input.startedAt ?? new Date();
+  const resumedBatchId = unfinishedBatches[0]?.batchId;
+  const isResumingMergeBatch = resumedBatchId !== undefined;
   const context = createHubRunContext({
     cwd: repoRoot,
     hubProjectDir,
@@ -589,16 +667,86 @@ export const runHubFlow = async (
     startedAt,
     env: input.env,
   });
-
   mkdirSync(join(context.runDir, "logs"), { recursive: true });
+  let selectedTasks: readonly HubTaskProjection[] = [];
+  let batchSelection: HubBatchPlannerResult | undefined;
+  let fallbackReason: string | undefined;
+
+  if (!isResumingMergeBatch) {
+    const readyBoard = loadHubReadyQueue(repoRoot, input.env);
+    const effectiveBatchSelection = resolveEffectiveHubBatchSelection({
+      flowKind: flowDefinition.kind,
+      batchStrategy: input.batchStrategy,
+      maxTasks: input.maxTasks,
+    });
+    const batchStrategy =
+      effectiveBatchSelection.batchStrategy ?? HUB_BATCH_DEFAULT_STRATEGY;
+    const maxTasks =
+      effectiveBatchSelection.maxTasks ?? HUB_BATCH_DEFAULT_MAX_TASKS;
+    const {
+      selectedTasks: initiallySelectedTasks,
+      batchSelection: initialBatchSelection,
+    } = await selectHubFlowTasksWithBatchOptions({
+      flowId: input.flowId,
+      cwd: repoRoot,
+      env: input.env,
+      runDir: context.runDir,
+      candidates: readyBoard.tasks,
+      batchStrategy,
+      maxTasks,
+      batchPlanner: input.batchPlanner,
+    });
+    const freshBoard = loadHubReadyQueue(repoRoot, input.env);
+    ({ selectedTasks, batchSelection, fallbackReason } =
+      resolveFreshValidatedHubBatchSelection({
+        initialSelectedTaskIds: initiallySelectedTasks.map((task) => task.id),
+        freshCandidates: freshBoard.tasks,
+        batchStrategy,
+        maxTasks,
+        batchSelection: initialBatchSelection,
+      }));
+  }
+
+  const selectedTaskIds = selectedTasks.map((task) => task.id);
+  const mode: RunHubFlowResult["mode"] = isResumingMergeBatch
+    ? "resumed_batch"
+    : selectedTasks.length > 0
+      ? "new_batch"
+      : "no_ready";
+  const effectiveBatchId = resumedBatchId ?? context.batchId;
+
+  const batchPlannedMetadata: {
+    batchStrategyRequested?: HubBatchStrategy;
+    batchStrategyUsed?: HubBatchStrategy;
+    maxTasks?: number;
+    deferredTasks?: HubBatchPlannerResult["deferredTasks"];
+    fallbackReason?: string;
+    rationale?: string;
+  } = {};
+  if (batchSelection) {
+    batchPlannedMetadata.batchStrategyRequested =
+      batchSelection.batchStrategyRequested;
+    batchPlannedMetadata.batchStrategyUsed = batchSelection.batchStrategyUsed;
+    batchPlannedMetadata.maxTasks = batchSelection.maxTasks;
+    batchPlannedMetadata.deferredTasks = batchSelection.deferredTasks;
+    if (batchSelection.fallbackReason) {
+      batchPlannedMetadata.fallbackReason = batchSelection.fallbackReason;
+    }
+    if (batchSelection.rationale) {
+      batchPlannedMetadata.rationale = batchSelection.rationale;
+    }
+  } else if (fallbackReason) {
+    batchPlannedMetadata.fallbackReason = fallbackReason;
+  }
 
   appendHubBatchEvent(context.runDir, {
     type: "batch_planned",
     runId: context.runId,
-    batchId: context.batchId,
+    batchId: effectiveBatchId,
     flowId: input.flowId,
     createdAt: startedAt.toISOString(),
     taskIds: selectedTaskIds,
+    ...batchPlannedMetadata,
   });
 
   const results: HubFlowTaskResult[] = [];
@@ -635,7 +783,7 @@ export const runHubFlow = async (
   return {
     flowId: input.flowId,
     runId: context.runId,
-    batchId: context.batchId,
+    batchId: effectiveBatchId,
     runDir: context.runDir,
     mode,
     selectedTaskIds,
@@ -643,6 +791,8 @@ export const runHubFlow = async (
     mergeResult,
     resumedBatchId,
     unfinishedBatchIds,
+    batchSelection,
+    ...(fallbackReason ? { fallbackReason } : {}),
   };
 };
 
@@ -657,17 +807,43 @@ export const formatHubFlowResultLines = (
     `Mode: ${result.mode}`,
     `Selected tasks: ${selectedTaskCount}`,
   ];
+  if (result.batchSelection) {
+    lines.push(
+      `Batch strategy: ${result.batchSelection.batchStrategyUsed} (max ${result.batchSelection.maxTasks})`,
+    );
+    if (
+      result.batchSelection.batchStrategyRequested !==
+      result.batchSelection.batchStrategyUsed
+    ) {
+      lines.push(
+        `Batch strategy requested: ${result.batchSelection.batchStrategyRequested}`,
+      );
+    }
+    if (result.batchSelection.fallbackReason) {
+      lines.push(`Batch fallback: ${result.batchSelection.fallbackReason}`);
+    }
+    if (result.batchSelection.rationale) {
+      lines.push(`Batch planner rationale: ${result.batchSelection.rationale}`);
+    }
+    if (result.batchSelection.deferredTasks.length > 0) {
+      lines.push(
+        `Deferred tasks: ${result.batchSelection.deferredTasks
+          .map((entry) => `${entry.taskId} (${entry.reason})`)
+          .join(", ")}`,
+      );
+    }
+  } else if (result.fallbackReason) {
+    lines.push(`Batch fallback: ${result.fallbackReason}`);
+  }
   if (result.resumedBatchId) {
     lines.push(`Resumed batch id: ${result.resumedBatchId}`);
-  } else if (result.unfinishedBatchIds.length > 0) {
-    lines.push(
-      `Unfinished batches not resumed: ${result.unfinishedBatchIds.join(", ")}`,
-    );
   }
 
   if (selectedTaskCount === 0) {
-    lines.push("No ready tasks selected.");
-    if (!result.resumedBatchId) {
+    if (result.mode === "resumed_batch") {
+      lines.push("No new tasks claimed; resuming prior merge-ready batch.");
+    } else {
+      lines.push("No ready tasks selected.");
       lines.push(`No unfinished ${result.flowId} batch found to resume.`);
     }
   } else {
@@ -720,12 +896,15 @@ export const createHubFlowRunImplementer = (options: {
       const result = await runHubAgent({
         cwd: options.cwd,
         promptFile: input.promptFile,
+        flowId: input.flowId,
+        batchId: input.batchId,
         taskId: input.taskId,
         title: input.title,
         branch: input.branch,
         runDir: input.runDir,
         name: `implement-${input.taskId}`,
         logFileName: `${input.taskId}.log`,
+        retryContext: input.retryContext,
       });
 
       if (!result.completionSignal) {
@@ -783,6 +962,8 @@ export const createHubFlowRunReviewer = (options: {
       const result = await runHubAgent({
         cwd: options.cwd,
         promptFile: input.promptFile,
+        flowId: input.flowId,
+        batchId: input.batchId,
         taskId: input.taskId,
         title: input.title,
         branch: input.branch,

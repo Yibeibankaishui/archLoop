@@ -36,6 +36,7 @@ import { mergeProviderEnv } from "./mergeProviderEnv.js";
 import { hostSessionStore } from "./SessionStore.js";
 import { defaultSessionPathsLayer } from "./SessionPaths.js";
 import { generateTempBranchName, getCurrentBranch } from "./WorktreeManager.js";
+import type { WorktreeLeaseOwnerInput } from "./WorktreeLease.js";
 import {
   type PromptArgs,
   substitutePromptArgs,
@@ -265,6 +266,11 @@ export interface RunOptions {
   /** Override default timeouts for built-in lifecycle steps. Unset keys keep their defaults. */
   readonly timeouts?: Timeouts;
   /**
+   * Owner metadata for worktree leases on non-head branch strategies.
+   * Hub flows pass task-first context; direct callers omit this to record direct ownership.
+   */
+  readonly worktreeLeaseOwner?: WorktreeLeaseOwnerInput;
+  /**
    * Structured output definition. When provided, the agent's stdout is
    * scanned for the configured XML tag after the iteration completes, and the
    * result is parsed/validated and returned on `RunResult.output`.
@@ -475,6 +481,7 @@ export async function run(
         hooks,
         signal: options.signal,
         timeouts: options.timeouts,
+        worktreeLeaseOwner: options.worktreeLeaseOwner,
       }),
       NodeFileSystem.layer,
       displayLayer,
