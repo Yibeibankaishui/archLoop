@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type {
-  HubProjectStatus,
-  HubTaskBoard,
-  HubTaskProjection,
+import {
+  buildHubRuntimeExecuteParams,
+  type HubProjectStatus,
+  type HubRuntimeActionPreview,
+  type HubRuntimePreviewAction,
+  type HubTaskBoard,
+  type HubTaskProjection,
 } from "@yibeibankaishui/archloop/hub-runtime-contract";
 import {
   HUB_DESKTOP_NAV_SECTIONS,
@@ -84,25 +87,67 @@ export const App = () => {
     return taskBoard.tasks.find((task) => task.id === selectedTaskId);
   }, [selectedTaskId, taskBoard]);
 
+  const previewOverviewAction = async (
+    action: HubRuntimePreviewAction,
+    params: Record<string, unknown>,
+  ): Promise<HubRuntimeActionPreview | undefined> => {
+    const bridge = hubRuntimeClient();
+    const result = await bridge.invoke({
+      action,
+      params: params as never,
+    });
+    if (!result.ok) {
+      setRuntimeError(result.error.message);
+      return undefined;
+    }
+    return result.data;
+  };
+
+  const confirmOverviewAction = async (
+    preview: HubRuntimeActionPreview,
+    params: Record<string, unknown>,
+  ): Promise<string | undefined> => {
+    const bridge = hubRuntimeClient();
+    const result = await bridge.invoke({
+      action: preview.action,
+      params: buildHubRuntimeExecuteParams(preview, params) as never,
+    });
+    if (!result.ok) {
+      return result.error.message;
+    }
+    return "Action queued for CLI execution.";
+  };
+
   const mainView = (() => {
-    if (loading) {
-      return <div className="hub-panel hub-empty">Loading local Hub data…</div>;
-    }
-    if (runtimeError) {
-      return (
-        <div className="hub-panel hub-empty hub-error" role="alert">
-          <h2>Runtime unavailable</h2>
-          <p>{runtimeError}</p>
-          <p className="hub-muted">
-            CLI fallback: <code>archloop project status</code>
-          </p>
-        </div>
-      );
-    }
     switch (section) {
       case "overview":
-        return <OverviewView status={projectStatus} />;
+        return (
+          <OverviewView
+            status={projectStatus}
+            loading={loading}
+            runtimeError={runtimeError}
+            viewportWidth={viewportWidth}
+            onPreviewAction={previewOverviewAction}
+            onConfirmAction={confirmOverviewAction}
+          />
+        );
       case "task-board":
+        if (loading) {
+          return (
+            <div className="hub-panel hub-empty">Loading local Hub data…</div>
+          );
+        }
+        if (runtimeError) {
+          return (
+            <div className="hub-panel hub-empty hub-error" role="alert">
+              <h2>Runtime unavailable</h2>
+              <p>{runtimeError}</p>
+              <p className="hub-muted">
+                CLI fallback: <code>archloop project status</code>
+              </p>
+            </div>
+          );
+        }
         return (
           <TaskBoardView
             board={taskBoard}
