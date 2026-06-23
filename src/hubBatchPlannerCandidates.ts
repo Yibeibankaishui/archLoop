@@ -374,6 +374,25 @@ export const enrichHubBatchPlannerCandidates = (input: {
   );
 };
 
+type HubBatchPlannerPromptCandidate = Omit<
+  HubBatchPlannerCandidate,
+  "description" | "blockersDeclared" | "blockerSource"
+>;
+
+const toHubBatchPlannerPromptCandidate = (
+  candidate: HubBatchPlannerCandidate,
+): HubBatchPlannerPromptCandidate => {
+  const {
+    description: _description,
+    blockersDeclared: _blockersDeclared,
+    blockerSource: _blockerSource,
+    ...promptCandidate
+  } = candidate;
+
+  return promptCandidate;
+};
+
 export const serializeHubBatchPlannerCandidates = (
   candidates: readonly HubBatchPlannerCandidate[],
-): string => JSON.stringify(candidates, null, 2);
+): string =>
+  JSON.stringify(candidates.map(toHubBatchPlannerPromptCandidate), null, 2);
