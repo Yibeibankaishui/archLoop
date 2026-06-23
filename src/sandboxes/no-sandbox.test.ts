@@ -1,4 +1,13 @@
-import { realpathSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { noSandbox } from "./no-sandbox.js";
 
@@ -89,6 +98,53 @@ describe("noSandbox", () => {
 
       const result = await handle.exec("echo $MY_TEST_VAR");
       expect(result.stdout.trim()).toBe("archloop_test_value");
+    });
+
+    it("isolates git global config per handle", async () => {
+      const tmpDir = mkdtempSync(join(tmpdir(), "archloop-no-sandbox-test-"));
+      const sourceGitConfig = join(tmpDir, ".gitconfig");
+      writeFileSync(sourceGitConfig, "[user]\n\temail = source@example.com\n");
+
+      const provider = noSandbox();
+      const first = await provider.create({
+        worktreePath: process.cwd(),
+        env: { GIT_CONFIG_GLOBAL: sourceGitConfig },
+      });
+      const second = await provider.create({
+        worktreePath: process.cwd(),
+        env: { GIT_CONFIG_GLOBAL: sourceGitConfig },
+      });
+
+      try {
+        const firstPath = (await first.exec('printf "%s" "$GIT_CONFIG_GLOBAL"'))
+          .stdout;
+        const secondPath = (
+          await second.exec('printf "%s" "$GIT_CONFIG_GLOBAL"')
+        ).stdout;
+
+        expect(firstPath).not.toBe(sourceGitConfig);
+        expect(secondPath).not.toBe(sourceGitConfig);
+        expect(firstPath).not.toBe(secondPath);
+
+        await first.exec('git config --global user.name "First Agent"');
+        await second.exec('git config --global user.name "Second Agent"');
+
+        expect(readFileSync(sourceGitConfig, "utf8")).toBe(
+          "[user]\n\temail = source@example.com\n",
+        );
+        expect(readFileSync(firstPath, "utf8")).toContain("First Agent");
+        expect(readFileSync(secondPath, "utf8")).toContain("Second Agent");
+
+        await first.close();
+        await second.close();
+
+        expect(existsSync(firstPath)).toBe(false);
+        expect(existsSync(secondPath)).toBe(false);
+      } finally {
+        await first.close();
+        await second.close();
+        rmSync(tmpDir, { recursive: true, force: true });
+      }
     });
 
     it("interactiveExec spawns process and returns exit code", async () => {
