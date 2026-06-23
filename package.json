@@ -45,6 +45,10 @@
     "./hub-project-overview": {
       "import": "./dist/hubProjectOverview.js",
       "types": "./dist/hubProjectOverview.d.ts"
+    },
+    "./hub-run-workbench": {
+      "import": "./dist/hubRunWorkbench.js",
+      "types": "./dist/hubRunWorkbench.d.ts"
     }
   },
   "bin": {

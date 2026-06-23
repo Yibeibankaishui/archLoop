@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   buildHubRuntimeExecuteParams,
+  type HubProjectRunSummary,
   type HubProjectStatus,
+  type HubRunEventsSnapshot,
   type HubRuntimeActionPreview,
   type HubRuntimePreviewAction,
   type HubTaskBoard,
@@ -12,6 +14,7 @@ import {
   HUB_DESKTOP_NAV_SECTIONS,
   type HubDesktopNavSection,
 } from "@yibeibankaishui/archloop/hub-desktop-shell";
+import { selectDefaultRunFocus } from "@yibeibankaishui/archloop/hub-run-workbench";
 
 import { hubRuntimeClient } from "./bridge";
 import { HubShell } from "./components/HubShell";
@@ -29,6 +32,15 @@ export const App = () => {
     HubProjectStatus | undefined
   >();
   const [taskBoard, setTaskBoard] = useState<HubTaskBoard | undefined>();
+  const [runSummaries, setRunSummaries] = useState<
+    readonly HubProjectRunSummary[] | undefined
+  >();
+  const [eventsSnapshot, setEventsSnapshot] = useState<
+    HubRunEventsSnapshot | undefined
+  >();
+  const [selectedRunId, setSelectedRunId] = useState<string | undefined>();
+  const [selectedBatchId, setSelectedBatchId] = useState<string | undefined>();
+  const [runWorkbenchLoading, setRunWorkbenchLoading] = useState(false);
   const [runtimeError, setRuntimeError] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
 
@@ -80,6 +92,80 @@ export const App = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (section !== "run-workbench") {
+      return;
+    }
+
+    let cancelled = false;
+    const loadRunWorkbench = async () => {
+      setRunWorkbenchLoading(true);
+      try {
+        const bridge = hubRuntimeClient();
+        const summariesResult = await bridge.invoke({
+          action: "run.listSummaries",
+          params: {},
+        });
+        if (cancelled) {
+          return;
+        }
+        if (!summariesResult.ok) {
+          setRuntimeError(summariesResult.error.message);
+          setRunSummaries(undefined);
+          setEventsSnapshot(undefined);
+          return;
+        }
+
+        setRunSummaries(summariesResult.data);
+        const focus = selectDefaultRunFocus(summariesResult.data, projectStatus);
+        const runId = selectedRunId ?? focus.runId;
+        const batchId = selectedBatchId ?? focus.batchId;
+        if (!runId || !batchId) {
+          setEventsSnapshot(undefined);
+          return;
+        }
+
+        const run = summariesResult.data.find((entry) => entry.runId === runId);
+        const batch = run?.batches.find((entry) => entry.batchId === batchId);
+        if (!batch) {
+          setEventsSnapshot(undefined);
+          return;
+        }
+
+        const eventsResult = await bridge.invoke({
+          action: "run.readEvents",
+          params: { runDir: batch.runDir },
+        });
+        if (cancelled) {
+          return;
+        }
+        if (!eventsResult.ok) {
+          setRuntimeError(eventsResult.error.message);
+          setEventsSnapshot(undefined);
+          return;
+        }
+        setEventsSnapshot(eventsResult.data);
+      } catch (error) {
+        if (!cancelled) {
+          setRuntimeError(
+            error instanceof Error ? error.message : "Hub runtime unavailable",
+          );
+          setRunSummaries(undefined);
+          setEventsSnapshot(undefined);
+        }
+      } finally {
+        if (!cancelled) {
+          setRunWorkbenchLoading(false);
+        }
+      }
+    };
+
+    void loadRunWorkbench();
+    return () => {
+      cancelled = true;
+    };
+  }, [section, projectStatus, selectedRunId, selectedBatchId]);
+
   const selectedTask = useMemo<HubTaskProjection | undefined>(() => {
     if (!taskBoard || !selectedTaskId) {
       return undefined;
@@ -87,7 +173,7 @@ export const App = () => {
     return taskBoard.tasks.find((task) => task.id === selectedTaskId);
   }, [selectedTaskId, taskBoard]);
 
-  const previewOverviewAction = async (
+  const previewRuntimeAction = async (
     action: HubRuntimePreviewAction,
     params: Record<string, unknown>,
   ): Promise<HubRuntimeActionPreview | undefined> => {
@@ -103,7 +189,7 @@ export const App = () => {
     return result.data;
   };
 
-  const confirmOverviewAction = async (
+  const confirmRuntimeAction = async (
     preview: HubRuntimeActionPreview,
     params: Record<string, unknown>,
   ): Promise<string | undefined> => {
@@ -127,8 +213,8 @@ export const App = () => {
             loading={loading}
             runtimeError={runtimeError}
             viewportWidth={viewportWidth}
-            onPreviewAction={previewOverviewAction}
-            onConfirmAction={confirmOverviewAction}
+            onPreviewAction={previewRuntimeAction}
+            onConfirmAction={confirmRuntimeAction}
           />
         );
       case "task-board":
@@ -159,7 +245,24 @@ export const App = () => {
           />
         );
       case "run-workbench":
-        return <RunWorkbenchView status={projectStatus} />;
+        return (
+          <RunWorkbenchView
+            status={projectStatus}
+            runSummaries={runSummaries}
+            eventsSnapshot={eventsSnapshot}
+            loading={loading || runWorkbenchLoading}
+            runtimeError={runtimeError}
+            viewportWidth={viewportWidth}
+            selectedRunId={selectedRunId}
+            selectedBatchId={selectedBatchId}
+            onSelectRun={(runId, batchId) => {
+              setSelectedRunId(runId);
+              setSelectedBatchId(batchId);
+            }}
+            onPreviewAction={previewRuntimeAction}
+            onConfirmAction={confirmRuntimeAction}
+          />
+        );
       case "proposal-session":
         return <ProposalSessionView />;
       default:

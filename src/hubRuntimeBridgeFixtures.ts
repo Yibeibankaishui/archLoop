@@ -1,4 +1,5 @@
-import type { HubProjectStatus } from "./projectStatus.js";
+import type { HubRunEventRecord } from "./hubRuntimeBridge.js";
+import type { HubProjectRunSummary, HubProjectStatus } from "./projectStatus.js";
 import type { HubTaskBoard, HubTaskProjection } from "./taskBoard.js";
 import { HUB_TASK_STATUSES } from "./taskBoard.js";
 
@@ -61,7 +62,9 @@ export const createHubDesktopFixtureTaskBoard = (): HubTaskBoard => {
   };
 };
 
-export const createHubDesktopFixtureProjectStatus = (): HubProjectStatus => ({
+export const createHubDesktopFixtureProjectStatus = (options?: {
+  readonly includeStaleLeaseDiagnostic?: boolean;
+}): HubProjectStatus => ({
   repoRoot: HUB_DESKTOP_FIXTURE_REPO_ROOT,
   archloopUserDataDir: "/tmp/archloop-user-data",
   hubProjectDir: "/tmp/archloop-user-data/projects/fixture",
@@ -106,5 +109,269 @@ export const createHubDesktopFixtureProjectStatus = (): HubProjectStatus => ({
     "run run-fixture-1 started flow with-review",
     "task arch-3 claimed on branch archloop/arch-3-awaiting-merge",
   ],
-  worktreeLeaseDiagnostics: [],
+  worktreeLeaseDiagnostics: options?.includeStaleLeaseDiagnostic
+    ? [
+        {
+          taskId: "arch-2",
+          title: "Recover stale claim",
+          reason: "worktree_lease_stale_with_failed_claim",
+          message: "Worktree lease is stale while task arch-2 remains failed.",
+          nextAction: "Recover arch-2 before reclaiming the worktree.",
+          branch: "archloop/arch-2-recover-stale-claim",
+          worktreeName: "archloop-arch-2-recover-stale-claim",
+          leaseState: "stale",
+          claimState: "stale",
+        },
+      ]
+    : [],
 });
+
+const FIXTURE_RUN_DIR =
+  "/tmp/archloop-user-data/projects/fixture/runs/run-fixture-1";
+
+export const createHubDesktopFixtureRunSummaries = (options?: {
+  readonly batchStatus?: HubProjectRunSummary["batches"][number]["status"];
+}): readonly HubProjectRunSummary[] => [
+  {
+    runId: "run-fixture-1",
+    runDir: FIXTURE_RUN_DIR,
+    branch: "archloop/arch-3-awaiting-merge",
+    startedAt: "2026-06-23T10:00:00.000Z",
+    batches: [
+      {
+        runId: "run-fixture-1",
+        batchId: "batch-fixture-1",
+        runDir: FIXTURE_RUN_DIR,
+        status: options?.batchStatus ?? "merging",
+        flowId: "with-review",
+        taskCount: 1,
+        active: options?.batchStatus !== "done",
+      },
+    ],
+  },
+];
+
+export const createHubDesktopFixtureRunEvents = (options?: {
+  readonly runDir?: string;
+  readonly completed?: boolean;
+  readonly includeMergeConflict?: boolean;
+  readonly includeFailedTask?: boolean;
+}): {
+  readonly runDir: string;
+  readonly events: readonly HubRunEventRecord[];
+} => {
+  const events: HubRunEventRecord[] = [
+    {
+      file: "run.jsonl",
+      lineNumber: 1,
+      event: {
+        type: "run_started",
+        runId: "run-fixture-1",
+        branch: "archloop/arch-3-awaiting-merge",
+        startedAt: "2026-06-23T10:00:00.000Z",
+      },
+    },
+    {
+      file: "batch.jsonl",
+      lineNumber: 1,
+      event: {
+        type: "batch_started",
+        runId: "run-fixture-1",
+        batchId: "batch-fixture-1",
+        branch: "archloop/arch-3-awaiting-merge",
+        startedAt: "2026-06-23T10:00:00.000Z",
+      },
+    },
+    {
+      file: "batch.jsonl",
+      lineNumber: 2,
+      event: {
+        type: "batch_planned",
+        runId: "run-fixture-1",
+        batchId: "batch-fixture-1",
+        flowId: "with-review",
+        createdAt: "2026-06-23T10:00:30.000Z",
+        taskIds: ["arch-3"],
+        batchStrategyUsed: "ready_queue",
+        rationale: "Fixture batch for desktop run workbench",
+        deferredTasks: [
+          { taskId: "arch-4", reason: "blocked_dependency" },
+        ],
+      },
+    },
+    {
+      file: "task.jsonl",
+      lineNumber: 1,
+      event: {
+        type: "task_claimed",
+        runId: "run-fixture-1",
+        batchId: "batch-fixture-1",
+        taskId: "arch-3",
+        branch: "archloop/arch-3-awaiting-merge",
+        createdAt: "2026-06-23T10:01:00.000Z",
+        status: "implementing",
+      },
+    },
+    {
+      file: "task.jsonl",
+      lineNumber: 2,
+      event: {
+        type: "task_implementation_started",
+        runId: "run-fixture-1",
+        batchId: "batch-fixture-1",
+        taskId: "arch-3",
+        createdAt: "2026-06-23T10:05:00.000Z",
+        status: "implementing",
+      },
+    },
+    {
+      file: "task.jsonl",
+      lineNumber: 3,
+      event: {
+        type: "task_implementation_succeeded",
+        runId: "run-fixture-1",
+        batchId: "batch-fixture-1",
+        taskId: "arch-3",
+        createdAt: "2026-06-23T10:20:00.000Z",
+        status: "reviewing",
+      },
+    },
+    {
+      file: "task.jsonl",
+      lineNumber: 4,
+      event: {
+        type: "task_review_started",
+        runId: "run-fixture-1",
+        batchId: "batch-fixture-1",
+        taskId: "arch-3",
+        createdAt: "2026-06-23T10:25:00.000Z",
+        status: "reviewing",
+      },
+    },
+    {
+      file: "task.jsonl",
+      lineNumber: 5,
+      event: {
+        type: "task_review_succeeded",
+        runId: "run-fixture-1",
+        batchId: "batch-fixture-1",
+        taskId: "arch-3",
+        createdAt: "2026-06-23T10:35:00.000Z",
+        status: "waiting_for_merge",
+      },
+    },
+    {
+      file: "task.jsonl",
+      lineNumber: 6,
+      event: {
+        type: "verification_started",
+        runId: "run-fixture-1",
+        batchId: "batch-fixture-1",
+        taskId: "arch-3",
+        createdAt: "2026-06-23T10:36:00.000Z",
+        status: "waiting_for_merge",
+      },
+    },
+    {
+      file: "task.jsonl",
+      lineNumber: 7,
+      event: {
+        type: "verification_passed",
+        runId: "run-fixture-1",
+        batchId: "batch-fixture-1",
+        taskId: "arch-3",
+        createdAt: "2026-06-23T10:37:00.000Z",
+        status: "waiting_for_merge",
+      },
+    },
+    {
+      file: "batch.jsonl",
+      lineNumber: 3,
+      event: {
+        type: "batch_merge_started",
+        runId: "run-fixture-1",
+        batchId: "batch-fixture-1",
+        createdAt: "2026-06-23T10:38:00.000Z",
+        taskIds: ["arch-3"],
+      },
+    },
+  ];
+
+  if (options?.includeMergeConflict) {
+    events.push({
+      file: "task.jsonl",
+      lineNumber: 8,
+      event: {
+        type: "merge_conflict_resolution_failed",
+        runId: "run-fixture-1",
+        batchId: "batch-fixture-1",
+        taskId: "arch-3",
+        createdAt: "2026-06-23T10:39:00.000Z",
+        message: "Automatic conflict resolution failed",
+        status: "merging",
+      },
+    });
+  }
+
+  if (options?.includeFailedTask) {
+    events.push({
+      file: "task.jsonl",
+      lineNumber: 9,
+      event: {
+        type: "task_implementation_failed",
+        runId: "run-fixture-1",
+        batchId: "batch-fixture-1",
+        taskId: "arch-2",
+        createdAt: "2026-06-23T09:30:00.000Z",
+        status: "failed",
+        failureReason: "agent_failed",
+      },
+    });
+  }
+
+  if (options?.completed) {
+    events.push(
+      {
+        file: "batch.jsonl",
+        lineNumber: 4,
+        event: {
+          type: "batch_merge_completed",
+          runId: "run-fixture-1",
+          batchId: "batch-fixture-1",
+          createdAt: "2026-06-23T10:45:00.000Z",
+          taskIds: ["arch-3"],
+          batchStatus: "done",
+        },
+      },
+      {
+        file: "task.jsonl",
+        lineNumber: 10,
+        event: {
+          type: "task_close_started",
+          runId: "run-fixture-1",
+          batchId: "batch-fixture-1",
+          taskId: "arch-3",
+          createdAt: "2026-06-23T10:46:00.000Z",
+          status: "merging",
+        },
+      },
+      {
+        file: "task.jsonl",
+        lineNumber: 11,
+        event: {
+          type: "task_closed",
+          runId: "run-fixture-1",
+          batchId: "batch-fixture-1",
+          taskId: "arch-3",
+          createdAt: "2026-06-23T10:47:00.000Z",
+          status: "done",
+        },
+      },
+    );
+  }
+
+  return {
+    runDir: options?.runDir ?? FIXTURE_RUN_DIR,
+    events,
+  };
+};

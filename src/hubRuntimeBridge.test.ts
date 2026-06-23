@@ -9,6 +9,7 @@ import {
 } from "./hubRuntimeBridge.js";
 import {
   createHubDesktopFixtureProjectStatus,
+  createHubDesktopFixtureRunSummaries,
   createHubDesktopFixtureTaskBoard,
 } from "./hubRuntimeBridgeFixtures.js";
 import { createHubRuntimeBridgeService } from "./hubRuntimeBridgeService.js";
@@ -106,6 +107,37 @@ describe("hubRuntimeBridgeService", () => {
     }
     if (board.ok) {
       expect(board.data.tasks.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("serves fixture run summaries and JSONL events for the run workbench", async () => {
+    const bridge = createHubRuntimeBridgeService({ useFixtures: true });
+    const summaries = await bridge.invoke({
+      action: "run.listSummaries",
+      params: {},
+    });
+    expect(summaries.ok).toBe(true);
+    if (!summaries.ok) {
+      return;
+    }
+
+    expect(summaries.data).toEqual(createHubDesktopFixtureRunSummaries());
+    const runDir = summaries.data[0]?.batches[0]?.runDir;
+    expect(runDir).toBeDefined();
+    if (!runDir) {
+      return;
+    }
+
+    const events = await bridge.invoke({
+      action: "run.readEvents",
+      params: { runDir },
+    });
+    expect(events.ok).toBe(true);
+    if (events.ok) {
+      expect(events.data.events.length).toBeGreaterThan(0);
+      expect(events.data.events[0]?.event).toEqual(
+        expect.objectContaining({ type: "run_started" }),
+      );
     }
   });
 
