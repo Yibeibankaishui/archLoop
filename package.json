@@ -53,6 +53,10 @@
     "./hub-proposal-workbench": {
       "import": "./dist/hubProposalWorkbench.js",
       "types": "./dist/hubProposalWorkbench.d.ts"
+    },
+    "./hub-task-board-workbench": {
+      "import": "./dist/hubTaskBoardWorkbench.js",
+      "types": "./dist/hubTaskBoardWorkbench.d.ts"
     }
   },
   "bin": {

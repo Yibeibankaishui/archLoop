@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   buildHubRuntimeExecuteParams,
@@ -8,7 +8,6 @@ import {
   type HubRuntimeActionPreview,
   type HubRuntimePreviewAction,
   type HubTaskBoard,
-  type HubTaskProjection,
 } from "@yibeibankaishui/archloop/hub-runtime-contract";
 import {
   HUB_DESKTOP_NAV_SECTIONS,
@@ -19,6 +18,7 @@ import {
   selectDefaultProposalRunDir,
   type ProposalSessionArtifactsSnapshot,
 } from "@yibeibankaishui/archloop/hub-proposal-workbench";
+import type { HubTaskInspectorModel } from "@yibeibankaishui/archloop/hub-task-board-workbench";
 
 import { hubRuntimeClient } from "./bridge";
 import { HubShell } from "./components/HubShell";
@@ -32,6 +32,9 @@ export const App = () => {
   const [viewportWidth, setViewportWidth] = useState(window.innerWidth);
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>();
+  const [taskInspector, setTaskInspector] = useState<
+    HubTaskInspectorModel | undefined
+  >();
   const [projectStatus, setProjectStatus] = useState<
     HubProjectStatus | undefined
   >();
@@ -271,12 +274,8 @@ export const App = () => {
     };
   }, [section, selectedProposalRunDir]);
 
-  const selectedTask = useMemo<HubTaskProjection | undefined>(() => {
-    if (!taskBoard || !selectedTaskId) {
-      return undefined;
-    }
-    return taskBoard.tasks.find((task) => task.id === selectedTaskId);
-  }, [selectedTaskId, taskBoard]);
+  const selectedTaskInspector =
+    section === "task-board" ? taskInspector : undefined;
 
   const previewRuntimeAction = async (
     action: HubRuntimePreviewAction,
@@ -323,30 +322,21 @@ export const App = () => {
           />
         );
       case "task-board":
-        if (loading) {
-          return (
-            <div className="hub-panel hub-empty">Loading local Hub data…</div>
-          );
-        }
-        if (runtimeError) {
-          return (
-            <div className="hub-panel hub-empty hub-error" role="alert">
-              <h2>Runtime unavailable</h2>
-              <p>{runtimeError}</p>
-              <p className="hub-muted">
-                CLI fallback: <code>archloop project status</code>
-              </p>
-            </div>
-          );
-        }
         return (
           <TaskBoardView
             board={taskBoard}
+            projectStatus={projectStatus}
+            loading={loading}
+            runtimeError={runtimeError}
+            viewportWidth={viewportWidth}
             selectedTaskId={selectedTaskId}
             onSelectTask={(taskId) => {
               setSelectedTaskId(taskId);
               setInspectorOpen(true);
             }}
+            onInspectorChange={setTaskInspector}
+            onPreviewAction={previewRuntimeAction}
+            onConfirmAction={confirmRuntimeAction}
           />
         );
       case "run-workbench":
@@ -393,10 +383,12 @@ export const App = () => {
       sections={HUB_DESKTOP_NAV_SECTIONS}
       viewportWidth={viewportWidth}
       inspectorOpen={inspectorOpen}
-      selectedTask={selectedTask}
+      taskInspector={selectedTaskInspector}
       projectStatus={projectStatus}
       onNavigate={setSection}
       onToggleInspector={() => setInspectorOpen((open) => !open)}
+      onPreviewAction={previewRuntimeAction}
+      onConfirmAction={confirmRuntimeAction}
     >
       {mainView}
     </HubShell>
