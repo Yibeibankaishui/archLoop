@@ -14,10 +14,15 @@ Each candidate may include blocker fields:
 
 - `explicitBlockers` — structured Beads dependency edges when available
 - `blockersDeclared` — refs parsed from the task description `## Blocked by` section when structured edges are unavailable
+- `blockersResolved` — declared blockers with live Hub task state when resolvable
+- `openBlockers` — declared blockers whose live state is still open
+- `unknownBlockers` — declared blockers that could not be resolved; treat them conservatively
 - `blockerSource` — `beads_dependency`, `description`, or `none`
 
 **Primary source of truth for explicit blockers:** `explicitBlockers` when
 `blockerSource` is `beads_dependency`. Otherwise use `blockersDeclared`.
+Treat any `unknownBlockers` as conservative blockers when deciding whether a
+candidate is safe to parallelize.
 
 # TASK
 
@@ -35,6 +40,7 @@ transitions.
 Defer tasks that should not run in parallel with your selected set because of:
 
 - explicit blockers on other ready candidates or selected tasks
+- blockers with unresolved or unknown live state
 - API shape or infrastructure dependencies on another selected task
 - overlapping core module ownership with another selected task
 - docs/QA work that depends on behavior another selected task will establish
