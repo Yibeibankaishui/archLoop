@@ -15,6 +15,10 @@ import {
   type HubDesktopNavSection,
 } from "@yibeibankaishui/archloop/hub-desktop-shell";
 import { selectDefaultRunFocus, resolveRunBatchRunDir } from "@yibeibankaishui/archloop/hub-run-workbench";
+import {
+  selectDefaultProposalRunDir,
+  type ProposalSessionArtifactsSnapshot,
+} from "@yibeibankaishui/archloop/hub-proposal-workbench";
 
 import { hubRuntimeClient } from "./bridge";
 import { HubShell } from "./components/HubShell";
@@ -41,6 +45,19 @@ export const App = () => {
   const [selectedRunId, setSelectedRunId] = useState<string | undefined>();
   const [selectedBatchId, setSelectedBatchId] = useState<string | undefined>();
   const [runWorkbenchLoading, setRunWorkbenchLoading] = useState(false);
+  const [proposalRunSummaries, setProposalRunSummaries] = useState<
+    readonly HubProjectRunSummary[] | undefined
+  >();
+  const [proposalSessionArtifacts, setProposalSessionArtifacts] = useState<
+    ProposalSessionArtifactsSnapshot | undefined
+  >();
+  const [proposalEventsSnapshot, setProposalEventsSnapshot] = useState<
+    HubRunEventsSnapshot | undefined
+  >();
+  const [selectedProposalRunDir, setSelectedProposalRunDir] = useState<
+    string | undefined
+  >();
+  const [proposalSessionLoading, setProposalSessionLoading] = useState(false);
   const [runtimeError, setRuntimeError] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
 
@@ -169,6 +186,91 @@ export const App = () => {
     };
   }, [section, projectStatus, selectedRunId, selectedBatchId]);
 
+  useEffect(() => {
+    if (section !== "proposal-session") {
+      return;
+    }
+
+    let cancelled = false;
+    const loadProposalSession = async () => {
+      setProposalSessionLoading(true);
+      try {
+        const bridge = hubRuntimeClient();
+        const summariesResult = await bridge.invoke({
+          action: "run.listSummaries",
+          params: {},
+        });
+        if (cancelled) {
+          return;
+        }
+        if (!summariesResult.ok) {
+          setRuntimeError(summariesResult.error.message);
+          setProposalRunSummaries(undefined);
+          setProposalSessionArtifacts(undefined);
+          setProposalEventsSnapshot(undefined);
+          return;
+        }
+
+        setProposalRunSummaries(summariesResult.data);
+        const runDir =
+          selectedProposalRunDir ??
+          selectDefaultProposalRunDir(summariesResult.data);
+        if (!runDir) {
+          setProposalSessionArtifacts(undefined);
+          setProposalEventsSnapshot(undefined);
+          return;
+        }
+
+        const [sessionResult, eventsResult] = await Promise.all([
+          bridge.invoke({
+            action: "proposal.readSession",
+            params: { runDir },
+          }),
+          bridge.invoke({
+            action: "run.readEvents",
+            params: { runDir },
+          }),
+        ]);
+        if (cancelled) {
+          return;
+        }
+        if (!sessionResult.ok) {
+          setRuntimeError(sessionResult.error.message);
+          setProposalSessionArtifacts(undefined);
+          setProposalEventsSnapshot(undefined);
+          return;
+        }
+        if (!eventsResult.ok) {
+          setRuntimeError(eventsResult.error.message);
+          setProposalEventsSnapshot(undefined);
+          setProposalSessionArtifacts(sessionResult.data);
+          return;
+        }
+
+        setProposalSessionArtifacts(sessionResult.data);
+        setProposalEventsSnapshot(eventsResult.data);
+      } catch (error) {
+        if (!cancelled) {
+          setRuntimeError(
+            error instanceof Error ? error.message : "Hub runtime unavailable",
+          );
+          setProposalRunSummaries(undefined);
+          setProposalSessionArtifacts(undefined);
+          setProposalEventsSnapshot(undefined);
+        }
+      } finally {
+        if (!cancelled) {
+          setProposalSessionLoading(false);
+        }
+      }
+    };
+
+    void loadProposalSession();
+    return () => {
+      cancelled = true;
+    };
+  }, [section, selectedProposalRunDir]);
+
   const selectedTask = useMemo<HubTaskProjection | undefined>(() => {
     if (!taskBoard || !selectedTaskId) {
       return undefined;
@@ -267,7 +369,19 @@ export const App = () => {
           />
         );
       case "proposal-session":
-        return <ProposalSessionView />;
+        return (
+          <ProposalSessionView
+            status={projectStatus}
+            runSummaries={proposalRunSummaries}
+            sessionArtifacts={proposalSessionArtifacts}
+            eventsSnapshot={proposalEventsSnapshot}
+            loading={loading || proposalSessionLoading}
+            runtimeError={runtimeError}
+            viewportWidth={viewportWidth}
+            selectedRunDir={selectedProposalRunDir}
+            onSelectRunDir={setSelectedProposalRunDir}
+          />
+        );
       default:
         return null;
     }

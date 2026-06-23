@@ -375,3 +375,145 @@ export const createHubDesktopFixtureRunEvents = (options?: {
     events,
   };
 };
+
+export const FIXTURE_PROPOSAL_RUN_DIR =
+  "/tmp/archloop-user-data/projects/fixture/runs/run-proposal-fixture-1";
+
+export const createHubDesktopFixtureProposalRunSummaries =
+  (): readonly HubProjectRunSummary[] => [
+    {
+      runId: "run-proposal-fixture-1",
+      runDir: FIXTURE_PROPOSAL_RUN_DIR,
+      branch: "proposal/prd-decomposition",
+      startedAt: "2026-06-23T11:00:00.000Z",
+      batches: [],
+    },
+  ];
+
+export const createHubDesktopFixtureProposalSessionArtifacts = () => ({
+  preparedContext: {
+    prdRef: "docs/prd/hub-gui.md",
+    summary: "Hub GUI v0 proposal session review",
+    prdTitle: "archLoop Hub GUI v0",
+  },
+  transcript: [
+    {
+      role: "assistant" as const,
+      content:
+        "Drafted two tracer-bullet slices for the proposal session vertical slice.",
+      createdAt: "2026-06-23T11:01:00.000Z",
+      phase: "draft" as const,
+    },
+    {
+      role: "assistant" as const,
+      content:
+        "Final proposal ready for maintainer review before local Beads writes.",
+      createdAt: "2026-06-23T11:05:00.000Z",
+      phase: "finalization" as const,
+    },
+  ],
+  finalProposal: {
+    prdRef: "docs/prd/hub-gui.md",
+    prdTitle: "archLoop Hub GUI v0",
+    summary: "Two slices for proposal session desktop review.",
+    slices: [
+      {
+        tempId: "slice-1",
+        title: "Build proposal session slice",
+        description: "Wire proposal session model and desktop view.",
+        sliceType: "AFK",
+        acceptanceCriteria: [
+          "Proposal session loads real bridge artifacts",
+          "Validation and apply states are visible",
+        ],
+        rationale:
+          "Tracer-bullet slice for maintainer review before local writes.",
+      },
+      {
+        tempId: "slice-2",
+        title: "Confirm Stitch alignment with maintainer",
+        description: "Review proposal session layout against Stitch reference.",
+        sliceType: "HITL",
+        acceptanceCriteria: ["Maintainer confirms Stitch alignment"],
+        rationale: "Human checkpoint before broad rollout.",
+      },
+    ],
+    dependencies: [{ dependentTempId: "slice-2", blockerTempId: "slice-1" }],
+    warnings: [],
+  },
+  applyResult: undefined,
+});
+
+export const createHubDesktopFixtureProposalSessionEvents = (options?: {
+  readonly includeSessionCompleted?: boolean;
+  readonly includeMutationDetected?: boolean;
+}): {
+  readonly runDir: string;
+  readonly events: readonly HubRunEventRecord[];
+} => {
+  const events: HubRunEventRecord[] = [
+    {
+      file: "proposal.jsonl",
+      lineNumber: 1,
+      event: {
+        type: "session_started",
+        flowId: "prd-decomposition",
+        runId: "run-proposal-fixture-1",
+        createdAt: "2026-06-23T11:00:00.000Z",
+      },
+    },
+    {
+      file: "proposal.jsonl",
+      lineNumber: 2,
+      event: {
+        type: "draft_succeeded",
+        flowId: "prd-decomposition",
+        runId: "run-proposal-fixture-1",
+        createdAt: "2026-06-23T11:01:00.000Z",
+        assistantMessage: "Drafted proposal slices.",
+      },
+    },
+    {
+      file: "proposal.jsonl",
+      lineNumber: 3,
+      event: {
+        type: "finalization_succeeded",
+        flowId: "prd-decomposition",
+        runId: "run-proposal-fixture-1",
+        createdAt: "2026-06-23T11:05:00.000Z",
+      },
+    },
+  ];
+
+  if (options?.includeMutationDetected) {
+    events.push({
+      file: "proposal.jsonl",
+      lineNumber: 4,
+      event: {
+        type: "mutation_detected",
+        flowId: "prd-decomposition",
+        runId: "run-proposal-fixture-1",
+        createdAt: "2026-06-23T11:05:30.000Z",
+        reason: "Beads task store changed during proposal session.",
+      },
+    });
+  }
+
+  if (options?.includeSessionCompleted) {
+    events.push({
+      file: "proposal.jsonl",
+      lineNumber: events.length + 1,
+      event: {
+        type: "session_completed",
+        flowId: "prd-decomposition",
+        runId: "run-proposal-fixture-1",
+        createdAt: "2026-06-23T11:06:00.000Z",
+      },
+    });
+  }
+
+  return {
+    runDir: FIXTURE_PROPOSAL_RUN_DIR,
+    events,
+  };
+};

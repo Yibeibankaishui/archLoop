@@ -9,6 +9,7 @@ import {
 } from "./hubRuntimeBridge.js";
 import {
   createHubDesktopFixtureProjectStatus,
+  createHubDesktopFixtureProposalRunSummaries,
   createHubDesktopFixtureRunSummaries,
   createHubDesktopFixtureTaskBoard,
 } from "./hubRuntimeBridgeFixtures.js";
@@ -121,7 +122,10 @@ describe("hubRuntimeBridgeService", () => {
       return;
     }
 
-    expect(summaries.data).toEqual(createHubDesktopFixtureRunSummaries());
+    expect(summaries.data).toEqual([
+      ...createHubDesktopFixtureRunSummaries(),
+      ...createHubDesktopFixtureProposalRunSummaries(),
+    ]);
     const runDir = summaries.data[0]?.batches[0]?.runDir;
     expect(runDir).toBeDefined();
     if (!runDir) {

@@ -49,6 +49,10 @@
     "./hub-run-workbench": {
       "import": "./dist/hubRunWorkbench.js",
       "types": "./dist/hubRunWorkbench.d.ts"
+    },
+    "./hub-proposal-workbench": {
+      "import": "./dist/hubProposalWorkbench.js",
+      "types": "./dist/hubProposalWorkbench.d.ts"
     }
   },
   "bin": {
