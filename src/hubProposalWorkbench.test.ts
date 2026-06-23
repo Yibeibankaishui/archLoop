@@ -7,11 +7,11 @@ import {
   selectDefaultProposalRunDir,
 } from "./hubProposalWorkbench.js";
 import {
+  createHubDesktopFixtureProjectStatus,
   createHubDesktopFixtureProposalRunSummaries,
   createHubDesktopFixtureProposalSessionArtifacts,
   createHubDesktopFixtureProposalSessionEvents,
 } from "./hubRuntimeBridgeFixtures.js";
-import { createHubDesktopFixtureProjectStatus } from "./hubRuntimeBridgeFixtures.js";
 import type { PrdDecompositionProposal } from "./hubPrdDecomposition.js";
 
 const invalidPrdProposal = (): PrdDecompositionProposal => ({

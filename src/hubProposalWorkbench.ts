@@ -168,6 +168,14 @@ const createEmptyProposalWorkbenchContent = (): Pick<
   actions: [],
 });
 
+const BLOCKING_VALIDATION_KINDS: ReadonlySet<HubProposalValidationKind> =
+  new Set([
+    "schema_mismatch",
+    "invalid_dependencies",
+    "missing_acceptance_criteria",
+    "mutation_detection_failure",
+  ]);
+
 const readObject = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -175,6 +183,9 @@ const readObject = (value: unknown): Record<string, unknown> =>
 
 const readString = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+
+const readErrorMessage = (error: unknown, fallback: string): string =>
+  error instanceof Error ? error.message : fallback;
 
 const isPrdProposal = (value: unknown): value is PrdDecompositionProposal => {
   const record = readObject(value);
@@ -249,6 +260,38 @@ const classifyValidationError = (
   return "schema_mismatch";
 };
 
+const isBlockingValidationError = (
+  error: HubProposalValidationError,
+): boolean => BLOCKING_VALIDATION_KINDS.has(error.kind);
+
+const indexValidationErrorsByTaskRef = (
+  validationErrors: readonly HubProposalValidationError[],
+): Map<string, HubProposalValidationError[]> => {
+  const errorsByRef = new Map<string, HubProposalValidationError[]>();
+  for (const error of validationErrors) {
+    if (!error.taskRef) {
+      continue;
+    }
+    const existing = errorsByRef.get(error.taskRef) ?? [];
+    existing.push(error);
+    errorsByRef.set(error.taskRef, existing);
+  }
+  return errorsByRef;
+};
+
+const resolveTaskCardValidationState = (
+  errors: readonly HubProposalValidationError[],
+  hasWarnings: boolean,
+): HubProposalTaskCard["validationState"] => {
+  if (errors.some((error) => error.kind !== "guarded_decision")) {
+    return "error";
+  }
+  if (hasWarnings) {
+    return "warning";
+  }
+  return "valid";
+};
+
 const collectPrdValidationErrors = (
   proposal: PrdDecompositionProposal,
 ): readonly HubProposalValidationError[] => {
@@ -280,11 +323,10 @@ const collectPrdValidationErrors = (
       unattendedReadyStates: true,
     });
   } catch (error) {
+    const message = readErrorMessage(error, "Invalid proposal");
     errors.push({
-      kind: classifyValidationError(
-        error instanceof Error ? error.message : "Invalid proposal",
-      ),
-      message: error instanceof Error ? error.message : "Invalid proposal",
+      kind: classifyValidationError(message),
+      message,
     });
   }
 
@@ -312,11 +354,10 @@ const collectTriageValidationErrors = (
       requiredTaskIds: knownTaskIds,
     });
   } catch (error) {
+    const message = readErrorMessage(error, "Invalid triage proposal");
     errors.push({
-      kind: classifyValidationError(
-        error instanceof Error ? error.message : "Invalid triage proposal",
-      ),
-      message: error instanceof Error ? error.message : "Invalid triage proposal",
+      kind: classifyValidationError(message),
+      message,
     });
   }
 
@@ -337,15 +378,7 @@ const buildPrdTaskCards = (
   proposal: PrdDecompositionProposal,
   validationErrors: readonly HubProposalValidationError[],
 ): readonly HubProposalTaskCard[] => {
-  const errorsByRef = new Map<string, HubProposalValidationError[]>();
-  for (const error of validationErrors) {
-    if (!error.taskRef) {
-      continue;
-    }
-    const existing = errorsByRef.get(error.taskRef) ?? [];
-    existing.push(error);
-    errorsByRef.set(error.taskRef, existing);
-  }
+  const errorsByRef = indexValidationErrorsByTaskRef(validationErrors);
 
   const blockersByDependent = new Map<string, string[]>();
   for (const dependency of proposal.dependencies) {
@@ -359,12 +392,6 @@ const buildPrdTaskCards = (
     const sliceWarnings = proposal.warnings
       .filter((warning) => warning.tempId === slice.tempId)
       .map((warning) => `${warning.severity}: ${warning.message}`);
-    const validationState =
-      sliceErrors.some((error) => error.kind !== "guarded_decision")
-        ? "error"
-        : sliceWarnings.length > 0
-          ? "warning"
-          : "valid";
 
     return {
       id: slice.tempId,
@@ -372,7 +399,10 @@ const buildPrdTaskCards = (
       intendedHubStatus: mapSliceTypeToReadyHubStatus(slice.sliceType),
       classification: slice.sliceType,
       dependencies: blockersByDependent.get(slice.tempId) ?? [],
-      validationState,
+      validationState: resolveTaskCardValidationState(
+        sliceErrors,
+        sliceWarnings.length > 0,
+      ),
       warnings: sliceWarnings,
       rationale: slice.rationale,
     };
@@ -383,24 +413,12 @@ const buildTriageTaskCards = (
   proposal: TriageProposal,
   validationErrors: readonly HubProposalValidationError[],
 ): readonly HubProposalTaskCard[] => {
-  const errorsByRef = new Map<string, HubProposalValidationError[]>();
-  for (const error of validationErrors) {
-    if (!error.taskRef) {
-      continue;
-    }
-    const existing = errorsByRef.get(error.taskRef) ?? [];
-    existing.push(error);
-    errorsByRef.set(error.taskRef, existing);
-  }
+  const errorsByRef = indexValidationErrorsByTaskRef(validationErrors);
 
   return proposal.decisions.map((decision: TriageProposalDecision) => {
     const sliceErrors = errorsByRef.get(decision.taskId) ?? [];
-    const validationState =
-      sliceErrors.some((error) => error.kind !== "guarded_decision")
-        ? "error"
-        : decision.confidence === "medium" || decision.confidence === "low"
-          ? "warning"
-          : "valid";
+    const hasConfidenceWarning =
+      decision.confidence === "medium" || decision.confidence === "low";
 
     return {
       id: decision.taskId,
@@ -410,7 +428,10 @@ const buildTriageTaskCards = (
         decision.dependencySuggestions?.map(
           (dependency) => dependency.blockerTaskId,
         ) ?? [],
-      validationState,
+      validationState: resolveTaskCardValidationState(
+        sliceErrors,
+        hasConfidenceWarning,
+      ),
       warnings: decision.needsInfoQuestions ?? [],
       confidence: decision.confidence,
       rationale: decision.rationale,
@@ -574,6 +595,46 @@ const taskStoreUnavailableReason = (
   return undefined;
 };
 
+const resolveApproveDisabledReason = (input: {
+  readonly proposalStatus: HubProposalSessionStatus;
+  readonly hasFinalProposal: boolean;
+  readonly hasBlockingValidation: boolean;
+}): string | undefined => {
+  if (input.proposalStatus === "applied") {
+    return "Proposal is already applied to the local task store.";
+  }
+  if (input.proposalStatus === "cancelled") {
+    return "Proposal session was cancelled.";
+  }
+  if (!input.hasFinalProposal) {
+    return "Final proposal is not available yet.";
+  }
+  if (input.hasBlockingValidation) {
+    return "Resolve validation errors before approval.";
+  }
+  return undefined;
+};
+
+const resolveApplyDisabledReason = (input: {
+  readonly proposalStatus: HubProposalSessionStatus;
+  readonly taskStoreReason?: string;
+  readonly hasBlockingValidation: boolean;
+}): string | undefined => {
+  if (input.proposalStatus === "applied") {
+    return "Proposal is already applied to the local task store.";
+  }
+  if (input.proposalStatus !== "approved_pending_apply") {
+    return "Approve the proposal before apply. Desktop apply is CLI-backed in v0.";
+  }
+  if (input.taskStoreReason) {
+    return input.taskStoreReason;
+  }
+  if (input.hasBlockingValidation) {
+    return "Resolve validation errors before apply.";
+  }
+  return undefined;
+};
+
 const buildActions = (input: {
   readonly flowId: HubProposalFlowId;
   readonly proposalStatus: HubProposalSessionStatus;
@@ -584,34 +645,18 @@ const buildActions = (input: {
   const cliFallback = resolveCliFallback(input.flowId);
   const taskStoreReason = taskStoreUnavailableReason(input.projectStatus);
   const hasBlockingValidation = input.validationErrors.some(
-    (error) =>
-      error.kind === "schema_mismatch" ||
-      error.kind === "invalid_dependencies" ||
-      error.kind === "missing_acceptance_criteria" ||
-      error.kind === "mutation_detection_failure",
+    isBlockingValidationError,
   );
-
-  const approveDisabled =
-    input.proposalStatus === "applied"
-      ? "Proposal is already applied to the local task store."
-      : input.proposalStatus === "cancelled"
-        ? "Proposal session was cancelled."
-        : !input.hasFinalProposal
-          ? "Final proposal is not available yet."
-          : hasBlockingValidation
-            ? "Resolve validation errors before approval."
-            : undefined;
-
-  const applyDisabled =
-    input.proposalStatus === "applied"
-      ? "Proposal is already applied to the local task store."
-      : input.proposalStatus !== "approved_pending_apply"
-        ? "Approve the proposal before apply. Desktop apply is CLI-backed in v0."
-        : taskStoreReason
-          ? taskStoreReason
-          : hasBlockingValidation
-            ? "Resolve validation errors before apply."
-            : undefined;
+  const approveDisabled = resolveApproveDisabledReason({
+    proposalStatus: input.proposalStatus,
+    hasFinalProposal: input.hasFinalProposal,
+    hasBlockingValidation,
+  });
+  const applyDisabled = resolveApplyDisabledReason({
+    proposalStatus: input.proposalStatus,
+    taskStoreReason,
+    hasBlockingValidation,
+  });
 
   return [
     {
