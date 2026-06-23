@@ -19,10 +19,7 @@ import type {
   HubRuntimeRequestMap,
   HubRuntimeResponseMap,
 } from "./hubRuntimeBridge.js";
-import {
-  describeHubRuntimeAction,
-  HUB_RUNTIME_MUTATING_ACTIONS,
-} from "./hubRuntimeBridge.js";
+import { describeHubRuntimeAction } from "./hubRuntimeBridge.js";
 import {
   createHubDesktopFixtureProjectStatus,
   createHubDesktopFixtureTaskBoard,
@@ -32,7 +29,6 @@ import {
 export interface HubRuntimeBridgeServiceOptions {
   readonly cwd?: string;
   readonly useFixtures?: boolean;
-  readonly now?: () => number;
 }
 
 const failure = <T>(
@@ -71,6 +67,19 @@ const resolveCwd = (
   params: { readonly cwd?: string },
   options: HubRuntimeBridgeServiceOptions,
 ): string => params.cwd ?? options.cwd ?? process.cwd();
+
+const cliFallbackForFailedAction = (
+  action: HubRuntimeAction,
+): string | undefined => {
+  switch (action) {
+    case "project.getStatus":
+      return "archloop project status";
+    case "taskBoard.load":
+      return "archloop tasks list";
+    default:
+      return undefined;
+  }
+};
 
 const buildRecoverPreview = (
   taskId: string,
@@ -276,14 +285,7 @@ export const createHubRuntimeBridgeService = (
         case "sync.pushExecute":
         case "sync.pullExecute":
         case "task.createExecute": {
-          if (!HUB_RUNTIME_MUTATING_ACTIONS.has(request.action)) {
-            return failure({
-              code: "invalid_request",
-              message: `Unsupported mutating action ${request.action}`,
-            });
-          }
-
-          const preview = await buildPreviewForMutatingAction(
+          const preview = buildPreviewForMutatingAction(
             request.action,
             params as HubRuntimeRequestMap[typeof request.action],
             cwd,
@@ -332,21 +334,16 @@ export const createHubRuntimeBridgeService = (
       return failure({
         code: actionMeta.kind === "read" ? "runtime_unavailable" : "command_failed",
         message,
-        cliFallback:
-          request.action === "project.getStatus"
-            ? "archloop project status"
-            : request.action === "taskBoard.load"
-              ? "archloop tasks list"
-              : undefined,
+        cliFallback: cliFallbackForFailedAction(request.action),
       });
     }
   };
 
-  const buildPreviewForMutatingAction = async (
+  const buildPreviewForMutatingAction = (
     action: HubRuntimeAction,
     params: HubRuntimeRequestMap[HubRuntimeAction],
     cwd: string,
-  ): Promise<HubRuntimeActionPreview | undefined> => {
+  ): HubRuntimeActionPreview | undefined => {
     switch (action) {
       case "recover.execute": {
         const recoverParams = params as HubRuntimeRequestMap["recover.execute"];
@@ -377,17 +374,16 @@ export const createHubRuntimeBridgeService = (
     request: HubRuntimeRequest<A>,
   ): Promise<HubRuntimeBridgeResult<HubRuntimeResponseMap[A]>> => {
     const fixtureStatus = createHubDesktopFixtureProjectStatus();
+    const fixtureBoard = createHubDesktopFixtureTaskBoard();
     const params = request.params as HubRuntimeRequestMap[typeof request.action];
     switch (request.action) {
       case "project.getStatus":
         return success(fixtureStatus as unknown as HubRuntimeResponseMap[A]);
       case "taskBoard.load":
-        return success(
-          createHubDesktopFixtureTaskBoard() as unknown as HubRuntimeResponseMap[A],
-        );
+        return success(fixtureBoard as unknown as HubRuntimeResponseMap[A]);
       case "task.get": {
         const taskParams = params as HubRuntimeRequestMap["task.get"];
-        const task = createHubDesktopFixtureTaskBoard().tasks.find(
+        const task = fixtureBoard.tasks.find(
           (entry) => entry.id === taskParams.taskId,
         );
         if (!task) {
@@ -463,7 +459,7 @@ export const createHubRuntimeBridgeService = (
       case "sync.pushExecute":
       case "sync.pullExecute":
       case "task.createExecute": {
-        const preview = await buildPreviewForMutatingAction(
+        const preview = buildPreviewForMutatingAction(
           request.action,
           params as HubRuntimeRequestMap[typeof request.action],
           HUB_DESKTOP_FIXTURE_REPO_ROOT,

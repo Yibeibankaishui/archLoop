@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type { HubProjectStatus } from "@yibeibankaishui/archloop/hub-runtime-contract";
-import type { HubTaskBoard, HubTaskProjection } from "@yibeibankaishui/archloop/hub-runtime-contract";
+import type {
+  HubProjectStatus,
+  HubTaskBoard,
+  HubTaskProjection,
+} from "@yibeibankaishui/archloop/hub-runtime-contract";
 import {
   HUB_DESKTOP_NAV_SECTIONS,
   type HubDesktopNavSection,

@@ -1,6 +1,16 @@
 import type { HubProjectStatus } from "@yibeibankaishui/archloop/hub-runtime-contract";
 import { hubDesktopNavLabel, type HubDesktopNavSection } from "@yibeibankaishui/archloop/hub-desktop-shell";
 
+const inspectorToggleLabel = (
+  collapseInspector: boolean,
+  inspectorOpen: boolean,
+): string => {
+  if (collapseInspector) {
+    return inspectorOpen ? "Close inspector" : "Open inspector";
+  }
+  return inspectorOpen ? "Hide inspector" : "Show inspector";
+};
+
 export interface HubHeaderProps {
   readonly activeSection: HubDesktopNavSection;
   readonly projectStatus?: HubProjectStatus;
@@ -37,13 +47,7 @@ export const HubHeader = ({
         onClick={onToggleInspector}
         aria-pressed={inspectorOpen}
       >
-        {collapseInspector
-          ? inspectorOpen
-            ? "Close inspector"
-            : "Open inspector"
-          : inspectorOpen
-            ? "Hide inspector"
-            : "Show inspector"}
+        {inspectorToggleLabel(collapseInspector, inspectorOpen)}
       </button>
     </div>
   </header>
