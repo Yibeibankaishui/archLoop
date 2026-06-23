@@ -1,0 +1,4 @@
+interface:
+  display_name: "To UI Brief"
+  short_description: "Create a design-agent UI brief"
+  default_prompt: "Use $to-ui-brief to turn this product context into a design-agent UI brief."

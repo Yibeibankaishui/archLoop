@@ -56,6 +56,13 @@ npm install
 npm run archloop
 ```
 
+## GUI prototype
+
+A static Codex-inspired archLoop GUI prototype lives in `gui/`. Open
+`gui/index.html` directly in a browser to review the proposed Hub run workbench,
+including recent runs, the agent transcript, plan checklist, terminal output,
+and merge/recovery inspector actions.
+
 ```typescript
 // 3. Run the agent via the JS API
 import { run, claudeCode } from "@yibeibankaishui/archloop";
