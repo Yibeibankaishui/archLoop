@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   enrichHubBatchPlannerCandidate,
   enrichHubBatchPlannerCandidates,
+  type HubBatchPlannerCandidate,
+  serializeHubBatchPlannerCandidates,
 } from "./hubBatchPlannerCandidates.js";
 import type { HubTaskProjection } from "./taskBoard.js";
 
@@ -32,7 +34,9 @@ const createTempHubTaskStoreRepo = async (input: {
   const { promisify } = await import("node:util");
   const execAsync = promisify(exec);
 
-  const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-planner-candidates-"));
+  const repoDir = await mkdtemp(
+    join(tmpdir(), "hub-batch-planner-candidates-"),
+  );
   await execAsync("git init -b main", { cwd: repoDir });
   const binDir = join(repoDir, "bin");
   await mkdir(binDir, { recursive: true });
@@ -192,14 +196,12 @@ describe("hubBatchPlannerCandidates", () => {
       "bd-missing",
     ]);
     expect(
-      candidate?.blockersResolved.map(
-        ({ ref, taskId, title, hubStatus }) => ({
-          ref,
-          taskId,
-          title,
-          hubStatus,
-        }),
-      ),
+      candidate?.blockersResolved.map(({ ref, taskId, title, hubStatus }) => ({
+        ref,
+        taskId,
+        title,
+        hubStatus,
+      })),
     ).toEqual([
       {
         ref: "github#152",
@@ -222,5 +224,43 @@ describe("hubBatchPlannerCandidates", () => {
     ]);
     expect(candidate?.openBlockers).toEqual(["github#152", "bd-open"]);
     expect(candidate?.unknownBlockers).toEqual(["bd-missing"]);
+  });
+
+  it("strips stale blocker prose from the planner payload", () => {
+    const candidate: HubBatchPlannerCandidate = {
+      id: "bd-child",
+      title: "Task bd-child",
+      description: `## Blocked by
+
+- #152
+- bd-closed`,
+      labels: [],
+      hubStatus: "ready_for_agent",
+      claimState: "none",
+      metadata: {},
+      remoteRefs: [],
+      explicitBlockers: [],
+      blockersDeclared: ["github#152", "bd-closed"],
+      blockersResolved: [],
+      openBlockers: [],
+      unknownBlockers: [],
+      blockerSource: "description",
+    };
+    const payload = serializeHubBatchPlannerCandidates([candidate]);
+
+    expect(payload).not.toContain("Blocked by");
+    expect(payload).not.toContain("blockersDeclared");
+    expect(payload).not.toContain("description");
+
+    const parsed = JSON.parse(payload) as Array<{
+      openBlockers: string[];
+      unknownBlockers: string[];
+      explicitBlockers: string[];
+    }>;
+    expect(parsed[0]).toMatchObject({
+      explicitBlockers: [],
+      openBlockers: [],
+      unknownBlockers: [],
+    });
   });
 });

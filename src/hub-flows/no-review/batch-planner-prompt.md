@@ -13,16 +13,12 @@ The list above is the complete allowed candidate pool for this planner run.
 Each candidate may include blocker fields:
 
 - `explicitBlockers` — structured Beads dependency edges when available
-- `blockersDeclared` — refs parsed from the task description `## Blocked by` section when structured edges are unavailable
-- `blockersResolved` — declared blockers with live Hub task state when resolvable
-- `openBlockers` — declared blockers whose live state is still open
-- `unknownBlockers` — declared blockers that could not be resolved; treat them conservatively
-- `blockerSource` — `beads_dependency`, `description`, or `none`
+- `blockersResolved` — live Hub task state for blockers that were resolved against the current task board
+- `openBlockers` — blockers whose live state is still open
+- `unknownBlockers` — blockers that could not be resolved; treat them conservatively
 
-**Primary source of truth for explicit blockers:** `explicitBlockers` when
-`blockerSource` is `beads_dependency`. Otherwise use `blockersDeclared`.
-Treat any `unknownBlockers` as conservative blockers when deciding whether a
-candidate is safe to parallelize.
+**Primary source of truth for whether a candidate is blocked:** `openBlockers`
+and `unknownBlockers`. When both `openBlockers` and `unknownBlockers` are empty, including `[]`, treat the candidate as **unblocked** even if the task body still contains stale `## Blocked by` prose or closed blockers elsewhere. Do not infer blockers from raw description text.
 
 # TASK
 

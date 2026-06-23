@@ -374,6 +374,32 @@ export const enrichHubBatchPlannerCandidates = (input: {
   );
 };
 
+type HubBatchPlannerPromptCandidate = Omit<
+  HubBatchPlannerCandidate,
+  "description" | "blockersDeclared" | "blockerSource"
+>;
+
+const toHubBatchPlannerPromptCandidate = (
+  candidate: HubBatchPlannerCandidate,
+): HubBatchPlannerPromptCandidate => {
+  return {
+    id: candidate.id,
+    title: candidate.title,
+    priority: candidate.priority,
+    labels: candidate.labels,
+    hubStatus: candidate.hubStatus,
+    claimState: candidate.claimState,
+    metadata: candidate.metadata,
+    remoteRefs: candidate.remoteRefs,
+    parentPrdRef: candidate.parentPrdRef,
+    explicitBlockers: candidate.explicitBlockers,
+    blockersResolved: candidate.blockersResolved,
+    openBlockers: candidate.openBlockers,
+    unknownBlockers: candidate.unknownBlockers,
+  };
+};
+
 export const serializeHubBatchPlannerCandidates = (
   candidates: readonly HubBatchPlannerCandidate[],
-): string => JSON.stringify(candidates, null, 2);
+): string =>
+  JSON.stringify(candidates.map(toHubBatchPlannerPromptCandidate), null, 2);

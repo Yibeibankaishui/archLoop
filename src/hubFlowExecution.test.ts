@@ -246,6 +246,26 @@ describe("Hub flow registry", () => {
       "hub-flows/with-review/review-prompt.md",
     );
   });
+
+  it.each(["no-review", "with-review"] as const)(
+    "batch planner prompt for %s treats empty live blockers as unblocked",
+    async (flowId) => {
+      const prompt = await readFile(
+        resolveHubFlowPromptPath(flowId, "batchPlanner"),
+        "utf-8",
+      );
+
+      expect(prompt).toContain("openBlockers");
+      expect(prompt).toContain("unknownBlockers");
+      expect(prompt).toContain(
+        "When both `openBlockers` and `unknownBlockers` are empty",
+      );
+      expect(prompt).toContain(
+        "Do not infer blockers from raw description text.",
+      );
+      expect(prompt).not.toContain("blockersDeclared");
+    },
+  );
 });
 
 describe("Hub flow planner", () => {
