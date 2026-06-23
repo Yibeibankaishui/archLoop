@@ -65,9 +65,14 @@ project status, task board, run, proposal, sync, and guarded mutating actions.
 ```bash
 npm run build
 cd hub-desktop
-npm install
+npm run install:ci
 npm run dev
 ```
+
+`hub-desktop/` ships a committed `package-lock.json`, so `npm run install:ci`
+uses `npm ci` for the deterministic install path used by QA and CI. Run
+`npm run audit:critical` in that directory to verify the desktop dependency
+tree stays clean.
 
 Set `ARCHLOOP_HUB_DESKTOP_FIXTURES=1` to load fixture data for demos and empty
 states. The older static `gui/` prototype remains a historical reference only.
