@@ -14,7 +14,7 @@ import {
   HUB_DESKTOP_NAV_SECTIONS,
   type HubDesktopNavSection,
 } from "@yibeibankaishui/archloop/hub-desktop-shell";
-import { selectDefaultRunFocus } from "@yibeibankaishui/archloop/hub-run-workbench";
+import { selectDefaultRunFocus, resolveRunBatchRunDir } from "@yibeibankaishui/archloop/hub-run-workbench";
 
 import { hubRuntimeClient } from "./bridge";
 import { HubShell } from "./components/HubShell";
@@ -125,16 +125,19 @@ export const App = () => {
           return;
         }
 
-        const run = summariesResult.data.find((entry) => entry.runId === runId);
-        const batch = run?.batches.find((entry) => entry.batchId === batchId);
-        if (!batch) {
+        const runDir = resolveRunBatchRunDir(
+          summariesResult.data,
+          runId,
+          batchId,
+        );
+        if (!runDir) {
           setEventsSnapshot(undefined);
           return;
         }
 
         const eventsResult = await bridge.invoke({
           action: "run.readEvents",
-          params: { runDir: batch.runDir },
+          params: { runDir },
         });
         if (cancelled) {
           return;

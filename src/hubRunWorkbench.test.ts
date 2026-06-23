@@ -4,6 +4,7 @@ import {
   buildHubRunWorkbenchModel,
   formatHubRunEventLine,
   resolveHubRunWorkbenchGridClass,
+  resolveRunBatchRunDir,
   selectDefaultRunFocus,
 } from "./hubRunWorkbench.js";
 import {
@@ -186,6 +187,16 @@ describe("hubRunWorkbench", () => {
       runId: "run-fixture-1",
       batchId: "batch-fixture-1",
     });
+  });
+
+  it("resolves run directory for a selected run and batch", () => {
+    const summaries = createHubDesktopFixtureRunSummaries();
+    expect(
+      resolveRunBatchRunDir(summaries, "run-fixture-1", "batch-fixture-1"),
+    ).toBe("/tmp/archloop-user-data/projects/fixture/runs/run-fixture-1");
+    expect(
+      resolveRunBatchRunDir(summaries, "missing-run", "batch-fixture-1"),
+    ).toBeUndefined();
   });
 
   it("uses stacked grid class on narrow viewports", () => {

@@ -1,7 +1,8 @@
 import { HUB_DESKTOP_LAYOUT } from "./hubDesktopShell.js";
-import type { HubRuntimePreviewAction } from "./hubRuntimeBridge.js";
-import type { HubRunEventRecord } from "./hubRuntimeBridge.js";
-import { formatHubOverviewPath } from "./hubProjectOverview.js";
+import type {
+  HubRunEventRecord,
+  HubRuntimePreviewAction,
+} from "./hubRuntimeBridge.js";
 import type {
   HubProjectBatchSummary,
   HubProjectRunSummary,
@@ -132,6 +133,23 @@ export interface BuildHubRunWorkbenchModelInput {
 }
 
 const RUN_WORKBENCH_CLI_FALLBACK = "archloop run . --flow <id>";
+
+const createEmptyRunWorkbenchContent = (): Pick<
+  HubRunWorkbenchModel,
+  | "runOptions"
+  | "stages"
+  | "gates"
+  | "terminalPhase"
+  | "terminalLines"
+  | "actions"
+> => ({
+  runOptions: [],
+  stages: [],
+  gates: [],
+  terminalPhase: "no_events",
+  terminalLines: [],
+  actions: [],
+});
 
 const STAGE_DEFINITIONS: readonly {
   readonly id: HubRunWorkbenchStageId;
@@ -290,6 +308,13 @@ const findSelectedBatch = (
   return { run, batch };
 };
 
+export const resolveRunBatchRunDir = (
+  runSummaries: readonly HubProjectRunSummary[],
+  runId: string,
+  batchId: string,
+): string | undefined =>
+  findSelectedBatch(runSummaries, runId, batchId)?.batch.runDir;
+
 const readDeferredTasks = (
   plannedRecord: Readonly<Record<string, unknown>>,
 ): readonly { taskId: string; reason: string }[] => {
@@ -358,12 +383,6 @@ const resolveReviewStageState = (
   }
   if (hasEventType(batchEvents, "task_review_started")) {
     return "active";
-  }
-  if (
-    hasEventType(batchEvents, "task_implementation_succeeded") &&
-    flowId?.includes("no-review")
-  ) {
-    return "skipped";
   }
   return "pending";
 };
@@ -488,9 +507,10 @@ const buildStages = (
         if (!hasRecoverableFailure) {
           return { state: "pending" };
         }
-        return hasRecoverableFailure
-          ? { state: "active", detail: "Recover failed tasks to continue" }
-          : { state: "pending" };
+        return {
+          state: "active",
+          detail: "Recover failed tasks to continue",
+        };
       default:
         return { state: "pending" };
     }
@@ -649,29 +669,15 @@ const buildActions = (
   });
 
   if (hasRecoverableFailure && projectStatus) {
-    for (const task of projectStatus.failedTasks) {
-      if (!metadata.selectedTaskIds.includes(task.id)) {
-        continue;
-      }
-      actions.push({
-        id: `recover-${task.id}`,
-        label: `Recover ${task.id}`,
-        description: task.nextAction,
-        kind: "bridge_preview",
-        bridgeAction: "recover.preview",
-        bridgeParams: { taskId: task.id },
-        cliFallback: `archloop tasks recover ${task.id}`,
-      });
-    }
-  }
+    const selectedTaskIds = new Set(metadata.selectedTaskIds);
+    const hasSelectedFailedTask = projectStatus.failedTasks.some((task) =>
+      selectedTaskIds.has(task.id),
+    );
+    const recoverableTasks = hasSelectedFailedTask
+      ? projectStatus.failedTasks.filter((task) => selectedTaskIds.has(task.id))
+      : projectStatus.failedTasks;
 
-  if (
-    hasRecoverableFailure &&
-    projectStatus?.failedTasks.some((task) =>
-      metadata.selectedTaskIds.includes(task.id),
-    ) !== true
-  ) {
-    for (const task of projectStatus?.failedTasks ?? []) {
+    for (const task of recoverableTasks) {
       actions.push({
         id: `recover-${task.id}`,
         label: `Recover ${task.id}`,
@@ -693,12 +699,7 @@ export const buildHubRunWorkbenchModel = (
   if (input.loading) {
     return {
       phase: "loading",
-      runOptions: [],
-      stages: [],
-      gates: [],
-      terminalPhase: "no_events",
-      terminalLines: [],
-      actions: [],
+      ...createEmptyRunWorkbenchContent(),
     };
   }
 
@@ -707,12 +708,7 @@ export const buildHubRunWorkbenchModel = (
       phase: "runtime_unavailable",
       runtimeError: input.runtimeError,
       cliFallback: RUN_WORKBENCH_CLI_FALLBACK,
-      runOptions: [],
-      stages: [],
-      gates: [],
-      terminalPhase: "no_events",
-      terminalLines: [],
-      actions: [],
+      ...createEmptyRunWorkbenchContent(),
     };
   }
 
@@ -722,12 +718,7 @@ export const buildHubRunWorkbenchModel = (
     return {
       phase: "empty",
       cliFallback: RUN_WORKBENCH_CLI_FALLBACK,
-      runOptions,
-      stages: [],
-      gates: [],
-      terminalPhase: "no_events",
-      terminalLines: [],
-      actions: [],
+      ...createEmptyRunWorkbenchContent(),
     };
   }
 
@@ -741,12 +732,8 @@ export const buildHubRunWorkbenchModel = (
     return {
       phase: "empty",
       cliFallback: RUN_WORKBENCH_CLI_FALLBACK,
+      ...createEmptyRunWorkbenchContent(),
       runOptions,
-      stages: [],
-      gates: [],
-      terminalPhase: "no_events",
-      terminalLines: [],
-      actions: [],
     };
   }
 
@@ -755,30 +742,22 @@ export const buildHubRunWorkbenchModel = (
     return {
       phase: "empty",
       cliFallback: RUN_WORKBENCH_CLI_FALLBACK,
+      ...createEmptyRunWorkbenchContent(),
       runOptions,
       selectedRunId: runId,
       selectedBatchId: batchId,
-      stages: [],
-      gates: [],
-      terminalPhase: "no_events",
-      terminalLines: [],
-      actions: [],
     };
   }
 
   const events = input.eventsSnapshot?.events ?? [];
   const batchEvents = filterBatchEvents(events, batchId);
-  const metadataTaskIds = new Set<string>();
-  const worktreeLeases = (input.projectStatus?.worktreeLeaseDiagnostics ?? [])
-    .filter((diagnostic) => {
-      metadataTaskIds.add(diagnostic.taskId);
-      return true;
-    })
-    .map((diagnostic) => ({
-      taskId: diagnostic.taskId,
-      branch: diagnostic.branch,
-      claimState: diagnostic.claimState,
-    }));
+  const worktreeLeases = (
+    input.projectStatus?.worktreeLeaseDiagnostics ?? []
+  ).map((diagnostic) => ({
+    taskId: diagnostic.taskId,
+    branch: diagnostic.branch,
+    claimState: diagnostic.claimState,
+  }));
 
   const metadata = buildMetadata(
     selected.run,
@@ -824,5 +803,3 @@ export const buildHubRunWorkbenchModel = (
     actions,
   };
 };
-
-export { formatHubOverviewPath };

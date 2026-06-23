@@ -8,7 +8,6 @@ import type {
 } from "@yibeibankaishui/archloop/hub-runtime-contract";
 import {
   buildHubRunWorkbenchModel,
-  formatHubOverviewPath,
   resolveHubRunWorkbenchGridClass,
   selectDefaultRunFocus,
   type HubRunEventsSnapshot,
@@ -16,6 +15,7 @@ import {
   type HubRunWorkbenchStageState,
   type HubRunWorkbenchTerminalPhase,
 } from "@yibeibankaishui/archloop/hub-run-workbench";
+import { formatHubOverviewPath } from "@yibeibankaishui/archloop/hub-project-overview";
 
 export interface RunWorkbenchViewProps {
   readonly status?: HubProjectStatus;
