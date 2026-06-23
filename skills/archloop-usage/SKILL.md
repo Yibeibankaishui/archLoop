@@ -82,8 +82,13 @@ allowed queue. Hub batch planner candidate enrichment computes
 state before planning, and the planner payload only exposes those structured
 fields. `openBlockers=[]` and `unknownBlockers=[]` mean the candidate is
 unblocked, even if the task body still contains stale `## Blocked by` prose.
-The blocker parser recognizes GitHub issue refs such as `#152` or issue URLs
-as well as Beads ids, and unresolved refs are treated conservatively.
+If the planner returns an `explicit_blocker` deferral for a candidate with no
+live `openBlockers`, no `unknownBlockers`, and no dependency on a selected
+task, Hub rejects that deferral, recovers the safe candidate up to
+`maxTasks`, and records `invalid_explicit_blocker_deferral` in batch events
+and CLI diagnostics. The blocker parser recognizes GitHub issue refs such as
+`#152` or issue URLs as well as Beads ids, and unresolved refs are treated
+conservatively.
 
 ## Project profiles
 

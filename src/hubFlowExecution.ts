@@ -779,6 +779,7 @@ export const runHubFlow = async (
     maxTasks?: number;
     deferredTasks?: HubBatchPlannerResult["deferredTasks"];
     fallbackReason?: string;
+    diagnosticReason?: string;
     rationale?: string;
   } = {};
   if (batchSelection) {
@@ -789,6 +790,9 @@ export const runHubFlow = async (
     batchPlannedMetadata.deferredTasks = batchSelection.deferredTasks;
     if (batchSelection.fallbackReason) {
       batchPlannedMetadata.fallbackReason = batchSelection.fallbackReason;
+    }
+    if (batchSelection.diagnosticReason) {
+      batchPlannedMetadata.diagnosticReason = batchSelection.diagnosticReason;
     }
     if (batchSelection.rationale) {
       batchPlannedMetadata.rationale = batchSelection.rationale;
@@ -880,6 +884,9 @@ export const formatHubFlowResultLines = (
     }
     if (result.batchSelection.fallbackReason) {
       lines.push(`Batch fallback: ${result.batchSelection.fallbackReason}`);
+    }
+    if (result.batchSelection.diagnosticReason) {
+      lines.push(`Batch diagnostic: ${result.batchSelection.diagnosticReason}`);
     }
     if (result.batchSelection.rationale) {
       lines.push(`Batch planner rationale: ${result.batchSelection.rationale}`);

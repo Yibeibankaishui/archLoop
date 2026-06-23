@@ -43,6 +43,61 @@ const plannerStdout = (output: {
     ...output,
   })}</batch-plan>`;
 
+const createTempHubTaskStoreRepo = async (input: {
+  readonly depListRecords?: readonly unknown[];
+  readonly listRecords: readonly unknown[];
+}): Promise<{ repoDir: string; env: NodeJS.ProcessEnv }> => {
+  const { mkdtemp, writeFile, mkdir, chmod } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { exec } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const execAsync = promisify(exec);
+
+  const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-planner-"));
+  await execAsync("git init -b main", { cwd: repoDir });
+  const binDir = join(repoDir, "bin");
+  await mkdir(binDir, { recursive: true });
+  const bdPath = join(binDir, "bd");
+  await writeFile(
+    bdPath,
+    `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args[0] === "dep" && args[1] === "list" && args.includes("--json")) {
+  process.stdout.write(JSON.stringify(${JSON.stringify(input.depListRecords ?? [])}));
+  process.exit(0);
+}
+if (args[0] === "ready" && args.includes("--json")) {
+  const records = ${JSON.stringify(input.listRecords)}.filter(
+    (task) => task.status === "open" && task.labels?.includes("ready-for-agent"),
+  );
+  process.stdout.write(JSON.stringify(records));
+  process.exit(0);
+}
+if (args[0] === "list" && args.includes("--json")) {
+  process.stdout.write(JSON.stringify(${JSON.stringify(input.listRecords)}));
+  process.exit(0);
+}
+process.exit(1);
+`,
+  );
+  await chmod(bdPath, 0o755);
+  await mkdir(join(repoDir, ".beads"), { recursive: true });
+  await writeFile(
+    join(repoDir, ".beads", "metadata.json"),
+    JSON.stringify({ backend: "dolt" }),
+  );
+
+  return {
+    repoDir,
+    env: {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      ARCHLOOP_BD_PATH: bdPath,
+    },
+  };
+};
+
 describe("hubBatchPlanner", () => {
   it("parses and validates max-tasks bounds for task-board flows", () => {
     expect(parseHubBatchMaxTasks("1")).toBe(1);
@@ -352,6 +407,125 @@ describe("hubBatchPlanner", () => {
       { taskId: "bd-third", reason: "same_core_module" },
     ]);
     expect(result.rationale).toBe("Two independent tasks.");
+  });
+
+  it("recovers invalid explicit_blocker deferrals when the candidate has no effective blockers", async () => {
+    const { repoDir, env } = await createTempHubTaskStoreRepo({
+      listRecords: [
+        {
+          id: "bd-github-152",
+          title: "Closed blocker",
+          hub_status: "done",
+          remoteRefs: [{ url: "github#152" }],
+        },
+        {
+          id: "bd-first",
+          title: "First ready task",
+          status: "open",
+          labels: ["ready-for-agent"],
+          metadata: {},
+        },
+        {
+          id: "bd-second",
+          title: "Second ready task",
+          status: "open",
+          labels: ["ready-for-agent"],
+          metadata: {},
+          description: "## Blocked by\n\n- #152",
+        },
+        {
+          id: "bd-third",
+          title: "Third ready task",
+          status: "open",
+          labels: ["ready-for-agent"],
+          metadata: {},
+          description: "## Blocked by\n\n- #152",
+        },
+      ],
+    });
+
+    const result = await planHubFlowBatch({
+      flowId: "no-review",
+      cwd: repoDir,
+      env,
+      runDir: "/tmp/run",
+      candidates: [
+        readyTask("bd-first"),
+        readyTask("bd-second", {
+          description: "## Blocked by\n\n- #152",
+        }),
+        readyTask("bd-third", {
+          description: "## Blocked by\n\n- #152",
+        }),
+      ],
+      batchStrategy: "planned",
+      maxTasks: 3,
+      batchPlanner: async () =>
+        plannerStdout({
+          selectedTaskIds: ["bd-first"],
+          deferred: [
+            { taskId: "bd-second", reason: "explicit_blocker" },
+            { taskId: "bd-third", reason: "explicit_blocker" },
+          ],
+        }),
+    });
+
+    expect(result.batchStrategyUsed).toBe("planned");
+    expect(result.selectedTasks.map((task) => task.id)).toEqual([
+      "bd-first",
+      "bd-second",
+      "bd-third",
+    ]);
+    expect(result.deferredTasks).toEqual([]);
+    expect(result.diagnosticReason).toBe("invalid_explicit_blocker_deferral");
+  });
+
+  it("keeps explicit_blocker deferrals when the candidate is a dependency of a selected task", async () => {
+    const { repoDir, env } = await createTempHubTaskStoreRepo({
+      listRecords: [
+        {
+          id: "bd-first",
+          title: "First ready task",
+          status: "open",
+          labels: ["ready-for-agent"],
+          metadata: {},
+          description: "## Blocked by\n\n- bd-second",
+        },
+        {
+          id: "bd-second",
+          title: "Second ready task",
+          status: "open",
+          labels: ["ready-for-agent"],
+          metadata: {},
+        },
+      ],
+    });
+
+    const result = await planHubFlowBatch({
+      flowId: "no-review",
+      cwd: repoDir,
+      env,
+      runDir: "/tmp/run",
+      candidates: [
+        readyTask("bd-first", {
+          description: "## Blocked by\n\n- bd-second",
+        }),
+        readyTask("bd-second"),
+      ],
+      batchStrategy: "planned",
+      maxTasks: 3,
+      batchPlanner: async () =>
+        plannerStdout({
+          selectedTaskIds: ["bd-first"],
+          deferred: [{ taskId: "bd-second", reason: "explicit_blocker" }],
+        }),
+    });
+
+    expect(result.selectedTasks.map((task) => task.id)).toEqual(["bd-first"]);
+    expect(result.deferredTasks).toEqual([
+      { taskId: "bd-second", reason: "explicit_blocker" },
+    ]);
+    expect(result.diagnosticReason).toBeUndefined();
   });
 
   it("selects at most max-tasks eligible ready tasks for limited strategy", async () => {
