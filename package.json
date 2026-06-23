@@ -41,6 +41,10 @@
     "./hub-desktop-shell": {
       "import": "./dist/hubDesktopShell.js",
       "types": "./dist/hubDesktopShell.d.ts"
+    },
+    "./hub-project-overview": {
+      "import": "./dist/hubProjectOverview.js",
+      "types": "./dist/hubProjectOverview.d.ts"
     }
   },
   "bin": {
