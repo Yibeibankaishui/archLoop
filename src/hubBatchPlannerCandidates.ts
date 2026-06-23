@@ -382,21 +382,14 @@ type HubBatchPlannerPromptCandidate = Omit<
 const toHubBatchPlannerPromptCandidate = (
   candidate: HubBatchPlannerCandidate,
 ): HubBatchPlannerPromptCandidate => {
-  return {
-    id: candidate.id,
-    title: candidate.title,
-    priority: candidate.priority,
-    labels: candidate.labels,
-    hubStatus: candidate.hubStatus,
-    claimState: candidate.claimState,
-    metadata: candidate.metadata,
-    remoteRefs: candidate.remoteRefs,
-    parentPrdRef: candidate.parentPrdRef,
-    explicitBlockers: candidate.explicitBlockers,
-    blockersResolved: candidate.blockersResolved,
-    openBlockers: candidate.openBlockers,
-    unknownBlockers: candidate.unknownBlockers,
-  };
+  const {
+    description: _description,
+    blockersDeclared: _blockersDeclared,
+    blockerSource: _blockerSource,
+    ...promptCandidate
+  } = candidate;
+
+  return promptCandidate;
 };
 
 export const serializeHubBatchPlannerCandidates = (
