@@ -2981,9 +2981,12 @@ const runCommand = Command.make(
           runHubFlow({
             flowId: flowDefinition.id,
             cwd: repoRoot,
-            implementer: createHubFlowRunImplementer({ cwd: repoRoot }),
+            implementer: createHubFlowRunImplementer({
+              cwd: repoRoot,
+              env: process.env,
+            }),
             reviewer: flowDefinition.hasReviewer
-              ? createHubFlowRunReviewer({ cwd: repoRoot })
+              ? createHubFlowRunReviewer({ cwd: repoRoot, env: process.env })
               : undefined,
             batchStrategy: batchSelectionOptions.batchStrategy,
             maxTasks: batchSelectionOptions.maxTasks,
