@@ -2,6 +2,7 @@ node_modules
 dist
 .env.*
 .vercel
+.stitch/
 # Mini Program verification run outputs (generated locally; not part of the package)
 debug/wx-check.log
 debug/wx-preview.jpg
