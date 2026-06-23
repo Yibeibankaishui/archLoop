@@ -1,5 +1,5 @@
 import { HUB_DESKTOP_LAYOUT } from "./hubDesktopShell.js";
-import { HUB_TASK_STORE_INIT_COMMAND } from "./hubTaskStore.js";
+import { HUB_TASK_STORE_INIT_COMMAND } from "./hubTaskStoreCommands.js";
 import type { HubRuntimePreviewAction } from "./hubRuntimeBridge.js";
 import type {
   HubProjectBatchSummary,
@@ -11,10 +11,7 @@ import type {
 import type { HubWorktreeLeaseDiagnostic } from "./hubWorktreeLeaseDiagnostics.js";
 import type { HubTaskStatus } from "./taskBoard.js";
 
-export type HubOverviewPhase =
-  | "loading"
-  | "runtime_unavailable"
-  | "ready";
+export type HubOverviewPhase = "loading" | "runtime_unavailable" | "ready";
 
 export type HubOverviewBannerSeverity = "info" | "warning" | "error";
 
@@ -135,7 +132,9 @@ const createRuntimeUnavailableOverviewModel = (
   ],
 });
 
-const taskStoreUnavailableReason = (status: HubProjectStatus): string | undefined => {
+const taskStoreUnavailableReason = (
+  status: HubProjectStatus,
+): string | undefined => {
   if (!status.beadsAvailable) {
     return "Beads runtime is unavailable. Install dependencies, set ARCHLOOP_BD_PATH, or use the bundled runtime.";
   }
@@ -172,9 +171,7 @@ export const resolveHubOverviewGridClass = (viewportWidth: number): string =>
     ? "hub-overview-grid hub-overview-grid-narrow"
     : "hub-overview-grid";
 
-const resolvePhase = (
-  input: BuildHubOverviewModelInput,
-): HubOverviewPhase => {
+const resolvePhase = (input: BuildHubOverviewModelInput): HubOverviewPhase => {
   if (input.loading) {
     return "loading";
   }
@@ -184,7 +181,9 @@ const resolvePhase = (
   return "ready";
 };
 
-const buildBanners = (status: HubProjectStatus): readonly HubOverviewBanner[] => {
+const buildBanners = (
+  status: HubProjectStatus,
+): readonly HubOverviewBanner[] => {
   const banners: HubOverviewBanner[] = [];
 
   if (!status.beadsAvailable) {
@@ -329,7 +328,9 @@ const buildRemoteSyncSection = (
   counts: buildRemoteSyncCounts(status.syncCounts),
 });
 
-const buildActions = (status: HubProjectStatus): readonly HubOverviewAction[] => {
+const buildActions = (
+  status: HubProjectStatus,
+): readonly HubOverviewAction[] => {
   const actions: HubOverviewAction[] = [];
   const storeBlocked = taskStoreUnavailableReason(status);
 
@@ -347,7 +348,8 @@ const buildActions = (status: HubProjectStatus): readonly HubOverviewAction[] =>
   actions.push({
     id: "sync-push",
     label: "Preview push",
-    description: "Review local task changes before pushing to the remote source.",
+    description:
+      "Review local task changes before pushing to the remote source.",
     kind: "bridge_preview",
     bridgeAction: "sync.pushPreview",
     bridgeParams: {},
@@ -358,7 +360,8 @@ const buildActions = (status: HubProjectStatus): readonly HubOverviewAction[] =>
   actions.push({
     id: "sync-pull",
     label: "Preview pull",
-    description: "Review remote task changes before pulling into the local store.",
+    description:
+      "Review remote task changes before pulling into the local store.",
     kind: "bridge_preview",
     bridgeAction: "sync.pullPreview",
     bridgeParams: {},
@@ -369,7 +372,8 @@ const buildActions = (status: HubProjectStatus): readonly HubOverviewAction[] =>
   actions.push({
     id: "open-agent-config",
     label: "Review agent config",
-    description: "Inspect configured provider keys and missing Hub env entries.",
+    description:
+      "Inspect configured provider keys and missing Hub env entries.",
     kind: "cli_only",
     cliFallback: "archloop agent-config list",
     disabledReason:

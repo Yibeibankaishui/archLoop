@@ -6,10 +6,13 @@
   "main": "dist-electron/main.js",
   "type": "module",
   "scripts": {
+    "predev": "npm --prefix .. run build",
     "dev": "npm run build:electron && concurrently -k \"vite\" \"wait-on http://127.0.0.1:5173 && cross-env VITE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .\"",
+    "prebuild": "npm --prefix .. run build",
     "build": "vite build && npm run build:electron",
     "build:electron": "tsc -p tsconfig.electron.json",
     "preview": "npm run build && electron .",
+    "pretypecheck": "npm --prefix .. run build",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json"
   },
   "dependencies": {
