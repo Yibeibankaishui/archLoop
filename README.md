@@ -56,12 +56,27 @@ npm install
 npm run archloop
 ```
 
+## Hub desktop app
+
+The functional archLoop Hub desktop shell lives in `hub-desktop/`. It is an
+Electron + React application with a typed local runtime bridge to real Hub
+project status, task board, run, proposal, sync, and guarded mutating actions.
+
+```bash
+npm run build
+cd hub-desktop
+npm install
+npm run dev
+```
+
+Set `ARCHLOOP_HUB_DESKTOP_FIXTURES=1` to load fixture data for demos and empty
+states. The older static `gui/` prototype remains a historical reference only.
+
 ## GUI prototype
 
 A static Codex-inspired archLoop GUI prototype lives in `gui/`. Open
-`gui/index.html` directly in a browser to review the proposed Hub run workbench,
-including recent runs, the agent transcript, plan checklist, terminal output,
-and merge/recovery inspector actions.
+`gui/index.html` directly in a browser to review the earlier proposed Hub run
+workbench layout. Prefer `hub-desktop/` for the current Stitch-aligned Hub shell.
 
 ```typescript
 // 3. Run the agent via the JS API

@@ -1,5 +1,7 @@
 node_modules
 dist
+hub-desktop/dist
+hub-desktop/dist-electron
 .env.*
 .vercel
 .stitch/
