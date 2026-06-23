@@ -22,9 +22,13 @@ import type {
 import { describeHubRuntimeAction } from "./hubRuntimeBridge.js";
 import {
   createHubDesktopFixtureProjectStatus,
+  createHubDesktopFixtureProposalRunSummaries,
+  createHubDesktopFixtureProposalSessionArtifacts,
+  createHubDesktopFixtureProposalSessionEvents,
   createHubDesktopFixtureRunEvents,
   createHubDesktopFixtureRunSummaries,
   createHubDesktopFixtureTaskBoard,
+  FIXTURE_PROPOSAL_RUN_DIR,
   HUB_DESKTOP_FIXTURE_REPO_ROOT,
 } from "./hubRuntimeBridgeFixtures.js";
 
@@ -398,21 +402,37 @@ export const createHubRuntimeBridgeService = (
       }
       case "run.listSummaries":
         return success(
-          createHubDesktopFixtureRunSummaries() as unknown as HubRuntimeResponseMap[A],
+          [
+            ...createHubDesktopFixtureRunSummaries(),
+            ...createHubDesktopFixtureProposalRunSummaries(),
+          ] as unknown as HubRuntimeResponseMap[A],
         );
       case "run.readEvents": {
         const runParams = params as HubRuntimeRequestMap["run.readEvents"];
+        if (runParams.runDir === FIXTURE_PROPOSAL_RUN_DIR) {
+          return success(
+            createHubDesktopFixtureProposalSessionEvents() as unknown as HubRuntimeResponseMap[A],
+          );
+        }
         return success(
           createHubDesktopFixtureRunEvents({
             runDir: runParams.runDir,
           }) as unknown as HubRuntimeResponseMap[A],
         );
       }
-      case "proposal.readSession":
+      case "proposal.readSession": {
+        const proposalParams =
+          params as HubRuntimeRequestMap["proposal.readSession"];
+        if (proposalParams.runDir === FIXTURE_PROPOSAL_RUN_DIR) {
+          return success(
+            createHubDesktopFixtureProposalSessionArtifacts() as unknown as HubRuntimeResponseMap[A],
+          );
+        }
         return failure({
           code: "not_found",
           message: "Fixture proposal session is unavailable",
         });
+      }
       case "config.getSummary":
         return success({
           hubEnvPath: "/tmp/archloop-user-data/.env",

@@ -511,6 +511,110 @@ code,
   min-height: 120px;
 }
 
+.hub-proposal-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr);
+  gap: var(--hub-space-3);
+}
+
+.hub-proposal-grid-narrow {
+  grid-template-columns: 1fr;
+}
+
+.hub-proposal-grid .hub-panel-wide {
+  grid-column: 1 / -1;
+}
+
+.hub-proposal-selector {
+  display: grid;
+  gap: var(--hub-space-2);
+  margin-top: var(--hub-space-3);
+}
+
+.hub-proposal-selector-label {
+  font-size: 12px;
+  color: var(--hub-muted);
+}
+
+.hub-proposal-select {
+  width: 100%;
+  border: 1px solid var(--hub-border);
+  border-radius: var(--hub-radius);
+  background: var(--hub-surface);
+  padding: 8px 10px;
+}
+
+.hub-proposal-rationale,
+.hub-proposal-transcript {
+  margin-top: var(--hub-space-3);
+}
+
+.hub-proposal-card-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--hub-space-2);
+}
+
+.hub-proposal-card {
+  border: 1px solid var(--hub-border);
+  border-radius: var(--hub-radius);
+  padding: var(--hub-space-3);
+  display: grid;
+  gap: var(--hub-space-2);
+}
+
+.hub-proposal-card.is-warning {
+  border-color: #f59e0b;
+}
+
+.hub-proposal-card.is-error {
+  border-color: #e11d48;
+}
+
+.hub-proposal-card-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--hub-space-2);
+}
+
+.hub-proposal-actions {
+  display: grid;
+  gap: var(--hub-space-2);
+}
+
+.hub-proposal-action {
+  display: grid;
+  gap: var(--hub-space-2);
+  padding-top: var(--hub-space-2);
+  border-top: 1px solid var(--hub-border);
+}
+
+.hub-proposal-action:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.hub-proposal-action-copy strong {
+  display: block;
+}
+
+.hub-proposal-action-controls {
+  display: flex;
+  gap: var(--hub-space-2);
+}
+
+.hub-proposal-decision-bar {
+  position: sticky;
+  bottom: 0;
+}
+
+.hub-proposal-skeleton {
+  min-height: 120px;
+}
+
 .hub-button {
   border: 1px solid var(--hub-border);
   border-radius: var(--hub-radius);
