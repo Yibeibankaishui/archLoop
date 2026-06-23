@@ -154,11 +154,28 @@ export interface RunHubFlowResult {
   readonly fallbackReason?: string;
 }
 
+type HubFlowLifecycleMutation = <T>(
+  operation: () => T | Promise<T>,
+) => Promise<T>;
+
 interface ResumableHubFlowBatch {
   readonly runId: string;
   readonly batchId: string;
   readonly createdAt: string | undefined;
 }
+
+const createHubFlowLifecycleMutationQueue = (): HubFlowLifecycleMutation => {
+  let previous: Promise<void> = Promise.resolve();
+
+  return async <T>(operation: () => T | Promise<T>): Promise<T> => {
+    const result = previous.then(operation, operation);
+    previous = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  };
+};
 
 const resolveFailureReason = (
   outcome: HubImplementTaskResult["outcome"],
@@ -341,6 +358,7 @@ const reviewSelectedTask = async (
   taskMetadata: Readonly<Record<string, unknown>>,
   promptFile: string,
   implementCommitCount: number,
+  mutateLifecycle: HubFlowLifecycleMutation,
 ): Promise<HubFlowTaskResult> => {
   const cwd = input.cwd ?? process.cwd();
   const reviewer = input.reviewer;
@@ -402,12 +420,14 @@ const reviewSelectedTask = async (
     createdAt: finishedAt,
   };
 
-  const lifecycleResult = isSuccessfulReview(reviewResult)
-    ? recordHubTaskReviewSuccess(lifecycleBase)
-    : recordHubTaskReviewFailure({
-        ...lifecycleBase,
-        failureReason: resolveFailureReason(reviewResult.outcome),
-      });
+  const lifecycleResult = await mutateLifecycle(() =>
+    isSuccessfulReview(reviewResult)
+      ? recordHubTaskReviewSuccess(lifecycleBase)
+      : recordHubTaskReviewFailure({
+          ...lifecycleBase,
+          failureReason: resolveFailureReason(reviewResult.outcome),
+        }),
+  );
 
   return {
     taskId: task.id,
@@ -428,7 +448,8 @@ const implementSelectedTask = async (
   task: HubTaskProjection,
   promptFile: string,
   hasReviewer: boolean,
-  reviewPromptFile?: string,
+  reviewPromptFile: string | undefined,
+  mutateLifecycle: HubFlowLifecycleMutation,
 ): Promise<HubFlowTaskResult> => {
   const cwd = input.cwd ?? process.cwd();
   const branch = resolveHubTaskBranch(task.id, task.title);
@@ -479,16 +500,18 @@ const implementSelectedTask = async (
     hasDirtyWork: retryPreparation.hasDirtyWork,
   });
 
-  const claimResult = claimHubTaskForImplementation({
-    cwd,
-    taskId: task.id,
-    branch,
-    hubProjectDir: context.hubProjectDir,
-    runId: context.runId,
-    batchId: context.batchId,
-    startedAt: input.startedAt,
-    env: input.env,
-  });
+  const claimResult = await mutateLifecycle(() =>
+    claimHubTaskForImplementation({
+      cwd,
+      taskId: task.id,
+      branch,
+      hubProjectDir: context.hubProjectDir,
+      runId: context.runId,
+      batchId: context.batchId,
+      startedAt: input.startedAt,
+      env: input.env,
+    }),
+  );
 
   if (claimResult.outcome === "skipped") {
     return {
@@ -514,14 +537,16 @@ const implementSelectedTask = async (
     batchId: context.batchId,
     runDir: context.runDir,
   };
-  recordImplementationStarted({
-    context: lifecycleContext,
-    taskId: task.id,
-    branch,
-    hubStatus: claimResult.task.hubStatus,
-    claim,
-    createdAt: startedAt,
-  });
+  await mutateLifecycle(() =>
+    recordImplementationStarted({
+      context: lifecycleContext,
+      taskId: task.id,
+      branch,
+      hubStatus: claimResult.task.hubStatus,
+      claim,
+      createdAt: startedAt,
+    }),
+  );
 
   let implementationResult: HubImplementTaskResult;
   try {
@@ -551,21 +576,23 @@ const implementSelectedTask = async (
 
   if (isSuccessfulImplementation(implementationResult)) {
     const implementationWork = resolveImplementationWork(implementationResult);
-    const { task: updatedTask } = recordImplementationSuccess({
-      cwd,
-      env: input.env,
-      context: lifecycleContext,
-      taskId: task.id,
-      branch,
-      metadata: claimResult.task.metadata,
-      claim,
-      commitCount: implementationResult.commits.length,
-      hasReviewer,
-      branchHasUnmergedWork:
-        implementationResult.branchHasUnmergedWork === true,
-      implementationWork,
-      createdAt: finishedAt,
-    });
+    const { task: updatedTask } = await mutateLifecycle(() =>
+      recordImplementationSuccess({
+        cwd,
+        env: input.env,
+        context: lifecycleContext,
+        taskId: task.id,
+        branch,
+        metadata: claimResult.task.metadata,
+        claim,
+        commitCount: implementationResult.commits.length,
+        hasReviewer,
+        branchHasUnmergedWork:
+          implementationResult.branchHasUnmergedWork === true,
+        implementationWork,
+        createdAt: finishedAt,
+      }),
+    );
 
     if (hasReviewer) {
       return reviewSelectedTask(
@@ -577,6 +604,7 @@ const implementSelectedTask = async (
         claimResult.task.metadata,
         reviewPromptFile!,
         implementationResult.commits.length,
+        mutateLifecycle,
       );
     }
 
@@ -592,18 +620,20 @@ const implementSelectedTask = async (
   }
 
   const failureReason = resolveFailureReason(implementationResult.outcome);
-  const { task: updatedTask } = recordImplementationFailure({
-    cwd,
-    env: input.env,
-    context: lifecycleContext,
-    taskId: task.id,
-    branch,
-    metadata: claimResult.task.metadata,
-    claim,
-    failureReason,
-    commitCount: implementationResult.commits.length,
-    createdAt: finishedAt,
-  });
+  const { task: updatedTask } = await mutateLifecycle(() =>
+    recordImplementationFailure({
+      cwd,
+      env: input.env,
+      context: lifecycleContext,
+      taskId: task.id,
+      branch,
+      metadata: claimResult.task.metadata,
+      claim,
+      failureReason,
+      commitCount: implementationResult.commits.length,
+      createdAt: finishedAt,
+    }),
+  );
 
   return {
     taskId: task.id,
@@ -749,19 +779,20 @@ export const runHubFlow = async (
     ...batchPlannedMetadata,
   });
 
-  const results: HubFlowTaskResult[] = [];
-  for (const task of selectedTasks) {
-    results.push(
-      await implementSelectedTask(
+  const mutateLifecycle = createHubFlowLifecycleMutationQueue();
+  const results: HubFlowTaskResult[] = await Promise.all(
+    selectedTasks.map((task) =>
+      implementSelectedTask(
         { ...input, cwd: repoRoot },
         context,
         task,
         implementPromptFile,
         flowDefinition.hasReviewer === true,
         reviewPromptFile,
+        mutateLifecycle,
       ),
-    );
-  }
+    ),
+  );
 
   const runMergePhase = input.runMergePhase ?? true;
   let mergeResult: RunHubBatchMergeResult | undefined;
