@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -25,4 +26,24 @@ describe("hub desktop launch", () => {
     const bridge = createHubRuntimeBridgeService({ useFixtures: true });
     expect(typeof bridge.invoke).toBe("function");
   });
+
+  it("passes hub-desktop typecheck against the runtime contract exports", () => {
+    const hubDesktopDir = join(process.cwd(), "hub-desktop");
+    const hubDesktopNodeModules = join(
+      hubDesktopDir,
+      "node_modules",
+      "typescript",
+    );
+    if (!existsSync(hubDesktopNodeModules)) {
+      execSync("npm install", {
+        cwd: hubDesktopDir,
+        stdio: "pipe",
+      });
+    }
+
+    execSync("npm run typecheck", {
+      cwd: hubDesktopDir,
+      stdio: "pipe",
+    });
+  }, 120_000);
 });

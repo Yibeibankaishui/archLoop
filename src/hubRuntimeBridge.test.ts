@@ -6,6 +6,7 @@ import {
   buildHubRuntimeExecuteParams,
   describeHubRuntimeAction,
   listCanonicalHubTaskStatuses,
+  type HubTaskStatus,
 } from "./hubRuntimeBridge.js";
 import {
   createHubDesktopFixtureProjectStatus,
@@ -72,6 +73,18 @@ describe("hubRuntimeBridge contract", () => {
       kind: "preview",
       requiresConfirm: false,
     });
+  });
+
+  it("exports HubTaskStatus for hub-desktop task board filters", () => {
+    const statuses = listCanonicalHubTaskStatuses();
+    const sampleStatus = statuses[0];
+    expect(sampleStatus).toBeDefined();
+    if (!sampleStatus) {
+      return;
+    }
+
+    const hubStatus: HubTaskStatus = sampleStatus;
+    expect(statuses).toContain(hubStatus);
   });
 
   it("rejects excluded Hub task statuses in bridge fixtures and vocabulary", () => {

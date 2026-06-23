@@ -1,8 +1,21 @@
-import type { HubProjectRunSummary, HubProjectStatus } from "./projectStatus.js";
-import type { HubTaskBoard, HubTaskProjection } from "./taskBoard.js";
+import type {
+  HubProjectRunSummary,
+  HubProjectStatus,
+} from "./projectStatus.js";
+import type {
+  HubTaskBoard,
+  HubTaskProjection,
+  HubTaskStatus,
+} from "./taskBoard.js";
 import { HUB_TASK_STATUSES } from "./taskBoard.js";
 
-export type { HubProjectRunSummary, HubProjectStatus, HubTaskBoard, HubTaskProjection };
+export type {
+  HubProjectRunSummary,
+  HubProjectStatus,
+  HubTaskBoard,
+  HubTaskProjection,
+  HubTaskStatus,
+};
 
 export const EXCLUDED_HUB_TASK_STATUSES = [
   "pending",
@@ -194,7 +207,7 @@ export const assertNoExcludedHubTaskStatuses = (
   }
 };
 
-export const listCanonicalHubTaskStatuses = (): readonly string[] =>
+export const listCanonicalHubTaskStatuses = (): readonly HubTaskStatus[] =>
   HUB_TASK_STATUSES;
 
 export const describeHubRuntimeAction = (
