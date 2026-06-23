@@ -21,6 +21,54 @@ const readyTask = (
     ...overrides,
   }) as HubTaskProjection;
 
+const createTempHubTaskStoreRepo = async (input: {
+  readonly depListRecords: readonly unknown[];
+  readonly listRecords: readonly unknown[];
+}): Promise<{ repoDir: string; env: NodeJS.ProcessEnv }> => {
+  const { mkdtemp, writeFile, mkdir, chmod } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { exec } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const execAsync = promisify(exec);
+
+  const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-planner-candidates-"));
+  await execAsync("git init -b main", { cwd: repoDir });
+  const binDir = join(repoDir, "bin");
+  await mkdir(binDir, { recursive: true });
+  const bdPath = join(binDir, "bd");
+  await writeFile(
+    bdPath,
+    `#!/usr/bin/env node
+const args = process.argv.slice(2);
+if (args[0] === "dep" && args[1] === "list" && args.includes("--json")) {
+  process.stdout.write(JSON.stringify(${JSON.stringify(input.depListRecords)}));
+  process.exit(0);
+}
+if (args[0] === "list" && args.includes("--json")) {
+  process.stdout.write(JSON.stringify(${JSON.stringify(input.listRecords)}));
+  process.exit(0);
+}
+process.exit(1);
+`,
+  );
+  await chmod(bdPath, 0o755);
+  await mkdir(join(repoDir, ".beads"), { recursive: true });
+  await writeFile(
+    join(repoDir, ".beads", "metadata.json"),
+    JSON.stringify({ backend: "dolt" }),
+  );
+
+  return {
+    repoDir,
+    env: {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      ARCHLOOP_BD_PATH: bdPath,
+    },
+  };
+};
+
 describe("hubBatchPlannerCandidates", () => {
   it("parses github refs, issue urls, and beads ids from blocked-by prose", () => {
     const candidate = enrichHubBatchPlannerCandidate(
@@ -76,59 +124,23 @@ describe("hubBatchPlannerCandidates", () => {
   });
 
   it("loads beads dependency blockers for ready queue candidates", async () => {
-    const { mkdtemp, writeFile, mkdir, chmod } =
-      await import("node:fs/promises");
-    const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
-    const { exec } = await import("node:child_process");
-    const { promisify } = await import("node:util");
-    const execAsync = promisify(exec);
-
-    const repoDir = await mkdtemp(
-      join(tmpdir(), "hub-batch-planner-candidates-"),
-    );
-    await execAsync("git init -b main", { cwd: repoDir });
-    const binDir = join(repoDir, "bin");
-    await mkdir(binDir, { recursive: true });
-    const bdPath = join(binDir, "bd");
-    await writeFile(
-      bdPath,
-      `#!/usr/bin/env node
-const args = process.argv.slice(2);
-if (args[0] === "dep" && args[1] === "list" && args.includes("--json")) {
-  process.stdout.write(JSON.stringify([
-    { issue_id: "bd-child", depends_on_id: "bd-parent", type: "blocks" },
-  ]));
-  process.exit(0);
-}
-if (args[0] === "list" && args.includes("--json")) {
-  process.stdout.write(JSON.stringify([
-    {
-      id: "bd-child",
-      title: "Task bd-child",
-      hub_status: "ready_for_agent",
-    },
-  ]));
-  process.exit(0);
-}
-process.exit(1);
-`,
-    );
-    await chmod(bdPath, 0o755);
-    await mkdir(join(repoDir, ".beads"), { recursive: true });
-    await writeFile(
-      join(repoDir, ".beads", "metadata.json"),
-      JSON.stringify({ backend: "dolt" }),
-    );
+    const { repoDir, env } = await createTempHubTaskStoreRepo({
+      depListRecords: [
+        { issue_id: "bd-child", depends_on_id: "bd-parent", type: "blocks" },
+      ],
+      listRecords: [
+        {
+          id: "bd-child",
+          title: "Task bd-child",
+          hub_status: "ready_for_agent",
+        },
+      ],
+    });
 
     const enriched = enrichHubBatchPlannerCandidates({
       cwd: repoDir,
       candidates: [readyTask("bd-child")],
-      env: {
-        ...process.env,
-        PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        ARCHLOOP_BD_PATH: bdPath,
-      },
+      env,
     });
 
     expect(enriched[0]?.explicitBlockers).toEqual(["bd-parent"]);
@@ -137,60 +149,28 @@ process.exit(1);
   });
 
   it("resolves open, closed, and unknown blockers from live hub state", async () => {
-    const { mkdtemp, writeFile, mkdir, chmod } =
-      await import("node:fs/promises");
-    const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
-    const { exec } = await import("node:child_process");
-    const { promisify } = await import("node:util");
-    const execAsync = promisify(exec);
-
-    const repoDir = await mkdtemp(
-      join(tmpdir(), "hub-batch-planner-blocker-resolution-"),
-    );
-    await execAsync("git init -b main", { cwd: repoDir });
-    const binDir = join(repoDir, "bin");
-    await mkdir(binDir, { recursive: true });
-    const bdPath = join(binDir, "bd");
-    await writeFile(
-      bdPath,
-      `#!/usr/bin/env node
-const args = process.argv.slice(2);
-if (args[0] === "dep" && args[1] === "list" && args.includes("--json")) {
-  process.stdout.write(JSON.stringify([]));
-  process.exit(0);
-}
-if (args[0] === "list" && args.includes("--json")) {
-  process.stdout.write(JSON.stringify([
-    {
-      id: "bd-github-open",
-      title: "Open github blocker",
-      hub_status: "implementing",
-      remoteRefs: [{ url: "github#152" }],
-    },
-    {
-      id: "bd-github-closed",
-      title: "Closed github blocker",
-      hub_status: "done",
-      remoteRefs: [{ url: "github#153" }],
-    },
-    {
-      id: "bd-open",
-      title: "Open beads blocker",
-      hub_status: "reviewing",
-    },
-  ]));
-  process.exit(0);
-}
-process.exit(1);
-`,
-    );
-    await chmod(bdPath, 0o755);
-    await mkdir(join(repoDir, ".beads"), { recursive: true });
-    await writeFile(
-      join(repoDir, ".beads", "metadata.json"),
-      JSON.stringify({ backend: "dolt" }),
-    );
+    const { repoDir, env } = await createTempHubTaskStoreRepo({
+      depListRecords: [],
+      listRecords: [
+        {
+          id: "bd-github-open",
+          title: "Open github blocker",
+          hub_status: "implementing",
+          remoteRefs: [{ url: "github#152" }],
+        },
+        {
+          id: "bd-github-closed",
+          title: "Closed github blocker",
+          hub_status: "done",
+          remoteRefs: [{ url: "github#153" }],
+        },
+        {
+          id: "bd-open",
+          title: "Open beads blocker",
+          hub_status: "reviewing",
+        },
+      ],
+    });
 
     const [candidate] = enrichHubBatchPlannerCandidates({
       cwd: repoDir,
@@ -202,11 +182,7 @@ process.exit(1);
 - bd-missing`,
         }),
       ],
-      env: {
-        ...process.env,
-        PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        ARCHLOOP_BD_PATH: bdPath,
-      },
+      env,
     });
 
     expect(candidate?.blockersDeclared).toEqual([
