@@ -1,4 +1,3 @@
-import { useState } from "react";
 import type { CSSProperties } from "react";
 
 import type {
@@ -6,10 +5,9 @@ import type {
   HubRuntimeActionPreview,
   HubRuntimePreviewAction,
 } from "@yibeibankaishui/archloop/hub-runtime-contract";
-import type {
-  HubTaskBoardAction,
-  HubTaskInspectorModel,
-} from "@yibeibankaishui/archloop/hub-task-board-workbench";
+import type { HubTaskInspectorModel } from "@yibeibankaishui/archloop/hub-task-board-workbench";
+
+import { HubWorkbenchActionButton } from "./HubWorkbenchActionButton";
 
 export interface InspectorPanelProps {
   readonly taskInspector?: HubTaskInspectorModel;
@@ -24,115 +22,6 @@ export interface InspectorPanelProps {
     params: Record<string, unknown>,
   ) => Promise<string | undefined>;
 }
-
-const InspectorActionButton = ({
-  action,
-  onPreviewAction,
-  onConfirmAction,
-}: {
-  readonly action: HubTaskBoardAction;
-  readonly onPreviewAction?: InspectorPanelProps["onPreviewAction"];
-  readonly onConfirmAction?: InspectorPanelProps["onConfirmAction"];
-}) => {
-  const [preview, setPreview] = useState<HubRuntimeActionPreview | undefined>();
-  const [previewParams, setPreviewParams] = useState<
-    Record<string, unknown> | undefined
-  >();
-  const [pending, setPending] = useState(false);
-  const [resultMessage, setResultMessage] = useState<string | undefined>();
-  const disabled = action.disabledReason !== undefined;
-
-  const handlePreview = async () => {
-    if (
-      disabled ||
-      action.kind !== "bridge_preview" ||
-      !action.bridgeAction ||
-      !onPreviewAction
-    ) {
-      return;
-    }
-    setPending(true);
-    setResultMessage(undefined);
-    try {
-      const nextPreview = await onPreviewAction(
-        action.bridgeAction,
-        action.bridgeParams ?? {},
-      );
-      setPreviewParams(action.bridgeParams ?? {});
-      setPreview(nextPreview);
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const handleConfirm = async () => {
-    if (!preview || !previewParams || !onConfirmAction || preview.disabledReason) {
-      return;
-    }
-    setPending(true);
-    try {
-      const message = await onConfirmAction(preview, previewParams);
-      setResultMessage(message ?? "Action queued for CLI execution.");
-      setPreview(undefined);
-      setPreviewParams(undefined);
-    } finally {
-      setPending(false);
-    }
-  };
-
-  return (
-    <div className="hub-inspector-action">
-      <strong>{action.label}</strong>
-      <p className="hub-muted">{action.description}</p>
-      {action.disabledReason ? (
-        <p className="hub-muted">{action.disabledReason}</p>
-      ) : null}
-      <p className="hub-muted">
-        CLI: <code>{action.cliFallback}</code>
-      </p>
-      {resultMessage ? <p className="hub-muted">{resultMessage}</p> : null}
-      {preview ? (
-        <div className="hub-panel">
-          <p>{preview.summary}</p>
-          {preview.disabledReason ? (
-            <p className="hub-muted">{preview.disabledReason}</p>
-          ) : null}
-        </div>
-      ) : null}
-      <div className="hub-inspector-action-controls">
-        {action.kind === "bridge_preview" ? (
-          <>
-            <button
-              type="button"
-              className="hub-button hub-focus-ring"
-              disabled={disabled || pending}
-              onClick={() => void handlePreview()}
-            >
-              Preview
-            </button>
-            <button
-              type="button"
-              className="hub-button hub-focus-ring"
-              disabled={!preview || pending || Boolean(preview.disabledReason)}
-              onClick={() => void handleConfirm()}
-            >
-              Confirm
-            </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            className="hub-button hub-focus-ring"
-            disabled={disabled}
-            title={action.disabledReason ?? action.cliFallback}
-          >
-            CLI only
-          </button>
-        )}
-      </div>
-    </div>
-  );
-};
 
 export const InspectorPanel = ({
   taskInspector,
@@ -204,9 +93,10 @@ export const InspectorPanel = ({
           <h2>Actions</h2>
           <div className="hub-inspector-action-list">
             {taskInspector.actions.map((action) => (
-              <InspectorActionButton
+              <HubWorkbenchActionButton
                 key={action.id}
                 action={action}
+                variant="inspector"
                 onPreviewAction={onPreviewAction}
                 onConfirmAction={onConfirmAction}
               />

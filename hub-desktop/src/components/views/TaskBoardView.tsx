@@ -9,12 +9,13 @@ import type {
 import {
   buildHubTaskBoardWorkbenchModel,
   resolveHubTaskBoardGridClass,
-  type HubTaskBoardAction,
   type HubTaskBoardFilterState,
   type HubTaskBoardMarkerTone,
   type HubTaskInspectorModel,
 } from "@yibeibankaishui/archloop/hub-task-board-workbench";
 import type { HubTaskStatus } from "@yibeibankaishui/archloop/hub-runtime-contract";
+
+import { HubWorkbenchActionButton } from "../HubWorkbenchActionButton";
 
 export interface TaskBoardViewProps {
   readonly board?: HubTaskBoard;
@@ -46,117 +47,6 @@ const markerClassName = (tone: HubTaskBoardMarkerTone): string => {
     default:
       return "hub-chip";
   }
-};
-
-const TaskBoardActionButton = ({
-  action,
-  onPreviewAction,
-  onConfirmAction,
-}: {
-  readonly action: HubTaskBoardAction;
-  readonly onPreviewAction?: TaskBoardViewProps["onPreviewAction"];
-  readonly onConfirmAction?: TaskBoardViewProps["onConfirmAction"];
-}) => {
-  const [preview, setPreview] = useState<HubRuntimeActionPreview | undefined>();
-  const [previewParams, setPreviewParams] = useState<
-    Record<string, unknown> | undefined
-  >();
-  const [pending, setPending] = useState(false);
-  const [resultMessage, setResultMessage] = useState<string | undefined>();
-  const disabled = action.disabledReason !== undefined;
-
-  const handlePreview = async () => {
-    if (
-      disabled ||
-      action.kind !== "bridge_preview" ||
-      !action.bridgeAction ||
-      !onPreviewAction
-    ) {
-      return;
-    }
-    setPending(true);
-    setResultMessage(undefined);
-    try {
-      const nextPreview = await onPreviewAction(
-        action.bridgeAction,
-        action.bridgeParams ?? {},
-      );
-      setPreviewParams(action.bridgeParams ?? {});
-      setPreview(nextPreview);
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const handleConfirm = async () => {
-    if (!preview || !previewParams || !onConfirmAction || preview.disabledReason) {
-      return;
-    }
-    setPending(true);
-    try {
-      const message = await onConfirmAction(preview, previewParams);
-      setResultMessage(message ?? "Action queued for CLI execution.");
-      setPreview(undefined);
-      setPreviewParams(undefined);
-    } finally {
-      setPending(false);
-    }
-  };
-
-  return (
-    <div className="hub-task-board-action">
-      <div className="hub-task-board-action-copy">
-        <strong>{action.label}</strong>
-        <p className="hub-muted">{action.description}</p>
-        {action.disabledReason ? (
-          <p className="hub-muted">{action.disabledReason}</p>
-        ) : null}
-        <p className="hub-muted">
-          CLI: <code>{action.cliFallback}</code>
-        </p>
-        {resultMessage ? <p className="hub-muted">{resultMessage}</p> : null}
-        {preview ? (
-          <div className="hub-panel">
-            <p>{preview.summary}</p>
-            {preview.disabledReason ? (
-              <p className="hub-muted">{preview.disabledReason}</p>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-      <div className="hub-task-board-action-controls">
-        {action.kind === "bridge_preview" ? (
-          <>
-            <button
-              type="button"
-              className="hub-button hub-focus-ring"
-              disabled={disabled || pending}
-              onClick={() => void handlePreview()}
-            >
-              Preview
-            </button>
-            <button
-              type="button"
-              className="hub-button hub-focus-ring"
-              disabled={!preview || pending || Boolean(preview.disabledReason)}
-              onClick={() => void handleConfirm()}
-            >
-              Confirm
-            </button>
-          </>
-        ) : (
-          <button
-            type="button"
-            className="hub-button hub-focus-ring"
-            disabled={disabled}
-            title={action.disabledReason ?? action.cliFallback}
-          >
-            CLI only
-          </button>
-        )}
-      </div>
-    </div>
-  );
 };
 
 export const TaskBoardView = ({
@@ -370,9 +260,10 @@ export const TaskBoardView = ({
           <h2>Board actions</h2>
           <div className="hub-task-board-action-list">
             {model.actions.map((action) => (
-              <TaskBoardActionButton
+              <HubWorkbenchActionButton
                 key={action.id}
                 action={action}
+                variant="task-board"
                 onPreviewAction={onPreviewAction}
                 onConfirmAction={onConfirmAction}
               />

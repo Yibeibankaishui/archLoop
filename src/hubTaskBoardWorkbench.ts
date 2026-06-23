@@ -142,6 +142,18 @@ export interface BuildHubTaskInspectorModelInput {
 
 const TASK_BOARD_CLI_FALLBACK = "archloop tasks list";
 
+const emptyHubTaskBoardWorkbenchModel = (
+  overrides: Partial<HubTaskBoardWorkbenchModel> &
+    Pick<HubTaskBoardWorkbenchModel, "phase">,
+): HubTaskBoardWorkbenchModel => ({
+  columns: [],
+  totalTaskCount: 0,
+  filteredTaskCount: 0,
+  statusFilterOptions: [],
+  actions: [],
+  ...overrides,
+});
+
 const readFirstString = (
   record: Readonly<Record<string, unknown>>,
   keys: readonly string[],
@@ -409,6 +421,26 @@ const buildInspectorRows = (
 ): readonly HubTaskInspectorRow[] =>
   Object.entries(entries).map(([key, value]) => ({ key, value }));
 
+const buildCommentSectionRows = (
+  task: HubTaskProjection,
+): readonly HubTaskInspectorRow[] => {
+  const commentLines = formatHubTaskCommentLines(task);
+  if (commentLines.length === 0) {
+    return [{ key: "Summary", value: "No comments yet." }];
+  }
+  return commentLines.slice(1).map((line, index) => ({
+    key: `Comment ${index + 1}`,
+    value: line.trim(),
+  }));
+};
+
+const resolveRecoverActionDescription = (
+  task: HubTaskProjection,
+  projectStatus: HubProjectStatus | undefined,
+): string =>
+  projectStatus?.failedTasks.find((entry) => entry.id === task.id)?.nextAction ??
+  `Reset execution state for ${task.id} after reviewing run artifacts.`;
+
 const buildTaskInspectorActions = (
   task: HubTaskProjection,
   projectStatus: HubProjectStatus | undefined,
@@ -429,10 +461,7 @@ const buildTaskInspectorActions = (
     actions.push({
       id: `recover-${task.id}`,
       label: `Recover ${task.id}`,
-      description:
-        projectStatus?.failedTasks.find((entry) => entry.id === task.id)
-          ?.nextAction ??
-        `Reset execution state for ${task.id} after reviewing run artifacts.`,
+      description: resolveRecoverActionDescription(task, projectStatus),
       kind: "bridge_preview",
       bridgeAction: "recover.preview",
       bridgeParams: { taskId: task.id },
@@ -581,28 +610,23 @@ export const buildHubTaskInspectorModel = (
   }
 
   if (failureReason || task.hubStatus === "failed") {
+    const failureNextAction = failureReason
+      ? resolveFailedTaskNextAction(task, failureReason)
+      : `archloop tasks recover ${task.id}`;
     sections.push({
       id: "failure",
       title: "Failure",
       rows: buildInspectorRows({
         Reason: failureReason ?? "unknown",
-        "Next action":
-          nextActions[0] ?? `archloop tasks recover ${task.id}`,
+        "Next action": failureNextAction,
       }),
     });
   }
 
-  const commentLines = formatHubTaskCommentLines(task);
   sections.push({
     id: "comments",
     title: "Comments",
-    rows:
-      commentLines.length > 0
-        ? commentLines.slice(1).map((line, index) => ({
-            key: `Comment ${index + 1}`,
-            value: line.trim(),
-          }))
-        : [{ key: "Summary", value: "No comments yet." }],
+    rows: buildCommentSectionRows(task),
   });
 
   return {
@@ -663,41 +687,25 @@ export const buildHubTaskBoardWorkbenchModel = (
   input: BuildHubTaskBoardWorkbenchModelInput,
 ): HubTaskBoardWorkbenchModel => {
   if (input.loading) {
-    return {
-      phase: "loading",
-      columns: [],
-      totalTaskCount: 0,
-      filteredTaskCount: 0,
-      statusFilterOptions: [],
-      actions: [],
-    };
+    return emptyHubTaskBoardWorkbenchModel({ phase: "loading" });
   }
 
   if (input.runtimeError) {
-    return {
+    return emptyHubTaskBoardWorkbenchModel({
       phase: "runtime_unavailable",
       runtimeError: input.runtimeError,
       cliFallback: TASK_BOARD_CLI_FALLBACK,
-      columns: [],
-      totalTaskCount: 0,
-      filteredTaskCount: 0,
-      statusFilterOptions: [],
-      actions: [],
-    };
+    });
   }
 
   const board = input.board;
   const allTasks = board?.tasks ?? [];
   if (allTasks.length === 0) {
-    return {
+    return emptyHubTaskBoardWorkbenchModel({
       phase: "empty",
       cliFallback: TASK_BOARD_CLI_FALLBACK,
-      columns: [],
-      totalTaskCount: 0,
-      filteredTaskCount: 0,
-      statusFilterOptions: [],
       actions: buildGlobalActions(input.projectStatus),
-    };
+    });
   }
 
   const filteredTasks = filterHubTaskBoardTasks(allTasks, input.filters);

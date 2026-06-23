@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
-import type { HubProjectStatus } from "@yibeibankaishui/archloop/hub-runtime-contract";
 import type {
+  HubProjectStatus,
   HubRuntimeActionPreview,
   HubRuntimePreviewAction,
 } from "@yibeibankaishui/archloop/hub-runtime-contract";
