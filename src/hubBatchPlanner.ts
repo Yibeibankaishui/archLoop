@@ -1,7 +1,10 @@
 import { HubFlowError } from "./errors.js";
 import type { HubFlowKind } from "./hubFlows.js";
 import type { HubBatchPlannerInvoker } from "./hubBatchPlannerAgent.js";
-import { enrichHubBatchPlannerCandidates } from "./hubBatchPlannerCandidates.js";
+import {
+  enrichHubBatchPlannerCandidates,
+  type HubBatchPlannerCandidate,
+} from "./hubBatchPlannerCandidates.js";
 import { isHubFlowEligibleTask, type HubTaskProjection } from "./taskBoard.js";
 
 export const HUB_BATCH_DEFAULT_MAX_TASKS = 3;
@@ -40,6 +43,12 @@ export const HUB_BATCH_FALLBACK_REASONS = [
 export type HubBatchFallbackReason =
   (typeof HUB_BATCH_FALLBACK_REASONS)[number];
 
+export const HUB_BATCH_DIAGNOSTIC_REASONS = [
+  "invalid_explicit_blocker_deferral",
+] as const;
+export type HubBatchDiagnosticReason =
+  (typeof HUB_BATCH_DIAGNOSTIC_REASONS)[number];
+
 export interface HubBatchDeferredTask {
   readonly taskId: string;
   readonly reason: HubBatchDeferredReason;
@@ -63,6 +72,7 @@ export interface HubBatchPlannerResult {
   readonly batchStrategyUsed: HubBatchStrategy;
   readonly maxTasks: number;
   readonly fallbackReason?: string;
+  readonly diagnosticReason?: HubBatchDiagnosticReason;
   readonly rationale?: string;
 }
 
@@ -356,6 +366,85 @@ const mapSelectedTasks = (
   });
 };
 
+const collectSelectedTaskBlockerIds = (
+  selectedTasks: readonly HubBatchPlannerCandidate[],
+): ReadonlySet<string> => {
+  const blockerIds = new Set<string>();
+  for (const task of selectedTasks) {
+    for (const blocker of task.blockersResolved ?? []) {
+      blockerIds.add(blocker.taskId);
+    }
+  }
+  return blockerIds;
+};
+
+const resolvePlannedBatchSelection = (input: {
+  readonly eligible: readonly HubTaskProjection[];
+  readonly enrichedCandidates: readonly HubBatchPlannerCandidate[];
+  readonly parsed: HubBatchPlannerAgentOutput;
+  readonly maxTasks: number;
+}): {
+  readonly selectedTasks: readonly HubTaskProjection[];
+  readonly deferredTasks: readonly HubBatchDeferredTask[];
+  readonly diagnosticReason?: HubBatchDiagnosticReason;
+} => {
+  const selectedTasks = mapSelectedTasks(
+    input.eligible,
+    input.parsed.selectedTaskIds,
+  );
+  const selectedTaskIds = new Set(input.parsed.selectedTaskIds);
+  const eligibleById = new Map(
+    input.enrichedCandidates.map((task) => [task.id, task]),
+  );
+  const selectedDependencyBlockerIds = collectSelectedTaskBlockerIds(
+    input.enrichedCandidates.filter((task) => selectedTaskIds.has(task.id)),
+  );
+  const deferredTasks: HubBatchDeferredTask[] = [];
+  const invalidExplicitBlockerTaskIds = new Set<string>();
+
+  for (const deferred of input.parsed.deferred) {
+    const candidate = eligibleById.get(deferred.taskId);
+    if (
+      deferred.reason !== "explicit_blocker" ||
+      candidate === undefined ||
+      candidate.openBlockers.length > 0 ||
+      candidate.unknownBlockers.length > 0 ||
+      selectedDependencyBlockerIds.has(candidate.id)
+    ) {
+      deferredTasks.push(deferred);
+      continue;
+    }
+
+    invalidExplicitBlockerTaskIds.add(candidate.id);
+  }
+
+  const capacity = Math.max(0, input.maxTasks - selectedTasks.length);
+  const recoveredTasks = input.eligible
+    .filter((task) => invalidExplicitBlockerTaskIds.has(task.id))
+    .slice(0, capacity);
+  selectedTasks.push(...recoveredTasks);
+
+  const recoveredTaskIds = new Set(recoveredTasks.map((task) => task.id));
+  const remainingInvalidTaskIds = [...invalidExplicitBlockerTaskIds].filter(
+    (taskId) => !recoveredTaskIds.has(taskId),
+  );
+
+  return {
+    selectedTasks,
+    deferredTasks: [
+      ...deferredTasks.filter((entry) => !recoveredTaskIds.has(entry.taskId)),
+      ...remainingInvalidTaskIds.map((taskId) => ({
+        taskId,
+        reason: "over_max_tasks" as const,
+      })),
+    ],
+    diagnosticReason:
+      invalidExplicitBlockerTaskIds.size > 0
+        ? "invalid_explicit_blocker_deferral"
+        : undefined,
+  };
+};
+
 const planConservativeHubFlowBatch = (
   input: HubBatchPlannerInput,
 ): HubBatchPlannerResult =>
@@ -445,13 +534,23 @@ const planPlannedHubFlowBatch = async (
     });
   }
 
+  const plannedSelection = resolvePlannedBatchSelection({
+    eligible,
+    enrichedCandidates,
+    parsed,
+    maxTasks: input.maxTasks,
+  });
+
   return {
-    selectedTasks: mapSelectedTasks(eligible, parsed.selectedTaskIds),
-    deferredTasks: parsed.deferred,
+    selectedTasks: plannedSelection.selectedTasks,
+    deferredTasks: plannedSelection.deferredTasks,
     batchStrategyRequested: "planned",
     batchStrategyUsed: "planned",
     maxTasks: input.maxTasks,
     rationale: parsed.rationale,
+    ...(plannedSelection.diagnosticReason
+      ? { diagnosticReason: plannedSelection.diagnosticReason }
+      : {}),
   };
 };
 

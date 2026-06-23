@@ -106,6 +106,7 @@ interface MockBeadsTask {
   status: string;
   labels: string[];
   metadata: Record<string, unknown>;
+  remoteRefs?: readonly { url: string }[];
 }
 
 const writeMockBd = async (
@@ -752,6 +753,118 @@ describe("Hub flow planner", () => {
 
     expect(formatHubFlowResultLines(result).join("\n")).toContain(
       "Batch strategy: planned (max 2)",
+    );
+  });
+
+  it("records invalid explicit blocker deferrals and recovers stale ready tasks up to max-tasks", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-flow-planned-invalid-deferral-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-github-152",
+        title: "Closed blocker",
+        status: "done",
+        labels: [],
+        metadata: {},
+        remoteRefs: [{ url: "github#152" }],
+      },
+      {
+        id: "bd-first",
+        title: "First ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-second",
+        title: "Second ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-third",
+        title: "Third ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    const invocations: HubImplementTaskInput[] = [];
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "planned-invalid-deferral",
+    );
+
+    const result = await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      batchStrategy: "planned",
+      maxTasks: 3,
+      batchPlanner: async () =>
+        `<batch-plan>${JSON.stringify({
+          selectedTaskIds: ["bd-first"],
+          deferred: [
+            { taskId: "bd-second", reason: "explicit_blocker" },
+            { taskId: "bd-third", reason: "explicit_blocker" },
+          ],
+          rationale: "Planner incorrectly deferred stale blocker prose.",
+        })}</batch-plan>`,
+      implementer: async (input) => {
+        invocations.push(input);
+        return {
+          outcome: "success",
+          commits: [{ sha: "abc123" }],
+          completionSignal: "<promise>COMPLETE</promise>",
+        };
+      },
+      runMergePhase: false,
+    });
+
+    expect(result.selectedTaskIds).toEqual([
+      "bd-first",
+      "bd-second",
+      "bd-third",
+    ]);
+    expect(result.batchSelection).toMatchObject({
+      batchStrategyUsed: "planned",
+      maxTasks: 3,
+      deferredTasks: [],
+      diagnosticReason: "invalid_explicit_blocker_deferral",
+      rationale: "Planner incorrectly deferred stale blocker prose.",
+    });
+    expect(new Set(invocations.map((input) => input.taskId))).toEqual(
+      new Set(["bd-first", "bd-second", "bd-third"]),
+    );
+
+    const batchEvents = await readJsonl(
+      join(result.runDir, "events", "batch.jsonl"),
+    );
+    const plannedEvent = batchEvents.find(
+      (event) => (event as { type?: string }).type === "batch_planned",
+    );
+    expect(plannedEvent).toMatchObject({
+      type: "batch_planned",
+      taskIds: ["bd-first", "bd-second", "bd-third"],
+      batchStrategyUsed: "planned",
+      maxTasks: 3,
+      diagnosticReason: "invalid_explicit_blocker_deferral",
+    });
+
+    expect(formatHubFlowResultLines(result).join("\n")).toContain(
+      "Batch diagnostic: invalid_explicit_blocker_deferral",
     );
   });
 
