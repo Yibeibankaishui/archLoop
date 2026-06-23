@@ -2,8 +2,8 @@ import type {
   HubProjectRunSummary,
   HubProjectStatus,
 } from "./projectStatus.js";
+import { HUB_TASK_STATUSES } from "./hubTaskShared.js";
 import {
-  HUB_TASK_STATUSES,
   type HubTaskBoard,
   type HubTaskProjection,
   type HubTaskStatus,

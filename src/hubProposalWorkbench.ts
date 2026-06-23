@@ -1,20 +1,24 @@
 import { HUB_DESKTOP_LAYOUT } from "./hubDesktopShell.js";
-import type { HubRunEventRecord, HubRuntimePreviewAction } from "./hubRuntimeBridge.js";
+import type {
+  HubRunEventRecord,
+  HubRuntimePreviewAction,
+} from "./hubRuntimeBridge.js";
 import {
   validatePrdDecompositionProposal,
   type PrdDecompositionProposal,
   type PrdProposalSlice,
-} from "./hubPrdDecomposition.js";
-import type { ProposalTranscriptTurn } from "./hubProposalSession.js";
-import { resolveProposalSessionArtifactPaths } from "./hubProposalSession.js";
-import {
   validateTriageProposal,
   type TriageProposal,
   type TriageProposalDecision,
-} from "./hubTriageProposal.js";
-import { mapSliceTypeToReadyHubStatus } from "./prdDecomposition.js";
-import type { HubProjectRunSummary, HubProjectStatus } from "./projectStatus.js";
-import { HUB_TASK_STORE_INIT_COMMAND } from "./hubTaskStore.js";
+} from "./hubProposalValidation.js";
+import { resolveProposalSessionArtifactPaths } from "./hubProposalArtifactPaths.js";
+import type { ProposalTranscriptTurn } from "./hubProposalSession.js";
+import { mapSliceTypeToReadyHubStatus } from "./prdModel.js";
+import type {
+  HubProjectRunSummary,
+  HubProjectStatus,
+} from "./projectStatus.js";
+import { HUB_TASK_STORE_INIT_COMMAND } from "./hubTaskStoreCommands.js";
 
 export type HubProposalWorkbenchPhase =
   | "loading"
@@ -77,7 +81,10 @@ export interface HubProposalSessionMetadata {
   readonly proposalStatus: HubProposalSessionStatus;
   readonly confidenceSummary?: string;
   readonly agentRationale?: string;
-  readonly artifactPaths: readonly { readonly label: string; readonly path: string }[];
+  readonly artifactPaths: readonly {
+    readonly label: string;
+    readonly path: string;
+  }[];
 }
 
 export interface HubProposalSourceContext {
@@ -157,10 +164,7 @@ export const HUB_PROPOSAL_REMOTE_SYNC_COPY =
 
 const createEmptyProposalWorkbenchContent = (): Pick<
   HubProposalWorkbenchModel,
-  | "sessionOptions"
-  | "taskCards"
-  | "validationErrors"
-  | "actions"
+  "sessionOptions" | "taskCards" | "validationErrors" | "actions"
 > => ({
   sessionOptions: [],
   taskCards: [],
@@ -182,7 +186,9 @@ const readObject = (value: unknown): Record<string, unknown> =>
     : {};
 
 const readString = (value: unknown): string | undefined =>
-  typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+  typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : undefined;
 
 const readErrorMessage = (error: unknown, fallback: string): string =>
   error instanceof Error ? error.message : fallback;
@@ -200,17 +206,18 @@ const isTriageProposal = (value: unknown): value is TriageProposal => {
 export const isProposalRunSummary = (run: HubProjectRunSummary): boolean =>
   (run.branch?.startsWith("proposal/") ?? false) ||
   run.batches.some(
-    (batch) => batch.flowId === "prd-decomposition" || batch.flowId === "triage",
+    (batch) =>
+      batch.flowId === "prd-decomposition" || batch.flowId === "triage",
   );
 
 export const filterProposalRunSummaries = (
   runSummaries: readonly HubProjectRunSummary[],
-): readonly HubProjectRunSummary[] =>
-  runSummaries.filter(isProposalRunSummary);
+): readonly HubProjectRunSummary[] => runSummaries.filter(isProposalRunSummary);
 
 export const selectDefaultProposalRunDir = (
   runSummaries: readonly HubProjectRunSummary[],
-): string | undefined => filterProposalRunSummaries(runSummaries).at(-1)?.runDir;
+): string | undefined =>
+  filterProposalRunSummaries(runSummaries).at(-1)?.runDir;
 
 const resolveFlowId = (
   run: HubProjectRunSummary | undefined,
@@ -220,7 +227,10 @@ const resolveFlowId = (
   if (branchFlow === "triage" || branchFlow === "prd-decomposition") {
     return branchFlow;
   }
-  if (readString(preparedContext.taskQuery) || preparedContext.taskCount !== undefined) {
+  if (
+    readString(preparedContext.taskQuery) ||
+    preparedContext.taskCount !== undefined
+  ) {
     return "triage";
   }
   return "prd-decomposition";
@@ -232,10 +242,7 @@ const resolveCliFallback = (flowId: HubProposalFlowId): string =>
 const hasProposalEventType = (
   events: readonly HubRunEventRecord[],
   type: string,
-): boolean =>
-  events.some(
-    (record) => readObject(record.event).type === type,
-  );
+): boolean => events.some((record) => readObject(record.event).type === type);
 
 const classifyValidationError = (
   message: string,
@@ -504,7 +511,7 @@ const buildSourceContext = (
   const title =
     flowId === "triage"
       ? "Triage proposal source"
-      : readString(preparedContext.prdTitle) ?? "PRD decomposition source";
+      : (readString(preparedContext.prdTitle) ?? "PRD decomposition source");
 
   return {
     title,
@@ -527,8 +534,10 @@ const buildApplyState = (
     return validationErrors.length > 0
       ? {
           status: "none",
-          message: "Proposal has validation issues that must be resolved before apply.",
-          nextStep: "Revise the proposal or reject it before attempting local writes.",
+          message:
+            "Proposal has validation issues that must be resolved before apply.",
+          nextStep:
+            "Revise the proposal or reject it before attempting local writes.",
           artifactReferences: [],
         }
       : undefined;
@@ -536,7 +545,9 @@ const buildApplyState = (
 
   if (status === "applied") {
     const taskIds = Array.isArray(applyResult?.taskIds)
-      ? applyResult.taskIds.filter((entry): entry is string => typeof entry === "string")
+      ? applyResult.taskIds.filter(
+          (entry): entry is string => typeof entry === "string",
+        )
       : [];
     return {
       status: "applied",
@@ -747,7 +758,9 @@ const buildMetadata = (
   };
 };
 
-export const resolveHubProposalWorkbenchGridClass = (viewportWidth: number): string =>
+export const resolveHubProposalWorkbenchGridClass = (
+  viewportWidth: number,
+): string =>
   viewportWidth < HUB_DESKTOP_LAYOUT.narrowBreakpointPx
     ? "hub-proposal-grid hub-proposal-grid-narrow"
     : "hub-proposal-grid";
@@ -792,7 +805,8 @@ export const buildHubProposalWorkbenchModel = (
     };
   }
 
-  const selectedRunDir = input.selectedRunDir ?? selectDefaultProposalRunDir(runSummaries);
+  const selectedRunDir =
+    input.selectedRunDir ?? selectDefaultProposalRunDir(runSummaries);
   const selectedRun = filterProposalRunSummaries(runSummaries).find(
     (run) => run.runDir === selectedRunDir,
   );
@@ -839,7 +853,8 @@ export const buildHubProposalWorkbenchModel = (
     validationErrors = [
       {
         kind: "schema_mismatch",
-        message: "Final proposal does not match a supported PRD or triage schema.",
+        message:
+          "Final proposal does not match a supported PRD or triage schema.",
       },
     ];
   }

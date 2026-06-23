@@ -3,19 +3,16 @@ import { readPrdWarningFromTask } from "./hubPrdWarning.js";
 import type { HubRuntimePreviewAction } from "./hubRuntimeBridge.js";
 import type { HubWorktreeLeaseDiagnostic } from "./hubWorktreeLeaseDiagnostics.js";
 import {
+  HUB_TASK_STATUSES,
   formatHubTaskCommentLines,
   formatHubTaskDetailsRows,
-  HUB_TASK_STATUSES,
-  type HubFailureReason,
-  type HubTaskBoard,
-  type HubTaskProjection,
   type HubTaskStatus,
-} from "./taskBoard.js";
-import {
-  resolveFailedTaskNextAction,
-  type HubProjectStatus,
-} from "./projectStatus.js";
-import { HUB_TASK_STORE_INIT_COMMAND } from "./hubTaskStore.js";
+} from "./hubTaskShared.js";
+import { resolveFailedTaskNextAction } from "./hubFailedTask.js";
+import { HUB_TASK_STORE_INIT_COMMAND } from "./hubTaskStoreCommands.js";
+import type { HubFailureReason } from "./hubFailedTask.js";
+import type { HubProjectStatus } from "./projectStatus.js";
+import type { HubTaskBoard, HubTaskProjection } from "./taskBoard.js";
 
 export type HubTaskBoardWorkbenchPhase =
   | "loading"
@@ -438,7 +435,8 @@ const resolveRecoverActionDescription = (
   task: HubTaskProjection,
   projectStatus: HubProjectStatus | undefined,
 ): string =>
-  projectStatus?.failedTasks.find((entry) => entry.id === task.id)?.nextAction ??
+  projectStatus?.failedTasks.find((entry) => entry.id === task.id)
+    ?.nextAction ??
   `Reset execution state for ${task.id} after reviewing run artifacts.`;
 
 const buildTaskInspectorActions = (
@@ -661,7 +659,8 @@ const buildGlobalActions = (
     {
       id: "sync-push",
       label: "Preview push",
-      description: "Review local task changes before pushing to the remote source.",
+      description:
+        "Review local task changes before pushing to the remote source.",
       kind: "bridge_preview",
       bridgeAction: "sync.pushPreview",
       bridgeParams: {},
@@ -671,7 +670,8 @@ const buildGlobalActions = (
     {
       id: "sync-pull",
       label: "Preview pull",
-      description: "Review remote task changes before pulling into the local store.",
+      description:
+        "Review remote task changes before pulling into the local store.",
       kind: "bridge_preview",
       bridgeAction: "sync.pullPreview",
       bridgeParams: {},

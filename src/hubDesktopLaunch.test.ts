@@ -40,4 +40,18 @@ describe("hub desktop launch", () => {
 
     execSync("npm run typecheck", { cwd: hubDesktopDir, stdio: "pipe" });
   }, 120_000);
+
+  it("passes the hub-desktop production build", () => {
+    const hubDesktopDir = join(process.cwd(), "hub-desktop");
+    const hubDesktopTypeScript = join(
+      hubDesktopDir,
+      "node_modules",
+      "typescript",
+    );
+    if (!existsSync(hubDesktopTypeScript)) {
+      execSync("npm install", { cwd: hubDesktopDir, stdio: "pipe" });
+    }
+
+    execSync("npm run build", { cwd: hubDesktopDir, stdio: "pipe" });
+  }, 240_000);
 });
