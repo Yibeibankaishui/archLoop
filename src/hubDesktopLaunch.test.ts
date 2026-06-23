@@ -23,7 +23,11 @@ type HubDesktopLockfile = {
 const hubDesktopDir = join(process.cwd(), "hub-desktop");
 const deterministicInstallCommand = "npm ci";
 const criticalAuditCommand = "npm audit --audit-level=critical";
-const minimumPatchedElectronMajor = 41;
+const minimumPatchedElectronVersion = {
+  major: 41,
+  minor: 7,
+  patch: 2,
+} as const;
 
 const readHubDesktopJson = <T>(fileName: string): T =>
   JSON.parse(readFileSync(join(hubDesktopDir, fileName), "utf8")) as T;
@@ -43,6 +47,35 @@ const parseVersionMajor = (versionRange: string) => {
   }
 
   return Number(match[1]);
+};
+
+const parseVersionComponents = (versionRange: string) => {
+  const match = versionRange.match(/^(\d+)\.(\d+)\.(\d+)/);
+  if (!match) {
+    throw new Error(
+      `Expected a semver-like version string, got ${versionRange}`,
+    );
+  }
+
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+  };
+};
+
+const isAtLeastVersion = (versionRange: string) => {
+  const version = parseVersionComponents(versionRange);
+
+  if (version.major !== minimumPatchedElectronVersion.major) {
+    return version.major > minimumPatchedElectronVersion.major;
+  }
+
+  if (version.minor !== minimumPatchedElectronVersion.minor) {
+    return version.minor > minimumPatchedElectronVersion.minor;
+  }
+
+  return version.patch >= minimumPatchedElectronVersion.patch;
 };
 
 const ensureHubDesktopDependencies = (): void => {
@@ -83,11 +116,9 @@ describe("hub desktop launch", () => {
     expect(packageJson.scripts["audit:critical"]).toBe(criticalAuditCommand);
     expect(
       parseVersionMajor(packageJson.devDependencies.electron),
-    ).toBeGreaterThanOrEqual(minimumPatchedElectronMajor);
+    ).toBeGreaterThanOrEqual(minimumPatchedElectronVersion.major);
     expect(lockfile.lockfileVersion).toBeGreaterThanOrEqual(3);
-    expect(parseVersionMajor(resolvedElectronVersion)).toBeGreaterThanOrEqual(
-      minimumPatchedElectronMajor,
-    );
+    expect(isAtLeastVersion(resolvedElectronVersion)).toBe(true);
     expect(lockfile.packages["node_modules/vitest"]).toBeUndefined();
   });
 
