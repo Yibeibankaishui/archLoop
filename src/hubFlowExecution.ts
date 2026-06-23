@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { assertAgentCredentialsConfigured } from "./agentAuthGuidance.js";
+import type { AgentProvider } from "./AgentProvider.js";
 import {
   appendHubBatchEvent,
   appendHubTaskEvent,
@@ -39,6 +40,11 @@ import {
   prepareHubTaskRetry,
 } from "./hubTaskRetry.js";
 import {
+  readHubAgentConfig,
+  type HubAgentRole,
+  type HubAgentRoleEntry,
+} from "./hubAgentConfig.js";
+import {
   HUB_BATCH_DEFAULT_MAX_TASKS,
   HUB_BATCH_DEFAULT_STRATEGY,
   resolveEffectiveHubBatchSelection,
@@ -48,6 +54,7 @@ import {
   type HubBatchStrategy,
 } from "./hubBatchPlanner.js";
 import type { HubBatchPlannerInvoker } from "./hubBatchPlannerAgent.js";
+import { resolveHubAgentProvider } from "./hubProposalAgent.js";
 import {
   loadHubTaskBoard,
   resolveHubTaskBranch,
@@ -199,6 +206,27 @@ const isSuccessfulImplementation = (result: HubImplementTaskResult): boolean =>
 const isSuccessfulReview = (result: HubReviewTaskResult): boolean =>
   result.outcome === "success" && result.completionSignal !== undefined;
 
+const resolveHubFlowRoleEntry = (input: {
+  readonly role: HubAgentRole;
+  readonly roleEntry?: HubAgentRoleEntry;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly homeDir?: string;
+}): HubAgentRoleEntry => {
+  if (input.roleEntry) {
+    return input.roleEntry;
+  }
+
+  const config = readHubAgentConfig({
+    env: input.env,
+    homeDir: input.homeDir,
+  });
+  const entry = config.roles[input.role];
+  if (!entry) {
+    throw new Error(`Missing Hub agent role config: ${input.role}`);
+  }
+  return entry;
+};
+
 const readJsonlRecords = (path: string): readonly Record<string, unknown>[] => {
   if (!existsSync(path)) {
     return [];
@@ -305,6 +333,7 @@ const buildHubAgentPromptArgs = (
 });
 
 const runHubAgent = async (input: {
+  readonly agent: AgentProvider;
   readonly cwd: string;
   readonly promptFile: string;
   readonly flowId: string;
@@ -319,17 +348,16 @@ const runHubAgent = async (input: {
   readonly retryContext?: string;
 }) => {
   await assertAgentCredentialsConfigured({
-    providerName: "cursor",
+    providerName: input.agent.name,
     cwd: input.cwd,
     env: input.env,
   });
 
-  const { cursor } = await import("./AgentProvider.js");
   const { run } = await import("./run.js");
   const { noSandbox } = await import("./sandboxes/no-sandbox.js");
 
   return run({
-    agent: cursor("auto"),
+    agent: input.agent,
     sandbox: noSandbox(),
     cwd: input.cwd,
     promptFile: input.promptFile,
@@ -921,10 +949,23 @@ const hasBranchUnmergedWork = async (
 
 export const createHubFlowRunImplementer = (options: {
   readonly cwd: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly homeDir?: string;
+  readonly roleEntry?: HubAgentRoleEntry;
 }): HubFlowImplementer => {
+  const agent = resolveHubAgentProvider(
+    resolveHubFlowRoleEntry({
+      role: "implementation",
+      roleEntry: options.roleEntry,
+      env: options.env,
+      homeDir: options.homeDir,
+    }),
+  );
+
   return async (input) => {
     try {
       const result = await runHubAgent({
+        agent,
         cwd: options.cwd,
         promptFile: input.promptFile,
         flowId: input.flowId,
@@ -987,10 +1028,23 @@ export const createHubFlowRunImplementer = (options: {
 
 export const createHubFlowRunReviewer = (options: {
   readonly cwd: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly homeDir?: string;
+  readonly roleEntry?: HubAgentRoleEntry;
 }): HubFlowReviewer => {
+  const agent = resolveHubAgentProvider(
+    resolveHubFlowRoleEntry({
+      role: "review",
+      roleEntry: options.roleEntry,
+      env: options.env,
+      homeDir: options.homeDir,
+    }),
+  );
+
   return async (input) => {
     try {
       const result = await runHubAgent({
+        agent,
         cwd: options.cwd,
         promptFile: input.promptFile,
         flowId: input.flowId,

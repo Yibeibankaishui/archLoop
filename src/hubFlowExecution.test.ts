@@ -11,6 +11,7 @@ import { appendHubBatchEvent, createHubRunContext } from "./hubExecution.js";
 import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
 import {
   createHubFlowRunImplementer,
+  createHubFlowRunReviewer,
   formatHubFlowResultLines,
   runHubFlow,
   type HubFlowImplementer,
@@ -1734,11 +1735,15 @@ describe("with-review Hub flow execution", () => {
     );
   });
 
-  it("createHubFlowRunImplementer fails fast when cursor credentials are missing", async () => {
+  it("createHubFlowRunImplementer uses the configured implementation role provider", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "hub-flow-preflight-"));
-    const implementer = createHubFlowRunImplementer({ cwd });
+    const implementer = createHubFlowRunImplementer({
+      cwd,
+      roleEntry: { provider: "codex", model: "gpt-5.4-mini" },
+    });
 
-    vi.stubEnv("CURSOR_API_KEY", "");
+    vi.stubEnv("OPENAI_KEY", "");
+    vi.stubEnv("CODEX_HOME", "");
     vi.stubEnv("XDG_DATA_HOME", join(cwd, "xdg-data"));
     try {
       const result = await implementer({
@@ -1753,6 +1758,41 @@ describe("with-review Hub flow execution", () => {
       });
 
       expect(result.outcome).toBe("agent_failed");
+      expect(result.message).toContain("Codex agent credentials");
+      expect(result.message).toContain("OPENAI_KEY");
+      expect(result.message).not.toContain("Cursor agent credentials");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("createHubFlowRunReviewer uses the configured review role provider", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "hub-flow-review-preflight-"));
+    const reviewer = createHubFlowRunReviewer({
+      cwd,
+      roleEntry: { provider: "codex", model: "gpt-5.4" },
+    });
+
+    vi.stubEnv("OPENAI_KEY", "");
+    vi.stubEnv("CODEX_HOME", "");
+    vi.stubEnv("XDG_DATA_HOME", join(cwd, "xdg-data"));
+    try {
+      const result = await reviewer({
+        flowId: "with-review",
+        batchId: "batch-test",
+        taskId: "bd-1",
+        title: "Test task",
+        branch: "archloop/bd-1-test-task",
+        promptFile: "/tmp/prompt.md",
+        cwd,
+        runDir: cwd,
+        implementCommitCount: 1,
+      });
+
+      expect(result.outcome).toBe("agent_failed");
+      expect(result.message).toContain("Codex agent credentials");
+      expect(result.message).toContain("OPENAI_KEY");
+      expect(result.message).not.toContain("Cursor agent credentials");
       expect(result.message).toContain("archloop env init");
     } finally {
       vi.unstubAllEnvs();
