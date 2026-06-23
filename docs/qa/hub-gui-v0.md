@@ -2,6 +2,8 @@
 
 本文档用于验收 GitHub issues #151 到 #156。验收目标是确认第一版 Hub GUI 已经作为桌面端应用落地，并且能通过真实本地 Hub runtime bridge 读取项目、任务、运行、proposal session 和同步状态。
 
+Binding design contract: [`docs/qa/hub-gui-v0-contract.md`](./hub-gui-v0-contract.md)
+
 ## Scope
 
 | Issue | Scope                                            | Primary evidence                                                                                                                      |
@@ -16,6 +18,7 @@
 Out of scope:
 
 - The historical static prototype in `gui/`.
+- The MCP-only duplicate overview surface that does not participate in the desktop shell contract.
 - Planner selection correctness regressions tracked separately by #157, #158, and #159.
 - Direct GitHub mutation from the proposal screen. Current v0 copy keeps proposal apply local-first and remote sync separate.
 

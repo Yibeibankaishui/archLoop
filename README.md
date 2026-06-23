@@ -80,6 +80,9 @@ macOS AppKit/Electron windows, use `npm run dev:renderer-fixtures` in
 `hub-desktop/` and open `http://127.0.0.1:5173/`; this exercises the React
 renderer against browser-safe fixture bridge data without requiring Electron.
 The older static `gui/` prototype remains a historical reference only.
+The binding design contract and QA evidence live in
+[`docs/qa/hub-gui-v0-contract.md`](docs/qa/hub-gui-v0-contract.md) and
+[`docs/qa/hub-gui-v0.md`](docs/qa/hub-gui-v0.md).
 
 ## GUI prototype
 

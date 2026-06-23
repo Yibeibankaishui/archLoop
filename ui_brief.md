@@ -19,6 +19,7 @@ The UI matters because the CLI already exposes the underlying model, but users n
 - `CONTEXT.md`: Use the exact product language. Key terms include archLoop, sandbox, host, agent, archLoop Hub, Hub project, Hub task board, local task store, remote task source, task sync, task selector, flow, flow batch, Hub run directory, Hub agent config, Hub agent role, worktree, worktree lease, branch strategy, and completion signal. Avoid calling Hub merely a GUI or dashboard.
 - `docs/product-definition-and-scope.md`: archLoop is positioned as a reliable automated engineer, not a cute assistant or one-shot generator. The product promise is "Give it work. It ships verified code." The core scope is task to code, agent execution loop, quality loop, isolated workspaces, Hub/control plane, and capability packs.
 - `docs/prd/archloop-hub-task-board.md`: Hub v1 is CLI-first, GUI later consumes the same model. Beads is the local task store. GitHub Issues and similar systems are remote task sources. PRD decomposition and triage are agent-driven proposal flows, but TypeScript orchestration owns validation, approval, state writes, and global transitions. Proposal flows write local Beads state only; remote changes happen through explicit pull/push/sync commands.
+- `docs/qa/hub-gui-v0-contract.md`: Binding desktop contract for the restored Hub GUI v0 visual baseline, including the four selected screens, screenshot inventory, and visible command matrix.
 - `docs/prd/archloop-hub-task-board.md`: Canonical task statuses are `inbox`, `needs_info`, `ready_for_agent`, `ready_for_human`, `blocked`, `implementing`, `reviewing`, `waiting_for_merge`, `merging`, `done`, `wontfix`, `failed`, and `sync_conflict`. Excluded statuses must not appear: `pending`, `triaging`, `waiting_for_review`, `planning`, `reserved`, `claimed`, `deferred`.
 - `docs/prd/archloop-hub-task-board.md`: Execution transitions with review are `ready_for_agent -> implementing -> reviewing -> waiting_for_merge -> merging -> done`; without review they skip `reviewing`. Failure can move any execution status to `failed`; open statuses can become `sync_conflict`; failed tasks can recover to `ready_for_agent`, `blocked`, `ready_for_human`, or `wontfix`.
 - `src/taskBoard.ts`: A task projection contains `id`, `title`, `beadsStatus`, `hubStatus`, `claim`, `claimState`, `labels`, `metadata`, `description`, `notes`, `comments`, `remoteRefs`, and `runRefs`. Board groups are status-grouped lists of task projections.
@@ -35,6 +36,7 @@ Use these only for human traceability. The pasteable prompt below is self-contai
 - `CONTEXT.md`
 - `docs/product-definition-and-scope.md`
 - `docs/prd/archloop-hub-task-board.md`
+- `docs/qa/hub-gui-v0-contract.md`
 - `docs/qa/archloop-hub-task-board.md`
 - `src/taskBoard.ts`
 - `src/projectStatus.ts`
