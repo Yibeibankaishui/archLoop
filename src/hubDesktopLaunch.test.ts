@@ -29,21 +29,15 @@ describe("hub desktop launch", () => {
 
   it("passes hub-desktop typecheck against the runtime contract exports", () => {
     const hubDesktopDir = join(process.cwd(), "hub-desktop");
-    const hubDesktopNodeModules = join(
+    const hubDesktopTypeScript = join(
       hubDesktopDir,
       "node_modules",
       "typescript",
     );
-    if (!existsSync(hubDesktopNodeModules)) {
-      execSync("npm install", {
-        cwd: hubDesktopDir,
-        stdio: "pipe",
-      });
+    if (!existsSync(hubDesktopTypeScript)) {
+      execSync("npm install", { cwd: hubDesktopDir, stdio: "pipe" });
     }
 
-    execSync("npm run typecheck", {
-      cwd: hubDesktopDir,
-      stdio: "pipe",
-    });
+    execSync("npm run typecheck", { cwd: hubDesktopDir, stdio: "pipe" });
   }, 120_000);
 });

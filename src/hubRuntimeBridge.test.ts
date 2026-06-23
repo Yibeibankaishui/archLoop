@@ -75,18 +75,6 @@ describe("hubRuntimeBridge contract", () => {
     });
   });
 
-  it("exports HubTaskStatus for hub-desktop task board filters", () => {
-    const statuses = listCanonicalHubTaskStatuses();
-    const sampleStatus = statuses[0];
-    expect(sampleStatus).toBeDefined();
-    if (!sampleStatus) {
-      return;
-    }
-
-    const hubStatus: HubTaskStatus = sampleStatus;
-    expect(statuses).toContain(hubStatus);
-  });
-
   it("rejects excluded Hub task statuses in bridge fixtures and vocabulary", () => {
     const board = createHubDesktopFixtureTaskBoard();
     const statuses = board.tasks.map((task) => task.hubStatus);
@@ -94,8 +82,11 @@ describe("hubRuntimeBridge contract", () => {
     for (const status of EXCLUDED_HUB_TASK_STATUSES) {
       expect(isCanonicalHubTaskStatus(status)).toBe(false);
     }
-    for (const status of listCanonicalHubTaskStatuses()) {
-      expect(isCanonicalHubTaskStatus(status)).toBe(true);
+    const canonicalStatuses = listCanonicalHubTaskStatuses();
+    expect(canonicalStatuses.length).toBeGreaterThan(0);
+    for (const status of canonicalStatuses) {
+      const hubStatus: HubTaskStatus = status;
+      expect(isCanonicalHubTaskStatus(hubStatus)).toBe(true);
     }
   });
 });
