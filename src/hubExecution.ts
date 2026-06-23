@@ -69,6 +69,7 @@ export interface HubBatchPlannedEvent {
     readonly reason: string;
   }[];
   readonly fallbackReason?: string;
+  readonly diagnosticReason?: string;
   readonly rationale?: string;
 }
 

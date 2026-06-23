@@ -1029,6 +1029,7 @@ Task-board flows treat `ready_for_agent` as the **candidate pool**, not the auto
 | `conservative`      | Selects at most one eligible ready task.                                                                                                                                                                                   |
 
 Hub batch planner candidates expose only structured blocker state to the planner. `openBlockers=[]` and `unknownBlockers=[]` mean the candidate is unblocked, even if the task body still contains stale `## Blocked by` prose. The planner does not infer blockers from raw description text.
+If the planner returns an `explicit_blocker` deferral for a candidate with no live `openBlockers`, no `unknownBlockers`, and no dependency on a selected task, Hub rejects that deferral, recovers the safe candidate up to `maxTasks`, and records `invalid_explicit_blocker_deferral` in the batch event/CLI diagnostics.
 
 If a later `archloop run . --flow <id>` finds an unfinished previous batch for the same flow with tasks still in `waiting_for_merge`, it creates a fresh Hub run directory for the retry and resumes that old batch's merge selection by its original batch id before planning or claiming new `ready_for_agent` tasks. Ready tasks that exist at the same time stay unclaimed until the resumed merge batch completes. Failed, stale, or inconsistent task states are reported with explicit recovery or repair guidance instead of being automatically modified.
 

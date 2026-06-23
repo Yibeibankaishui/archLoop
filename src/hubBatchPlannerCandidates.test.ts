@@ -226,6 +226,37 @@ describe("hubBatchPlannerCandidates", () => {
     expect(candidate?.unknownBlockers).toEqual(["bd-missing"]);
   });
 
+  it("treats stale Blocked by #152 prose as unblocked when #152 is done", async () => {
+    const { repoDir, env } = await createTempHubTaskStoreRepo({
+      depListRecords: [],
+      listRecords: [
+        {
+          id: "bd-github-152",
+          title: "Closed github blocker",
+          hub_status: "done",
+          remoteRefs: [{ url: "github#152" }],
+        },
+      ],
+    });
+
+    const [candidate] = enrichHubBatchPlannerCandidates({
+      cwd: repoDir,
+      candidates: [
+        readyTask("bd-child", {
+          description: `## Blocked by
+
+- #152`,
+        }),
+      ],
+      env,
+    });
+
+    expect(candidate?.blockersDeclared).toEqual(["github#152"]);
+    expect(candidate?.blockersResolved).toHaveLength(1);
+    expect(candidate?.openBlockers).toEqual([]);
+    expect(candidate?.unknownBlockers).toEqual([]);
+  });
+
   it("strips stale blocker prose from the planner payload", () => {
     const candidate: HubBatchPlannerCandidate = {
       id: "bd-child",
