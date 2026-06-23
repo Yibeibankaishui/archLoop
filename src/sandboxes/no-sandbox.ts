@@ -12,6 +12,15 @@
  */
 
 import { spawn, type StdioOptions } from "node:child_process";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type {
   NoSandboxProvider,
@@ -24,6 +33,24 @@ export interface NoSandboxOptions {
   /** Environment variables injected by this provider. Merged at launch time. */
   readonly env?: Record<string, string>;
 }
+
+const createIsolatedGitGlobalConfig = (
+  env: NodeJS.ProcessEnv,
+): { readonly path: string; readonly cleanup: () => void } => {
+  const tmpDir = mkdtempSync(join(tmpdir(), "archloop-gitconfig-"));
+  const configPath = join(tmpDir, ".gitconfig");
+  const sourcePath = env.GIT_CONFIG_GLOBAL ?? join(homedir(), ".gitconfig");
+  const sourceContent = existsSync(sourcePath)
+    ? readFileSync(sourcePath, "utf8")
+    : "";
+
+  writeFileSync(configPath, sourceContent);
+
+  return {
+    path: configPath,
+    cleanup: () => rmSync(tmpDir, { recursive: true, force: true }),
+  };
+};
 
 /**
  * Create a no-sandbox provider.
@@ -38,7 +65,12 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
   env: options?.env ?? {},
   create: async (createOptions): Promise<NoSandboxHandle> => {
     const worktreePath = createOptions.worktreePath;
-    const processEnv = { ...process.env, ...createOptions.env };
+    const baseEnv = { ...process.env, ...createOptions.env };
+    const isolatedGitConfig = createIsolatedGitGlobalConfig(baseEnv);
+    const processEnv = {
+      ...baseEnv,
+      GIT_CONFIG_GLOBAL: isolatedGitConfig.path,
+    };
 
     const handle: NoSandboxHandle = {
       worktreePath,
@@ -127,7 +159,7 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
       },
 
       close: async (): Promise<void> => {
-        // No-op — no container to tear down
+        isolatedGitConfig.cleanup();
       },
     };
 
