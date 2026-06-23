@@ -734,6 +734,121 @@ describe("Hub flow planner", () => {
     );
   });
 
+  it("starts planned batch implementations before the first selected task finishes", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-parallel-batch-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-first",
+        title: "First ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-second",
+        title: "Second ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    let finishImplementations!: () => void;
+    const finishImplementationsPromise = new Promise<void>((resolve) => {
+      finishImplementations = resolve;
+    });
+    let resolveBothStarted!: () => void;
+    const bothStarted = new Promise<void>((resolve) => {
+      resolveBothStarted = resolve;
+    });
+    const startedTaskIds: string[] = [];
+    const implementer: HubFlowImplementer = async (input) => {
+      startedTaskIds.push(input.taskId);
+      if (startedTaskIds.length === 2) {
+        resolveBothStarted();
+      }
+      await finishImplementationsPromise;
+      return {
+        outcome: "success",
+        commits: [{ sha: `commit-${input.taskId}` }],
+        completionSignal: "<promise>COMPLETE</promise>",
+      };
+    };
+    const waitForBothStarted = async (): Promise<boolean> =>
+      await new Promise((resolve) => {
+        const timeout = setTimeout(() => resolve(false), 1000);
+        void bothStarted.then(() => {
+          clearTimeout(timeout);
+          resolve(true);
+        });
+      });
+
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "parallel-batch",
+    );
+    const runPromise = runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      batchStrategy: "planned",
+      maxTasks: 2,
+      batchPlanner: async () =>
+        `<batch-plan>${JSON.stringify({
+          selectedTaskIds: ["bd-first", "bd-second"],
+          deferred: [],
+          rationale: "Two independent tasks can run in parallel.",
+        })}</batch-plan>`,
+      implementer,
+      runMergePhase: false,
+    });
+
+    const secondTaskStartedBeforeFirstFinished = await waitForBothStarted();
+    finishImplementations();
+    const result = await runPromise;
+
+    expect(secondTaskStartedBeforeFirstFinished).toBe(true);
+    expect(new Set(startedTaskIds)).toEqual(new Set(["bd-first", "bd-second"]));
+    expect(result.selectedTaskIds).toEqual(["bd-first", "bd-second"]);
+    expect(result.results).toHaveLength(2);
+
+    const taskEvents = await readJsonl(
+      join(result.runDir, "events", "task.jsonl"),
+    );
+    const firstSuccessIndex = taskEvents.findIndex(
+      (event) =>
+        (event as { type?: string }).type === "task_implementation_succeeded",
+    );
+    const startedBeforeFirstSuccess = taskEvents
+      .slice(0, firstSuccessIndex)
+      .filter(
+        (event) =>
+          (event as { type?: string }).type === "task_implementation_started",
+      )
+      .map((event) => (event as { taskId: string }).taskId);
+    expect(new Set(startedBeforeFirstSuccess)).toEqual(
+      new Set(["bd-first", "bd-second"]),
+    );
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(
+      finalState.every(
+        (task) => task.metadata.hubStatus === "waiting_for_merge",
+      ),
+    ).toBe(true);
+  });
+
   it("limited batch strategy selects eligible ready tasks in ready queue order up to max-tasks", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-limited-"));
     await initRepo(repoDir);
