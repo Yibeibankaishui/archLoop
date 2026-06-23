@@ -29,6 +29,18 @@
     "./sandboxes/no-sandbox": {
       "import": "./dist/sandboxes/no-sandbox.js",
       "types": "./dist/sandboxes/no-sandbox.d.ts"
+    },
+    "./hub-runtime-bridge": {
+      "import": "./dist/hubRuntimeBridgeService.js",
+      "types": "./dist/hubRuntimeBridgeService.d.ts"
+    },
+    "./hub-runtime-contract": {
+      "import": "./dist/hubRuntimeBridge.js",
+      "types": "./dist/hubRuntimeBridge.d.ts"
+    },
+    "./hub-desktop-shell": {
+      "import": "./dist/hubDesktopShell.js",
+      "types": "./dist/hubDesktopShell.d.ts"
     }
   },
   "bin": {
