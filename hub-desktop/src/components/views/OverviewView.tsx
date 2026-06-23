@@ -10,6 +10,7 @@ import {
   formatHubOverviewPath,
   resolveHubOverviewGridClass,
   type HubOverviewAction,
+  type HubOverviewBannerSeverity,
 } from "@yibeibankaishui/archloop/hub-project-overview";
 
 export interface OverviewViewProps {
@@ -27,7 +28,7 @@ export interface OverviewViewProps {
   ) => Promise<string | undefined>;
 }
 
-const bannerClassName = (severity: "info" | "warning" | "error"): string => {
+const bannerClassName = (severity: HubOverviewBannerSeverity): string => {
   switch (severity) {
     case "error":
       return "hub-banner is-error";

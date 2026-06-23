@@ -211,3 +211,31 @@ export const describeHubRuntimeAction = (
   }
   return { kind: "read", requiresConfirm: false };
 };
+
+export const buildHubRuntimeExecuteParams = (
+  preview: HubRuntimeActionPreview,
+  params: Record<string, unknown>,
+): HubRuntimeRequestMap[HubRuntimeMutatingAction] => {
+  switch (preview.action) {
+    case "recover.execute":
+      return {
+        ...params,
+        outcome: "ready_for_agent",
+        confirmToken: preview.confirmToken,
+      };
+    case "task.createExecute":
+      return {
+        ...params,
+        confirmToken: preview.confirmToken,
+      };
+    case "sync.pushExecute":
+    case "sync.pullExecute":
+      return {
+        confirmToken: preview.confirmToken,
+      };
+    default: {
+      const exhaustive: never = preview.action;
+      return exhaustive;
+    }
+  }
+};

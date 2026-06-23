@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type {
-  HubProjectStatus,
-  HubRuntimeActionPreview,
-  HubRuntimePreviewAction,
-  HubTaskBoard,
-  HubTaskProjection,
+import {
+  buildHubRuntimeExecuteParams,
+  type HubProjectStatus,
+  type HubRuntimeActionPreview,
+  type HubRuntimePreviewAction,
+  type HubTaskBoard,
+  type HubTaskProjection,
 } from "@yibeibankaishui/archloop/hub-runtime-contract";
 import {
   HUB_DESKTOP_NAV_SECTIONS,
@@ -107,24 +108,9 @@ export const App = () => {
     params: Record<string, unknown>,
   ): Promise<string | undefined> => {
     const bridge = hubRuntimeClient();
-    const executeParams =
-      preview.action === "recover.execute"
-        ? {
-            ...params,
-            outcome: "ready_for_agent",
-            confirmToken: preview.confirmToken,
-          }
-        : preview.action === "task.createExecute"
-          ? {
-              ...params,
-              confirmToken: preview.confirmToken,
-            }
-          : {
-              confirmToken: preview.confirmToken,
-            };
     const result = await bridge.invoke({
       action: preview.action,
-      params: executeParams as never,
+      params: buildHubRuntimeExecuteParams(preview, params) as never,
     });
     if (!result.ok) {
       return result.error.message;

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   EXCLUDED_HUB_TASK_STATUSES,
   assertNoExcludedHubTaskStatuses,
+  buildHubRuntimeExecuteParams,
   describeHubRuntimeAction,
   listCanonicalHubTaskStatuses,
 } from "./hubRuntimeBridge.js";
@@ -14,6 +15,48 @@ import { createHubRuntimeBridgeService } from "./hubRuntimeBridgeService.js";
 import { isCanonicalHubTaskStatus } from "./taskBoard.js";
 
 describe("hubRuntimeBridge contract", () => {
+  it("builds execute params from preview actions", () => {
+    expect(
+      buildHubRuntimeExecuteParams(
+        {
+          action: "recover.execute",
+          summary: "Recover arch-2",
+          confirmToken: "recover-token",
+        },
+        { taskId: "arch-2" },
+      ),
+    ).toEqual({
+      taskId: "arch-2",
+      outcome: "ready_for_agent",
+      confirmToken: "recover-token",
+    });
+    expect(
+      buildHubRuntimeExecuteParams(
+        {
+          action: "sync.pushExecute",
+          summary: "Push",
+          confirmToken: "push-token",
+        },
+        { cwd: "/repo" },
+      ),
+    ).toEqual({
+      confirmToken: "push-token",
+    });
+    expect(
+      buildHubRuntimeExecuteParams(
+        {
+          action: "task.createExecute",
+          summary: "Create",
+          confirmToken: "create-token",
+        },
+        { title: "New task" },
+      ),
+    ).toEqual({
+      title: "New task",
+      confirmToken: "create-token",
+    });
+  });
+
   it("describes mutating actions as confirm-gated", () => {
     expect(describeHubRuntimeAction("recover.execute")).toEqual({
       kind: "mutating",

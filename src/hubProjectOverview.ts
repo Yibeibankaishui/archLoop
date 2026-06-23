@@ -93,6 +93,48 @@ export interface BuildHubOverviewModelInput {
 const REMOTE_SYNC_DOES_NOT_MUTATE_COPY =
   "Counts reflect local task metadata only. Remote sync requires preview and confirm; approving a proposal does not mutate GitHub.";
 
+const RUNTIME_UNAVAILABLE_CLI_FALLBACK = "archloop project status";
+
+const createEmptyHubOverviewContent = (): Pick<
+  HubOverviewModel,
+  | "banners"
+  | "actions"
+  | "statusCountEntries"
+  | "syncSections"
+  | "failedTasks"
+  | "activeBatches"
+  | "runDirectories"
+  | "recentEvents"
+  | "worktreeLeaseDiagnostics"
+> => ({
+  banners: [],
+  actions: [],
+  statusCountEntries: [],
+  syncSections: [],
+  failedTasks: [],
+  activeBatches: [],
+  runDirectories: [],
+  recentEvents: [],
+  worktreeLeaseDiagnostics: [],
+});
+
+const createRuntimeUnavailableOverviewModel = (
+  runtimeError: string,
+): HubOverviewModel => ({
+  phase: "runtime_unavailable",
+  runtimeError,
+  ...createEmptyHubOverviewContent(),
+  banners: [
+    {
+      id: "runtime-unavailable",
+      severity: "error",
+      title: "Hub runtime unavailable",
+      message: runtimeError,
+      cliFallback: RUNTIME_UNAVAILABLE_CLI_FALLBACK,
+    },
+  ],
+});
+
 const taskStoreUnavailableReason = (status: HubProjectStatus): string | undefined => {
   if (!status.beadsAvailable) {
     return "Beads runtime is unavailable. Install dependencies, set ARCHLOOP_BD_PATH, or use the bundled runtime.";
@@ -272,7 +314,7 @@ const buildLocalSyncSection = (
     title: "Local task store",
     scope: "local",
     description: unavailable
-      ? (unavailable ?? "Local task store is unavailable.")
+      ? unavailable
       : "Counts come from the local Beads task store in this repository.",
     counts,
   };
@@ -369,67 +411,22 @@ export const buildHubOverviewModel = (
   if (phase === "loading") {
     return {
       phase,
-      banners: [],
-      actions: [],
-      statusCountEntries: [],
-      syncSections: [],
-      failedTasks: [],
-      activeBatches: [],
-      runDirectories: [],
-      recentEvents: [],
-      worktreeLeaseDiagnostics: [],
+      ...createEmptyHubOverviewContent(),
     };
   }
 
   if (phase === "runtime_unavailable") {
-    return {
-      phase,
-      runtimeError: input.runtimeError,
-      banners: [
-        {
-          id: "runtime-unavailable",
-          severity: "error",
-          title: "Hub runtime unavailable",
-          message:
-            input.runtimeError ??
-            "The desktop runtime bridge could not load local Hub data.",
-          cliFallback: "archloop project status",
-        },
-      ],
-      actions: [],
-      statusCountEntries: [],
-      syncSections: [],
-      failedTasks: [],
-      activeBatches: [],
-      runDirectories: [],
-      recentEvents: [],
-      worktreeLeaseDiagnostics: [],
-    };
+    return createRuntimeUnavailableOverviewModel(
+      input.runtimeError ??
+        "The desktop runtime bridge could not load local Hub data.",
+    );
   }
 
   const status = input.status;
   if (!status) {
-    return {
-      phase: "runtime_unavailable",
-      runtimeError: "Hub project status is unavailable.",
-      banners: [
-        {
-          id: "runtime-unavailable",
-          severity: "error",
-          title: "Hub runtime unavailable",
-          message: "Hub project status is unavailable.",
-          cliFallback: "archloop project status",
-        },
-      ],
-      actions: [],
-      statusCountEntries: [],
-      syncSections: [],
-      failedTasks: [],
-      activeBatches: [],
-      runDirectories: [],
-      recentEvents: [],
-      worktreeLeaseDiagnostics: [],
-    };
+    return createRuntimeUnavailableOverviewModel(
+      "Hub project status is unavailable.",
+    );
   }
 
   return {
