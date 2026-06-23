@@ -22,6 +22,8 @@ import type {
 import { describeHubRuntimeAction } from "./hubRuntimeBridge.js";
 import {
   createHubDesktopFixtureProjectStatus,
+  createHubDesktopFixtureRunEvents,
+  createHubDesktopFixtureRunSummaries,
   createHubDesktopFixtureTaskBoard,
   HUB_DESKTOP_FIXTURE_REPO_ROOT,
 } from "./hubRuntimeBridgeFixtures.js";
@@ -395,12 +397,17 @@ export const createHubRuntimeBridgeService = (
         return success(task as unknown as HubRuntimeResponseMap[A]);
       }
       case "run.listSummaries":
-        return success([] as unknown as HubRuntimeResponseMap[A]);
-      case "run.readEvents":
-        return success({
-          runDir: (params as HubRuntimeRequestMap["run.readEvents"]).runDir,
-          events: [],
-        } as unknown as HubRuntimeResponseMap[A]);
+        return success(
+          createHubDesktopFixtureRunSummaries() as unknown as HubRuntimeResponseMap[A],
+        );
+      case "run.readEvents": {
+        const runParams = params as HubRuntimeRequestMap["run.readEvents"];
+        return success(
+          createHubDesktopFixtureRunEvents({
+            runDir: runParams.runDir,
+          }) as unknown as HubRuntimeResponseMap[A],
+        );
+      }
       case "proposal.readSession":
         return failure({
           code: "not_found",
