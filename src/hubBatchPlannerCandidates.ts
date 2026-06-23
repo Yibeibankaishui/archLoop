@@ -1,6 +1,11 @@
-import { parseDeclaredBeadsBlockers } from "./hubBlockerResolution.js";
+import { parseDeclaredHubBlockers } from "./hubBlockerResolution.js";
 import { runBdTextForHubTaskStore } from "./hubTaskStore.js";
-import type { HubTaskProjection } from "./taskBoard.js";
+import {
+  isCompletedHubStatus,
+  loadHubTaskBoard,
+  type HubTaskBoard,
+  type HubTaskProjection,
+} from "./taskBoard.js";
 
 export type HubBatchPlannerBlockerSource =
   | "beads_dependency"
@@ -20,7 +25,18 @@ export interface HubBatchPlannerCandidate {
   readonly parentPrdRef?: string;
   readonly explicitBlockers: readonly string[];
   readonly blockersDeclared: readonly string[];
+  readonly blockersResolved: readonly HubBatchPlannerResolvedBlocker[];
+  readonly openBlockers: readonly string[];
+  readonly unknownBlockers: readonly string[];
   readonly blockerSource: HubBatchPlannerBlockerSource;
+}
+
+export interface HubBatchPlannerResolvedBlocker {
+  readonly ref: string;
+  readonly taskId: string;
+  readonly title: string;
+  readonly hubStatus: HubTaskProjection["hubStatus"];
+  readonly claimState?: HubTaskProjection["claimState"];
 }
 
 const readFirstString = (
@@ -80,6 +96,17 @@ const readDependencyIds = (
 const uniqueStrings = (values: readonly string[]): string[] => [
   ...new Set(values),
 ];
+
+const tryLoadHubTaskBoard = (
+  cwd: string,
+  env?: NodeJS.ProcessEnv,
+): HubTaskBoard | undefined => {
+  try {
+    return loadHubTaskBoard(cwd, env);
+  } catch {
+    return undefined;
+  }
+};
 
 const parseBdJsonOutput = (stdout: string): unknown[] => {
   const trimmed = stdout.trim();
@@ -197,10 +224,89 @@ const resolveBlockerSource = (input: {
   return "none";
 };
 
+const buildHubTaskIndexes = (board: HubTaskBoard): {
+  readonly byId: ReadonlyMap<string, HubTaskProjection>;
+  readonly byRemoteRef: ReadonlyMap<string, HubTaskProjection>;
+} => {
+  const byId = new Map<string, HubTaskProjection>();
+  const byRemoteRef = new Map<string, HubTaskProjection>();
+
+  for (const task of board.tasks) {
+    byId.set(task.id, task);
+    for (const ref of task.remoteRefs) {
+      if (!byRemoteRef.has(ref)) {
+        byRemoteRef.set(ref, task);
+      }
+    }
+  }
+
+  return { byId, byRemoteRef };
+};
+
+const resolveDeclaredBlocker = (
+  ref: string,
+  indexes: {
+    readonly byId: ReadonlyMap<string, HubTaskProjection>;
+    readonly byRemoteRef: ReadonlyMap<string, HubTaskProjection>;
+  },
+): HubTaskProjection | undefined =>
+  ref.startsWith("github#")
+    ? indexes.byRemoteRef.get(ref)
+    : indexes.byId.get(ref);
+
+const resolveDeclaredBlockers = (
+  declaredBlockers: readonly string[],
+  board: HubTaskBoard | undefined,
+): {
+  readonly blockersResolved: readonly HubBatchPlannerResolvedBlocker[];
+  readonly openBlockers: readonly string[];
+  readonly unknownBlockers: readonly string[];
+} => {
+  if (!board) {
+    return {
+      blockersResolved: [],
+      openBlockers: [],
+      unknownBlockers: declaredBlockers,
+    };
+  }
+
+  const indexes = buildHubTaskIndexes(board);
+  const blockersResolved: HubBatchPlannerResolvedBlocker[] = [];
+  const openBlockers: string[] = [];
+  const unknownBlockers: string[] = [];
+
+  for (const ref of declaredBlockers) {
+    const task = resolveDeclaredBlocker(ref, indexes);
+    if (!task) {
+      unknownBlockers.push(ref);
+      continue;
+    }
+
+    blockersResolved.push({
+      ref,
+      taskId: task.id,
+      title: task.title,
+      hubStatus: task.hubStatus,
+      claimState: task.claimState,
+    });
+
+    if (!isCompletedHubStatus(task.hubStatus)) {
+      openBlockers.push(ref);
+    }
+  }
+
+  return {
+    blockersResolved,
+    openBlockers: uniqueStrings(openBlockers),
+    unknownBlockers: uniqueStrings(unknownBlockers),
+  };
+};
+
 export const enrichHubBatchPlannerCandidate = (
   task: HubTaskProjection,
   input: {
     readonly beadsDependencyBlockers?: readonly string[];
+    readonly hubTaskBoard?: HubTaskBoard;
   } = {},
 ): HubBatchPlannerCandidate => {
   const metadataBlockers = readMetadataBlockers(task.metadata);
@@ -210,7 +316,7 @@ export const enrichHubBatchPlannerCandidate = (
       ? beadsDependencyBlockers
       : metadataBlockers;
 
-  const declaredBlockers = parseDeclaredBeadsBlockers(task.description ?? "");
+  const declaredBlockers = parseDeclaredHubBlockers(task.description ?? "");
   const blockersDeclared =
     explicitBlockers.length > 0 ? explicitBlockers : declaredBlockers;
   const blockerSource = resolveBlockerSource({
@@ -218,6 +324,10 @@ export const enrichHubBatchPlannerCandidate = (
     metadataBlockers,
     blockersDeclared,
   });
+  const blockerResolution = resolveDeclaredBlockers(
+    blockersDeclared,
+    input.hubTaskBoard,
+  );
 
   return {
     id: task.id,
@@ -232,6 +342,9 @@ export const enrichHubBatchPlannerCandidate = (
     parentPrdRef: readParentPrdRef(task.metadata, task.remoteRefs ?? []),
     explicitBlockers,
     blockersDeclared,
+    blockersResolved: blockerResolution.blockersResolved,
+    openBlockers: blockerResolution.openBlockers,
+    unknownBlockers: blockerResolution.unknownBlockers,
     blockerSource,
   };
 };
@@ -247,10 +360,12 @@ export const enrichHubBatchPlannerCandidates = (input: {
     taskIds,
     env: input.env,
   });
+  const hubTaskBoard = tryLoadHubTaskBoard(input.cwd, input.env);
 
   return input.candidates.map((task) =>
     enrichHubBatchPlannerCandidate(task, {
       beadsDependencyBlockers: beadsDependencyBlockersByTaskId[task.id],
+      hubTaskBoard,
     }),
   );
 };
