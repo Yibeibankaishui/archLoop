@@ -7,6 +7,19 @@ import { describe, expect, it } from "vitest";
 import { HUB_RUNTIME_BRIDGE_CHANNELS } from "./hubRuntimeBridge.js";
 import { createHubRuntimeBridgeService } from "./hubRuntimeBridgeService.js";
 
+const hubDesktopDir = join(process.cwd(), "hub-desktop");
+
+const ensureHubDesktopDependencies = (): void => {
+  const hubDesktopTypeScript = join(
+    hubDesktopDir,
+    "node_modules",
+    "typescript",
+  );
+  if (!existsSync(hubDesktopTypeScript)) {
+    execSync("npm install", { cwd: hubDesktopDir, stdio: "pipe" });
+  }
+};
+
 describe("hub desktop launch", () => {
   it("defines an independent hub-desktop package entrypoint and bridge channel", () => {
     const packageJson = JSON.parse(
@@ -28,30 +41,12 @@ describe("hub desktop launch", () => {
   });
 
   it("passes hub-desktop typecheck against the runtime contract exports", () => {
-    const hubDesktopDir = join(process.cwd(), "hub-desktop");
-    const hubDesktopTypeScript = join(
-      hubDesktopDir,
-      "node_modules",
-      "typescript",
-    );
-    if (!existsSync(hubDesktopTypeScript)) {
-      execSync("npm install", { cwd: hubDesktopDir, stdio: "pipe" });
-    }
-
+    ensureHubDesktopDependencies();
     execSync("npm run typecheck", { cwd: hubDesktopDir, stdio: "pipe" });
   }, 120_000);
 
   it("passes the hub-desktop production build", () => {
-    const hubDesktopDir = join(process.cwd(), "hub-desktop");
-    const hubDesktopTypeScript = join(
-      hubDesktopDir,
-      "node_modules",
-      "typescript",
-    );
-    if (!existsSync(hubDesktopTypeScript)) {
-      execSync("npm install", { cwd: hubDesktopDir, stdio: "pipe" });
-    }
-
+    ensureHubDesktopDependencies();
     execSync("npm run build", { cwd: hubDesktopDir, stdio: "pipe" });
   }, 240_000);
 });

@@ -1,13 +1,6 @@
-import type { HubTaskProjection } from "./taskBoard.js";
+import type { HubFailureReason, HubTaskProjection } from "./taskBoard.js";
 
-export type HubFailureReason =
-  | "agent_failed"
-  | "sandbox_failed"
-  | "merge_conflict"
-  | "merge_failed"
-  | "verification_failure"
-  | "close_failed"
-  | "unknown";
+export type { HubFailureReason } from "./taskBoard.js";
 
 export const resolveFailedTaskNextAction = (
   task: Pick<HubTaskProjection, "id">,

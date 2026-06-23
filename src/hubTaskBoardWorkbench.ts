@@ -4,6 +4,7 @@ import type { HubRuntimePreviewAction } from "./hubRuntimeBridge.js";
 import type { HubWorktreeLeaseDiagnostic } from "./hubWorktreeLeaseDiagnostics.js";
 import {
   HUB_TASK_STATUSES,
+  formatHubTaskBoardStatusLabel,
   formatHubTaskCommentLines,
   formatHubTaskDetailsRows,
   type HubTaskStatus,
@@ -137,6 +138,8 @@ export interface BuildHubTaskInspectorModelInput {
   readonly projectStatus?: HubProjectStatus;
 }
 
+export { formatHubTaskBoardStatusLabel };
+
 const TASK_BOARD_CLI_FALLBACK = "archloop tasks list";
 
 const emptyHubTaskBoardWorkbenchModel = (
@@ -178,9 +181,6 @@ const taskStoreUnavailableReason = (
   }
   return undefined;
 };
-
-export const formatHubTaskBoardStatusLabel = (status: HubTaskStatus): string =>
-  status.replaceAll("_", " ");
 
 export const readHubTaskBoardSyncState = (
   task: HubTaskProjection,

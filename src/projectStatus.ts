@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { resolveFailedTaskNextAction } from "./hubFailedTask.js";
 import { isBdAvailable, resolveBdExecutable } from "./resolveBdExecutable.js";
 import {
   HUB_TASK_STORE_INIT_COMMAND,
@@ -211,27 +212,7 @@ const createEmptySyncCounts = (): MutableHubProjectSyncCounts => ({
 const readTaskCount = (value: unknown): number | undefined =>
   Array.isArray(value) ? value.length : undefined;
 
-export const resolveFailedTaskNextAction = (
-  task: Pick<HubTaskProjection, "id">,
-  failureReason: HubFailureReason | undefined,
-): string => {
-  const recoverCmd = `archloop tasks recover ${task.id}`;
-  switch (failureReason) {
-    case "agent_failed":
-    case "sandbox_failed":
-      return `${recoverCmd} to reset and retry agent work`;
-    case "merge_conflict":
-      return `${recoverCmd} or resolve the merge conflict manually`;
-    case "merge_failed":
-      return `${recoverCmd} to inspect and retry the merge`;
-    case "verification_failure":
-      return `${recoverCmd} or fix verification and recover`;
-    case "close_failed":
-      return `${recoverCmd} to verify merge and retry local close`;
-    default:
-      return `${recoverCmd} to inspect and repair execution state`;
-  }
-};
+export { resolveFailedTaskNextAction };
 
 const summarizeTaskBoard = (
   board: HubTaskBoard | undefined,

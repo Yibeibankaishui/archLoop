@@ -4,8 +4,9 @@ import { join } from "node:path";
 
 import { TaskBoardError } from "./errors.js";
 import { isBdAvailable, resolveBdExecutable } from "./resolveBdExecutable.js";
+import { HUB_TASK_STORE_INIT_COMMAND } from "./hubTaskStoreCommands.js";
 
-export const HUB_TASK_STORE_INIT_COMMAND = "archloop tasks init";
+export { HUB_TASK_STORE_INIT_COMMAND } from "./hubTaskStoreCommands.js";
 
 export const resolveHubTaskStoreDir = (cwd: string): string =>
   join(cwd, ".beads");

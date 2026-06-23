@@ -13,6 +13,10 @@ import {
   resolveHubRunEventsDirectory,
 } from "./hubExecution.js";
 import {
+  resolveProposalSessionArtifactPaths,
+  type ProposalSessionArtifactPaths,
+} from "./hubProposalArtifactPaths.js";
+import {
   resolveGitRepoRoot,
   resolveHubProjectDir,
   resolveArchloopUserDataDir,
@@ -98,14 +102,8 @@ export type RunProposalSessionResult<T> =
       readonly reason: string;
     };
 
-export interface ProposalSessionArtifactPaths {
-  readonly artifactsDir: string;
-  readonly preparedContextPath: string;
-  readonly transcriptPath: string;
-  readonly finalProposalPath: string;
-  readonly applyResultPath: string;
-  readonly proposalEventsPath: string;
-}
+export { resolveProposalSessionArtifactPaths };
+export type { ProposalSessionArtifactPaths };
 
 type ProposalSessionEvent =
   | {
@@ -238,21 +236,6 @@ export const writeProposalSessionApplyResult = (
   value: Record<string, unknown>,
 ): void => {
   writeJson(resolveProposalSessionArtifactPaths(runDir).applyResultPath, value);
-};
-
-export const resolveProposalSessionArtifactPaths = (
-  runDir: string,
-): ProposalSessionArtifactPaths => {
-  const artifactsDir = join(runDir, "artifacts");
-  const eventsDir = resolveHubRunEventsDirectory(runDir);
-  return {
-    artifactsDir,
-    preparedContextPath: join(artifactsDir, "prepared-context.json"),
-    transcriptPath: join(artifactsDir, "transcript.json"),
-    finalProposalPath: join(artifactsDir, "final-proposal.json"),
-    applyResultPath: join(artifactsDir, "apply-result.json"),
-    proposalEventsPath: join(eventsDir, "proposal.jsonl"),
-  };
 };
 
 const persistPreparedContext = (
