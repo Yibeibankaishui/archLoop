@@ -44,6 +44,7 @@ const plannerStdout = (output: {
   })}</batch-plan>`;
 
 const createTempHubTaskStoreRepo = async (input: {
+  readonly depListRecords?: readonly unknown[];
   readonly listRecords: readonly unknown[];
 }): Promise<{ repoDir: string; env: NodeJS.ProcessEnv }> => {
   const { mkdtemp, writeFile, mkdir, chmod } = await import("node:fs/promises");
@@ -62,6 +63,10 @@ const createTempHubTaskStoreRepo = async (input: {
     bdPath,
     `#!/usr/bin/env node
 const args = process.argv.slice(2);
+if (args[0] === "dep" && args[1] === "list" && args.includes("--json")) {
+  process.stdout.write(JSON.stringify(${JSON.stringify(input.depListRecords ?? [])}));
+  process.exit(0);
+}
 if (args[0] === "ready" && args.includes("--json")) {
   const records = ${JSON.stringify(input.listRecords)}.filter(
     (task) => task.status === "open" && task.labels?.includes("ready-for-agent"),

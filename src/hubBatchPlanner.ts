@@ -371,12 +371,27 @@ const collectSelectedTaskBlockerIds = (
 ): ReadonlySet<string> => {
   const blockerIds = new Set<string>();
   for (const task of selectedTasks) {
-    for (const blocker of task.blockersResolved ?? []) {
+    for (const blocker of task.blockersResolved) {
       blockerIds.add(blocker.taskId);
     }
   }
   return blockerIds;
 };
+
+const shouldRecoverExplicitBlockerDeferral = (input: {
+  readonly deferred: HubBatchDeferredTask;
+  readonly candidate?: HubBatchPlannerCandidate;
+  readonly selectedDependencyBlockerIds: ReadonlySet<string>;
+}): input is {
+  readonly deferred: HubBatchDeferredTask & { readonly reason: "explicit_blocker" };
+  readonly candidate: HubBatchPlannerCandidate;
+  readonly selectedDependencyBlockerIds: ReadonlySet<string>;
+} =>
+  input.deferred.reason === "explicit_blocker" &&
+  input.candidate !== undefined &&
+  input.candidate.openBlockers.length === 0 &&
+  input.candidate.unknownBlockers.length === 0 &&
+  !input.selectedDependencyBlockerIds.has(input.candidate.id);
 
 const resolvePlannedBatchSelection = (input: {
   readonly eligible: readonly HubTaskProjection[];
@@ -405,24 +420,23 @@ const resolvePlannedBatchSelection = (input: {
   for (const deferred of input.parsed.deferred) {
     const candidate = eligibleById.get(deferred.taskId);
     if (
-      deferred.reason !== "explicit_blocker" ||
-      candidate === undefined ||
-      candidate.openBlockers.length > 0 ||
-      candidate.unknownBlockers.length > 0 ||
-      selectedDependencyBlockerIds.has(candidate.id)
+      !shouldRecoverExplicitBlockerDeferral({
+        deferred,
+        candidate,
+        selectedDependencyBlockerIds,
+      })
     ) {
       deferredTasks.push(deferred);
       continue;
     }
 
-    invalidExplicitBlockerTaskIds.add(candidate.id);
+    invalidExplicitBlockerTaskIds.add(deferred.taskId);
   }
 
   const capacity = Math.max(0, input.maxTasks - selectedTasks.length);
   const recoveredTasks = input.eligible
     .filter((task) => invalidExplicitBlockerTaskIds.has(task.id))
     .slice(0, capacity);
-  selectedTasks.push(...recoveredTasks);
 
   const recoveredTaskIds = new Set(recoveredTasks.map((task) => task.id));
   const remainingInvalidTaskIds = [...invalidExplicitBlockerTaskIds].filter(
@@ -430,9 +444,9 @@ const resolvePlannedBatchSelection = (input: {
   );
 
   return {
-    selectedTasks,
+    selectedTasks: [...selectedTasks, ...recoveredTasks],
     deferredTasks: [
-      ...deferredTasks.filter((entry) => !recoveredTaskIds.has(entry.taskId)),
+      ...deferredTasks,
       ...remainingInvalidTaskIds.map((taskId) => ({
         taskId,
         reason: "over_max_tasks" as const,
