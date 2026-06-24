@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  HUB_DESKTOP_LAYOUT,
   HUB_DESKTOP_FOCUS_RING_CLASS,
   HUB_DESKTOP_NAV_SECTIONS,
   HUB_DESKTOP_SHELL_TABS,
@@ -28,11 +29,17 @@ describe("hubDesktopShell", () => {
     expect(isHubDesktopNavSection("settings")).toBe(false);
   });
 
-  it("collapses the inspector on narrow viewports without changing desktop grid", () => {
+  it("collapses the inspector on narrow viewports and reclaims the desktop column when hidden", () => {
     expect(resolveHubDesktopLayoutMode(1440)).toBe("desktop");
     expect(shouldCollapseInspector(1440)).toBe(false);
-    expect(hubDesktopShellGridStyle(1440).gridTemplateAreas).toContain(
+    expect(hubDesktopShellGridStyle(1440, true).gridTemplateAreas).toContain(
       "inspector",
+    );
+    expect(
+      hubDesktopShellGridStyle(1440, false).gridTemplateAreas,
+    ).not.toContain("inspector");
+    expect(hubDesktopShellGridStyle(1440, false).gridTemplateColumns).toBe(
+      `${HUB_DESKTOP_LAYOUT.railWidthPx}px 1fr`,
     );
 
     expect(resolveHubDesktopLayoutMode(800)).toBe("tablet");

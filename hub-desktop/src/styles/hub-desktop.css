@@ -272,13 +272,15 @@ textarea {
   display: grid;
   gap: 4px;
   align-items: end;
+  min-width: 0;
 }
 
 .hub-header-action-note {
   margin: 0;
-  max-width: 180px;
+  max-width: 240px;
   font-size: 11px;
-  line-height: 1.2;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
 }
 
 .hub-header-preview {
@@ -976,7 +978,7 @@ code,
   display: grid;
   gap: var(--hub-space-3);
   grid-template-columns: minmax(0, 1.45fr) minmax(280px, 360px);
-  align-items: start;
+  align-items: stretch;
 }
 
 .hub-run-primary {
@@ -1018,6 +1020,7 @@ code,
   display: grid;
   gap: var(--hub-space-3);
   background: #ffffff;
+  align-content: start;
 }
 
 .hub-run-inspector-block {
@@ -1432,11 +1435,9 @@ code,
 }
 
 .hub-proposal-decision-bar {
-  position: sticky;
-  bottom: 0;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(0, 1.4fr);
+  align-items: start;
   gap: var(--hub-space-3);
   background: linear-gradient(180deg, rgba(248, 250, 252, 0.84) 0%, #ffffff 16%);
   backdrop-filter: blur(4px);
@@ -1457,15 +1458,14 @@ code,
 }
 
 .hub-proposal-decision-actions {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  gap: var(--hub-space-3);
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--hub-space-2);
+  align-items: start;
 }
 
 .hub-proposal-decision-primary {
-  min-width: 300px;
+  min-width: 0;
 }
 
 .hub-proposal-decision-primary .hub-inspector-action {
@@ -1476,6 +1476,11 @@ code,
   display: grid;
   gap: var(--hub-space-3);
   min-width: 0;
+}
+
+.hub-proposal-secondary-action p {
+  margin: 0;
+  line-height: 1.3;
 }
 
 .hub-proposal-inspector-kv {
@@ -1544,7 +1549,7 @@ code,
 .hub-task-board-toolbar-card {
   display: grid;
   gap: var(--hub-space-2);
-  padding: var(--hub-space-3);
+  padding: var(--hub-space-2);
   border: 1px solid var(--hub-border);
   border-radius: var(--hub-radius);
   background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(2, 6, 23, 0.98));
@@ -1588,7 +1593,7 @@ code,
 }
 
 .hub-task-board-create-textarea {
-  min-height: 80px;
+  min-height: 64px;
   resize: vertical;
 }
 
@@ -1597,7 +1602,7 @@ code,
   grid-template-columns: minmax(180px, 1.5fr) repeat(3, minmax(120px, 1fr)) auto;
   gap: var(--hub-space-2);
   align-items: end;
-  padding: var(--hub-space-3);
+  padding: var(--hub-space-2) var(--hub-space-3);
   border: 1px solid #0f172a;
   border-radius: var(--hub-radius);
   background: linear-gradient(180deg, #020617, #0f172a);
@@ -1638,6 +1643,7 @@ code,
   margin: 0;
   align-self: center;
   text-align: right;
+  white-space: nowrap;
 }
 
 .hub-card-labels,
@@ -1831,8 +1837,8 @@ code,
 
 .hub-terminal-body {
   margin: 0;
-  min-height: 180px;
-  max-height: 280px;
+  min-height: 132px;
+  max-height: 180px;
   overflow: auto;
   white-space: pre-wrap;
   font-family: var(--hub-font-mono);
@@ -1877,6 +1883,14 @@ code,
   .hub-header-tabs,
   .hub-header-actions {
     justify-content: flex-start;
+  }
+
+  .hub-proposal-decision-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .hub-proposal-decision-actions {
+    grid-template-columns: 1fr;
   }
 
   .hub-run-workbench-body {

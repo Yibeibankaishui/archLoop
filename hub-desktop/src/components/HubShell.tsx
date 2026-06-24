@@ -52,12 +52,12 @@ export const HubShell = ({
   children,
 }: HubShellProps) => {
   const collapseInspector = shouldCollapseInspector(viewportWidth);
-  const showInspector = inspectorOpen && !collapseInspector;
+  const showInlineInspector = inspectorOpen && !collapseInspector;
 
   return (
     <div
       className="hub-shell"
-      style={hubDesktopShellGridStyle(viewportWidth)}
+      style={hubDesktopShellGridStyle(viewportWidth, showInlineInspector)}
       data-layout={collapseInspector ? "narrow" : "desktop"}
     >
       <HubNav
@@ -79,7 +79,7 @@ export const HubShell = ({
       <main className="hub-main" aria-label={hubDesktopNavLabel(activeSection)}>
         {children}
       </main>
-      {showInspector ? (
+      {showInlineInspector ? (
         <InspectorPanel
           taskInspector={taskInspector}
           projectStatus={projectStatus}
