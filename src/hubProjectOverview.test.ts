@@ -4,6 +4,7 @@ import {
   buildHubOverviewModel,
   formatHubOverviewPath,
   resolveHubOverviewGridClass,
+  resolveHubOverviewSyncNowAction,
 } from "./hubProjectOverview.js";
 import { createHubDesktopFixtureProjectStatus } from "./hubRuntimeBridgeFixtures.js";
 import { HUB_TASK_STORE_INIT_COMMAND } from "./hubTaskStore.js";
@@ -170,6 +171,48 @@ describe("hubProjectOverview", () => {
     );
   });
 
+  it("builds the sync now banner action from remote sync state", () => {
+    const pushAction = resolveHubOverviewSyncNowAction(
+      emptyStatus({
+        beadsAvailable: true,
+        taskStoreInitialized: true,
+        syncCounts: {
+          pushPending: 2,
+          conflict: 0,
+          localOnly: 1,
+          synced: 0,
+        },
+      }),
+    );
+    expect(pushAction).toEqual(
+      expect.objectContaining({
+        id: "sync-now",
+        label: "SYNC NOW",
+        bridgeAction: "sync.pushPreview",
+        cliFallback: "archloop tasks push",
+      }),
+    );
+
+    const syncedAction = resolveHubOverviewSyncNowAction(
+      emptyStatus({
+        beadsAvailable: true,
+        taskStoreInitialized: true,
+        syncCounts: {
+          pushPending: 0,
+          conflict: 0,
+          localOnly: 0,
+          synced: 3,
+        },
+      }),
+    );
+    expect(syncedAction).toEqual(
+      expect.objectContaining({
+        disabledReason: "Everything is already synced.",
+        bridgeAction: "sync.pullPreview",
+      }),
+    );
+  });
+
   it("includes failed tasks, active batches, run directories, events, and lease diagnostics", () => {
     const status = createHubDesktopFixtureProjectStatus();
     const model = buildHubOverviewModel({ status });
@@ -189,7 +232,8 @@ describe("hubProjectOverview", () => {
   });
 
   it("formats long filesystem paths for dense overview panels", () => {
-    const path = "/very/long/archloop/user/data/projects/fixture/runs/run-fixture-1";
+    const path =
+      "/very/long/archloop/user/data/projects/fixture/runs/run-fixture-1";
     expect(formatHubOverviewPath(path, 40)).toBe(
       "…/projects/fixture/runs/run-fixture-1",
     );

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import type {
   HubProjectStatus,
@@ -9,6 +9,7 @@ import {
   buildHubOverviewModel,
   formatHubOverviewPath,
   resolveHubOverviewGridClass,
+  resolveHubOverviewSyncNowAction,
   type HubOverviewAction,
   type HubOverviewBannerSeverity,
 } from "@yibeibankaishui/archloop/hub-project-overview";
@@ -28,6 +29,23 @@ export interface OverviewViewProps {
   ) => Promise<string | undefined>;
 }
 
+type OverviewTimelineItemKind = "batch" | "event" | "failed_task" | "lease";
+
+interface OverviewTimelineItem {
+  readonly id: string;
+  readonly kind: OverviewTimelineItemKind;
+  readonly title: string;
+  readonly summary: string;
+  readonly badge: string;
+  readonly tone: "ready" | "active" | "warning" | "error" | "neutral";
+  readonly sourcePath?: string;
+  readonly lockedBy?: string;
+  readonly leaseId?: string;
+  readonly statusLabel?: string;
+  readonly nextAction?: string;
+  readonly details: readonly [string, string][];
+}
+
 const bannerClassName = (severity: HubOverviewBannerSeverity): string => {
   switch (severity) {
     case "error":
@@ -39,7 +57,9 @@ const bannerClassName = (severity: HubOverviewBannerSeverity): string => {
   }
 };
 
-const syncToneClass = (tone: "warning" | "danger" | "neutral" | undefined): string => {
+const syncToneClass = (
+  tone: "warning" | "danger" | "neutral" | undefined,
+): string => {
   switch (tone) {
     case "warning":
       return "hub-chip is-warning";
@@ -50,7 +70,139 @@ const syncToneClass = (tone: "warning" | "danger" | "neutral" | undefined): stri
   }
 };
 
+const timelineToneClass = (tone: OverviewTimelineItem["tone"]): string => {
+  switch (tone) {
+    case "ready":
+      return "hub-chip is-ready";
+    case "active":
+      return "hub-chip is-active";
+    case "warning":
+      return "hub-chip is-warning";
+    case "error":
+      return "hub-chip is-error";
+    default:
+      return "hub-chip";
+  }
+};
+
 const boolLabel = (value: boolean): string => (value ? "yes" : "no");
+
+const buildOverviewTimelineItems = (
+  status: HubProjectStatus | undefined,
+): readonly OverviewTimelineItem[] => {
+  if (!status) {
+    return [];
+  }
+
+  const items: OverviewTimelineItem[] = [];
+
+  for (const batch of status.activeBatches) {
+    items.push({
+      id: `batch-${batch.runId}-${batch.batchId}`,
+      kind: "batch",
+      title: `${batch.runId} / ${batch.batchId}`,
+      summary: `Flow batch ${batch.status} with ${batch.taskCount ?? 0} task(s) on ${batch.flowId ?? "unknown flow"}.`,
+      badge: "Flow batch",
+      tone: batch.active ? "active" : "neutral",
+      sourcePath: batch.runDir,
+      statusLabel: batch.status.replaceAll("_", " "),
+      details: [
+        ["Run ID", batch.runId],
+        ["Batch ID", batch.batchId],
+        ["Branch", batch.flowId ?? "—"],
+        ["Run dir", batch.runDir],
+      ],
+    });
+  }
+
+  for (const task of status.failedTasks) {
+    items.push({
+      id: `failed-${task.id}`,
+      kind: "failed_task",
+      title: `${task.id} · ${task.title}`,
+      summary: task.failureReason
+        ? `${task.failureReason} detected. ${task.nextAction}`
+        : task.nextAction,
+      badge: "Failed task",
+      tone: "error",
+      sourcePath: status.hubProjectDir,
+      leaseId: `lease-${task.id}`,
+      statusLabel: "DONE",
+      nextAction: task.nextAction,
+      details: [
+        ["Task ID", task.id],
+        ["Title", task.title],
+        ["Failure reason", task.failureReason ?? "unknown"],
+        ["Next action", task.nextAction],
+      ],
+    });
+  }
+
+  for (const diagnostic of status.worktreeLeaseDiagnostics) {
+    items.push({
+      id: `lease-${diagnostic.taskId}`,
+      kind: "lease",
+      title: `${diagnostic.taskId} · ${diagnostic.reason.replaceAll("_", " ")}`,
+      summary: diagnostic.message,
+      badge: "Lease",
+      tone:
+        diagnostic.leaseState === "active"
+          ? "active"
+          : diagnostic.leaseState === "stale"
+            ? "warning"
+            : "neutral",
+      sourcePath: diagnostic.branch,
+      lockedBy: diagnostic.owner
+        ? diagnostic.owner.kind === "hub" && diagnostic.owner.taskId
+          ? [
+              `task ${diagnostic.owner.taskId}`,
+              diagnostic.owner.flowId
+                ? `flow ${diagnostic.owner.flowId}`
+                : undefined,
+              diagnostic.owner.batchId
+                ? `batch ${diagnostic.owner.batchId}`
+                : undefined,
+            ]
+              .filter((part) => part !== undefined)
+              .join(", ")
+          : "direct execution"
+        : "unknown owner",
+      leaseId: diagnostic.worktreeName,
+      statusLabel: diagnostic.leaseState === "active" ? "ACTIVE" : "DONE",
+      nextAction: diagnostic.nextAction,
+      details: [
+        ["Lease ID", diagnostic.worktreeName],
+        ["Branch", diagnostic.branch],
+        ["Lease state", diagnostic.leaseState],
+        ["Claim state", diagnostic.claimState],
+        ["Next action", diagnostic.nextAction],
+      ],
+    });
+  }
+
+  for (const [index, event] of status.recentEvents.entries()) {
+    items.push({
+      id: `event-${index}`,
+      kind: "event",
+      title: `Event ${index + 1}`,
+      summary: event,
+      badge: "Activity",
+      tone: index === 0 ? "neutral" : "warning",
+      sourcePath: status.repoRoot,
+      details: [["Event", event]],
+    });
+  }
+
+  return items;
+};
+
+const resolveDefaultTimelineItemId = (
+  items: readonly OverviewTimelineItem[],
+): string | undefined =>
+  items.find((item) => item.kind === "lease")?.id ??
+  items.find((item) => item.kind === "failed_task")?.id ??
+  items.find((item) => item.kind === "batch")?.id ??
+  items[0]?.id;
 
 const OverviewActionButton = ({
   action,
@@ -94,7 +246,12 @@ const OverviewActionButton = ({
   };
 
   const handleConfirm = async () => {
-    if (!preview || !previewParams || !onConfirmAction || preview.disabledReason) {
+    if (
+      !preview ||
+      !previewParams ||
+      !onConfirmAction ||
+      preview.disabledReason
+    ) {
       return;
     }
     setPending(true);
@@ -145,7 +302,11 @@ const OverviewActionButton = ({
         )}
       </div>
       {preview ? (
-        <div className="hub-overview-preview" role="region" aria-label="Action preview">
+        <div
+          className="hub-overview-preview"
+          role="region"
+          aria-label="Action preview"
+        >
           <p>{preview.summary}</p>
           {preview.disabledReason ? (
             <p className="hub-muted" role="status">
@@ -172,6 +333,115 @@ const OverviewActionButton = ({
   );
 };
 
+const CompactActionButton = ({
+  action,
+  onPreviewAction,
+  onConfirmAction,
+}: {
+  readonly action: HubOverviewAction;
+  readonly onPreviewAction?: OverviewViewProps["onPreviewAction"];
+  readonly onConfirmAction?: OverviewViewProps["onConfirmAction"];
+}) => {
+  const [preview, setPreview] = useState<HubRuntimeActionPreview | undefined>();
+  const [previewParams, setPreviewParams] = useState<
+    Record<string, unknown> | undefined
+  >();
+  const [pending, setPending] = useState(false);
+  const disabled = action.disabledReason !== undefined;
+
+  const handlePreview = async () => {
+    if (
+      disabled ||
+      action.kind !== "bridge_preview" ||
+      !action.bridgeAction ||
+      !onPreviewAction
+    ) {
+      return;
+    }
+    setPending(true);
+    try {
+      const nextPreview = await onPreviewAction(
+        action.bridgeAction,
+        action.bridgeParams ?? {},
+      );
+      setPreviewParams(action.bridgeParams ?? {});
+      setPreview(nextPreview);
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const handleConfirm = async () => {
+    if (
+      !preview ||
+      !previewParams ||
+      !onConfirmAction ||
+      preview.disabledReason
+    ) {
+      return;
+    }
+    setPending(true);
+    try {
+      await onConfirmAction(preview, previewParams);
+      setPreview(undefined);
+      setPreviewParams(undefined);
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <div className="hub-overview-sync-action">
+      <button
+        type="button"
+        className="hub-button hub-focus-ring"
+        disabled={disabled || pending || !onPreviewAction}
+        onClick={() => void handlePreview()}
+      >
+        {pending ? `${action.label}…` : action.label}
+      </button>
+      {preview ? (
+        <div
+          className="hub-overview-sync-preview"
+          role="region"
+          aria-label="Sync preview"
+        >
+          <p>{preview.summary}</p>
+          {preview.disabledReason ? (
+            <p className="hub-muted" role="status">
+              {preview.disabledReason}
+            </p>
+          ) : (
+            <button
+              type="button"
+              className="hub-button hub-focus-ring"
+              disabled={pending || !onConfirmAction}
+              onClick={() => void handleConfirm()}
+            >
+              Confirm
+            </button>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
+const OverviewMetricCard = ({
+  label,
+  value,
+  tone = "neutral",
+}: {
+  readonly label: string;
+  readonly value: string | number;
+  readonly tone?: "ready" | "active" | "warning" | "error" | "neutral";
+}) => (
+  <article className="hub-overview-metric">
+    <p className="hub-muted">{label}</p>
+    <span className={timelineToneClass(tone)}>{value}</span>
+  </article>
+);
+
 export const OverviewView = ({
   status,
   loading = false,
@@ -190,6 +460,30 @@ export const OverviewView = ({
     [loading, runtimeError, status],
   );
 
+  const syncBannerAction = useMemo(
+    () => resolveHubOverviewSyncNowAction(status),
+    [status],
+  );
+
+  const timelineItems = useMemo(
+    () => buildOverviewTimelineItems(status),
+    [status],
+  );
+
+  const [selectedTimelineItemId, setSelectedTimelineItemId] = useState<
+    string | undefined
+  >(() => resolveDefaultTimelineItemId(timelineItems));
+
+  useEffect(() => {
+    const defaultId = resolveDefaultTimelineItemId(timelineItems);
+    if (
+      !selectedTimelineItemId ||
+      !timelineItems.some((item) => item.id === selectedTimelineItemId)
+    ) {
+      setSelectedTimelineItemId(defaultId);
+    }
+  }, [selectedTimelineItemId, timelineItems]);
+
   if (model.phase === "loading") {
     return (
       <div
@@ -202,8 +496,8 @@ export const OverviewView = ({
           <p className="hub-muted">Loading local Hub data…</p>
         </section>
         <section className="hub-panel hub-overview-skeleton">
-          <h2>Local task store</h2>
-          <p className="hub-muted">Reading Beads task counts…</p>
+          <h2>Activity timeline</h2>
+          <p className="hub-muted">Reading local Hub events…</p>
         </section>
       </div>
     );
@@ -223,211 +517,384 @@ export const OverviewView = ({
 
   const paths = model.projectPaths;
   const gridClass = resolveHubOverviewGridClass(viewportWidth);
+  const selectedTimelineItem =
+    timelineItems.find((item) => item.id === selectedTimelineItemId) ??
+    timelineItems[0];
 
   return (
-    <div className={gridClass} aria-label="Hub project overview">
-      {model.banners.map((banner) => (
-        <section
-          key={banner.id}
-          className={`${bannerClassName(banner.severity)} hub-panel-wide`}
-          role={banner.severity === "error" ? "alert" : "status"}
-          aria-label={banner.title}
-        >
-          <h2>{banner.title}</h2>
-          <p>{banner.message}</p>
-          {banner.cliFallback ? (
-            <p className="hub-muted">
-              CLI fallback: <code>{banner.cliFallback}</code>
-            </p>
-          ) : null}
-        </section>
-      ))}
-
-      <section className="hub-panel" aria-labelledby="hub-overview-paths-heading">
-        <h2 id="hub-overview-paths-heading">Project paths</h2>
-        <dl className="hub-kv">
-          <div>
-            <dt>Repo root</dt>
-            <dd className="hub-mono" title={paths?.repoRoot}>
-              {formatHubOverviewPath(paths?.repoRoot ?? "")}
-            </dd>
-          </div>
-          <div>
-            <dt>archLoop user data</dt>
-            <dd className="hub-mono" title={paths?.archloopUserDataDir}>
-              {formatHubOverviewPath(paths?.archloopUserDataDir ?? "")}
-            </dd>
-          </div>
-          <div>
-            <dt>Hub project directory</dt>
-            <dd className="hub-mono" title={paths?.hubProjectDir}>
-              {formatHubOverviewPath(paths?.hubProjectDir ?? "")}
-            </dd>
-          </div>
-          <div>
-            <dt>Registered</dt>
-            <dd>{boolLabel(paths?.projectRegistered ?? false)}</dd>
-          </div>
-          <div>
-            <dt>Beads available</dt>
-            <dd>{boolLabel(paths?.beadsAvailable ?? false)}</dd>
-          </div>
-          <div>
-            <dt>Task store initialized</dt>
-            <dd>{boolLabel(paths?.taskStoreInitialized ?? false)}</dd>
-          </div>
-        </dl>
-      </section>
-
-      <section className="hub-panel" aria-labelledby="hub-overview-counts-heading">
-        <h2 id="hub-overview-counts-heading">Task counts</h2>
-        <dl className="hub-kv">
-          <div>
-            <dt>Ready</dt>
-            <dd>{model.taskCounts?.ready ?? 0}</dd>
-          </div>
-          <div>
-            <dt>Total</dt>
-            <dd>{model.taskCounts?.total ?? 0}</dd>
-          </div>
-        </dl>
-        {model.statusCountEntries.length > 0 ? (
-          <ul className="hub-overview-status-list" aria-label="Per-status counts">
-            {model.statusCountEntries.map((entry) => (
-              <li key={entry.status}>
-                <span className="hub-mono">{entry.status}</span>
-                <span className="hub-chip">{entry.count}</span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="hub-muted">No Hub tasks found.</p>
-        )}
-      </section>
-
-      {model.syncSections.map((section) => (
-        <section
-          key={section.scope}
-          className={`hub-panel hub-sync-panel is-${section.scope}`}
-          aria-labelledby={`hub-overview-sync-${section.scope}`}
-        >
-          <h2 id={`hub-overview-sync-${section.scope}`}>{section.title}</h2>
-          <p className="hub-muted">{section.description}</p>
-          <dl className="hub-kv">
-            {section.counts.map((count) => (
-              <div key={count.label}>
-                <dt>{count.label}</dt>
-                <dd>
-                  <span className={syncToneClass(count.tone)}>{count.value}</span>
-                </dd>
-              </div>
-            ))}
-          </dl>
-        </section>
-      ))}
-
-      <section className="hub-panel" aria-labelledby="hub-overview-failed-heading">
-        <h2 id="hub-overview-failed-heading">Failed tasks</h2>
-        {model.failedTasks.length > 0 ? (
-          <ul className="hub-list">
-            {model.failedTasks.map((task) => (
-              <li key={task.id}>
-                <span className="hub-mono">{task.id}</span>:{" "}
-                {task.failureReason ?? "unknown"} — {task.nextAction}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="hub-muted">No failed tasks.</p>
-        )}
-      </section>
-
-      <section className="hub-panel" aria-labelledby="hub-overview-batches-heading">
-        <h2 id="hub-overview-batches-heading">Active batches</h2>
-        {model.activeBatches.length > 0 ? (
-          <ul className="hub-list">
-            {model.activeBatches.map((batch) => (
-              <li key={`${batch.runId}-${batch.batchId}`}>
-                <span className="hub-mono">
-                  {batch.runId}/{batch.batchId}
-                </span>{" "}
-                — {batch.status}
-                {batch.flowId ? ` (${batch.flowId})` : ""}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="hub-muted">No active Hub runs.</p>
-        )}
-      </section>
-
-      <section className="hub-panel" aria-labelledby="hub-overview-runs-heading">
-        <h2 id="hub-overview-runs-heading">Run directories</h2>
-        {model.runDirectories.length > 0 ? (
-          <ul className="hub-mono-list hub-list">
-            {model.runDirectories.map((runDir) => (
-              <li key={runDir} title={runDir}>
-                {formatHubOverviewPath(runDir)}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="hub-muted">No Hub run directories yet.</p>
-        )}
-      </section>
-
-      <section
-        className="hub-panel hub-panel-wide"
-        aria-labelledby="hub-overview-events-heading"
-      >
-        <h2 id="hub-overview-events-heading">Recent activity</h2>
-        {model.recentEvents.length > 0 ? (
-          <ul className="hub-list">
-            {model.recentEvents.map((event) => (
-              <li key={event}>{event}</li>
-            ))}
-          </ul>
-        ) : (
-          <p className="hub-muted">No recent Hub events yet.</p>
-        )}
-      </section>
-
-      <section
-        className="hub-panel hub-panel-wide"
-        aria-labelledby="hub-overview-leases-heading"
-      >
-        <h2 id="hub-overview-leases-heading">Worktree lease diagnostics</h2>
-        {model.worktreeLeaseDiagnostics.length > 0 ? (
-          <ul className="hub-list">
-            {model.worktreeLeaseDiagnostics.map((diagnostic) => (
-              <li key={diagnostic.taskId}>
-                <span className="hub-mono">{diagnostic.taskId}</span>:{" "}
-                {diagnostic.reason} on {diagnostic.branch} — {diagnostic.message}
-                <div className="hub-muted">Next: {diagnostic.nextAction}</div>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="hub-muted">No active or inconsistent worktree leases.</p>
-        )}
-      </section>
-
-      <section
-        className="hub-panel hub-panel-wide"
-        aria-labelledby="hub-overview-actions-heading"
-      >
-        <h2 id="hub-overview-actions-heading">Local actions</h2>
-        <div className="hub-overview-actions">
-          {model.actions.map((action) => (
-            <OverviewActionButton
-              key={action.id}
-              action={action}
+    <div className="hub-overview-shell" aria-label="Hub project overview">
+      <section className="hub-panel hub-banner hub-overview-sync-banner hub-overview-span">
+        <div className="hub-overview-sync-copy">
+          <p className="hub-eyebrow">Project Overview</p>
+          <h2>SYNC NOW</h2>
+          <p className="hub-muted">
+            Remote sync is preview-confirm gated. Local task metadata stays
+            separate from remote task source changes.
+          </p>
+        </div>
+        <div className="hub-overview-sync-controls">
+          {syncBannerAction ? (
+            <CompactActionButton
+              action={syncBannerAction}
               onPreviewAction={onPreviewAction}
               onConfirmAction={onConfirmAction}
             />
-          ))}
+          ) : null}
+          <div className="hub-overview-sync-summary">
+            <span className="hub-chip is-active">
+              {model.statusCountEntries.length} status bucket(s)
+            </span>
+            <span className="hub-chip is-ready">
+              {model.taskCounts?.ready ?? 0} ready
+            </span>
+          </div>
         </div>
       </section>
+
+      <div className={gridClass}>
+        <aside className="hub-panel hub-overview-column hub-overview-left">
+          <section className="hub-overview-stack">
+            <div className="hub-overview-heading-row">
+              <div>
+                <p className="hub-eyebrow">Project health</p>
+                <h2>Hub project</h2>
+              </div>
+              <span
+                className={`hub-chip ${paths?.projectRegistered ? "is-ready" : "is-warning"}`}
+              >
+                {paths?.projectRegistered ? "registered" : "not registered"}
+              </span>
+            </div>
+
+            <dl className="hub-kv hub-overview-kv">
+              <div>
+                <dt>Repo root</dt>
+                <dd className="hub-mono" title={paths?.repoRoot}>
+                  {formatHubOverviewPath(paths?.repoRoot ?? "")}
+                </dd>
+              </div>
+              <div>
+                <dt>archLoop user data</dt>
+                <dd className="hub-mono" title={paths?.archloopUserDataDir}>
+                  {formatHubOverviewPath(paths?.archloopUserDataDir ?? "")}
+                </dd>
+              </div>
+              <div>
+                <dt>Hub project dir</dt>
+                <dd className="hub-mono" title={paths?.hubProjectDir}>
+                  {formatHubOverviewPath(paths?.hubProjectDir ?? "")}
+                </dd>
+              </div>
+              <div>
+                <dt>Beads</dt>
+                <dd>
+                  <span
+                    className={`hub-chip ${paths?.beadsAvailable ? "is-ready" : "is-warning"}`}
+                  >
+                    {paths?.beadsAvailable ? "available" : "unavailable"}
+                  </span>
+                </dd>
+              </div>
+              <div>
+                <dt>Task store</dt>
+                <dd>
+                  <span
+                    className={`hub-chip ${paths?.taskStoreInitialized ? "is-ready" : "is-warning"}`}
+                  >
+                    {paths?.taskStoreInitialized ? "initialized" : "missing"}
+                  </span>
+                </dd>
+              </div>
+            </dl>
+          </section>
+
+          <section className="hub-overview-stack">
+            <div className="hub-overview-heading-row">
+              <div>
+                <p className="hub-eyebrow">Metrics</p>
+                <h2>System status</h2>
+              </div>
+            </div>
+            <div className="hub-overview-metrics">
+              <OverviewMetricCard
+                label="Ready"
+                value={model.taskCounts?.ready ?? 0}
+                tone="ready"
+              />
+              <OverviewMetricCard
+                label="Total"
+                value={model.taskCounts?.total ?? 0}
+                tone="neutral"
+              />
+              <OverviewMetricCard
+                label="Active batches"
+                value={model.activeBatches.length}
+                tone="active"
+              />
+              <OverviewMetricCard
+                label="Failed tasks"
+                value={model.failedTasks.length}
+                tone={model.failedTasks.length > 0 ? "error" : "neutral"}
+              />
+            </div>
+          </section>
+
+          <section className="hub-overview-stack">
+            <div className="hub-overview-heading-row">
+              <div>
+                <p className="hub-eyebrow">Warnings</p>
+                <h2>Status banners</h2>
+              </div>
+            </div>
+            {model.banners.length > 0 ? (
+              <div className="hub-overview-warning-stack">
+                {model.banners.map((banner) => (
+                  <section
+                    key={banner.id}
+                    className={bannerClassName(banner.severity)}
+                    role={banner.severity === "error" ? "alert" : "status"}
+                    aria-label={banner.title}
+                  >
+                    <h3>{banner.title}</h3>
+                    <p>{banner.message}</p>
+                    {banner.cliFallback ? (
+                      <p className="hub-muted">
+                        CLI fallback: <code>{banner.cliFallback}</code>
+                      </p>
+                    ) : null}
+                  </section>
+                ))}
+              </div>
+            ) : (
+              <p className="hub-muted">No sync or recovery warnings.</p>
+            )}
+          </section>
+
+          <section className="hub-overview-stack">
+            <div className="hub-overview-heading-row">
+              <div>
+                <p className="hub-eyebrow">Actions</p>
+                <h2>Hub actions</h2>
+              </div>
+            </div>
+            <div className="hub-overview-actions">
+              {model.actions.map((action) => (
+                <OverviewActionButton
+                  key={action.id}
+                  action={action}
+                  onPreviewAction={onPreviewAction}
+                  onConfirmAction={onConfirmAction}
+                />
+              ))}
+            </div>
+            <div className="hub-overview-note">
+              <p className="hub-muted">
+                Sync and recovery stay preview-confirm gated. CLI-only actions
+                keep their fallback visible.
+              </p>
+            </div>
+          </section>
+
+          <section className="hub-overview-stack">
+            <div className="hub-overview-heading-row">
+              <div>
+                <p className="hub-eyebrow">Sync state</p>
+                <h2>Remote metadata</h2>
+              </div>
+            </div>
+            {model.syncSections.map((section) => (
+              <section
+                key={section.scope}
+                className={`hub-sync-panel is-${section.scope}`}
+                aria-labelledby={`hub-overview-sync-${section.scope}`}
+              >
+                <h3 id={`hub-overview-sync-${section.scope}`}>
+                  {section.title}
+                </h3>
+                <p className="hub-muted">{section.description}</p>
+                <dl className="hub-kv">
+                  {section.counts.map((count) => (
+                    <div key={count.label}>
+                      <dt>{count.label}</dt>
+                      <dd>
+                        <span className={syncToneClass(count.tone)}>
+                          {count.value}
+                        </span>
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              </section>
+            ))}
+          </section>
+        </aside>
+
+        <section className="hub-panel hub-overview-column hub-overview-center">
+          <div className="hub-overview-heading-row">
+            <div>
+              <p className="hub-eyebrow">Activity</p>
+              <h2>Activity timeline</h2>
+            </div>
+            <span className="hub-chip is-active">
+              {timelineItems.length} item(s)
+            </span>
+          </div>
+
+          {timelineItems.length > 0 ? (
+            <ol className="hub-overview-timeline">
+              {timelineItems.map((item) => {
+                const selected = item.id === selectedTimelineItem?.id;
+                return (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      className={`hub-overview-timeline-item hub-focus-ring ${selected ? "is-selected" : ""}`}
+                      aria-pressed={selected}
+                      onClick={() => setSelectedTimelineItemId(item.id)}
+                    >
+                      <span
+                        className="hub-overview-timeline-rail"
+                        aria-hidden="true"
+                      >
+                        <span
+                          className={`hub-overview-timeline-dot ${selected ? "is-selected" : ""}`}
+                        />
+                      </span>
+                      <div className="hub-overview-timeline-card">
+                        <div className="hub-overview-timeline-header">
+                          <div className="hub-overview-timeline-title">
+                            <span className="hub-eyebrow">{item.badge}</span>
+                            <strong>{item.title}</strong>
+                          </div>
+                          <span className={timelineToneClass(item.tone)}>
+                            {item.statusLabel ?? item.badge}
+                          </span>
+                        </div>
+                        <p className="hub-muted">{item.summary}</p>
+                        {item.sourcePath ? (
+                          <p
+                            className="hub-mono hub-muted"
+                            title={item.sourcePath}
+                          >
+                            {formatHubOverviewPath(item.sourcePath)}
+                          </p>
+                        ) : null}
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ol>
+          ) : (
+            <div className="hub-panel hub-empty">
+              <h3>No recent activity</h3>
+              <p className="hub-muted">
+                The timeline is empty until Hub records events.
+              </p>
+            </div>
+          )}
+        </section>
+
+        <aside className="hub-panel hub-overview-column hub-overview-right">
+          <div className="hub-overview-heading-row">
+            <div>
+              <p className="hub-eyebrow">Inspector</p>
+              <h2>Lease inspector</h2>
+            </div>
+            <span
+              className={`hub-chip ${selectedTimelineItem?.statusLabel === "DONE" ? "is-ready" : selectedTimelineItem?.tone === "error" ? "is-error" : selectedTimelineItem?.tone === "warning" ? "is-warning" : "is-active"}`}
+            >
+              {selectedTimelineItem?.statusLabel ?? "DONE"}
+            </span>
+          </div>
+
+          {selectedTimelineItem ? (
+            <div className="hub-overview-inspector">
+              <section className="hub-overview-inspector-card">
+                <h3>{selectedTimelineItem.title}</h3>
+                <p className="hub-muted">{selectedTimelineItem.summary}</p>
+              </section>
+
+              <dl className="hub-kv hub-overview-kv">
+                {selectedTimelineItem.details.map(([key, value]) => (
+                  <div key={`${selectedTimelineItem.id}-${key}`}>
+                    <dt>{key}</dt>
+                    <dd className="hub-mono">{value}</dd>
+                  </div>
+                ))}
+                <div>
+                  <dt>Lease ID</dt>
+                  <dd className="hub-mono">
+                    {selectedTimelineItem.leaseId ??
+                      selectedTimelineItem.sourcePath ??
+                      selectedTimelineItem.id}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Source path</dt>
+                  <dd className="hub-mono">
+                    {selectedTimelineItem.sourcePath
+                      ? formatHubOverviewPath(selectedTimelineItem.sourcePath)
+                      : "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Locked by</dt>
+                  <dd className="hub-mono">
+                    {selectedTimelineItem.lockedBy ?? "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Next action</dt>
+                  <dd>
+                    {selectedTimelineItem.nextAction ??
+                      "Inspect the selected activity."}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+          ) : (
+            <div className="hub-panel hub-empty">
+              <h3>Lease inspector</h3>
+              <p className="hub-muted">
+                Select a timeline item to inspect the current lease or activity.
+              </p>
+            </div>
+          )}
+        </aside>
+      </div>
+
+      <footer className="hub-panel hub-overview-footer hub-overview-span">
+        <div className="hub-overview-footer-copy">
+          <p className="hub-eyebrow">Diagnostics</p>
+          <h2>Operational summary</h2>
+          <p className="hub-muted">
+            {boolLabel(paths?.beadsAvailable ?? false)} Beads,{" "}
+            {boolLabel(paths?.taskStoreInitialized ?? false)} task store,{" "}
+            {model.activeBatches.length} active batch(es),{" "}
+            {model.failedTasks.length} failed task(s).
+          </p>
+        </div>
+        <div className="hub-overview-footer-actions">
+          <button
+            type="button"
+            className="hub-button hub-focus-ring"
+            disabled
+            title="Generate a report from the CLI path in v0."
+          >
+            Generate Report
+          </button>
+          <button
+            type="button"
+            className="hub-button hub-focus-ring"
+            disabled
+            title="Open repo information from the CLI path in v0."
+          >
+            View Repo Info
+          </button>
+          <span className="hub-chip is-active">Uptime: live</span>
+        </div>
+      </footer>
     </div>
   );
 };
