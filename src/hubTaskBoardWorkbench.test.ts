@@ -78,11 +78,17 @@ describe("hubTaskBoardWorkbench", () => {
         expect.objectContaining({ kind: "sync" }),
       ]),
     );
+    expect(failedCard?.progressPercent).toBeGreaterThan(0);
+    expect(failedCard?.claimSummary).toBeUndefined();
 
     const claimedCard = model.columns
       .flatMap((column) => column.tasks)
       .find((card) => card.id === "arch-3");
     expect(claimedCard?.claimState).toBe("active");
+    expect(claimedCard?.claimSummary).toContain(
+      "archloop/arch-3-awaiting-merge",
+    );
+    expect(claimedCard?.progressLabel).toContain("waiting for merge");
     expect(claimedCard?.markers).toEqual(
       expect.arrayContaining([expect.objectContaining({ kind: "claim" })]),
     );
@@ -99,9 +105,9 @@ describe("hubTaskBoardWorkbench", () => {
     const board = createHubDesktopFixtureTaskBoard();
     const statuses = board.tasks.map((task) => task.hubStatus);
     expect(statuses).not.toContain("claimed");
-    expect(
-      board.tasks.find((task) => task.id === "arch-3")?.claimState,
-    ).toBe("active");
+    expect(board.tasks.find((task) => task.id === "arch-3")?.claimState).toBe(
+      "active",
+    );
   });
 
   it("filters tasks by search query and hub status", () => {
@@ -142,9 +148,11 @@ describe("hubTaskBoardWorkbench", () => {
 
     expect(inspector.sections.map((section) => section.id)).toEqual(
       expect.arrayContaining([
+        "summary",
         "beads",
         "metadata",
         "runs",
+        "run-directories",
         "lease",
         "failure",
         "comments",
@@ -167,6 +175,31 @@ describe("hubTaskBoardWorkbench", () => {
     );
   });
 
+  it("shows run directory rows only for tasks with matching run refs", () => {
+    const tasks = createHubDesktopFixtureTasks();
+    const projectStatus = createHubDesktopFixtureProjectStatus();
+
+    const noRunRefsInspector = buildHubTaskInspectorModel({
+      task: tasks.find((entry) => entry.id === "arch-1")!,
+      projectStatus,
+    });
+    expect(
+      noRunRefsInspector.sections.some(
+        (section) => section.id === "run-directories",
+      ),
+    ).toBe(false);
+
+    const unmatchedRunDirectoryInspector = buildHubTaskInspectorModel({
+      task: tasks.find((entry) => entry.id === "arch-5")!,
+      projectStatus,
+    });
+    expect(
+      unmatchedRunDirectoryInspector.sections.find(
+        (section) => section.id === "run-directories",
+      )?.rows,
+    ).toEqual([{ key: "Run ref 1", value: "run-proposal-fixture-1" }]);
+  });
+
   it("exposes sync preview actions and CLI-only open-run/open-remote fallbacks", () => {
     const model = buildHubTaskBoardWorkbenchModel({
       board: createHubDesktopFixtureTaskBoard(),
@@ -174,6 +207,20 @@ describe("hubTaskBoardWorkbench", () => {
       selectedTaskId: "arch-5",
     });
 
+    expect(model.toolbarActions).toContainEqual(
+      expect.objectContaining({
+        id: "create-task",
+        kind: "bridge_preview",
+        bridgeAction: "task.createPreview",
+      }),
+    );
+    expect(model.toolbarActions).toContainEqual(
+      expect.objectContaining({
+        id: "run-triage",
+        kind: "cli_only",
+        cliFallback: expect.stringContaining("tasks triage"),
+      }),
+    );
     expect(model.actions).toContainEqual(
       expect.objectContaining({
         id: "sync-push",
@@ -208,6 +255,8 @@ describe("hubTaskBoardWorkbench", () => {
     expect(formatHubTaskBoardStatusLabel("ready_for_agent")).toBe(
       "ready for agent",
     );
-    expect(formatHubTaskBoardStatusLabel("sync_conflict")).toBe("sync conflict");
+    expect(formatHubTaskBoardStatusLabel("sync_conflict")).toBe(
+      "sync conflict",
+    );
   });
 });
