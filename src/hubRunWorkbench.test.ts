@@ -66,6 +66,31 @@ describe("hubRunWorkbench", () => {
     ]);
   });
 
+  it("tracks the active implementation stage and run inspector details", () => {
+    const model = buildHubRunWorkbenchModel({
+      runSummaries: createHubDesktopFixtureRunSummaries(),
+      eventsSnapshot: createHubDesktopFixtureRunEvents(),
+      selectedRunId: "run-fixture-1",
+      selectedBatchId: "batch-fixture-1",
+      projectStatus: createHubDesktopFixtureProjectStatus({
+        includeStaleLeaseDiagnostic: true,
+      }),
+    });
+
+    expect(
+      model.stages.find((stage) => stage.id === "implementation")?.state,
+    ).toBe("active");
+    expect(model.stages.find((stage) => stage.id === "review")?.state).toBe(
+      "pending",
+    );
+    expect(model.metadata?.relatedCommits).toEqual(["c79d9a4", "71b7bec"]);
+    expect(model.actions.map((action) => action.label)).toEqual([
+      "Cancel Run",
+      "Recover Task",
+      "Resume Merge",
+    ]);
+  });
+
   it("builds stage timeline from real Hub event vocabulary", () => {
     const model = buildHubRunWorkbenchModel({
       runSummaries: createHubDesktopFixtureRunSummaries(),
@@ -88,8 +113,11 @@ describe("hubRunWorkbench", () => {
     expect(model.stages.find((stage) => stage.id === "run_start")?.state).toBe(
       "complete",
     );
-    expect(model.stages.find((stage) => stage.id === "merge")?.state).toBe(
-      "active",
+    expect(
+      model.stages.find((stage) => stage.id === "implementation")?.state,
+    ).toBe("active");
+    expect(model.stages.find((stage) => stage.id === "review")?.state).toBe(
+      "pending",
     );
   });
 
@@ -128,9 +156,9 @@ describe("hubRunWorkbench", () => {
     });
     expect(running.terminalPhase).toBe("running");
     expect(running.terminalLines.length).toBeGreaterThan(0);
-    expect(running.terminalLines.some((line) => line.includes("batch_planned"))).toBe(
-      true,
-    );
+    expect(
+      running.terminalLines.some((line) => line.includes("batch_planned")),
+    ).toBe(true);
 
     const completed = buildHubRunWorkbenchModel({
       runSummaries: createHubDesktopFixtureRunSummaries({
@@ -158,7 +186,7 @@ describe("hubRunWorkbench", () => {
 
     expect(model.actions).toContainEqual(
       expect.objectContaining({
-        id: "recover-arch-2",
+        id: "recover-task",
         kind: "bridge_preview",
         bridgeAction: "recover.preview",
       }),
@@ -255,7 +283,9 @@ describe("hubRunWorkbench", () => {
 
   it("marks passed terminal phase when verification succeeds and batch completes", () => {
     const model = buildHubRunWorkbenchModel({
-      runSummaries: createHubDesktopFixtureRunSummaries({ batchStatus: "done" }),
+      runSummaries: createHubDesktopFixtureRunSummaries({
+        batchStatus: "done",
+      }),
       eventsSnapshot: createHubDesktopFixtureRunEvents({ completed: true }),
       selectedRunId: "run-fixture-1",
       selectedBatchId: "batch-fixture-1",

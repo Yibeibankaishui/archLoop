@@ -584,7 +584,7 @@ code,
 .hub-run-grid {
   display: grid;
   gap: var(--hub-space-3);
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
 }
 
 .hub-run-grid-narrow {
@@ -615,9 +615,116 @@ code,
   font-size: 12px;
 }
 
-.hub-run-subheading {
-  margin: var(--hub-space-2) 0 6px;
+.hub-run-hero {
+  display: grid;
+  gap: var(--hub-space-3);
+  border-color: #bfdbfe;
+  background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%);
+}
+
+.hub-run-hero-top {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--hub-space-3);
+  flex-wrap: wrap;
+}
+
+.hub-run-hero-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.hub-run-hero-title {
+  margin: 0;
+  font-family: var(--hub-font-heading);
+  font-size: 20px;
+  line-height: 1.2;
+}
+
+.hub-run-hero-controls {
+  display: flex;
+  align-items: start;
+  gap: var(--hub-space-2);
+  flex-wrap: wrap;
+}
+
+.hub-run-hero-chips,
+.hub-run-chip-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hub-run-hero-command {
+  display: flex;
+  align-items: center;
+  gap: var(--hub-space-2);
+  padding-top: var(--hub-space-2);
+  border-top: 1px solid var(--hub-border);
+}
+
+.hub-run-workbench-body {
+  display: grid;
+  gap: var(--hub-space-3);
+  grid-template-columns: minmax(0, 1.45fr) minmax(280px, 360px);
+  align-items: start;
+}
+
+.hub-run-primary {
+  display: grid;
+  gap: var(--hub-space-3);
+}
+
+.hub-run-selected-batch {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.hub-run-section-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--hub-space-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--hub-space-2);
+}
+
+.hub-run-section-header h2 {
+  margin-bottom: 0;
+  color: var(--hub-text);
+  font-size: 16px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.hub-run-callout {
+  display: grid;
+  gap: var(--hub-space-2);
+  margin-top: var(--hub-space-2);
+  padding-top: var(--hub-space-2);
+  border-top: 1px solid var(--hub-border);
+}
+
+.hub-run-inspector {
+  display: grid;
+  gap: var(--hub-space-3);
+  background: #ffffff;
+}
+
+.hub-run-inspector-block {
+  display: grid;
+  gap: var(--hub-space-2);
+  padding-top: var(--hub-space-2);
+  border-top: 1px solid var(--hub-border);
+}
+
+.hub-run-inspector-block h3 {
+  margin: 0;
   font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
   color: var(--hub-text-muted);
 }
 
@@ -626,18 +733,27 @@ code,
   margin: 0;
   padding: 0;
   display: grid;
-  gap: var(--hub-space-2);
+  gap: 10px;
 }
 
 .hub-run-stage {
   display: grid;
-  grid-template-columns: minmax(120px, 1fr) auto;
-  gap: 6px 10px;
-  align-items: center;
-  padding: var(--hub-space-2);
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: var(--hub-space-3);
   border: 1px solid var(--hub-border);
   border-radius: var(--hub-radius);
   background: #f8fafc;
+}
+
+.hub-run-stage-marker {
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: 999px;
+  background: #cbd5e1;
+  box-shadow: 0 0 0 4px #e2e8f0;
 }
 
 .hub-run-stage.is-active {
@@ -645,9 +761,19 @@ code,
   background: #eef2ff;
 }
 
+.hub-run-stage.is-active .hub-run-stage-marker {
+  background: var(--hub-active);
+  box-shadow: 0 0 0 4px #e0e7ff;
+}
+
 .hub-run-stage.is-complete {
   border-color: #a7f3d0;
   background: #ecfdf5;
+}
+
+.hub-run-stage.is-complete .hub-run-stage-marker {
+  background: var(--hub-ready);
+  box-shadow: 0 0 0 4px #dcfce7;
 }
 
 .hub-run-stage.is-failed {
@@ -655,17 +781,42 @@ code,
   background: #fff1f2;
 }
 
+.hub-run-stage.is-failed .hub-run-stage-marker {
+  background: var(--hub-danger);
+  box-shadow: 0 0 0 4px #ffe4e6;
+}
+
 .hub-run-stage.is-skipped {
   border-style: dashed;
   color: var(--hub-text-muted);
 }
 
+.hub-run-stage.is-skipped .hub-run-stage-marker {
+  background: var(--hub-text-muted);
+  box-shadow: 0 0 0 4px #e2e8f0;
+}
+
+.hub-run-stage-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.hub-run-stage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--hub-space-2);
+  flex-wrap: wrap;
+}
+
 .hub-run-stage-label {
   font-size: 14px;
+  font-weight: 600;
 }
 
 .hub-run-stage-detail {
-  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
 }
 
 .hub-run-terminal-header {
@@ -674,6 +825,32 @@ code,
   justify-content: space-between;
   gap: var(--hub-space-2);
   margin-bottom: var(--hub-space-2);
+  flex-wrap: wrap;
+}
+
+.hub-run-terminal-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid #1e293b;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.95);
+}
+
+.hub-run-terminal-tab {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: #cbd5e1;
+  cursor: pointer;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.hub-run-terminal-tab.is-active {
+  background: #e2e8f0;
+  color: #0f172a;
 }
 
 .hub-run-terminal.is-failed .hub-status {
@@ -689,19 +866,31 @@ code,
 
 .hub-run-actions {
   display: grid;
-  gap: var(--hub-space-3);
+  gap: var(--hub-space-2);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .hub-run-action {
   display: grid;
   gap: var(--hub-space-2);
-  padding-top: var(--hub-space-2);
-  border-top: 1px solid var(--hub-border);
+  padding: var(--hub-space-3);
+  border: 1px solid var(--hub-border);
+  border-radius: var(--hub-radius);
+  background: var(--hub-surface);
 }
 
-.hub-run-action:first-child {
-  padding-top: 0;
-  border-top: 0;
+.hub-run-action.is-primary {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+}
+
+.hub-run-action.is-secondary {
+  background: #f8fafc;
+}
+
+.hub-run-action.is-danger {
+  border-color: #fecdd3;
+  background: #fff1f2;
 }
 
 .hub-run-action-copy strong {
@@ -1040,6 +1229,14 @@ code,
   .hub-header-tabs,
   .hub-header-actions {
     justify-content: flex-start;
+  }
+
+  .hub-run-workbench-body {
+    grid-template-columns: 1fr;
+  }
+
+  .hub-run-hero-top {
+    flex-direction: column;
   }
 }
 
