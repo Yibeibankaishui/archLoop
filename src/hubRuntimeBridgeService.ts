@@ -131,6 +131,16 @@ const buildTaskCreatePreview = (
   };
 };
 
+const buildRecoverDisabledPreview = (
+  taskId: string,
+): HubRuntimeActionPreview => ({
+  action: "recover.execute",
+  summary: `Task ${taskId} is not failed`,
+  confirmToken: "",
+  disabledReason: "Only failed tasks can be recovered from the Hub GUI.",
+  cliFallback: `archloop tasks show ${taskId}`,
+});
+
 const createFixturePreview = (
   action: HubRuntimeActionPreview["action"],
   summary: string,
@@ -165,8 +175,24 @@ const validateProposalSessionRunDir = (
 ): HubRuntimeBridgeError | undefined =>
   existsSync(runDir) ? undefined : proposalSessionNotFoundError(runDir);
 
-const readConfirmToken = (params: Record<string, unknown>): string | undefined =>
+const readConfirmToken = (
+  params: Record<string, unknown>,
+): string | undefined =>
   typeof params.confirmToken === "string" ? params.confirmToken : undefined;
+
+const buildSyncStateSummary = (syncCounts: {
+  readonly pushPending: number;
+  readonly conflict: number;
+  readonly localOnly: number;
+  readonly synced: number;
+}) => ({
+  pushPending: syncCounts.pushPending,
+  pullPending: 0,
+  conflict: syncCounts.conflict,
+  localOnly: syncCounts.localOnly,
+  synced: syncCounts.synced,
+  cliFallback: "archloop tasks sync",
+});
 
 const confirmPreviewError = (
   preview: HubRuntimeActionPreview,
@@ -285,6 +311,14 @@ const readRunEvents = (runDir: string) => {
   return { runDir, events };
 };
 
+const createFixtureProposalApplyPreview = (): HubRuntimeActionPreview =>
+  createFixturePreview(
+    "proposal.applyExecute",
+    "Approve and apply 2 proposed tasks to the local Beads store.",
+    "fixture-proposal-apply",
+    "archloop tasks from-prd <ref>",
+  );
+
 export const createHubRuntimeBridgeService = (
   options: HubRuntimeBridgeServiceOptions = {},
 ) => {
@@ -402,14 +436,11 @@ export const createHubRuntimeBridgeService = (
         }
         case "sync.getState": {
           const status = resolveHubProjectStatus({ cwd });
-          return success({
-            pushPending: status.syncCounts.pushPending,
-            pullPending: 0,
-            conflict: status.syncCounts.conflict,
-            localOnly: status.syncCounts.localOnly,
-            synced: status.syncCounts.synced,
-            cliFallback: "archloop tasks sync",
-          } as unknown as HubRuntimeResponseMap[A]);
+          return success(
+            buildSyncStateSummary(
+              status.syncCounts,
+            ) as unknown as HubRuntimeResponseMap[A],
+          );
         }
         case "recover.preview": {
           const recoverParams =
@@ -427,12 +458,7 @@ export const createHubRuntimeBridgeService = (
           }
           if (task.hubStatus !== "failed") {
             return success({
-              action: "recover.execute",
-              summary: `Task ${recoverParams.taskId} is not failed`,
-              confirmToken: "",
-              disabledReason:
-                "Only failed tasks can be recovered from the Hub GUI.",
-              cliFallback: `archloop tasks show ${recoverParams.taskId}`,
+              ...buildRecoverDisabledPreview(recoverParams.taskId),
             } as unknown as HubRuntimeResponseMap[A]);
           }
           return success(
@@ -631,12 +657,7 @@ export const createHubRuntimeBridgeService = (
         } as unknown as HubRuntimeResponseMap[A]);
       case "sync.getState":
         return success({
-          pushPending: fixtureStatus.syncCounts.pushPending,
-          pullPending: 0,
-          conflict: fixtureStatus.syncCounts.conflict,
-          localOnly: fixtureStatus.syncCounts.localOnly,
-          synced: fixtureStatus.syncCounts.synced,
-          cliFallback: "archloop tasks sync",
+          ...buildSyncStateSummary(fixtureStatus.syncCounts),
         } as HubRuntimeResponseMap[A]);
       case "recover.preview": {
         const recoverParams = params as HubRuntimeRequestMap["recover.preview"];
@@ -683,12 +704,7 @@ export const createHubRuntimeBridgeService = (
           });
         }
         return success(
-          createFixturePreview(
-            "proposal.applyExecute",
-            "Approve and apply 2 proposed tasks to the local Beads store.",
-            "fixture-proposal-apply",
-            "archloop tasks from-prd <ref>",
-          ) as HubRuntimeResponseMap[A],
+          createFixtureProposalApplyPreview() as HubRuntimeResponseMap[A],
         );
       }
       case "recover.execute":
@@ -698,12 +714,7 @@ export const createHubRuntimeBridgeService = (
       case "proposal.applyExecute": {
         const preview =
           request.action === "proposal.applyExecute"
-            ? createFixturePreview(
-                "proposal.applyExecute",
-                "Approve and apply 2 proposed tasks to the local Beads store.",
-                "fixture-proposal-apply",
-                "archloop tasks from-prd <ref>",
-              )
+            ? createFixtureProposalApplyPreview()
             : buildPreviewForMutatingAction(
                 request.action,
                 params as HubRuntimeRequestMap[typeof request.action],
