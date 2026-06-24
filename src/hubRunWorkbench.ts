@@ -159,6 +159,9 @@ const createEmptyRunWorkbenchContent = (): Pick<
   actions: [],
 });
 
+const createRunFlowCliFallback = (flowId?: string): string =>
+  `archloop run . --flow ${flowId ?? "<id>"}`;
+
 const STAGE_DEFINITIONS: readonly {
   readonly id: HubRunWorkbenchStageId;
   readonly label: string;
@@ -173,6 +176,45 @@ const STAGE_DEFINITIONS: readonly {
   { id: "failure", label: "Failure" },
   { id: "recovery", label: "Recovery" },
 ];
+
+const STAGE_TIMESTAMP_EVENT_TYPES: Readonly<
+  Record<HubRunWorkbenchStageId, readonly string[]>
+> = {
+  run_start: ["run_started", "batch_started"],
+  task_claim: ["task_claimed", "task_claim_skipped"],
+  implementation: [
+    "task_implementation_started",
+    "task_implementation_succeeded",
+    "task_implementation_failed",
+  ],
+  review: [
+    "task_review_started",
+    "task_review_succeeded",
+    "task_review_failed",
+  ],
+  verification: [
+    "verification_started",
+    "verification_passed",
+    "verification_failed",
+  ],
+  merge: [
+    "batch_merge_started",
+    "merge_started",
+    "batch_merge_completed",
+    "merge_failed",
+    "merge_conflict_resolution_failed",
+  ],
+  close: ["task_close_started", "task_closed", "task_close_failed"],
+  failure: [
+    "task_implementation_failed",
+    "verification_failed",
+    "merge_failed",
+    "merge_conflict_resolution_failed",
+    "task_close_failed",
+    "batch_merge_completed",
+  ],
+  recovery: ["task_recovered", "recover_started", "recover_completed"],
+};
 
 const readObject = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -274,57 +316,9 @@ const resolveStageTimestamp = (
   batchEvents: readonly Record<string, unknown>[],
   stageId: HubRunWorkbenchStageId,
 ): string | undefined => {
-  const matchingTypes: readonly string[] = (() => {
-    switch (stageId) {
-      case "run_start":
-        return ["run_started", "batch_started"];
-      case "task_claim":
-        return ["task_claimed", "task_claim_skipped"];
-      case "implementation":
-        return [
-          "task_implementation_started",
-          "task_implementation_succeeded",
-          "task_implementation_failed",
-        ];
-      case "review":
-        return [
-          "task_review_started",
-          "task_review_succeeded",
-          "task_review_failed",
-        ];
-      case "verification":
-        return [
-          "verification_started",
-          "verification_passed",
-          "verification_failed",
-        ];
-      case "merge":
-        return [
-          "batch_merge_started",
-          "merge_started",
-          "batch_merge_completed",
-          "merge_failed",
-          "merge_conflict_resolution_failed",
-        ];
-      case "close":
-        return ["task_close_started", "task_closed", "task_close_failed"];
-      case "failure":
-        return [
-          "task_implementation_failed",
-          "verification_failed",
-          "merge_failed",
-          "merge_conflict_resolution_failed",
-          "task_close_failed",
-          "batch_merge_completed",
-        ];
-      case "recovery":
-        return ["task_recovered", "recover_started", "recover_completed"];
-    }
-  })();
-
   for (const record of batchEvents) {
     const type = readFirstString(record, ["type"]);
-    if (!type || !matchingTypes.includes(type)) {
+    if (!type || !STAGE_TIMESTAMP_EVENT_TYPES[stageId].includes(type)) {
       continue;
     }
     const timestamp = readEventTimestamp(record);
@@ -672,7 +666,7 @@ const buildGates = (
       message: "Hub verification did not pass for this batch.",
       nextStep:
         "Inspect verification output, fix the repo, then rerun the flow.",
-      cliFallback: `archloop run . --flow ${metadata.flowId ?? "<id>"}`,
+      cliFallback: createRunFlowCliFallback(metadata.flowId),
     });
   }
 
@@ -688,7 +682,7 @@ const buildGates = (
       message: "Merge selection or conflict resolution failed.",
       nextStep:
         "Resolve conflicts in the worktree, then resume merge with the same flow.",
-      cliFallback: `archloop run . --flow ${metadata.flowId ?? "<id>"}`,
+      cliFallback: createRunFlowCliFallback(metadata.flowId),
     });
   }
 
@@ -718,7 +712,7 @@ const buildGates = (
         "Dirty source files blocked task claim or merge.",
       nextStep:
         "Commit, stash, or revert dirty source files, then rerun the same flow.",
-      cliFallback: `archloop run . --flow ${metadata.flowId ?? "<id>"}`,
+      cliFallback: createRunFlowCliFallback(metadata.flowId),
     });
   }
 
@@ -778,7 +772,6 @@ const buildActions = (
   hasRecoverableFailure: boolean,
 ): readonly HubRunWorkbenchAction[] => {
   const actions: HubRunWorkbenchAction[] = [];
-  const flowId = metadata.flowId ?? "<id>";
 
   actions.push({
     id: "cancel-run",
@@ -819,7 +812,7 @@ const buildActions = (
       "Resume an unfinished merge-ready batch for this flow before claiming new tasks.",
     kind: "cli_only",
     priority: "secondary",
-    cliFallback: `archloop run . --flow ${flowId}`,
+    cliFallback: createRunFlowCliFallback(metadata.flowId),
     disabledReason:
       metadata.batchStatus === "merging"
         ? undefined

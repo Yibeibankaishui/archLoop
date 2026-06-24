@@ -37,6 +37,9 @@ export interface RunWorkbenchViewProps {
   ) => Promise<string | undefined>;
 }
 
+type HubBatchStatus = HubProjectRunSummary["batches"][number]["status"];
+type RunOutputTab = "terminal" | "jsonl";
+
 const stageStateClass = (state: HubRunWorkbenchStageState): string => {
   switch (state) {
     case "active":
@@ -68,7 +71,7 @@ const terminalPhaseLabel = (phase: HubRunWorkbenchTerminalPhase): string => {
 };
 
 const batchStatusLabel = (
-  status: HubProjectRunSummary["batches"][number]["status"] | undefined,
+  status: HubBatchStatus | undefined,
 ): string => {
   switch (status) {
     case "done":
@@ -86,7 +89,7 @@ const batchStatusLabel = (
 };
 
 const batchStatusChipClass = (
-  status: HubProjectRunSummary["batches"][number]["status"] | undefined,
+  status: HubBatchStatus | undefined,
 ): string => {
   switch (status) {
     case "done":
@@ -125,6 +128,53 @@ const formatRunJsonlLine = (
       : JSON.stringify(record.event);
   return `${record.file}:${record.lineNumber} ${payload}`;
 };
+
+const runStateLabel = (
+  terminalPhase: HubRunWorkbenchTerminalPhase,
+  batchStatus: HubBatchStatus | undefined,
+): string => {
+  if (terminalPhase === "passed" || batchStatus === "done") {
+    return "Completed";
+  }
+  if (terminalPhase === "failed") {
+    return "Failed";
+  }
+  return "Running";
+};
+
+const runStateChipClass = (label: string): string => {
+  switch (label) {
+    case "Completed":
+      return "hub-chip is-ready";
+    case "Failed":
+      return "hub-chip is-error";
+    default:
+      return "hub-chip is-warning";
+  }
+};
+
+const outputEmptyStateLabel = (outputTab: RunOutputTab): string =>
+  outputTab === "jsonl"
+    ? "No JSONL events loaded for this batch yet."
+    : "No run events loaded for this batch yet.";
+
+const SelectedTaskChipCloud = ({
+  taskIds,
+}: {
+  readonly taskIds: readonly string[];
+}) => (
+  <div className="hub-run-chip-cloud" aria-label="Selected tasks">
+    {taskIds.length > 0 ? (
+      taskIds.map((taskId) => (
+        <span key={taskId} className="hub-chip">
+          {taskId}
+        </span>
+      ))
+    ) : (
+      <span className="hub-muted">No selected tasks recorded.</span>
+    )}
+  </div>
+);
 
 const RunWorkbenchActionButton = ({
   action,
@@ -271,7 +321,7 @@ export const RunWorkbenchView = ({
   onPreviewAction,
   onConfirmAction,
 }: RunWorkbenchViewProps) => {
-  const [outputTab, setOutputTab] = useState<"terminal" | "jsonl">("terminal");
+  const [outputTab, setOutputTab] = useState<RunOutputTab>("terminal");
   const defaultFocus = useMemo(
     () => selectDefaultRunFocus(runSummaries ?? [], status),
     [runSummaries, status],
@@ -356,12 +406,10 @@ export const RunWorkbenchView = ({
   const gridClass = resolveHubRunWorkbenchGridClass(viewportWidth);
   const selectedRunValue = `${model.selectedRunId}:${model.selectedBatchId}`;
   const commandFallback = `archloop run . --flow ${metadata?.flowId ?? "<id>"}`;
-  const runStateLabel =
-    model.terminalPhase === "passed" || metadata?.batchStatus === "done"
-      ? "Completed"
-      : model.terminalPhase === "failed"
-        ? "Failed"
-        : "Running";
+  const currentRunStateLabel = runStateLabel(
+    model.terminalPhase,
+    metadata?.batchStatus,
+  );
 
   return (
     <div className={gridClass} aria-label="Hub run workbench">
@@ -425,16 +473,8 @@ export const RunWorkbenchView = ({
           <span className={batchStatusChipClass(metadata?.batchStatus)}>
             {batchStatusLabel(metadata?.batchStatus)}
           </span>
-          <span
-            className={
-              runStateLabel === "Completed"
-                ? "hub-chip is-ready"
-                : runStateLabel === "Failed"
-                  ? "hub-chip is-error"
-                  : "hub-chip is-warning"
-            }
-          >
-            {runStateLabel}
+          <span className={runStateChipClass(currentRunStateLabel)}>
+            {currentRunStateLabel}
           </span>
         </div>
         <div className="hub-run-hero-command">
@@ -479,17 +519,7 @@ export const RunWorkbenchView = ({
             <p className="hub-muted">
               {metadata?.rationale ?? "No batch rationale recorded."}
             </p>
-            <div className="hub-run-chip-cloud" aria-label="Selected tasks">
-              {metadata && metadata.selectedTaskIds.length > 0 ? (
-                metadata.selectedTaskIds.map((taskId) => (
-                  <span key={taskId} className="hub-chip">
-                    {taskId}
-                  </span>
-                ))
-              ) : (
-                <span className="hub-muted">No selected tasks recorded.</span>
-              )}
-            </div>
+            <SelectedTaskChipCloud taskIds={metadata?.selectedTaskIds ?? []} />
             {metadata && metadata.deferredTasks.length > 0 ? (
               <div className="hub-run-callout">
                 <p className="hub-muted">Deferred tasks</p>
@@ -591,17 +621,7 @@ export const RunWorkbenchView = ({
 
           <section className="hub-run-inspector-block">
             <h3>Tasks in batch</h3>
-            <div className="hub-run-chip-cloud">
-              {metadata && metadata.selectedTaskIds.length > 0 ? (
-                metadata.selectedTaskIds.map((taskId) => (
-                  <span key={taskId} className="hub-chip">
-                    {taskId}
-                  </span>
-                ))
-              ) : (
-                <span className="hub-muted">No selected tasks recorded.</span>
-              )}
-            </div>
+            <SelectedTaskChipCloud taskIds={metadata?.selectedTaskIds ?? []} />
           </section>
 
           <section className="hub-run-inspector-block">
@@ -665,7 +685,7 @@ export const RunWorkbenchView = ({
         <div className="hub-run-actions">
           {model.actions.map((action) => (
             <RunWorkbenchActionButton
-              key={action.id}
+              key={`${model.selectedRunId}:${model.selectedBatchId}:${action.id}`}
               action={action}
               onPreviewAction={onPreviewAction}
               onConfirmAction={onConfirmAction}
@@ -714,9 +734,7 @@ export const RunWorkbenchView = ({
         <pre className="hub-terminal-body" aria-live="polite">
           {outputLines.length > 0
             ? outputLines.join("\n")
-            : outputTab === "jsonl"
-              ? "No JSONL events loaded for this batch yet."
-              : "No run events loaded for this batch yet."}
+            : outputEmptyStateLabel(outputTab)}
         </pre>
       </section>
     </div>
