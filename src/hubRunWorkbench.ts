@@ -403,12 +403,22 @@ export const formatHubRunEventLine = (record: HubRunEventRecord): string => {
 
 export const resolveHubRunWorkbenchGridClass = (
   viewportWidth: number,
-): string =>
-  resolveHubDesktopSurfaceGridClass(
-    "hub-run-grid",
-    "hub-run-grid-narrow",
-    viewportWidth,
-  );
+): string => {
+  const classNames = [
+    resolveHubDesktopSurfaceGridClass(
+      "hub-run-grid",
+      "hub-run-grid-narrow",
+      viewportWidth,
+    ),
+  ];
+  if (
+    viewportWidth >= HUB_DESKTOP_LAYOUT.narrowBreakpointPx &&
+    viewportWidth <= HUB_DESKTOP_LAYOUT.runWorkbenchCompactMaxWidthPx
+  ) {
+    classNames.push("hub-run-grid-compact");
+  }
+  return classNames.join(" ");
+};
 
 const buildRunOptions = (
   runSummaries: readonly HubProjectRunSummary[],

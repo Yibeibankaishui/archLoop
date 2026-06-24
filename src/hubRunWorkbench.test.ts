@@ -231,6 +231,9 @@ describe("hubRunWorkbench", () => {
     expect(resolveHubRunWorkbenchGridClass(1440)).toBe(
       "hub-run-grid hub-surface-dense",
     );
+    expect(resolveHubRunWorkbenchGridClass(960)).toBe(
+      "hub-run-grid hub-run-grid-compact",
+    );
     expect(resolveHubRunWorkbenchGridClass(700)).toBe(
       "hub-run-grid hub-run-grid-narrow",
     );

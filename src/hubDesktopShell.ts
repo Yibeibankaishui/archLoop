@@ -14,6 +14,7 @@ export const HUB_DESKTOP_LAYOUT = {
   narrowBreakpointPx: 960,
   compactBreakpointPx: 720,
   denseSurfaceBreakpointPx: 1280,
+  runWorkbenchCompactMaxWidthPx: 1024,
 } as const;
 
 export const HUB_DESKTOP_FOCUS_RING_CLASS = "hub-focus-ring";

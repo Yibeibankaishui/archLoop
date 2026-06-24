@@ -70,9 +70,7 @@ const terminalPhaseLabel = (phase: HubRunWorkbenchTerminalPhase): string => {
   }
 };
 
-const batchStatusLabel = (
-  status: HubBatchStatus | undefined,
-): string => {
+const batchStatusLabel = (status: HubBatchStatus | undefined): string => {
   switch (status) {
     case "done":
       return "Completed";
@@ -88,9 +86,7 @@ const batchStatusLabel = (
   }
 };
 
-const batchStatusChipClass = (
-  status: HubBatchStatus | undefined,
-): string => {
+const batchStatusChipClass = (status: HubBatchStatus | undefined): string => {
   switch (status) {
     case "done":
       return "hub-chip is-ready";
@@ -486,7 +482,7 @@ export const RunWorkbenchView = ({
       {model.gates.map((gate) => (
         <section
           key={gate.kind}
-          className="hub-banner is-error hub-panel-wide"
+          className="hub-banner is-error hub-panel-wide hub-run-gate"
           role="alert"
           aria-label={gate.title}
         >
@@ -670,7 +666,7 @@ export const RunWorkbenchView = ({
       </section>
 
       <section
-        className="hub-panel hub-panel-wide"
+        className="hub-panel hub-panel-wide hub-run-actions-panel"
         aria-labelledby="hub-run-actions-heading"
       >
         <div className="hub-run-section-header">
@@ -695,7 +691,7 @@ export const RunWorkbenchView = ({
       </section>
 
       <section
-        className={`hub-panel hub-terminal hub-panel-wide hub-run-terminal is-${model.terminalPhase}`}
+        className={`hub-panel hub-terminal hub-panel-wide hub-run-terminal hub-run-terminal-panel is-${model.terminalPhase}`}
         aria-labelledby="hub-run-terminal-heading"
       >
         <div className="hub-run-terminal-header">
