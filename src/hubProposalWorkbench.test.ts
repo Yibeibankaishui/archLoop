@@ -282,7 +282,7 @@ describe("hubProposalWorkbench", () => {
 
   it("uses stacked grid class on narrow viewports", () => {
     expect(resolveHubProposalWorkbenchGridClass(1440)).toBe(
-      "hub-proposal-grid",
+      "hub-proposal-grid hub-surface-dense",
     );
     expect(resolveHubProposalWorkbenchGridClass(700)).toBe(
       "hub-proposal-grid hub-proposal-grid-narrow",

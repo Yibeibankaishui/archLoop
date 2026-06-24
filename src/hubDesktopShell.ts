@@ -13,6 +13,7 @@ export const HUB_DESKTOP_LAYOUT = {
   inspectorWidthPx: 380,
   narrowBreakpointPx: 960,
   compactBreakpointPx: 720,
+  denseSurfaceBreakpointPx: 1280,
 } as const;
 
 export const HUB_DESKTOP_FOCUS_RING_CLASS = "hub-focus-ring";
@@ -80,6 +81,9 @@ export const resolveHubDesktopLayoutMode = (
 
 export const shouldCollapseInspector = (viewportWidth: number): boolean =>
   viewportWidth < HUB_DESKTOP_LAYOUT.narrowBreakpointPx;
+
+export const shouldUseDenseDesktopSurface = (viewportWidth: number): boolean =>
+  viewportWidth >= HUB_DESKTOP_LAYOUT.denseSurfaceBreakpointPx;
 
 const twoColumnShellGridStyle = (): Record<string, string> => ({
   gridTemplateColumns: `${HUB_DESKTOP_LAYOUT.railWidthPx}px 1fr`,

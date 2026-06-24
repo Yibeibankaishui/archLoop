@@ -1,4 +1,7 @@
-import { HUB_DESKTOP_LAYOUT } from "./hubDesktopShell.js";
+import {
+  HUB_DESKTOP_LAYOUT,
+  shouldUseDenseDesktopSurface,
+} from "./hubDesktopShell.js";
 import type {
   HubRunEventRecord,
   HubRuntimePreviewAction,
@@ -885,9 +888,17 @@ const buildMetadata = (
 export const resolveHubProposalWorkbenchGridClass = (
   viewportWidth: number,
 ): string =>
-  viewportWidth < HUB_DESKTOP_LAYOUT.narrowBreakpointPx
-    ? "hub-proposal-grid hub-proposal-grid-narrow"
-    : "hub-proposal-grid";
+  [
+    "hub-proposal-grid",
+    shouldUseDenseDesktopSurface(viewportWidth)
+      ? "hub-surface-dense"
+      : undefined,
+    viewportWidth < HUB_DESKTOP_LAYOUT.narrowBreakpointPx
+      ? "hub-proposal-grid-narrow"
+      : undefined,
+  ]
+    .filter((className): className is string => className !== undefined)
+    .join(" ");
 
 export const buildHubProposalWorkbenchModel = (
   input: BuildHubProposalWorkbenchModelInput,

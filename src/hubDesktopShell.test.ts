@@ -12,6 +12,7 @@ import {
   isHubDesktopNavSection,
   resolveHubDesktopLayoutMode,
   shouldCollapseInspector,
+  shouldUseDenseDesktopSurface,
 } from "./hubDesktopShell.js";
 
 describe("hubDesktopShell", () => {
@@ -52,6 +53,11 @@ describe("hubDesktopShell", () => {
     expect(hubDesktopShellGridStyle(640).gridTemplateAreas).toBe(
       '"header" "main"',
     );
+  });
+
+  it("uses dense desktop surfaces on wide viewports to keep the first viewport usable", () => {
+    expect(shouldUseDenseDesktopSurface(1600)).toBe(true);
+    expect(shouldUseDenseDesktopSurface(960)).toBe(false);
   });
 
   it("defines a shared focus ring class for keyboard navigation", () => {
