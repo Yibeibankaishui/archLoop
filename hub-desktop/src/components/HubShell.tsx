@@ -63,14 +63,18 @@ export const HubShell = ({
       <HubNav
         sections={sections}
         activeSection={activeSection}
+        projectStatus={projectStatus}
         onNavigate={onNavigate}
       />
       <HubHeader
         activeSection={activeSection}
         projectStatus={projectStatus}
+        onNavigate={onNavigate}
         onToggleInspector={onToggleInspector}
         inspectorOpen={inspectorOpen}
         collapseInspector={collapseInspector}
+        onPreviewAction={onPreviewAction}
+        onConfirmAction={onConfirmAction}
       />
       <main className="hub-main" aria-label={hubDesktopNavLabel(activeSection)}>
         {children}
@@ -80,6 +84,7 @@ export const HubShell = ({
           taskInspector={taskInspector}
           projectStatus={projectStatus}
           style={{ width: HUB_DESKTOP_LAYOUT.inspectorWidthPx }}
+          onClose={onToggleInspector}
           onPreviewAction={onPreviewAction}
           onConfirmAction={onConfirmAction}
         />
@@ -93,6 +98,7 @@ export const HubShell = ({
             <InspectorPanel
               taskInspector={taskInspector}
               projectStatus={projectStatus}
+              onClose={onToggleInspector}
               onPreviewAction={onPreviewAction}
               onConfirmAction={onConfirmAction}
             />

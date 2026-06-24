@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   HUB_DESKTOP_FOCUS_RING_CLASS,
   HUB_DESKTOP_NAV_SECTIONS,
+  HUB_DESKTOP_SHELL_TABS,
   HUB_DESKTOP_TOKENS,
+  HUB_DESKTOP_TYPOGRAPHY,
   hubDesktopNavLabel,
   hubDesktopShellGridStyle,
   isHubDesktopNavSection,
@@ -47,5 +49,16 @@ describe("hubDesktopShell", () => {
 
   it("defines a shared focus ring class for keyboard navigation", () => {
     expect(HUB_DESKTOP_FOCUS_RING_CLASS).toBe("hub-focus-ring");
+  });
+
+  it("publishes shared typography tokens and shell tabs", () => {
+    expect(HUB_DESKTOP_TYPOGRAPHY.heading).toContain("Geist");
+    expect(HUB_DESKTOP_TYPOGRAPHY.body).toContain("Inter");
+    expect(HUB_DESKTOP_TYPOGRAPHY.mono).toContain("JetBrains Mono");
+    expect(HUB_DESKTOP_SHELL_TABS.map((tab) => tab.label)).toEqual([
+      "Project",
+      "Run",
+      "Batch",
+    ]);
   });
 });
