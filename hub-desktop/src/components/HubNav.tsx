@@ -66,43 +66,48 @@ export const HubNav = ({
   activeSection,
   projectStatus,
   onNavigate,
-}: HubNavProps) => (
-  <nav className="hub-rail" aria-label="Hub navigation">
-    <div className="hub-rail-brand" aria-hidden="true">
-      aL
-    </div>
-    <div className="hub-rail-stack" aria-label="Hub sections">
-      {sections.map((section) => {
-        const active = section === activeSection;
-        return (
-          <button
-            key={section}
-            type="button"
-            className={`hub-rail-button hub-focus-ring ${active ? "is-active" : ""}`}
-            aria-current={active ? "page" : undefined}
-            title={hubDesktopNavLabel(section)}
-            onClick={() => onNavigate(section)}
-          >
-            <span className="hub-rail-button-icon" aria-hidden="true">
-              {navIcon(section)}
-            </span>
-            <span className="hub-sr-only">
-              {hubDesktopNavLabel(section)} {navShortLabel(section)}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-    <div className="hub-rail-footer" aria-label="Hub project summary">
-      <div className="hub-rail-summary">
-        <span className="hub-rail-summary-label">Ready</span>
-        <strong>{projectStatus?.taskCounts.ready ?? 0}</strong>
-        <span className="hub-rail-summary-divider">/</span>
-        <span>{projectStatus?.taskCounts.total ?? 0}</span>
-      </div>
-      <div className="hub-rail-avatar" aria-hidden="true">
+}: HubNavProps) => {
+  const readyCount = projectStatus?.taskCounts.ready ?? 0;
+  const totalCount = projectStatus?.taskCounts.total ?? 0;
+
+  return (
+    <nav className="hub-rail" aria-label="Hub navigation">
+      <div className="hub-rail-brand" aria-hidden="true">
         aL
       </div>
-    </div>
-  </nav>
-);
+      <div className="hub-rail-stack" aria-label="Hub sections">
+        {sections.map((section) => {
+          const active = section === activeSection;
+          return (
+            <button
+              key={section}
+              type="button"
+              className={`hub-rail-button hub-focus-ring ${active ? "is-active" : ""}`}
+              aria-current={active ? "page" : undefined}
+              title={hubDesktopNavLabel(section)}
+              onClick={() => onNavigate(section)}
+            >
+              <span className="hub-rail-button-icon" aria-hidden="true">
+                {navIcon(section)}
+              </span>
+              <span className="hub-sr-only">
+                {hubDesktopNavLabel(section)} {navShortLabel(section)}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="hub-rail-footer" aria-label="Hub project summary">
+        <div className="hub-rail-summary">
+          <span className="hub-rail-summary-label">Ready</span>
+          <strong>{readyCount}</strong>
+          <span className="hub-rail-summary-divider">/</span>
+          <span>{totalCount}</span>
+        </div>
+        <div className="hub-rail-avatar" aria-hidden="true">
+          aL
+        </div>
+      </div>
+    </nav>
+  );
+};

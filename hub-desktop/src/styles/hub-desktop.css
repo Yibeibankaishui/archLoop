@@ -126,6 +126,11 @@ textarea {
   height: 18px;
 }
 
+.hub-rail-button-icon {
+  display: grid;
+  place-items: center;
+}
+
 .hub-rail-button svg rect,
 .hub-rail-button svg circle,
 .hub-rail-button svg path {
@@ -253,14 +258,6 @@ textarea {
   border-color: #bfdbfe;
   background: #eff6ff;
   color: var(--hub-accent);
-}
-
-.hub-header-meta {
-  display: flex;
-  align-items: center;
-  gap: var(--hub-space-2);
-  flex-wrap: wrap;
-  justify-content: flex-end;
 }
 
 .hub-header-actions {
@@ -446,7 +443,7 @@ textarea {
 .hub-mono,
 code,
 .hub-mono-list {
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  font-family: var(--hub-font-mono);
   font-size: 12px;
 }
 
@@ -614,7 +611,7 @@ code,
   border-radius: var(--hub-radius);
   background: var(--hub-surface);
   padding: 8px 10px;
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  font-family: var(--hub-font-mono);
   font-size: 12px;
 }
 
@@ -1001,7 +998,7 @@ code,
   max-height: 280px;
   overflow: auto;
   white-space: pre-wrap;
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  font-family: var(--hub-font-mono);
   font-size: 12px;
 }
 
@@ -1033,10 +1030,6 @@ code,
 }
 
 @media (max-width: 960px) {
-  .hub-header-meta {
-    justify-content: flex-start;
-  }
-
   .hub-header {
     grid-template-columns: 1fr;
     align-items: start;

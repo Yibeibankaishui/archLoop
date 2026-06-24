@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { HubProjectStatus } from "@yibeibankaishui/archloop/hub-runtime-contract";
@@ -6,12 +6,19 @@ import {
   HUB_DESKTOP_SHELL_TABS,
   hubDesktopNavLabel,
   type HubDesktopNavSection,
-  type HubDesktopShellTab,
 } from "@yibeibankaishui/archloop/hub-desktop-shell";
 import type {
   HubRuntimeActionPreview,
   HubRuntimePreviewAction,
 } from "@yibeibankaishui/archloop/hub-runtime-contract";
+
+type HeaderIconKind = "notifications" | "help" | "avatar";
+
+const HEADER_ICON_BUTTONS = [
+  { label: "Notifications", kind: "notifications" },
+  { label: "Help", kind: "help" },
+  { label: "Account", kind: "avatar" },
+] as const;
 
 const inspectorToggleLabel = (
   collapseInspector: boolean,
@@ -23,7 +30,7 @@ const inspectorToggleLabel = (
   return inspectorOpen ? "Hide inspector" : "Show inspector";
 };
 
-const headerIcon = (kind: "notifications" | "help" | "avatar"): ReactNode => {
+const headerIcon = (kind: HeaderIconKind): ReactNode => {
   switch (kind) {
     case "notifications":
       return (
@@ -48,9 +55,6 @@ const headerIcon = (kind: "notifications" | "help" | "avatar"): ReactNode => {
       );
   }
 };
-
-const tabSectionForHeader = (tab: HubDesktopShellTab): HubDesktopNavSection =>
-  tab.section;
 
 const syncPreviewActionForStatus = (
   projectStatus?: HubProjectStatus,
@@ -84,13 +88,21 @@ const syncPreviewActionForStatus = (
   return { bridgeAction: "sync.pushPreview" };
 };
 
+const isHeaderTabActive = (
+  tabSection: HubDesktopNavSection,
+  tabKey: (typeof HUB_DESKTOP_SHELL_TABS)[number]["key"],
+  activeSection: HubDesktopNavSection,
+): boolean =>
+  tabSection === activeSection ||
+  (activeSection === "proposal-session" && tabKey === "batch");
+
 const HeaderIconButton = ({
   label,
   kind,
   disabled,
 }: {
   readonly label: string;
-  readonly kind: "notifications" | "help" | "avatar";
+  readonly kind: HeaderIconKind;
   readonly disabled?: boolean;
 }) => (
   <button
@@ -120,9 +132,9 @@ const HeaderPreviewAction = ({
   readonly onConfirmAction?: HubHeaderProps["onConfirmAction"];
 }) => {
   const [preview, setPreview] = useState<HubRuntimeActionPreview | undefined>();
-  const [previewParams, setPreviewParams] = useState<
-    Record<string, unknown> | undefined
-  >();
+  const previewParamsRef = useRef<Record<string, unknown> | undefined>(
+    undefined,
+  );
   const [pending, setPending] = useState(false);
   const [resultMessage, setResultMessage] = useState<string | undefined>();
   const disabled = disabledReason !== undefined;
@@ -135,8 +147,12 @@ const HeaderPreviewAction = ({
     setPending(true);
     setResultMessage(undefined);
     try {
-      const nextPreview = await onPreviewAction(bridgeAction, {});
-      setPreviewParams({});
+      const nextPreviewParams = {};
+      const nextPreview = await onPreviewAction(
+        bridgeAction,
+        nextPreviewParams,
+      );
+      previewParamsRef.current = nextPreviewParams;
       setPreview(nextPreview);
     } finally {
       setPending(false);
@@ -144,6 +160,7 @@ const HeaderPreviewAction = ({
   };
 
   const handleConfirm = async () => {
+    const previewParams = previewParamsRef.current;
     if (
       !preview ||
       !previewParams ||
@@ -158,7 +175,7 @@ const HeaderPreviewAction = ({
       const message = await onConfirmAction(preview, previewParams);
       setResultMessage(message ?? "Action queued for CLI execution.");
       setPreview(undefined);
-      setPreviewParams(undefined);
+      previewParamsRef.current = undefined;
     } finally {
       setPending(false);
     }
@@ -265,9 +282,7 @@ export const HubHeader = ({
 
       <nav className="hub-header-tabs" aria-label="Hub sections">
         {HUB_DESKTOP_SHELL_TABS.map((tab) => {
-          const active =
-            tabSectionForHeader(tab) === activeSection ||
-            (activeSection === "proposal-session" && tab.key === "batch");
+          const active = isHeaderTabActive(tab.section, tab.key, activeSection);
           return (
             <button
               key={tab.key}
@@ -313,9 +328,14 @@ export const HubHeader = ({
         >
           {inspectorToggleLabel(collapseInspector, inspectorOpen)}
         </button>
-        <HeaderIconButton label="Notifications" kind="notifications" disabled />
-        <HeaderIconButton label="Help" kind="help" disabled />
-        <HeaderIconButton label="Account" kind="avatar" disabled />
+        {HEADER_ICON_BUTTONS.map((button) => (
+          <HeaderIconButton
+            key={button.kind}
+            label={button.label}
+            kind={button.kind}
+            disabled
+          />
+        ))}
       </div>
     </header>
   );
