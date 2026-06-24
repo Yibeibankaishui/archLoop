@@ -203,6 +203,29 @@ const readStringArray = (value: unknown): readonly string[] =>
 const readErrorMessage = (error: unknown, fallback: string): string =>
   error instanceof Error ? error.message : fallback;
 
+const confidenceTone = (score: number): "high" | "medium" | "low" => {
+  if (score >= 85) {
+    return "high";
+  }
+  if (score >= 70) {
+    return "medium";
+  }
+  return "low";
+};
+
+const applyPenaltyScore = (
+  applyState: HubProposalApplyState | undefined,
+): number => {
+  switch (applyState?.status) {
+    case "blocked_mutations":
+      return 20;
+    case "validation_failed":
+      return 12;
+    default:
+      return 0;
+  }
+};
+
 const summarizeConfidenceIndex = (input: {
   readonly validationErrors: readonly HubProposalValidationError[];
   readonly taskCards: readonly HubProposalTaskCard[];
@@ -223,18 +246,13 @@ const summarizeConfidenceIndex = (input: {
         return score + 8;
     }
   }, 0);
-  const applyPenalty =
-    input.applyState?.status === "blocked_mutations"
-      ? 20
-      : input.applyState?.status === "validation_failed"
-        ? 12
-        : 0;
+  const applyPenalty = applyPenaltyScore(input.applyState);
   const warningPenalty = warningCount * 4;
   const score = Math.max(
     40,
     100 - validationPenalty - applyPenalty - warningPenalty,
   );
-  const tone = score >= 85 ? "high" : score >= 70 ? "medium" : "low";
+  const tone = confidenceTone(score);
   return `Confidence index ${score}/100 (${tone})`;
 };
 
@@ -616,10 +634,9 @@ const buildSourceContext = (
         : readStringArray(preparedContext.decisionItems);
   const extractedRequirementText =
     extractHighlightedRequirementText(preparedContext);
-  const title = flowId === "triage" ? "Source document" : "Source document";
 
   return {
-    title,
+    title: "Source document",
     summary,
     highlights,
     extractedRequirementText,
@@ -737,6 +754,23 @@ const resolveApproveDisabledReason = (input: {
   return undefined;
 };
 
+const resolveCliOnlyActionDisabledReason = (input: {
+  readonly proposalStatus: HubProposalSessionStatus;
+  readonly cliFallback: string;
+  readonly action: "reject" | "revise";
+}): string => {
+  if (input.proposalStatus === "applied") {
+    return input.action === "reject"
+      ? "Proposal is already applied to the local task store."
+      : "Applied proposals must be changed on the task board instead.";
+  }
+
+  const baseCopy = `Desktop ${input.action} is not wired in v0. Re-open the proposal session with ${input.cliFallback}`;
+  return input.action === "reject"
+    ? `${baseCopy} if you need to cancel or restart.`
+    : `${baseCopy} to refine it in the CLI.`;
+};
+
 const buildActions = (input: {
   readonly flowId: HubProposalFlowId;
   readonly proposalStatus: HubProposalSessionStatus;
@@ -781,10 +815,11 @@ const buildActions = (input: {
       description: "Discard the proposal without creating local tasks.",
       kind: "cli_only",
       cliFallback,
-      disabledReason:
-        input.proposalStatus === "applied"
-          ? "Proposal is already applied to the local task store."
-          : `Desktop reject is not wired in v0. Re-open the proposal session with ${cliFallback} if you need to cancel or restart.`,
+      disabledReason: resolveCliOnlyActionDisabledReason({
+        proposalStatus: input.proposalStatus,
+        cliFallback,
+        action: "reject",
+      }),
     },
     {
       id: "revise",
@@ -793,10 +828,11 @@ const buildActions = (input: {
         "Restart or refine the proposal session with additional maintainer feedback.",
       kind: "cli_only",
       cliFallback,
-      disabledReason:
-        input.proposalStatus === "applied"
-          ? "Applied proposals must be changed on the task board instead."
-          : `Desktop revise is not wired in v0. Re-open the proposal session with ${cliFallback} to refine it in the CLI.`,
+      disabledReason: resolveCliOnlyActionDisabledReason({
+        proposalStatus: input.proposalStatus,
+        cliFallback,
+        action: "revise",
+      }),
     },
   ];
 };

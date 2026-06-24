@@ -68,6 +68,29 @@ const taskCardClass = (card: HubProposalTaskCard): string => {
   }
 };
 
+const taskValidationChipClass = (
+  validationState: HubProposalTaskCard["validationState"],
+): string => {
+  switch (validationState) {
+    case "error":
+      return "hub-chip is-error";
+    case "warning":
+      return "hub-chip is-warning";
+    default:
+      return "hub-chip";
+  }
+};
+
+const dependencySummary = (dependencies: readonly string[]): string => {
+  if (dependencies.length === 0) {
+    return "No dependencies";
+  }
+  if (dependencies.length === 1) {
+    return "1 dependency";
+  }
+  return `${dependencies.length} dependencies`;
+};
+
 const ProposalSecondaryAction = ({
   action,
 }: {
@@ -122,20 +145,8 @@ const ProposalTaskCardView = ({
       {card.confidence ? (
         <span className="hub-chip">{card.confidence} confidence</span>
       ) : null}
-      <span className="hub-chip">
-        {card.dependencies.length > 0
-          ? `${card.dependencies.length} dependency${card.dependencies.length === 1 ? "" : "s"}`
-          : "No dependencies"}
-      </span>
-      <span
-        className={
-          card.validationState === "error"
-            ? "hub-chip is-error"
-            : card.validationState === "warning"
-              ? "hub-chip is-warning"
-              : "hub-chip"
-        }
-      >
+      <span className="hub-chip">{dependencySummary(card.dependencies)}</span>
+      <span className={taskValidationChipClass(card.validationState)}>
         {card.validationState}
       </span>
     </div>

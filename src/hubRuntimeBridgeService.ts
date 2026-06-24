@@ -153,6 +153,51 @@ const readString = (value: unknown): string | undefined =>
     ? value.trim()
     : undefined;
 
+const proposalSessionNotFoundError = (
+  runDir: string,
+): HubRuntimeBridgeError => ({
+  code: "not_found",
+  message: `Proposal session not found at ${runDir}`,
+});
+
+const validateProposalSessionRunDir = (
+  runDir: string,
+): HubRuntimeBridgeError | undefined =>
+  existsSync(runDir) ? undefined : proposalSessionNotFoundError(runDir);
+
+const readConfirmToken = (params: Record<string, unknown>): string | undefined =>
+  typeof params.confirmToken === "string" ? params.confirmToken : undefined;
+
+const confirmPreviewError = (
+  preview: HubRuntimeActionPreview,
+): HubRuntimeBridgeError | undefined => {
+  if (preview.disabledReason) {
+    return {
+      code: "action_disabled",
+      message: preview.disabledReason,
+      cliFallback: preview.cliFallback,
+    };
+  }
+
+  return undefined;
+};
+
+const validateConfirmToken = (
+  preview: HubRuntimeActionPreview,
+  params: Record<string, unknown>,
+): HubRuntimeBridgeError | undefined => {
+  const confirmToken = readConfirmToken(params);
+  if (!confirmToken || confirmToken !== preview.confirmToken) {
+    return {
+      code: "confirm_invalid",
+      message: "Confirm token is missing or invalid. Preview the action first.",
+      cliFallback: preview.cliFallback,
+    };
+  }
+
+  return undefined;
+};
+
 const inferProposalFlowId = (
   preparedContext: Readonly<Record<string, unknown>>,
 ): "prd-decomposition" | "triage" =>
@@ -243,6 +288,24 @@ const readRunEvents = (runDir: string) => {
 export const createHubRuntimeBridgeService = (
   options: HubRuntimeBridgeServiceOptions = {},
 ) => {
+  const queuePreviewExecution = <T>(
+    preview: HubRuntimeActionPreview,
+    params: Record<string, unknown>,
+    data: T,
+  ): HubRuntimeBridgeResult<T> => {
+    const previewError = confirmPreviewError(preview);
+    if (previewError) {
+      return failure(previewError);
+    }
+
+    const confirmError = validateConfirmToken(preview, params);
+    if (confirmError) {
+      return failure(confirmError);
+    }
+
+    return success(data);
+  };
+
   const invoke = async <A extends HubRuntimeAction>(
     request: HubRuntimeRequest<A>,
   ): Promise<HubRuntimeBridgeResult<HubRuntimeResponseMap[A]>> => {
@@ -310,11 +373,11 @@ export const createHubRuntimeBridgeService = (
         case "proposal.applyPreview": {
           const proposalParams =
             params as HubRuntimeRequestMap["proposal.applyPreview"];
-          if (!existsSync(proposalParams.runDir)) {
-            return failure({
-              code: "not_found",
-              message: `Proposal session not found at ${proposalParams.runDir}`,
-            });
+          const runDirError = validateProposalSessionRunDir(
+            proposalParams.runDir,
+          );
+          if (runDirError) {
+            return failure(runDirError);
           }
           return success(
             buildProposalApplyPreview(
@@ -322,34 +385,6 @@ export const createHubRuntimeBridgeService = (
               proposalParams.cwd ?? cwd,
             ) as unknown as HubRuntimeResponseMap[A],
           );
-        }
-        case "proposal.applyExecute": {
-          const proposalParams =
-            params as HubRuntimeRequestMap["proposal.applyExecute"];
-          const preview = buildProposalApplyPreview(
-            proposalParams.runDir,
-            proposalParams.cwd ?? cwd,
-          );
-          if (preview.disabledReason) {
-            return failure({
-              code: "action_disabled",
-              message: preview.disabledReason,
-              cliFallback: preview.cliFallback,
-            });
-          }
-          const confirmToken = (params as { readonly confirmToken?: string })
-            .confirmToken;
-          if (!confirmToken || confirmToken !== preview.confirmToken) {
-            return failure({
-              code: "confirm_invalid",
-              message:
-                "Confirm token is missing or invalid. Preview the action first.",
-              cliFallback: preview.cliFallback,
-            });
-          }
-          return success({
-            status: "queued_for_cli",
-          } as unknown as HubRuntimeResponseMap[A]);
         }
         case "config.getSummary": {
           const envValues = readHubEnvFile({ env: process.env });
@@ -442,7 +477,19 @@ export const createHubRuntimeBridgeService = (
         case "recover.execute":
         case "sync.pushExecute":
         case "sync.pullExecute":
-        case "task.createExecute": {
+        case "task.createExecute":
+        case "proposal.applyExecute": {
+          if (request.action === "proposal.applyExecute") {
+            const proposalParams =
+              params as HubRuntimeRequestMap["proposal.applyExecute"];
+            const runDirError = validateProposalSessionRunDir(
+              proposalParams.runDir,
+            );
+            if (runDirError) {
+              return failure(runDirError);
+            }
+          }
+
           const preview = buildPreviewForMutatingAction(
             request.action,
             params as HubRuntimeRequestMap[typeof request.action],
@@ -454,25 +501,7 @@ export const createHubRuntimeBridgeService = (
               message: "Unable to build preview for mutating action",
             });
           }
-          if (preview.disabledReason) {
-            return failure({
-              code: "action_disabled",
-              message: preview.disabledReason,
-              cliFallback: preview.cliFallback,
-            });
-          }
-          const confirmToken = (params as { readonly confirmToken?: string })
-            .confirmToken;
-          if (!confirmToken || confirmToken !== preview.confirmToken) {
-            return failure({
-              code: "confirm_invalid",
-              message:
-                "Confirm token is missing or invalid. Preview the action first.",
-              cliFallback: preview.cliFallback,
-            });
-          }
-
-          return success({
+          return queuePreviewExecution(preview, readObject(params), {
             status: "queued_for_cli",
             taskId:
               request.action === "recover.execute"
