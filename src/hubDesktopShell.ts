@@ -81,6 +81,11 @@ export const resolveHubDesktopLayoutMode = (
 export const shouldCollapseInspector = (viewportWidth: number): boolean =>
   viewportWidth < HUB_DESKTOP_LAYOUT.narrowBreakpointPx;
 
+const twoColumnShellGridStyle = (): Record<string, string> => ({
+  gridTemplateColumns: `${HUB_DESKTOP_LAYOUT.railWidthPx}px 1fr`,
+  gridTemplateAreas: '"rail header" "rail main"',
+});
+
 export const hubDesktopNavLabel = (section: HubDesktopNavSection): string => {
   switch (section) {
     case "overview":
@@ -106,16 +111,10 @@ export const hubDesktopShellGridStyle = (
     };
   }
   if (mode === "tablet") {
-    return {
-      gridTemplateColumns: `${HUB_DESKTOP_LAYOUT.railWidthPx}px 1fr`,
-      gridTemplateAreas: '"rail header" "rail main"',
-    };
+    return twoColumnShellGridStyle();
   }
   if (!showInspector) {
-    return {
-      gridTemplateColumns: `${HUB_DESKTOP_LAYOUT.railWidthPx}px 1fr`,
-      gridTemplateAreas: '"rail header" "rail main"',
-    };
+    return twoColumnShellGridStyle();
   }
   return {
     gridTemplateColumns: `${HUB_DESKTOP_LAYOUT.railWidthPx}px 1fr ${HUB_DESKTOP_LAYOUT.inspectorWidthPx}px`,

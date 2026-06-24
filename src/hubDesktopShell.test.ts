@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  HUB_DESKTOP_LAYOUT,
   HUB_DESKTOP_FOCUS_RING_CLASS,
   HUB_DESKTOP_NAV_SECTIONS,
   HUB_DESKTOP_SHELL_TABS,
@@ -38,7 +39,7 @@ describe("hubDesktopShell", () => {
       hubDesktopShellGridStyle(1440, false).gridTemplateAreas,
     ).not.toContain("inspector");
     expect(hubDesktopShellGridStyle(1440, false).gridTemplateColumns).toBe(
-      "60px 1fr",
+      `${HUB_DESKTOP_LAYOUT.railWidthPx}px 1fr`,
     );
 
     expect(resolveHubDesktopLayoutMode(800)).toBe("tablet");
