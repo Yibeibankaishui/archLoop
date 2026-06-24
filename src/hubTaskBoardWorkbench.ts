@@ -1,4 +1,7 @@
-import { HUB_DESKTOP_LAYOUT } from "./hubDesktopShell.js";
+import {
+  HUB_DESKTOP_LAYOUT,
+  resolveHubDesktopSurfaceGridClass,
+} from "./hubDesktopShell.js";
 import { readPrdWarningFromTask } from "./hubPrdWarning.js";
 import type { HubRuntimePreviewAction } from "./hubRuntimeBridge.js";
 import type { HubWorktreeLeaseDiagnostic } from "./hubWorktreeLeaseDiagnostics.js";
@@ -218,7 +221,8 @@ const formatRelativeRunDirectory = (
   runDirectory: string,
   hubProjectDir: string | undefined,
 ): string => {
-  const formatSegments = (value: string): string => value.split("/").join(" / ");
+  const formatSegments = (value: string): string =>
+    value.split("/").join(" / ");
   const normalize = (value: string): string => value.replaceAll("\\", "/");
   const normalizedRunDirectory = normalize(runDirectory);
   if (!hubProjectDir) {
@@ -491,7 +495,10 @@ const buildCommentSectionRows = (
   }));
 };
 
-const matchesRunDirectoryRef = (runDirectory: string, runRef: string): boolean =>
+const matchesRunDirectoryRef = (
+  runDirectory: string,
+  runRef: string,
+): boolean =>
   runDirectory.includes(`/runs/${runRef}`) ||
   runDirectory.endsWith(`/runs/${runRef}`) ||
   runDirectory.endsWith(`/${runRef}`);
@@ -893,6 +900,8 @@ export const buildHubTaskBoardWorkbenchModel = (
 };
 
 export const resolveHubTaskBoardGridClass = (viewportWidth: number): string =>
-  viewportWidth < HUB_DESKTOP_LAYOUT.narrowBreakpointPx
-    ? "hub-task-board-grid hub-task-board-grid-narrow"
-    : "hub-task-board-grid";
+  resolveHubDesktopSurfaceGridClass(
+    "hub-task-board-grid",
+    "hub-task-board-grid-narrow",
+    viewportWidth,
+  );
