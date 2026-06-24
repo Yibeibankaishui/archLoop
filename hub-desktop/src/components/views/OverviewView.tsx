@@ -46,6 +46,13 @@ interface OverviewTimelineItem {
   readonly details: readonly [string, string][];
 }
 
+interface UseBridgePreviewActionInput {
+  readonly action: HubOverviewAction;
+  readonly onPreviewAction?: OverviewViewProps["onPreviewAction"];
+  readonly onConfirmAction?: OverviewViewProps["onConfirmAction"];
+  readonly defaultResultMessage?: string;
+}
+
 const bannerClassName = (severity: HubOverviewBannerSeverity): string => {
   switch (severity) {
     case "error":
@@ -82,6 +89,58 @@ const timelineToneClass = (tone: OverviewTimelineItem["tone"]): string => {
       return "hub-chip is-error";
     default:
       return "hub-chip";
+  }
+};
+
+const leaseTimelineTone = (
+  leaseState: HubProjectStatus["worktreeLeaseDiagnostics"][number]["leaseState"],
+): OverviewTimelineItem["tone"] => {
+  switch (leaseState) {
+    case "active":
+      return "active";
+    case "stale":
+      return "warning";
+    default:
+      return "neutral";
+  }
+};
+
+const formatLeaseOwner = (
+  diagnostic: HubProjectStatus["worktreeLeaseDiagnostics"][number],
+): string => {
+  if (!diagnostic.owner) {
+    return "unknown owner";
+  }
+
+  if (diagnostic.owner.kind !== "hub" || !diagnostic.owner.taskId) {
+    return "direct execution";
+  }
+
+  const ownerParts = [`task ${diagnostic.owner.taskId}`];
+  if (diagnostic.owner.flowId) {
+    ownerParts.push(`flow ${diagnostic.owner.flowId}`);
+  }
+  if (diagnostic.owner.batchId) {
+    ownerParts.push(`batch ${diagnostic.owner.batchId}`);
+  }
+
+  return ownerParts.join(", ");
+};
+
+const inspectorStatusClassName = (
+  item: OverviewTimelineItem | undefined,
+): string => {
+  if (item?.statusLabel === "DONE") {
+    return "hub-chip is-ready";
+  }
+
+  switch (item?.tone) {
+    case "error":
+      return "hub-chip is-error";
+    case "warning":
+      return "hub-chip is-warning";
+    default:
+      return "hub-chip is-active";
   }
 };
 
@@ -145,28 +204,9 @@ const buildOverviewTimelineItems = (
       title: `${diagnostic.taskId} · ${diagnostic.reason.replaceAll("_", " ")}`,
       summary: diagnostic.message,
       badge: "Lease",
-      tone:
-        diagnostic.leaseState === "active"
-          ? "active"
-          : diagnostic.leaseState === "stale"
-            ? "warning"
-            : "neutral",
+      tone: leaseTimelineTone(diagnostic.leaseState),
       sourcePath: diagnostic.branch,
-      lockedBy: diagnostic.owner
-        ? diagnostic.owner.kind === "hub" && diagnostic.owner.taskId
-          ? [
-              `task ${diagnostic.owner.taskId}`,
-              diagnostic.owner.flowId
-                ? `flow ${diagnostic.owner.flowId}`
-                : undefined,
-              diagnostic.owner.batchId
-                ? `batch ${diagnostic.owner.batchId}`
-                : undefined,
-            ]
-              .filter((part) => part !== undefined)
-              .join(", ")
-          : "direct execution"
-        : "unknown owner",
+      lockedBy: formatLeaseOwner(diagnostic),
       leaseId: diagnostic.worktreeName,
       statusLabel: diagnostic.leaseState === "active" ? "ACTIVE" : "DONE",
       nextAction: diagnostic.nextAction,
@@ -204,15 +244,12 @@ const resolveDefaultTimelineItemId = (
   items.find((item) => item.kind === "batch")?.id ??
   items[0]?.id;
 
-const OverviewActionButton = ({
+const useBridgePreviewAction = ({
   action,
   onPreviewAction,
   onConfirmAction,
-}: {
-  readonly action: HubOverviewAction;
-  readonly onPreviewAction?: OverviewViewProps["onPreviewAction"];
-  readonly onConfirmAction?: OverviewViewProps["onConfirmAction"];
-}) => {
+  defaultResultMessage,
+}: UseBridgePreviewActionInput) => {
   const [preview, setPreview] = useState<HubRuntimeActionPreview | undefined>();
   const [previewParams, setPreviewParams] = useState<
     Record<string, unknown> | undefined
@@ -221,24 +258,24 @@ const OverviewActionButton = ({
   const [resultMessage, setResultMessage] = useState<string | undefined>();
 
   const disabled = action.disabledReason !== undefined;
+  const canPreview =
+    !disabled &&
+    action.kind === "bridge_preview" &&
+    action.bridgeAction !== undefined &&
+    onPreviewAction !== undefined;
 
   const handlePreview = async () => {
-    if (
-      disabled ||
-      action.kind !== "bridge_preview" ||
-      !action.bridgeAction ||
-      !onPreviewAction
-    ) {
+    if (!canPreview || !onPreviewAction || !action.bridgeAction) {
       return;
     }
+
     setPending(true);
     setResultMessage(undefined);
+
     try {
-      const nextPreview = await onPreviewAction(
-        action.bridgeAction,
-        action.bridgeParams ?? {},
-      );
-      setPreviewParams(action.bridgeParams ?? {});
+      const params = action.bridgeParams ?? {};
+      const nextPreview = await onPreviewAction(action.bridgeAction, params);
+      setPreviewParams(params);
       setPreview(nextPreview);
     } finally {
       setPending(false);
@@ -254,16 +291,54 @@ const OverviewActionButton = ({
     ) {
       return;
     }
+
     setPending(true);
+
     try {
       const message = await onConfirmAction(preview, previewParams);
-      setResultMessage(message ?? "Action queued for CLI execution.");
+      if (defaultResultMessage) {
+        setResultMessage(message ?? defaultResultMessage);
+      }
       setPreview(undefined);
       setPreviewParams(undefined);
     } finally {
       setPending(false);
     }
   };
+
+  return {
+    preview,
+    pending,
+    disabled,
+    canPreview,
+    resultMessage,
+    handlePreview,
+    handleConfirm,
+  };
+};
+
+const OverviewActionButton = ({
+  action,
+  onPreviewAction,
+  onConfirmAction,
+}: {
+  readonly action: HubOverviewAction;
+  readonly onPreviewAction?: OverviewViewProps["onPreviewAction"];
+  readonly onConfirmAction?: OverviewViewProps["onConfirmAction"];
+}) => {
+  const {
+    preview,
+    pending,
+    disabled,
+    resultMessage,
+    handlePreview,
+    handleConfirm,
+  } = useBridgePreviewAction({
+    action,
+    onPreviewAction,
+    onConfirmAction,
+    defaultResultMessage: "Action queued for CLI execution.",
+  });
 
   return (
     <div className="hub-overview-action">
@@ -342,53 +417,12 @@ const CompactActionButton = ({
   readonly onPreviewAction?: OverviewViewProps["onPreviewAction"];
   readonly onConfirmAction?: OverviewViewProps["onConfirmAction"];
 }) => {
-  const [preview, setPreview] = useState<HubRuntimeActionPreview | undefined>();
-  const [previewParams, setPreviewParams] = useState<
-    Record<string, unknown> | undefined
-  >();
-  const [pending, setPending] = useState(false);
-  const disabled = action.disabledReason !== undefined;
-
-  const handlePreview = async () => {
-    if (
-      disabled ||
-      action.kind !== "bridge_preview" ||
-      !action.bridgeAction ||
-      !onPreviewAction
-    ) {
-      return;
-    }
-    setPending(true);
-    try {
-      const nextPreview = await onPreviewAction(
-        action.bridgeAction,
-        action.bridgeParams ?? {},
-      );
-      setPreviewParams(action.bridgeParams ?? {});
-      setPreview(nextPreview);
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const handleConfirm = async () => {
-    if (
-      !preview ||
-      !previewParams ||
-      !onConfirmAction ||
-      preview.disabledReason
-    ) {
-      return;
-    }
-    setPending(true);
-    try {
-      await onConfirmAction(preview, previewParams);
-      setPreview(undefined);
-      setPreviewParams(undefined);
-    } finally {
-      setPending(false);
-    }
-  };
+  const { preview, pending, disabled, handlePreview, handleConfirm } =
+    useBridgePreviewAction({
+      action,
+      onPreviewAction,
+      onConfirmAction,
+    });
 
   return (
     <div className="hub-overview-sync-action">
@@ -801,9 +835,7 @@ export const OverviewView = ({
               <p className="hub-eyebrow">Inspector</p>
               <h2>Lease inspector</h2>
             </div>
-            <span
-              className={`hub-chip ${selectedTimelineItem?.statusLabel === "DONE" ? "is-ready" : selectedTimelineItem?.tone === "error" ? "is-error" : selectedTimelineItem?.tone === "warning" ? "is-warning" : "is-active"}`}
-            >
+            <span className={inspectorStatusClassName(selectedTimelineItem)}>
               {selectedTimelineItem?.statusLabel ?? "DONE"}
             </span>
           </div>
