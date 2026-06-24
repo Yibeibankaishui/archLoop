@@ -24,6 +24,14 @@
       "doc_url": "https://my.feishu.cn/docx/NicDdex57oA52QxtMSsckEYjnyb",
       "sync_mode": "overwrite",
       "updated_at": "2026-05-26T13:44:58+08:00"
+    },
+    {
+      "local_path": "docs/qa/hub-gui-current-status-feishu.md",
+      "title": "archLoop GUI 当前状态与问题汇总",
+      "doc_id": "V3QFdV89ion3iNxKj8VctYagnQb",
+      "doc_url": "https://my.feishu.cn/docx/V3QFdV89ion3iNxKj8VctYagnQb",
+      "sync_mode": "overwrite",
+      "updated_at": "2026-06-24T18:34:39+08:00"
     }
   ]
 }
