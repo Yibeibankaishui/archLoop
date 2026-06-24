@@ -349,9 +349,7 @@ export const selectDefaultRunFocus = (
     if (!run) {
       continue;
     }
-    const activeBatch = [...run.batches]
-      .reverse()
-      .find((batch) => batch.active);
+    const activeBatch = findLastActiveBatch(run);
     if (activeBatch) {
       return { runId: run.runId, batchId: activeBatch.batchId };
     }
@@ -364,6 +362,18 @@ export const selectDefaultRunFocus = (
   }
 
   return {};
+};
+
+const findLastActiveBatch = (
+  run: HubProjectRunSummary,
+): HubProjectBatchSummary | undefined => {
+  for (let index = run.batches.length - 1; index >= 0; index -= 1) {
+    const batch = run.batches[index];
+    if (batch?.active) {
+      return batch;
+    }
+  }
+  return undefined;
 };
 
 export const formatHubRunEventLine = (record: HubRunEventRecord): string => {
