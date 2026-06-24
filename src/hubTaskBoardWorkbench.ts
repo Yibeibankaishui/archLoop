@@ -899,9 +899,18 @@ export const buildHubTaskBoardWorkbenchModel = (
   };
 };
 
-export const resolveHubTaskBoardGridClass = (viewportWidth: number): string =>
-  `${resolveHubDesktopSurfaceGridClass(
-    "hub-task-board-grid",
-    "hub-task-board-grid-narrow",
-    viewportWidth,
-  )}${viewportWidth >= HUB_DESKTOP_LAYOUT.denseSurfaceBreakpointPx ? " hub-task-board-grid-board-first" : ""}`;
+export const resolveHubTaskBoardGridClass = (
+  viewportWidth: number,
+): string => {
+  const classNames = [
+    resolveHubDesktopSurfaceGridClass(
+      "hub-task-board-grid",
+      "hub-task-board-grid-narrow",
+      viewportWidth,
+    ),
+  ];
+  if (viewportWidth >= HUB_DESKTOP_LAYOUT.denseSurfaceBreakpointPx) {
+    classNames.push("hub-task-board-grid-board-first");
+  }
+  return classNames.join(" ");
+};
