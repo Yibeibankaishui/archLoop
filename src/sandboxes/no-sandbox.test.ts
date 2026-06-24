@@ -100,6 +100,23 @@ describe("noSandbox", () => {
       expect(result.stdout.trim()).toBe("archloop_test_value");
     });
 
+    it("exec terminates the spawned process when aborted", async () => {
+      const provider = noSandbox();
+      const handle = await provider.create({
+        worktreePath: process.cwd(),
+        env: {},
+      });
+      const controller = new AbortController();
+
+      const execPromise = handle.exec("sleep 30", {
+        signal: controller.signal,
+      });
+      setTimeout(() => controller.abort(new Error("stop")), 50);
+
+      const result = await execPromise;
+      expect(result.exitCode).toBe(130);
+    });
+
     it("isolates git global config per handle", async () => {
       const tmpDir = mkdtempSync(join(tmpdir(), "archloop-no-sandbox-test-"));
       const sourceGitConfig = join(tmpDir, ".gitconfig");

@@ -92,6 +92,8 @@ const parseStreamJsonLine = (line: string): ParsedStreamEvent[] => {
 export interface AgentCommandOptions {
   readonly prompt: string;
   readonly dangerouslySkipPermissions: boolean;
+  /** Working directory the provider should use when it supports an explicit cwd flag. */
+  readonly cwd?: string;
   /** When set, the agent should resume the given session ID instead of starting fresh. */
   readonly resumeSession?: string;
 }
@@ -466,12 +468,13 @@ export const codex = (
   env: options?.env ?? {},
   captureSessions: false,
 
-  buildPrintCommand({ prompt }: AgentCommandOptions): PrintCommand {
+  buildPrintCommand({ prompt, cwd }: AgentCommandOptions): PrintCommand {
     const effortFlag = options?.effort
       ? ` -c ${shellEscape(`model_reasoning_effort="${options.effort}"`)}`
       : "";
+    const cdFlag = cwd ? ` --cd ${shellEscape(cwd)}` : "";
     return {
-      command: `codex exec --json --dangerously-bypass-approvals-and-sandbox -m ${shellEscape(model)}${effortFlag}`,
+      command: `codex exec --json --dangerously-bypass-approvals-and-sandbox -m ${shellEscape(model)}${effortFlag}${cdFlag}`,
       stdin: prompt,
     };
   },

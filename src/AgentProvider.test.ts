@@ -510,6 +510,15 @@ describe("codex factory", () => {
     expect(command).toContain(`-c 'model_reasoning_effort="high"'`);
   });
 
+  it("buildPrintCommand includes an explicit cwd when provided", () => {
+    const provider = codex("gpt-5.4-mini");
+    const { command } = provider.buildPrintCommand({
+      ...opts("do something"),
+      cwd: "/tmp/archloop worktree",
+    });
+    expect(command).toContain("--cd '/tmp/archloop worktree'");
+  });
+
   it("buildPrintCommand omits model reasoning effort config when not specified", () => {
     const provider = codex("gpt-5.4-mini");
     const { command } = provider.buildPrintCommand(opts("do something"));
