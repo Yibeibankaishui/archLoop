@@ -68,6 +68,12 @@ const invokeAgent = (
   Effect.gen(function* () {
     let resultText = "";
     let sessionId: string | undefined;
+    const execAbortController = new AbortController();
+    const abortExec = (reason: unknown) => {
+      if (!execAbortController.signal.aborted) {
+        execAbortController.abort(reason);
+      }
+    };
 
     // Deferred that will be failed when the idle timer fires
     const timeoutSignal = yield* Deferred.make<never, AgentIdleTimeoutError>();
@@ -89,15 +95,12 @@ const invokeAgent = (
     const resetIdleTimer = () => {
       if (timeoutHandle !== null) clearTimeout(timeoutHandle);
       timeoutHandle = setTimeout(() => {
-        Effect.runPromise(
-          Deferred.fail(
-            timeoutSignal,
-            new AgentIdleTimeoutError({
-              message: `Agent idle for ${idleTimeoutMs / 1000} seconds — no output received. Consider increasing the idle timeout with --idle-timeout.`,
-              timeoutMs: idleTimeoutMs,
-            }),
-          ),
-        ).catch(() => {});
+        const error = new AgentIdleTimeoutError({
+          message: `Agent idle for ${idleTimeoutMs / 1000} seconds — no output received. Consider increasing the idle timeout with --idle-timeout.`,
+          timeoutMs: idleTimeoutMs,
+        });
+        Effect.runPromise(Deferred.fail(timeoutSignal, error)).catch(() => {});
+        abortExec(error);
       }, idleTimeoutMs);
       // Reset warning interval on activity
       startWarningInterval();
@@ -112,6 +115,7 @@ const invokeAgent = (
         return yield* Effect.die(signal.reason);
       }
       const onAbort = () => {
+        abortExec(signal.reason);
         Effect.runPromise(Deferred.die(abortDeferred, signal.reason)).catch(
           () => {},
         );
@@ -127,6 +131,7 @@ const invokeAgent = (
         prompt,
         dangerouslySkipPermissions: true,
         resumeSession,
+        cwd: sandboxRepoDir,
       });
       const execResult = yield* sandbox.exec(printCmd.command, {
         onLine: (line) => {
@@ -145,7 +150,18 @@ const invokeAgent = (
         },
         cwd: sandboxRepoDir,
         stdin: printCmd.stdin,
+        signal: execAbortController.signal,
       });
+
+      if (execAbortController.signal.aborted) {
+        const reason = execAbortController.signal.reason;
+        if (reason instanceof AgentIdleTimeoutError) {
+          return yield* Effect.fail(reason);
+        }
+        if (signal?.aborted) {
+          return yield* Effect.die(reason);
+        }
+      }
 
       if (execResult.exitCode !== 0) {
         const failure = toAgentExecFailure(

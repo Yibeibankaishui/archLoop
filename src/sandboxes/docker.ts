@@ -210,6 +210,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
             cwd?: string;
             sudo?: boolean;
             stdin?: string;
+            signal?: AbortSignal;
           },
         ): Promise<ExecResult> => {
           const effectiveCommand = opts?.sudo ? `sudo ${command}` : command;
@@ -219,6 +220,15 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
           args.push(containerName, "sh", "-c", effectiveCommand);
 
           return new Promise((resolve, reject) => {
+            if (opts?.signal?.aborted) {
+              resolve({
+                stdout: "",
+                stderr: "Command aborted before start",
+                exitCode: 130,
+              });
+              return;
+            }
+
             const proc = spawn(dockerBin, args, {
               stdio: [
                 opts?.stdin !== undefined ? "pipe" : "ignore",
@@ -234,6 +244,12 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
 
             const stdoutChunks: string[] = [];
             const stderrChunks: string[] = [];
+            let forceKillHandle: ReturnType<typeof setTimeout> | undefined;
+            const onAbort = () => {
+              proc.kill("SIGTERM");
+              forceKillHandle = setTimeout(() => proc.kill("SIGKILL"), 5_000);
+            };
+            opts?.signal?.addEventListener("abort", onAbort, { once: true });
 
             if (opts?.onLine) {
               const onLine = opts.onLine;
@@ -256,11 +272,13 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
               reject(new Error(`${dockerBin} exec failed: ${error.message}`));
             });
 
-            proc.on("close", (code) => {
+            proc.on("close", (code, signal) => {
+              opts?.signal?.removeEventListener("abort", onAbort);
+              if (forceKillHandle !== undefined) clearTimeout(forceKillHandle);
               resolve({
                 stdout: stdoutChunks.join(opts?.onLine ? "\n" : ""),
                 stderr: stderrChunks.join(""),
-                exitCode: code ?? 0,
+                exitCode: code ?? (signal ? 130 : 0),
               });
             });
           });

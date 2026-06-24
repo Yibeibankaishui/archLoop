@@ -52,6 +52,37 @@ const createIsolatedGitGlobalConfig = (
   };
 };
 
+const DEFAULT_SYSTEM_PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+
+const ensureSystemPath = (pathValue: string | undefined): string => {
+  const segments = (pathValue ?? "").split(":").filter(Boolean);
+  for (const segment of DEFAULT_SYSTEM_PATH.split(":")) {
+    if (!segments.includes(segment)) segments.push(segment);
+  }
+  return segments.join(":");
+};
+
+const killProcessTree = (
+  proc: ReturnType<typeof spawn>,
+): ReturnType<typeof setTimeout> | undefined => {
+  if (proc.exitCode !== null || proc.signalCode !== null) return undefined;
+
+  const kill = (signal: NodeJS.Signals) => {
+    try {
+      if (process.platform !== "win32" && proc.pid !== undefined) {
+        process.kill(-proc.pid, signal);
+      } else {
+        proc.kill(signal);
+      }
+    } catch {
+      // Process is already gone.
+    }
+  };
+
+  kill("SIGTERM");
+  return setTimeout(() => kill("SIGKILL"), 5_000);
+};
+
 /**
  * Create a no-sandbox provider.
  *
@@ -70,6 +101,9 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
     const processEnv = {
       ...baseEnv,
       GIT_CONFIG_GLOBAL: isolatedGitConfig.path,
+      PATH: ensureSystemPath(baseEnv.PATH),
+      SHELL:
+        baseEnv.SHELL && existsSync(baseEnv.SHELL) ? baseEnv.SHELL : "/bin/zsh",
     };
 
     const handle: NoSandboxHandle = {
@@ -82,15 +116,26 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
           cwd?: string;
           sudo?: boolean;
           stdin?: string;
+          signal?: AbortSignal;
         },
       ): Promise<ExecResult> => {
         // sudo is a no-op for no-sandbox — the user is already on the host
         const cwd = opts?.cwd ?? worktreePath;
 
         return new Promise((resolve, reject) => {
+          if (opts?.signal?.aborted) {
+            resolve({
+              stdout: "",
+              stderr: "Command aborted before start",
+              exitCode: 130,
+            });
+            return;
+          }
+
           const proc = spawn("sh", ["-c", command], {
             cwd,
             env: processEnv,
+            detached: process.platform !== "win32",
             stdio: [
               opts?.stdin !== undefined ? "pipe" : "ignore",
               "pipe",
@@ -105,6 +150,11 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
 
           const stdoutChunks: string[] = [];
           const stderrChunks: string[] = [];
+          let forceKillHandle: ReturnType<typeof setTimeout> | undefined;
+          const onAbort = () => {
+            forceKillHandle = killProcessTree(proc);
+          };
+          opts?.signal?.addEventListener("abort", onAbort, { once: true });
 
           if (opts?.onLine) {
             const rl = createInterface({ input: proc.stdout! });
@@ -126,11 +176,13 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
             reject(new Error(`exec failed: ${error.message}`));
           });
 
-          proc.on("close", (code) => {
+          proc.on("close", (code, signal) => {
+            opts?.signal?.removeEventListener("abort", onAbort);
+            if (forceKillHandle !== undefined) clearTimeout(forceKillHandle);
             resolve({
               stdout: stdoutChunks.join(opts?.onLine ? "\n" : ""),
               stderr: stderrChunks.join(""),
-              exitCode: code ?? 0,
+              exitCode: code ?? (signal ? 130 : 0),
             });
           });
         });

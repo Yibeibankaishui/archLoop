@@ -49,6 +49,7 @@ export interface SandboxService {
       cwd?: string;
       sudo?: boolean;
       stdin?: string;
+      signal?: AbortSignal;
     },
   ) => Effect.Effect<ExecResult, ExecError>;
 

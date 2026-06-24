@@ -2677,6 +2677,70 @@ describe("Orchestrator Display integration", () => {
     }
   }, 10_000);
 
+  it("aborts the active sandbox exec when idle timeout fires", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-timeout-abort-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    let execSignal: AbortSignal | undefined;
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const fsLayer = makeLocalSandboxLayer(dir);
+      return Layer.succeed(Sandbox, {
+        exec: (command, options) => {
+          if (command.startsWith("claude ")) {
+            execSignal = options?.signal;
+            return Effect.async((resume) => {
+              const onAbort = () => {
+                setTimeout(() => {
+                  resume(
+                    Effect.succeed({
+                      stdout: "",
+                      stderr: "aborted",
+                      exitCode: 130,
+                    }),
+                  );
+                }, 10);
+              };
+              options?.signal?.addEventListener("abort", onAbort, {
+                once: true,
+              });
+            });
+          }
+
+          return Effect.flatMap(Sandbox, (real) =>
+            real.exec(command, options),
+          ).pipe(Effect.provide(fsLayer));
+        },
+        copyIn: (hostPath, sandboxPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyIn(hostPath, sandboxPath),
+          ).pipe(Effect.provide(fsLayer)),
+        copyFileOut: (sandboxPath, hostPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyFileOut(sandboxPath, hostPath),
+          ).pipe(Effect.provide(fsLayer)),
+      });
+    });
+
+    const exitResult = await Effect.runPromise(
+      orchestrate({
+        provider: testProvider,
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: "test",
+        idleTimeoutSeconds: 0.1,
+      }).pipe(
+        Effect.provide(Layer.merge(factoryLayer, testDisplayLayer)),
+        Effect.exit,
+      ),
+    );
+
+    expect(exitResult._tag).toBe("Failure");
+    expect(execSignal?.aborted).toBe(true);
+    expect(execSignal?.reason).toBeInstanceOf(AgentIdleTimeoutError);
+  }, 10_000);
+
   it("resets the idle timer on each text/tool_call output", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "orch-idle-reset-"));
 
