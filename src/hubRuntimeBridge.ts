@@ -8,11 +8,13 @@ import {
   type HubTaskProjection,
   type HubTaskStatus,
 } from "./taskBoard.js";
+import type { HubTaskBoardAction } from "./hubTaskBoardWorkbench.js";
 
 export type {
   HubProjectRunSummary,
   HubProjectStatus,
   HubTaskBoard,
+  HubTaskBoardAction,
   HubTaskProjection,
   HubTaskStatus,
 };
@@ -49,13 +51,15 @@ export type HubRuntimePreviewAction =
   | "recover.preview"
   | "sync.pushPreview"
   | "sync.pullPreview"
-  | "task.createPreview";
+  | "task.createPreview"
+  | "proposal.applyPreview";
 
 export type HubRuntimeMutatingAction =
   | "recover.execute"
   | "sync.pushExecute"
   | "sync.pullExecute"
-  | "task.createExecute";
+  | "task.createExecute"
+  | "proposal.applyExecute";
 
 export type HubRuntimeAction =
   | HubRuntimeReadAction
@@ -101,6 +105,10 @@ export interface HubRuntimeRequestMap {
     readonly description?: string;
     readonly cwd?: string;
   };
+  "proposal.applyPreview": {
+    readonly runDir: string;
+    readonly cwd?: string;
+  };
   "recover.execute": {
     readonly taskId: string;
     readonly cwd?: string;
@@ -112,6 +120,11 @@ export interface HubRuntimeRequestMap {
   "task.createExecute": {
     readonly title: string;
     readonly description?: string;
+    readonly cwd?: string;
+    readonly confirmToken: string;
+  };
+  "proposal.applyExecute": {
+    readonly runDir: string;
     readonly cwd?: string;
     readonly confirmToken: string;
   };
@@ -171,10 +184,12 @@ export interface HubRuntimeResponseMap {
   "sync.pushPreview": HubRuntimeActionPreview;
   "sync.pullPreview": HubRuntimeActionPreview;
   "task.createPreview": HubRuntimeActionPreview;
+  "proposal.applyPreview": HubRuntimeActionPreview;
   "recover.execute": { readonly taskId: string; readonly status: string };
   "sync.pushExecute": { readonly status: string };
   "sync.pullExecute": { readonly status: string };
   "task.createExecute": HubTaskProjection;
+  "proposal.applyExecute": { readonly status: string };
 }
 
 export const HUB_RUNTIME_MUTATING_ACTIONS = new Set<HubRuntimeAction>([
@@ -182,6 +197,7 @@ export const HUB_RUNTIME_MUTATING_ACTIONS = new Set<HubRuntimeAction>([
   "sync.pushExecute",
   "sync.pullExecute",
   "task.createExecute",
+  "proposal.applyExecute",
 ]);
 
 export const HUB_RUNTIME_PREVIEW_ACTIONS = new Set<HubRuntimeAction>([
@@ -189,6 +205,7 @@ export const HUB_RUNTIME_PREVIEW_ACTIONS = new Set<HubRuntimeAction>([
   "sync.pushPreview",
   "sync.pullPreview",
   "task.createPreview",
+  "proposal.applyPreview",
 ]);
 
 export const isExcludedHubTaskStatusLabel = (
@@ -237,6 +254,11 @@ export const buildHubRuntimeExecuteParams = (
         confirmToken: preview.confirmToken,
       };
     case "task.createExecute":
+      return {
+        ...params,
+        confirmToken: preview.confirmToken,
+      };
+    case "proposal.applyExecute":
       return {
         ...params,
         confirmToken: preview.confirmToken,

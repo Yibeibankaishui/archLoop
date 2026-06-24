@@ -81,6 +81,9 @@ export interface HubProposalSessionMetadata {
   readonly proposalStatus: HubProposalSessionStatus;
   readonly confidenceSummary?: string;
   readonly agentRationale?: string;
+  readonly worktreeLeaseSummary: string;
+  readonly localWriteSummary: string;
+  readonly agentLogPath: string;
   readonly artifactPaths: readonly {
     readonly label: string;
     readonly path: string;
@@ -91,6 +94,8 @@ export interface HubProposalSourceContext {
   readonly title: string;
   readonly summary?: string;
   readonly highlights: readonly string[];
+  readonly extractedRequirementText?: string;
+  readonly requirements: readonly string[];
   readonly transcriptExcerpt: readonly {
     readonly role: string;
     readonly content: string;
@@ -190,8 +195,101 @@ const readString = (value: unknown): string | undefined =>
     ? value.trim()
     : undefined;
 
+const readStringArray = (value: unknown): readonly string[] =>
+  Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+
 const readErrorMessage = (error: unknown, fallback: string): string =>
   error instanceof Error ? error.message : fallback;
+
+const summarizeConfidenceIndex = (input: {
+  readonly validationErrors: readonly HubProposalValidationError[];
+  readonly taskCards: readonly HubProposalTaskCard[];
+  readonly applyState?: HubProposalApplyState;
+}): string => {
+  const warningCount = input.taskCards.reduce(
+    (count, card) => count + card.warnings.length,
+    0,
+  );
+  const validationPenalty = input.validationErrors.reduce((score, error) => {
+    switch (error.kind) {
+      case "mutation_detection_failure":
+      case "schema_mismatch":
+      case "invalid_dependencies":
+      case "missing_acceptance_criteria":
+        return score + 18;
+      default:
+        return score + 8;
+    }
+  }, 0);
+  const applyPenalty =
+    input.applyState?.status === "blocked_mutations"
+      ? 20
+      : input.applyState?.status === "validation_failed"
+        ? 12
+        : 0;
+  const warningPenalty = warningCount * 4;
+  const score = Math.max(
+    40,
+    100 - validationPenalty - applyPenalty - warningPenalty,
+  );
+  const tone = score >= 85 ? "high" : score >= 70 ? "medium" : "low";
+  return `Confidence index ${score}/100 (${tone})`;
+};
+
+const extractRequirementItems = (
+  prdContent: string | undefined,
+): readonly string[] => {
+  if (!prdContent) {
+    return [];
+  }
+
+  const items: string[] = [];
+  for (const line of prdContent.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    const match = /^(?:\d+\.|-|\*)\s+(.*)$/.exec(trimmed);
+    if (!match?.[1]) {
+      continue;
+    }
+    const requirement = match[1].replace(/^\[[ xX]\]\s+/, "").trim();
+    if (requirement.length > 0) {
+      items.push(requirement);
+    }
+  }
+  return items;
+};
+
+const extractHighlightedRequirementText = (
+  preparedContext: Readonly<Record<string, unknown>>,
+): string | undefined => {
+  const explicit = readString(preparedContext.extractedRequirementText);
+  if (explicit) {
+    return explicit;
+  }
+
+  const prdContent = readString(preparedContext.prdContent);
+  if (!prdContent) {
+    return readString(preparedContext.summary);
+  }
+
+  const paragraphs = prdContent
+    .split(/\n\s*\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter((paragraph) => paragraph.length > 0);
+
+  for (const paragraph of paragraphs) {
+    if (paragraph.startsWith("#")) {
+      continue;
+    }
+    if (/^(?:\d+\.|-|\*)\s+/.test(paragraph)) {
+      continue;
+    }
+    return paragraph.replace(/\s+/g, " ");
+  }
+
+  return readString(preparedContext.summary) ?? prdContent.split(/\r?\n/)[0];
+};
 
 const isPrdProposal = (value: unknown): value is PrdDecompositionProposal => {
   const record = readObject(value);
@@ -508,15 +606,24 @@ const buildSourceContext = (
   }
 
   const summary = readString(preparedContext.summary);
-  const title =
-    flowId === "triage"
-      ? "Triage proposal source"
-      : (readString(preparedContext.prdTitle) ?? "PRD decomposition source");
+  const explicitRequirements = readStringArray(preparedContext.requirements);
+  const prdContent = readString(preparedContext.prdContent);
+  const requirements =
+    explicitRequirements.length > 0
+      ? explicitRequirements
+      : flowId === "prd-decomposition"
+        ? extractRequirementItems(prdContent)
+        : readStringArray(preparedContext.decisionItems);
+  const extractedRequirementText =
+    extractHighlightedRequirementText(preparedContext);
+  const title = flowId === "triage" ? "Source document" : "Source document";
 
   return {
     title,
     summary,
     highlights,
+    extractedRequirementText,
+    requirements,
     transcriptExcerpt: transcript.slice(-4).map((turn) => ({
       role: turn.role,
       content: turn.content,
@@ -610,6 +717,7 @@ const resolveApproveDisabledReason = (input: {
   readonly proposalStatus: HubProposalSessionStatus;
   readonly hasFinalProposal: boolean;
   readonly hasBlockingValidation: boolean;
+  readonly taskStoreReason?: string;
 }): string | undefined => {
   if (input.proposalStatus === "applied") {
     return "Proposal is already applied to the local task store.";
@@ -623,25 +731,8 @@ const resolveApproveDisabledReason = (input: {
   if (input.hasBlockingValidation) {
     return "Resolve validation errors before approval.";
   }
-  return undefined;
-};
-
-const resolveApplyDisabledReason = (input: {
-  readonly proposalStatus: HubProposalSessionStatus;
-  readonly taskStoreReason?: string;
-  readonly hasBlockingValidation: boolean;
-}): string | undefined => {
-  if (input.proposalStatus === "applied") {
-    return "Proposal is already applied to the local task store.";
-  }
-  if (input.proposalStatus !== "approved_pending_apply") {
-    return "Approve the proposal before apply. Desktop apply is CLI-backed in v0.";
-  }
   if (input.taskStoreReason) {
     return input.taskStoreReason;
-  }
-  if (input.hasBlockingValidation) {
-    return "Resolve validation errors before apply.";
   }
   return undefined;
 };
@@ -652,6 +743,7 @@ const buildActions = (input: {
   readonly validationErrors: readonly HubProposalValidationError[];
   readonly projectStatus?: HubProjectStatus;
   readonly hasFinalProposal: boolean;
+  readonly runDir: string;
 }): readonly HubProposalWorkbenchAction[] => {
   const cliFallback = resolveCliFallback(input.flowId);
   const taskStoreReason = taskStoreUnavailableReason(input.projectStatus);
@@ -662,20 +754,24 @@ const buildActions = (input: {
     proposalStatus: input.proposalStatus,
     hasFinalProposal: input.hasFinalProposal,
     hasBlockingValidation,
-  });
-  const applyDisabled = resolveApplyDisabledReason({
-    proposalStatus: input.proposalStatus,
     taskStoreReason,
-    hasBlockingValidation,
   });
+  const approveBridgeParams = {
+    runDir: input.runDir,
+    ...(input.projectStatus?.repoRoot
+      ? { cwd: input.projectStatus.repoRoot }
+      : {}),
+  };
 
   return [
     {
       id: "approve",
-      label: "Approve",
+      label: "Approve & Apply to Beads",
       description:
-        "Confirm the proposal for local Beads writes. Does not mutate GitHub.",
-      kind: "cli_only",
+        "Preview the local Beads write, then confirm approval. Remote sync stays separate.",
+      kind: "bridge_preview",
+      bridgeAction: "proposal.applyPreview",
+      bridgeParams: approveBridgeParams,
       cliFallback,
       disabledReason: approveDisabled,
     },
@@ -687,8 +783,8 @@ const buildActions = (input: {
       cliFallback,
       disabledReason:
         input.proposalStatus === "applied"
-          ? "Applied proposals cannot be rejected from the desktop shell."
-          : undefined,
+          ? "Proposal is already applied to the local task store."
+          : `Desktop reject is not wired in v0. Re-open the proposal session with ${cliFallback} if you need to cancel or restart.`,
     },
     {
       id: "revise",
@@ -700,16 +796,7 @@ const buildActions = (input: {
       disabledReason:
         input.proposalStatus === "applied"
           ? "Applied proposals must be changed on the task board instead."
-          : undefined,
-    },
-    {
-      id: "apply",
-      label: "Apply locally",
-      description:
-        "Write approved tasks to the local Beads store. Remote sync stays separate.",
-      kind: "cli_only",
-      cliFallback,
-      disabledReason: applyDisabled,
+          : `Desktop revise is not wired in v0. Re-open the proposal session with ${cliFallback} to refine it in the CLI.`,
     },
   ];
 };
@@ -729,8 +816,8 @@ const buildMetadata = (
   run: HubProjectRunSummary,
   flowId: HubProposalFlowId,
   proposalStatus: HubProposalSessionStatus,
-  preparedContext: Readonly<Record<string, unknown>>,
   transcript: readonly ProposalTranscriptTurn[],
+  confidenceSummary: string,
 ): HubProposalSessionMetadata => {
   const artifactPaths = resolveProposalSessionArtifactPaths(run.runDir);
   const latestAssistant = [...transcript]
@@ -743,11 +830,12 @@ const buildMetadata = (
     flowId,
     branch: run.branch,
     proposalStatus,
-    confidenceSummary:
-      flowId === "triage"
-        ? "Review low- and medium-confidence triage decisions before apply."
-        : undefined,
+    confidenceSummary,
     agentRationale: latestAssistant?.content,
+    worktreeLeaseSummary: `${run.branch ?? `proposal/${flowId}`} · run ${run.runId}`,
+    localWriteSummary:
+      "Local Beads writes only. Remote GitHub sync stays separate.",
+    agentLogPath: `${run.runDir.replace(/\/$/, "")}/logs/${flowId}-finalization.log`,
     artifactPaths: [
       { label: "Prepared context", path: artifactPaths.preparedContextPath },
       { label: "Transcript", path: artifactPaths.transcriptPath },
@@ -871,25 +959,31 @@ export const buildHubProposalWorkbenchModel = (
     ];
   }
 
+  const applyState = buildApplyState(input.sessionArtifacts, validationErrors);
+  const confidenceSummary = summarizeConfidenceIndex({
+    validationErrors,
+    taskCards,
+    applyState,
+  });
   const metadata = buildMetadata(
     selectedRun,
     flowId,
     proposalStatus,
-    preparedContext,
     input.sessionArtifacts.transcript,
+    confidenceSummary,
   );
   const sourceContext = buildSourceContext(
     flowId,
     preparedContext,
     input.sessionArtifacts.transcript,
   );
-  const applyState = buildApplyState(input.sessionArtifacts, validationErrors);
   const actions = buildActions({
     flowId,
     proposalStatus,
     validationErrors,
     projectStatus: input.projectStatus,
     hasFinalProposal: finalProposal !== undefined,
+    runDir: selectedRun.runDir,
   });
 
   return {

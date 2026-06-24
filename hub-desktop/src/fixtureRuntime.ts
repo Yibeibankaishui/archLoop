@@ -350,8 +350,20 @@ const createProposalSession =
   (): HubRuntimeResponseMap["proposal.readSession"] => ({
     preparedContext: {
       prdRef: "docs/prd/hub-gui.md",
+      prdPath: "docs/prd/hub-gui.md",
       summary: "Hub GUI v0 proposal session review",
       prdTitle: "archLoop Hub GUI v0",
+      prdContent: [
+        "# archLoop Hub GUI v0",
+        "",
+        "Restore the proposal session review console so maintainers can inspect source context, task decomposition, validation, and decision flow before any local Beads writes.",
+        "",
+        "1. Show the source document pane with highlighted extracted requirements.",
+        "2. Show the proposed task decomposition pane with dependency chips and warning states.",
+        "3. Show the validation block with rose error treatment.",
+        "4. Show the inspector with worktree lease, local writes, agent log, and ID.",
+        "5. Show the bottom approve/reject bar with preview-confirm apply.",
+      ].join("\n"),
     },
     transcript: [
       {
@@ -499,6 +511,15 @@ const resolveFixtureRequest = (
         ),
       );
     }
+    case "proposal.applyPreview":
+      return ok(
+        createPreview(
+          "proposal.applyExecute",
+          "Approve and apply 2 proposed tasks to the local Beads store.",
+          "fixture-proposal-apply",
+          "archloop tasks from-prd <ref>",
+        ),
+      );
     case "recover.execute": {
       const params = request.params as HubRuntimeRequestMap["recover.execute"];
       return ok({ taskId: params.taskId, status: "queued_for_cli" });
@@ -506,6 +527,19 @@ const resolveFixtureRequest = (
     case "sync.pushExecute":
     case "sync.pullExecute":
       return ok({ status: "queued_for_cli" });
+    case "proposal.applyExecute": {
+      const params =
+        request.params as HubRuntimeRequestMap["proposal.applyExecute"];
+      return params.confirmToken === "fixture-proposal-apply"
+        ? ok({ status: "queued_for_cli" })
+        : {
+            ok: false,
+            error: {
+              code: "confirm_invalid",
+              message: "Confirm token is missing or invalid",
+            },
+          };
+    }
     case "task.createExecute": {
       const params =
         request.params as HubRuntimeRequestMap["task.createExecute"];

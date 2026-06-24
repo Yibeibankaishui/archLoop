@@ -446,8 +446,20 @@ export const createHubDesktopFixtureProposalRunSummaries =
 export const createHubDesktopFixtureProposalSessionArtifacts = () => ({
   preparedContext: {
     prdRef: "docs/prd/hub-gui.md",
+    prdPath: "docs/prd/hub-gui.md",
     summary: "Hub GUI v0 proposal session review",
     prdTitle: "archLoop Hub GUI v0",
+    prdContent: [
+      "# archLoop Hub GUI v0",
+      "",
+      "Restore the proposal session review console so maintainers can inspect source context, task decomposition, validation, and decision flow before any local Beads writes.",
+      "",
+      "1. Show the source document pane with highlighted extracted requirements.",
+      "2. Show the proposed task decomposition pane with dependency chips and warning states.",
+      "3. Show the validation block with rose error treatment.",
+      "4. Show the inspector with worktree lease, local writes, agent log, and ID.",
+      "5. Show the bottom approve/reject bar with preview-confirm apply.",
+    ].join("\n"),
   },
   transcript: [
     {

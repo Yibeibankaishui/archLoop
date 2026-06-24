@@ -378,6 +378,8 @@ export const App = () => {
             viewportWidth={viewportWidth}
             selectedRunDir={selectedProposalRunDir}
             onSelectRunDir={setSelectedProposalRunDir}
+            onPreviewAction={previewRuntimeAction}
+            onConfirmAction={confirmRuntimeAction}
           />
         );
       default:
