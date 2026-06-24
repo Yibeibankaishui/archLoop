@@ -56,8 +56,11 @@ export interface HubTaskBoardCard {
   readonly labels: readonly string[];
   readonly syncState: HubTaskBoardSyncState;
   readonly claimState?: "active" | "stale";
+  readonly claimSummary?: string;
   readonly remoteRefs: readonly string[];
   readonly runRefs: readonly string[];
+  readonly progressPercent: number;
+  readonly progressLabel: string;
   readonly markers: readonly HubTaskBoardMarker[];
 }
 
@@ -121,6 +124,7 @@ export interface HubTaskBoardWorkbenchModel {
     readonly count: number;
   }[];
   readonly inspector?: HubTaskInspectorModel;
+  readonly toolbarActions: readonly HubTaskBoardAction[];
   readonly actions: readonly HubTaskBoardAction[];
 }
 
@@ -150,6 +154,7 @@ const emptyHubTaskBoardWorkbenchModel = (
   totalTaskCount: 0,
   filteredTaskCount: 0,
   statusFilterOptions: [],
+  toolbarActions: [],
   actions: [],
   ...overrides,
 });
@@ -180,6 +185,56 @@ const taskStoreUnavailableReason = (
     return "Local task store is not initialized.";
   }
   return undefined;
+};
+
+const resolveTaskProgressPercent = (task: HubTaskProjection): number => {
+  const index = HUB_TASK_STATUSES.indexOf(task.hubStatus);
+  if (index < 0) {
+    return 0;
+  }
+  if (HUB_TASK_STATUSES.length <= 1) {
+    return 100;
+  }
+  return Math.round((index / (HUB_TASK_STATUSES.length - 1)) * 100);
+};
+
+const formatTaskProgressLabel = (task: HubTaskProjection): string =>
+  `${formatHubTaskBoardStatusLabel(task.hubStatus)} · ${resolveTaskProgressPercent(task)}%`;
+
+const buildClaimSummary = (task: HubTaskProjection): string | undefined => {
+  if (!task.claim) {
+    return undefined;
+  }
+  const parts = [
+    task.claimState ? `claim ${task.claimState}` : "claim",
+    task.claim.branch ? task.claim.branch : undefined,
+    task.claim.runId ? `run ${task.claim.runId}` : undefined,
+  ].filter((part): part is string => part !== undefined);
+  return parts.join(" · ");
+};
+
+const formatRelativeRunDirectory = (
+  runDirectory: string,
+  hubProjectDir: string | undefined,
+): string => {
+  const normalize = (value: string): string => value.replaceAll("\\", "/");
+  const normalizedRunDirectory = normalize(runDirectory);
+  if (!hubProjectDir) {
+    return normalizedRunDirectory.split("/").join(" / ");
+  }
+
+  const normalizedHubProjectDir = normalize(hubProjectDir).replace(/\/+$/, "");
+  if (
+    normalizedRunDirectory === normalizedHubProjectDir ||
+    !normalizedRunDirectory.startsWith(`${normalizedHubProjectDir}/`)
+  ) {
+    return normalizedRunDirectory.split("/").join(" / ");
+  }
+
+  const relativePath = normalizedRunDirectory.slice(
+    normalizedHubProjectDir.length + 1,
+  );
+  return relativePath.split("/").join(" / ");
 };
 
 export const readHubTaskBoardSyncState = (
@@ -389,8 +444,11 @@ const buildHubTaskBoardCard = (task: HubTaskProjection): HubTaskBoardCard => ({
   labels: task.labels,
   syncState: readHubTaskBoardSyncState(task),
   claimState: task.claimState,
+  claimSummary: buildClaimSummary(task),
   remoteRefs: task.remoteRefs,
   runRefs: task.runRefs,
+  progressPercent: resolveTaskProgressPercent(task),
+  progressLabel: formatTaskProgressLabel(task),
   markers: buildHubTaskBoardCardMarkers(task),
 });
 
@@ -428,6 +486,39 @@ const buildCommentSectionRows = (
   return commentLines.slice(1).map((line, index) => ({
     key: `Comment ${index + 1}`,
     value: line.trim(),
+  }));
+};
+
+const buildRunDirectoryTreeRows = (
+  task: HubTaskProjection,
+  projectStatus: HubProjectStatus | undefined,
+): readonly HubTaskInspectorRow[] => {
+  const runDirectories = projectStatus?.runDirectories ?? [];
+  const relevantRunDirectories =
+    task.runRefs.length > 0
+      ? runDirectories.filter((runDirectory) =>
+          task.runRefs.some(
+            (runRef) =>
+              runDirectory.includes(`/runs/${runRef}`) ||
+              runDirectory.endsWith(`/runs/${runRef}`) ||
+              runDirectory.endsWith(`/${runRef}`),
+          ),
+        )
+      : runDirectories;
+
+  if (relevantRunDirectories.length === 0) {
+    return task.runRefs.map((runRef, index) => ({
+      key: `Run ref ${index + 1}`,
+      value: runRef,
+    }));
+  }
+
+  return relevantRunDirectories.map((runDirectory, index) => ({
+    key: `Run dir ${index + 1}`,
+    value: formatRelativeRunDirectory(
+      runDirectory,
+      projectStatus?.hubProjectDir,
+    ),
   }));
 };
 
@@ -506,6 +597,7 @@ export const buildHubTaskInspectorModel = (
   const lease = findLeaseDiagnostic(task, projectStatus);
   const failureReason = readFailureReason(task);
   const blockedReason = readBlockedReason(task);
+  const progressPercent = resolveTaskProgressPercent(task);
   const nextActions: string[] = [];
 
   if (failureReason) {
@@ -519,6 +611,18 @@ export const buildHubTaskInspectorModel = (
   }
 
   const sections: HubTaskInspectorSection[] = [
+    {
+      id: "summary",
+      title: "Summary",
+      rows: buildInspectorRows({
+        "Task id": task.id,
+        "Hub status": task.hubStatus,
+        "Beads status": detailRows["Beads status"] ?? task.beadsStatus ?? "—",
+        "Claim state": task.claimState ?? "unclaimed",
+        "Sync state": readHubTaskBoardSyncState(task),
+        Progress: `${progressPercent}%`,
+      }),
+    },
     {
       id: "beads",
       title: "Beads details",
@@ -567,6 +671,15 @@ export const buildHubTaskInspectorModel = (
         key: `Run ${index + 1}`,
         value: ref,
       })),
+    });
+  }
+
+  const runDirectoryRows = buildRunDirectoryTreeRows(task, projectStatus);
+  if (runDirectoryRows.length > 0) {
+    sections.push({
+      id: "run-directories",
+      title: "Run directory tree",
+      rows: runDirectoryRows,
     });
   }
 
@@ -646,6 +759,28 @@ const buildGlobalActions = (
 ): readonly HubTaskBoardAction[] => {
   const storeBlocked = taskStoreUnavailableReason(projectStatus);
   const actions: HubTaskBoardAction[] = [
+    {
+      id: "create-task",
+      label: "Create Task",
+      description:
+        "Create a new local Hub task in Beads and preview the write before applying it.",
+      kind: "bridge_preview",
+      bridgeAction: "task.createPreview",
+      bridgeParams: {},
+      cliFallback: "archloop tasks create --title <title>",
+      disabledReason:
+        "Enter a title in the desktop create form to preview the local task write.",
+    },
+    {
+      id: "run-triage",
+      label: "Run Triage",
+      description:
+        "Start the triage proposal flow for inbox and needs_info tasks.",
+      kind: "cli_only",
+      cliFallback: "archloop tasks triage --query inbox,needs_info",
+      disabledReason:
+        "The desktop does not expose a triage proposal preview in v0. Use archloop tasks triage --query inbox,needs_info from the CLI.",
+    },
     {
       id: "initialize-task-store",
       label: "Initialize task store",
@@ -732,7 +867,8 @@ export const buildHubTaskBoardWorkbenchModel = (
           projectStatus: input.projectStatus,
         })
       : undefined,
-    actions: buildGlobalActions(input.projectStatus),
+    toolbarActions: buildGlobalActions(input.projectStatus).slice(0, 2),
+    actions: buildGlobalActions(input.projectStatus).slice(2),
   };
 };
 

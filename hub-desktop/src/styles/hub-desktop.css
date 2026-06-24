@@ -852,21 +852,117 @@ code,
   gap: var(--hub-space-3);
 }
 
-.hub-task-board-grid-narrow .hub-task-board-toolbar {
+.hub-task-board-grid-narrow .hub-task-board-toolbar-actions,
+.hub-task-board-grid-narrow .hub-task-board-filter-strip {
   grid-template-columns: 1fr;
 }
 
 .hub-task-board-toolbar {
   display: grid;
+  gap: var(--hub-space-3);
+}
+
+.hub-task-board-toolbar-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.hub-task-board-toolbar-copy h2 {
+  margin: 0;
+  font-family: var(--hub-font-heading);
+  font-size: 18px;
+  line-height: 1.1;
+}
+
+.hub-task-board-toolbar-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(220px, 0.9fr);
+  gap: var(--hub-space-3);
+  align-items: start;
+}
+
+.hub-task-board-toolbar-card {
+  display: grid;
+  gap: var(--hub-space-2);
+  padding: var(--hub-space-3);
+  border: 1px solid var(--hub-border);
+  border-radius: var(--hub-radius);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(2, 6, 23, 0.98));
+  color: #e2e8f0;
+}
+
+.hub-task-board-toolbar-card .hub-muted {
+  color: #94a3b8;
+}
+
+.hub-task-board-toolbar-card strong {
+  color: #f8fafc;
+}
+
+.hub-task-board-toolbar-card .hub-panel {
+  border-color: #1e293b;
+  background: rgba(15, 23, 42, 0.72);
+  color: #e2e8f0;
+}
+
+.hub-task-board-toolbar-card .hub-input,
+.hub-task-board-filter-strip .hub-input {
+  background: #020617;
+  color: #e2e8f0;
+  border-color: #1e293b;
+}
+
+.hub-task-board-toolbar-card .hub-input::placeholder,
+.hub-task-board-filter-strip .hub-input::placeholder {
+  color: #64748b;
+}
+
+.hub-task-board-create-fields {
+  display: grid;
+  gap: var(--hub-space-2);
+}
+
+.hub-task-board-create-field {
+  display: grid;
+  gap: 4px;
+}
+
+.hub-task-board-create-textarea {
+  min-height: 80px;
+  resize: vertical;
+}
+
+.hub-task-board-filter-strip {
+  display: grid;
   grid-template-columns: minmax(180px, 1.5fr) repeat(3, minmax(120px, 1fr)) auto;
   gap: var(--hub-space-2);
   align-items: end;
+  padding: var(--hub-space-3);
+  border: 1px solid #0f172a;
+  border-radius: var(--hub-radius);
+  background: linear-gradient(180deg, #020617, #0f172a);
+  color: #e2e8f0;
+}
+
+.hub-task-board-filter-strip .hub-muted {
+  color: #94a3b8;
 }
 
 .hub-task-board-search,
 .hub-task-board-filter {
   display: grid;
   gap: 4px;
+}
+
+.hub-task-board-terminal-filter {
+  background: #020617;
+  color: #e2e8f0;
+  border-color: #1e293b;
+  font-family: var(--hub-font-mono);
+}
+
+.hub-task-board-terminal-filter::placeholder {
+  color: #64748b;
 }
 
 .hub-input {
@@ -881,6 +977,7 @@ code,
 .hub-task-board-count {
   margin: 0;
   align-self: center;
+  text-align: right;
 }
 
 .hub-card-labels,
@@ -916,12 +1013,17 @@ code,
 }
 
 .hub-board-column {
-  min-width: 260px;
-  max-width: 320px;
+  width: 300px;
+  min-width: 300px;
+  max-width: 300px;
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   gap: var(--hub-space-2);
+  padding: var(--hub-space-2);
+  border: 1px solid var(--hub-border);
+  border-radius: var(--hub-radius);
+  background: #f8fafc;
 }
 
 .hub-board-column-header {
@@ -934,6 +1036,9 @@ code,
 .hub-board-column-header h2 {
   margin: 0;
   font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--hub-text-muted);
 }
 
 .hub-board-cards {
@@ -952,8 +1057,9 @@ code,
   background: var(--hub-surface);
   padding: var(--hub-space-2);
   display: grid;
-  gap: 4px;
+  gap: 6px;
   cursor: pointer;
+  box-shadow: 0 0 0 1px rgba(226, 232, 240, 0.4);
 }
 
 .hub-card:hover {
@@ -962,7 +1068,77 @@ code,
 
 .hub-card.is-selected {
   border-color: var(--hub-accent);
+  background: #eff6ff;
   box-shadow: inset 0 0 0 1px var(--hub-accent);
+}
+
+.hub-card-topline {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--hub-space-2);
+}
+
+.hub-card-progress-chip {
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.hub-card-progress {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: #e2e8f0;
+  overflow: hidden;
+}
+
+.hub-card-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--hub-active);
+}
+
+.hub-card-progress-fill.hub-status-done {
+  background: var(--hub-ready);
+}
+
+.hub-card-progress-fill.hub-status-failed,
+.hub-card-progress-fill.hub-status-sync_conflict {
+  background: var(--hub-danger);
+}
+
+.hub-card-progress-fill.hub-status-blocked,
+.hub-card-progress-fill.hub-status-needs_info,
+.hub-card-progress-fill.hub-status-inbox {
+  background: var(--hub-warning);
+}
+
+.hub-card-progress-fill.hub-status-implementing,
+.hub-card-progress-fill.hub-status-reviewing,
+.hub-card-progress-fill.hub-status-waiting_for_merge,
+.hub-card-progress-fill.hub-status-merging {
+  background: var(--hub-active);
+}
+
+.hub-card-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.hub-card-claim-row {
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid #c7d2fe;
+  border-radius: var(--hub-radius);
+  background: #eef2ff;
+}
+
+.hub-card-claim-row .hub-eyebrow {
+  margin: 0;
 }
 
 .hub-card-id {
@@ -973,6 +1149,7 @@ code,
   font-size: 14px;
   line-height: 1.3;
   overflow-wrap: anywhere;
+  font-family: var(--hub-font-heading);
 }
 
 .hub-list {
