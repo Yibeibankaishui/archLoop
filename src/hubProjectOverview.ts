@@ -396,6 +396,64 @@ const buildActions = (
   return actions;
 };
 
+export const resolveHubOverviewSyncNowAction = (
+  status: HubProjectStatus | undefined,
+): HubOverviewAction | undefined => {
+  if (!status) {
+    return undefined;
+  }
+
+  if (status.syncCounts.conflict > 0) {
+    return {
+      id: "sync-now",
+      label: "SYNC NOW",
+      description: "Preview the remote sync conflict before confirming.",
+      kind: "bridge_preview",
+      bridgeAction: "sync.pullPreview",
+      bridgeParams: {},
+      cliFallback: "archloop tasks sync",
+    };
+  }
+
+  if (status.syncCounts.pushPending > 0 || status.syncCounts.localOnly > 0) {
+    return {
+      id: "sync-now",
+      label: "SYNC NOW",
+      description:
+        "Preview local changes before pushing them to the remote source.",
+      kind: "bridge_preview",
+      bridgeAction: "sync.pushPreview",
+      bridgeParams: {},
+      cliFallback: "archloop tasks push",
+    };
+  }
+
+  if (status.syncCounts.synced > 0) {
+    return {
+      id: "sync-now",
+      label: "SYNC NOW",
+      description:
+        "Preview a pull so remote state stays in step with the local store.",
+      kind: "bridge_preview",
+      bridgeAction: "sync.pullPreview",
+      bridgeParams: {},
+      cliFallback: "archloop tasks pull",
+      disabledReason: "Everything is already synced.",
+    };
+  }
+
+  return {
+    id: "sync-now",
+    label: "SYNC NOW",
+    description: "Preview task sync before confirming changes.",
+    kind: "bridge_preview",
+    bridgeAction: "sync.pushPreview",
+    bridgeParams: {},
+    cliFallback: "archloop tasks sync",
+    disabledReason: "No sync changes are available yet.",
+  };
+};
+
 const buildStatusCountEntries = (
   status: HubProjectStatus,
 ): readonly HubOverviewStatusCountEntry[] =>
