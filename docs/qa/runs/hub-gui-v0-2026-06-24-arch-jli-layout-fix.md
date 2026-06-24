@@ -18,6 +18,7 @@ Environment:
 Result: **Pass for task scope**
 
 The Hub desktop screens now reclaim the desktop inspector column when the inspector is closed, keep the proposal decision bar in flow, and compact the task board, run workbench, and header control surfaces so the first viewport matches the Stitch contract much more closely.
+Follow-up pass: the task board now promotes the Kanban surface ahead of supporting chrome at desktop width, and the 960px run layout keeps the terminal visible in the first viewport.
 
 ## Automated Gates
 
@@ -41,8 +42,8 @@ Captured in the repository:
 ## Visual Checks
 
 - Overview keeps the header command text readable and preserves the inspector layout when open.
-- Task Board reclaims vertical space for the Kanban surface and keeps task text from clipping in the cards.
-- Run Workbench uses the available desktop width when the inspector is hidden and keeps the output stack compact.
+- Task Board reclaims vertical space for the Kanban surface, shows the board before the create/triage chrome, and keeps task text from clipping in the cards.
+- Run Workbench uses the available desktop width when the inspector is hidden, keeps the output stack compact, and surfaces the terminal in the 960px viewport.
 - Proposal Session no longer overlays the decision area on top of the source and decomposition content.
 
 ## Notes

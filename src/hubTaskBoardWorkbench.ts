@@ -900,8 +900,8 @@ export const buildHubTaskBoardWorkbenchModel = (
 };
 
 export const resolveHubTaskBoardGridClass = (viewportWidth: number): string =>
-  resolveHubDesktopSurfaceGridClass(
+  `${resolveHubDesktopSurfaceGridClass(
     "hub-task-board-grid",
     "hub-task-board-grid-narrow",
     viewportWidth,
-  );
+  )}${viewportWidth >= HUB_DESKTOP_LAYOUT.denseSurfaceBreakpointPx ? " hub-task-board-grid-board-first" : ""}`;

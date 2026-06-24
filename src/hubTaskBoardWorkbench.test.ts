@@ -246,7 +246,7 @@ describe("hubTaskBoardWorkbench", () => {
 
   it("uses stacked board grid class on narrow viewports", () => {
     expect(resolveHubTaskBoardGridClass(1440)).toBe(
-      "hub-task-board-grid hub-surface-dense",
+      "hub-task-board-grid hub-surface-dense hub-task-board-grid-board-first",
     );
     expect(resolveHubTaskBoardGridClass(700)).toBe(
       "hub-task-board-grid hub-task-board-grid-narrow",

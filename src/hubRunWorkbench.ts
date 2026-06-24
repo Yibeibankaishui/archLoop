@@ -404,11 +404,16 @@ export const formatHubRunEventLine = (record: HubRunEventRecord): string => {
 export const resolveHubRunWorkbenchGridClass = (
   viewportWidth: number,
 ): string =>
-  resolveHubDesktopSurfaceGridClass(
+  `${resolveHubDesktopSurfaceGridClass(
     "hub-run-grid",
     "hub-run-grid-narrow",
     viewportWidth,
-  );
+  )}${
+    viewportWidth >= HUB_DESKTOP_LAYOUT.narrowBreakpointPx &&
+    viewportWidth <= 1024
+      ? " hub-run-grid-compact"
+      : ""
+  }`;
 
 const buildRunOptions = (
   runSummaries: readonly HubProjectRunSummary[],
