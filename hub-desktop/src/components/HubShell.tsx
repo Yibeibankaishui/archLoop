@@ -57,7 +57,7 @@ export const HubShell = ({
   return (
     <div
       className="hub-shell"
-      style={hubDesktopShellGridStyle(viewportWidth)}
+      style={hubDesktopShellGridStyle(viewportWidth, showInspector)}
       data-layout={collapseInspector ? "narrow" : "desktop"}
     >
       <HubNav

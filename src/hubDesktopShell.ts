@@ -96,6 +96,7 @@ export const hubDesktopNavLabel = (section: HubDesktopNavSection): string => {
 
 export const hubDesktopShellGridStyle = (
   viewportWidth: number,
+  showInspector = true,
 ): Record<string, string> => {
   const mode = resolveHubDesktopLayoutMode(viewportWidth);
   if (mode === "compact") {
@@ -105,6 +106,12 @@ export const hubDesktopShellGridStyle = (
     };
   }
   if (mode === "tablet") {
+    return {
+      gridTemplateColumns: `${HUB_DESKTOP_LAYOUT.railWidthPx}px 1fr`,
+      gridTemplateAreas: '"rail header" "rail main"',
+    };
+  }
+  if (!showInspector) {
     return {
       gridTemplateColumns: `${HUB_DESKTOP_LAYOUT.railWidthPx}px 1fr`,
       gridTemplateAreas: '"rail header" "rail main"',

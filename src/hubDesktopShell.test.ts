@@ -28,11 +28,17 @@ describe("hubDesktopShell", () => {
     expect(isHubDesktopNavSection("settings")).toBe(false);
   });
 
-  it("collapses the inspector on narrow viewports without changing desktop grid", () => {
+  it("collapses the inspector on narrow viewports and reclaims the desktop column when hidden", () => {
     expect(resolveHubDesktopLayoutMode(1440)).toBe("desktop");
     expect(shouldCollapseInspector(1440)).toBe(false);
-    expect(hubDesktopShellGridStyle(1440).gridTemplateAreas).toContain(
+    expect(hubDesktopShellGridStyle(1440, true).gridTemplateAreas).toContain(
       "inspector",
+    );
+    expect(
+      hubDesktopShellGridStyle(1440, false).gridTemplateAreas,
+    ).not.toContain("inspector");
+    expect(hubDesktopShellGridStyle(1440, false).gridTemplateColumns).toBe(
+      "60px 1fr",
     );
 
     expect(resolveHubDesktopLayoutMode(800)).toBe("tablet");
