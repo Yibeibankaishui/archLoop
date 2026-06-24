@@ -145,6 +145,7 @@ export interface BuildHubTaskInspectorModelInput {
 export { formatHubTaskBoardStatusLabel };
 
 const TASK_BOARD_CLI_FALLBACK = "archloop tasks list";
+const TASK_BOARD_TOOLBAR_ACTION_IDS = new Set(["create-task", "run-triage"]);
 
 const emptyHubTaskBoardWorkbenchModel = (
   overrides: Partial<HubTaskBoardWorkbenchModel> &
@@ -217,10 +218,11 @@ const formatRelativeRunDirectory = (
   runDirectory: string,
   hubProjectDir: string | undefined,
 ): string => {
+  const formatSegments = (value: string): string => value.split("/").join(" / ");
   const normalize = (value: string): string => value.replaceAll("\\", "/");
   const normalizedRunDirectory = normalize(runDirectory);
   if (!hubProjectDir) {
-    return normalizedRunDirectory.split("/").join(" / ");
+    return formatSegments(normalizedRunDirectory);
   }
 
   const normalizedHubProjectDir = normalize(hubProjectDir).replace(/\/+$/, "");
@@ -228,13 +230,13 @@ const formatRelativeRunDirectory = (
     normalizedRunDirectory === normalizedHubProjectDir ||
     !normalizedRunDirectory.startsWith(`${normalizedHubProjectDir}/`)
   ) {
-    return normalizedRunDirectory.split("/").join(" / ");
+    return formatSegments(normalizedRunDirectory);
   }
 
   const relativePath = normalizedRunDirectory.slice(
     normalizedHubProjectDir.length + 1,
   );
-  return relativePath.split("/").join(" / ");
+  return formatSegments(relativePath);
 };
 
 export const readHubTaskBoardSyncState = (
@@ -489,22 +491,23 @@ const buildCommentSectionRows = (
   }));
 };
 
+const matchesRunDirectoryRef = (runDirectory: string, runRef: string): boolean =>
+  runDirectory.includes(`/runs/${runRef}`) ||
+  runDirectory.endsWith(`/runs/${runRef}`) ||
+  runDirectory.endsWith(`/${runRef}`);
+
 const buildRunDirectoryTreeRows = (
   task: HubTaskProjection,
   projectStatus: HubProjectStatus | undefined,
 ): readonly HubTaskInspectorRow[] => {
   const runDirectories = projectStatus?.runDirectories ?? [];
-  const relevantRunDirectories =
-    task.runRefs.length > 0
-      ? runDirectories.filter((runDirectory) =>
-          task.runRefs.some(
-            (runRef) =>
-              runDirectory.includes(`/runs/${runRef}`) ||
-              runDirectory.endsWith(`/runs/${runRef}`) ||
-              runDirectory.endsWith(`/${runRef}`),
-          ),
-        )
-      : runDirectories;
+  if (task.runRefs.length === 0) {
+    return [];
+  }
+
+  const relevantRunDirectories = runDirectories.filter((runDirectory) =>
+    task.runRefs.some((runRef) => matchesRunDirectoryRef(runDirectory, runRef)),
+  );
 
   if (relevantRunDirectories.length === 0) {
     return task.runRefs.map((runRef, index) => ({
@@ -521,6 +524,20 @@ const buildRunDirectoryTreeRows = (
     ),
   }));
 };
+
+const splitTaskBoardActions = (
+  actions: readonly HubTaskBoardAction[],
+): {
+  readonly toolbarActions: readonly HubTaskBoardAction[];
+  readonly boardActions: readonly HubTaskBoardAction[];
+} => ({
+  toolbarActions: actions.filter((action) =>
+    TASK_BOARD_TOOLBAR_ACTION_IDS.has(action.id),
+  ),
+  boardActions: actions.filter(
+    (action) => !TASK_BOARD_TOOLBAR_ACTION_IDS.has(action.id),
+  ),
+});
 
 const resolveRecoverActionDescription = (
   task: HubTaskProjection,
@@ -835,11 +852,14 @@ export const buildHubTaskBoardWorkbenchModel = (
 
   const board = input.board;
   const allTasks = board?.tasks ?? [];
+  const globalActions = buildGlobalActions(input.projectStatus);
+  const actionGroups = splitTaskBoardActions(globalActions);
   if (allTasks.length === 0) {
     return emptyHubTaskBoardWorkbenchModel({
       phase: "empty",
       cliFallback: TASK_BOARD_CLI_FALLBACK,
-      actions: buildGlobalActions(input.projectStatus),
+      toolbarActions: actionGroups.toolbarActions,
+      actions: actionGroups.boardActions,
     });
   }
 
@@ -867,8 +887,8 @@ export const buildHubTaskBoardWorkbenchModel = (
           projectStatus: input.projectStatus,
         })
       : undefined,
-    toolbarActions: buildGlobalActions(input.projectStatus).slice(0, 2),
-    actions: buildGlobalActions(input.projectStatus).slice(2),
+    toolbarActions: actionGroups.toolbarActions,
+    actions: actionGroups.boardActions,
   };
 };
 

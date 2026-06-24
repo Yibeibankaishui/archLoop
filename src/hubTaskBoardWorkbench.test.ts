@@ -175,6 +175,31 @@ describe("hubTaskBoardWorkbench", () => {
     );
   });
 
+  it("shows run directory rows only for tasks with matching run refs", () => {
+    const tasks = createHubDesktopFixtureTasks();
+    const projectStatus = createHubDesktopFixtureProjectStatus();
+
+    const noRunRefsInspector = buildHubTaskInspectorModel({
+      task: tasks.find((entry) => entry.id === "arch-1")!,
+      projectStatus,
+    });
+    expect(
+      noRunRefsInspector.sections.some(
+        (section) => section.id === "run-directories",
+      ),
+    ).toBe(false);
+
+    const unmatchedRunDirectoryInspector = buildHubTaskInspectorModel({
+      task: tasks.find((entry) => entry.id === "arch-5")!,
+      projectStatus,
+    });
+    expect(
+      unmatchedRunDirectoryInspector.sections.find(
+        (section) => section.id === "run-directories",
+      )?.rows,
+    ).toEqual([{ key: "Run ref 1", value: "run-proposal-fixture-1" }]);
+  });
+
   it("exposes sync preview actions and CLI-only open-run/open-remote fallbacks", () => {
     const model = buildHubTaskBoardWorkbenchModel({
       board: createHubDesktopFixtureTaskBoard(),

@@ -68,6 +68,47 @@ const syncStateClassName = (
   }
 };
 
+const DEFAULT_CREATE_TASK_ACTION: HubTaskBoardAction = {
+  id: "create-task",
+  label: "Create Task",
+  description:
+    "Create a new local Hub task in Beads and preview the write before applying it.",
+  kind: "bridge_preview",
+  bridgeAction: "task.createPreview",
+  bridgeParams: {},
+  cliFallback: "archloop tasks create --title <title>",
+  disabledReason:
+    "Enter a title in the desktop create form to preview the local task write.",
+};
+
+const DEFAULT_RUN_TRIAGE_ACTION: HubTaskBoardAction = {
+  id: "run-triage",
+  label: "Run Triage",
+  description: "Start the triage proposal flow for inbox and needs_info tasks.",
+  kind: "cli_only",
+  cliFallback: "archloop tasks triage --query inbox,needs_info",
+  disabledReason:
+    "The desktop does not expose a triage proposal preview in v0. Use archloop tasks triage --query inbox,needs_info from the CLI.",
+};
+
+const findToolbarAction = (
+  actions: readonly HubTaskBoardAction[],
+  actionId: string,
+): HubTaskBoardAction | undefined =>
+  actions.find((action) => action.id === actionId);
+
+const resolveTaskStoreBlockedReason = (
+  projectStatus: HubProjectStatus | undefined,
+): string | undefined => {
+  if (!projectStatus?.beadsAvailable) {
+    return "Beads runtime is unavailable. Install dependencies, set ARCHLOOP_BD_PATH, or use the bundled runtime.";
+  }
+  if (!projectStatus.taskStoreInitialized) {
+    return "Local task store is not initialized. Run archloop tasks init first.";
+  }
+  return undefined;
+};
+
 export const TaskBoardView = ({
   board,
   projectStatus,
@@ -116,21 +157,16 @@ export const TaskBoardView = ({
     onInspectorChange?.(model.inspector);
   }, [model.inspector, onInspectorChange]);
 
+  const createTaskActionBase =
+    findToolbarAction(model.toolbarActions, "create-task") ??
+    DEFAULT_CREATE_TASK_ACTION;
+
   const createTaskAction: HubTaskBoardAction = useMemo(() => {
     const title = createTaskTitle.trim();
     const description = createTaskDescription.trim();
-    const storeBlockedReason = !projectStatus?.beadsAvailable
-      ? "Beads runtime is unavailable. Install dependencies, set ARCHLOOP_BD_PATH, or use the bundled runtime."
-      : !projectStatus?.taskStoreInitialized
-        ? "Local task store is not initialized. Run archloop tasks init first."
-        : undefined;
+    const storeBlockedReason = resolveTaskStoreBlockedReason(projectStatus);
     return {
-      id: "create-task-toolbar",
-      label: "Create Task",
-      description:
-        "Create a new local Hub task in Beads and preview the write before applying it.",
-      kind: "bridge_preview",
-      bridgeAction: "task.createPreview",
+      ...createTaskActionBase,
       bridgeParams: {
         title,
         ...(description.length > 0 ? { description } : {}),
@@ -138,32 +174,22 @@ export const TaskBoardView = ({
       cliFallback:
         title.length > 0
           ? `archloop tasks create --title "${title}"`
-          : "archloop tasks create --title <title>",
+          : createTaskActionBase.cliFallback,
       disabledReason:
         title.length > 0
           ? storeBlockedReason
           : "Enter a task title to preview the local Beads write.",
     };
   }, [
+    createTaskActionBase,
     createTaskDescription,
     createTaskTitle,
-    projectStatus?.beadsAvailable,
-    projectStatus?.taskStoreInitialized,
+    projectStatus,
   ]);
 
-  const runTriageAction = useMemo<HubTaskBoardAction>(
-    () => ({
-      id: "run-triage-toolbar",
-      label: "Run Triage",
-      description:
-        "Start the triage proposal flow for inbox and needs_info tasks.",
-      kind: "cli_only",
-      cliFallback: "archloop tasks triage --query inbox,needs_info",
-      disabledReason:
-        "The desktop does not expose a triage proposal preview in v0. Use archloop tasks triage --query inbox,needs_info from the CLI.",
-    }),
-    [],
-  );
+  const runTriageAction =
+    findToolbarAction(model.toolbarActions, "run-triage") ??
+    DEFAULT_RUN_TRIAGE_ACTION;
 
   if (model.phase === "loading") {
     return <div className="hub-panel hub-empty">Loading local Hub tasks…</div>;
