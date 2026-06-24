@@ -10,6 +10,7 @@ import {
   hubDesktopNavLabel,
   hubDesktopShellGridStyle,
   isHubDesktopNavSection,
+  resolveHubDesktopSurfaceGridClass,
   resolveHubDesktopLayoutMode,
   shouldCollapseInspector,
   shouldUseDenseDesktopSurface,
@@ -58,6 +59,23 @@ describe("hubDesktopShell", () => {
   it("uses dense desktop surfaces on wide viewports to keep the first viewport usable", () => {
     expect(shouldUseDenseDesktopSurface(1600)).toBe(true);
     expect(shouldUseDenseDesktopSurface(960)).toBe(false);
+  });
+
+  it("builds dense and narrow surface classes from a shared helper", () => {
+    expect(
+      resolveHubDesktopSurfaceGridClass(
+        "hub-run-grid",
+        "hub-run-grid-narrow",
+        1440,
+      ),
+    ).toBe("hub-run-grid hub-surface-dense");
+    expect(
+      resolveHubDesktopSurfaceGridClass(
+        "hub-run-grid",
+        "hub-run-grid-narrow",
+        700,
+      ),
+    ).toBe("hub-run-grid hub-run-grid-narrow");
   });
 
   it("defines a shared focus ring class for keyboard navigation", () => {

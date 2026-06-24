@@ -1,6 +1,6 @@
 import {
   HUB_DESKTOP_LAYOUT,
-  shouldUseDenseDesktopSurface,
+  resolveHubDesktopSurfaceGridClass,
 } from "./hubDesktopShell.js";
 import { readPrdWarningFromTask } from "./hubPrdWarning.js";
 import type { HubRuntimePreviewAction } from "./hubRuntimeBridge.js";
@@ -900,14 +900,8 @@ export const buildHubTaskBoardWorkbenchModel = (
 };
 
 export const resolveHubTaskBoardGridClass = (viewportWidth: number): string =>
-  [
+  resolveHubDesktopSurfaceGridClass(
     "hub-task-board-grid",
-    shouldUseDenseDesktopSurface(viewportWidth)
-      ? "hub-surface-dense"
-      : undefined,
-    viewportWidth < HUB_DESKTOP_LAYOUT.narrowBreakpointPx
-      ? "hub-task-board-grid-narrow"
-      : undefined,
-  ]
-    .filter((className): className is string => className !== undefined)
-    .join(" ");
+    "hub-task-board-grid-narrow",
+    viewportWidth,
+  );

@@ -1,6 +1,6 @@
 import {
   HUB_DESKTOP_LAYOUT,
-  shouldUseDenseDesktopSurface,
+  resolveHubDesktopSurfaceGridClass,
 } from "./hubDesktopShell.js";
 import type {
   HubRunEventRecord,
@@ -404,17 +404,11 @@ export const formatHubRunEventLine = (record: HubRunEventRecord): string => {
 export const resolveHubRunWorkbenchGridClass = (
   viewportWidth: number,
 ): string =>
-  [
+  resolveHubDesktopSurfaceGridClass(
     "hub-run-grid",
-    shouldUseDenseDesktopSurface(viewportWidth)
-      ? "hub-surface-dense"
-      : undefined,
-    viewportWidth < HUB_DESKTOP_LAYOUT.narrowBreakpointPx
-      ? "hub-run-grid-narrow"
-      : undefined,
-  ]
-    .filter((className): className is string => className !== undefined)
-    .join(" ");
+    "hub-run-grid-narrow",
+    viewportWidth,
+  );
 
 const buildRunOptions = (
   runSummaries: readonly HubProjectRunSummary[],

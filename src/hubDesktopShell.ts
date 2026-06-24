@@ -90,6 +90,21 @@ const twoColumnShellGridStyle = (): Record<string, string> => ({
   gridTemplateAreas: '"rail header" "rail main"',
 });
 
+export const resolveHubDesktopSurfaceGridClass = (
+  baseClass: string,
+  narrowClass: string,
+  viewportWidth: number,
+): string => {
+  const classNames = [baseClass];
+  if (shouldUseDenseDesktopSurface(viewportWidth)) {
+    classNames.push("hub-surface-dense");
+  }
+  if (viewportWidth < HUB_DESKTOP_LAYOUT.narrowBreakpointPx) {
+    classNames.push(narrowClass);
+  }
+  return classNames.join(" ");
+};
+
 export const hubDesktopNavLabel = (section: HubDesktopNavSection): string => {
   switch (section) {
     case "overview":
