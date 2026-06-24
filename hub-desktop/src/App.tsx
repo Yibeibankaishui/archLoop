@@ -13,7 +13,10 @@ import {
   HUB_DESKTOP_NAV_SECTIONS,
   type HubDesktopNavSection,
 } from "@yibeibankaishui/archloop/hub-desktop-shell";
-import { selectDefaultRunFocus, resolveRunBatchRunDir } from "@yibeibankaishui/archloop/hub-run-workbench";
+import {
+  selectDefaultRunFocus,
+  resolveRunBatchRunDir,
+} from "@yibeibankaishui/archloop/hub-run-workbench";
 import {
   selectDefaultProposalRunDir,
   type ProposalSessionArtifactsSnapshot,
@@ -137,7 +140,10 @@ export const App = () => {
         }
 
         setRunSummaries(summariesResult.data);
-        const focus = selectDefaultRunFocus(summariesResult.data, projectStatus);
+        const focus = selectDefaultRunFocus(
+          summariesResult.data,
+          projectStatus,
+        );
         const runId = selectedRunId ?? focus.runId;
         const batchId = selectedBatchId ?? focus.batchId;
         if (!runId || !batchId) {
@@ -276,6 +282,8 @@ export const App = () => {
 
   const selectedTaskInspector =
     section === "task-board" ? taskInspector : undefined;
+  const shellInspectorOpen =
+    section === "run-workbench" ? false : inspectorOpen;
 
   const previewRuntimeAction = async (
     action: HubRuntimePreviewAction,
@@ -382,7 +390,7 @@ export const App = () => {
       activeSection={section}
       sections={HUB_DESKTOP_NAV_SECTIONS}
       viewportWidth={viewportWidth}
-      inspectorOpen={inspectorOpen}
+      inspectorOpen={shellInspectorOpen}
       taskInspector={selectedTaskInspector}
       projectStatus={projectStatus}
       onNavigate={setSection}

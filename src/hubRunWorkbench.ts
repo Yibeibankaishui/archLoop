@@ -50,6 +50,8 @@ export type HubRunWorkbenchGateKind =
 
 export type HubRunWorkbenchActionKind = "bridge_preview" | "cli_only";
 
+export type HubRunWorkbenchActionPriority = "primary" | "secondary" | "danger";
+
 export interface HubRunWorkbenchGate {
   readonly kind: HubRunWorkbenchGateKind;
   readonly title: string;
@@ -63,6 +65,7 @@ export interface HubRunWorkbenchStage {
   readonly label: string;
   readonly state: HubRunWorkbenchStageState;
   readonly detail?: string;
+  readonly timestamp?: string;
 }
 
 export interface HubRunWorkbenchBatchMetadata {
@@ -75,8 +78,12 @@ export interface HubRunWorkbenchBatchMetadata {
   readonly batchStatus: HubProjectBatchSummary["status"];
   readonly batchStrategy?: string;
   readonly rationale?: string;
+  readonly relatedCommits: readonly string[];
   readonly selectedTaskIds: readonly string[];
-  readonly deferredTasks: readonly { readonly taskId: string; readonly reason: string }[];
+  readonly deferredTasks: readonly {
+    readonly taskId: string;
+    readonly reason: string;
+  }[];
   readonly worktreeLeases: readonly {
     readonly taskId: string;
     readonly branch: string;
@@ -89,6 +96,7 @@ export interface HubRunWorkbenchAction {
   readonly label: string;
   readonly description: string;
   readonly kind: HubRunWorkbenchActionKind;
+  readonly priority: HubRunWorkbenchActionPriority;
   readonly bridgeAction?: HubRuntimePreviewAction;
   readonly bridgeParams?: Record<string, unknown>;
   readonly cliFallback: string;
@@ -151,6 +159,9 @@ const createEmptyRunWorkbenchContent = (): Pick<
   actions: [],
 });
 
+const createRunFlowCliFallback = (flowId?: string): string =>
+  `archloop run . --flow ${flowId ?? "<id>"}`;
+
 const STAGE_DEFINITIONS: readonly {
   readonly id: HubRunWorkbenchStageId;
   readonly label: string;
@@ -165,6 +176,45 @@ const STAGE_DEFINITIONS: readonly {
   { id: "failure", label: "Failure" },
   { id: "recovery", label: "Recovery" },
 ];
+
+const STAGE_TIMESTAMP_EVENT_TYPES: Readonly<
+  Record<HubRunWorkbenchStageId, readonly string[]>
+> = {
+  run_start: ["run_started", "batch_started"],
+  task_claim: ["task_claimed", "task_claim_skipped"],
+  implementation: [
+    "task_implementation_started",
+    "task_implementation_succeeded",
+    "task_implementation_failed",
+  ],
+  review: [
+    "task_review_started",
+    "task_review_succeeded",
+    "task_review_failed",
+  ],
+  verification: [
+    "verification_started",
+    "verification_passed",
+    "verification_failed",
+  ],
+  merge: [
+    "batch_merge_started",
+    "merge_started",
+    "batch_merge_completed",
+    "merge_failed",
+    "merge_conflict_resolution_failed",
+  ],
+  close: ["task_close_started", "task_closed", "task_close_failed"],
+  failure: [
+    "task_implementation_failed",
+    "verification_failed",
+    "merge_failed",
+    "merge_conflict_resolution_failed",
+    "task_close_failed",
+    "batch_merge_completed",
+  ],
+  recovery: ["task_recovered", "recover_started", "recover_completed"],
+};
 
 const readObject = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -190,6 +240,32 @@ const readStringArray = (value: unknown): readonly string[] => {
   }
   return value.filter((entry): entry is string => typeof entry === "string");
 };
+
+const readCommitList = (value: unknown): readonly string[] => {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? [trimmed] : [];
+  }
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry) => {
+      if (typeof entry === "string") {
+        return entry.trim();
+      }
+      return readFirstString(readObject(entry), ["sha", "commitSha", "commit"]);
+    })
+    .filter(
+      (entry): entry is string => entry !== undefined && entry.length > 0,
+    );
+};
+
+const readEventTimestamp = (
+  record: Readonly<Record<string, unknown>>,
+): string | undefined =>
+  readFirstString(record, ["createdAt", "startedAt", "timestamp"]);
 
 const eventMatchesBatch = (
   record: Readonly<Record<string, unknown>>,
@@ -217,6 +293,43 @@ const hasAnyEventType = (
   types: readonly string[],
 ): boolean => types.some((type) => hasEventType(records, type));
 
+const collectRelatedCommits = (
+  batchEvents: readonly Record<string, unknown>[],
+): readonly string[] => {
+  const commits = new Set<string>();
+  for (const record of batchEvents) {
+    for (const value of [
+      record.commits,
+      record.commitShas,
+      record.commitHashes,
+      record.commitSha,
+    ]) {
+      for (const commit of readCommitList(value)) {
+        commits.add(commit);
+      }
+    }
+  }
+  return [...commits];
+};
+
+const resolveStageTimestamp = (
+  batchEvents: readonly Record<string, unknown>[],
+  stageId: HubRunWorkbenchStageId,
+): string | undefined => {
+  for (const record of batchEvents) {
+    const type = readFirstString(record, ["type"]);
+    if (!type || !STAGE_TIMESTAMP_EVENT_TYPES[stageId].includes(type)) {
+      continue;
+    }
+    const timestamp = readEventTimestamp(record);
+    if (timestamp) {
+      return timestamp;
+    }
+  }
+
+  return undefined;
+};
+
 export const selectDefaultRunFocus = (
   runSummaries: readonly HubProjectRunSummary[],
   projectStatus?: HubProjectStatus,
@@ -236,7 +349,9 @@ export const selectDefaultRunFocus = (
     if (!run) {
       continue;
     }
-    const activeBatch = [...run.batches].reverse().find((batch) => batch.active);
+    const activeBatch = [...run.batches]
+      .reverse()
+      .find((batch) => batch.active);
     if (activeBatch) {
       return { runId: run.runId, batchId: activeBatch.batchId };
     }
@@ -296,10 +411,12 @@ const findSelectedBatch = (
   runSummaries: readonly HubProjectRunSummary[],
   runId: string,
   batchId: string,
-): {
-  readonly run: HubProjectRunSummary;
-  readonly batch: HubProjectBatchSummary;
-} | undefined => {
+):
+  | {
+      readonly run: HubProjectRunSummary;
+      readonly batch: HubProjectBatchSummary;
+    }
+  | undefined => {
   const run = runSummaries.find((entry) => entry.runId === runId);
   const batch = run?.batches.find((entry) => entry.batchId === batchId);
   if (!run || !batch) {
@@ -341,6 +458,12 @@ const buildMetadata = (
     (record) => record.type === "batch_planned",
   );
   const plannedRecord = readObject(plannedEvent);
+  const relatedCommits = collectRelatedCommits(batchEvents);
+  const plannedCommits = readCommitList(
+    plannedRecord.commits ??
+      plannedRecord.commitShas ??
+      plannedRecord.commitHashes,
+  );
   const startedEvent = batchEvents.find(
     (record) =>
       record.type === "batch_started" || record.type === "run_started",
@@ -362,6 +485,7 @@ const buildMetadata = (
         "batch_strategy_used",
       ]) ?? undefined,
     rationale: readFirstString(plannedRecord, ["rationale"]),
+    relatedCommits: relatedCommits.length > 0 ? relatedCommits : plannedCommits,
     selectedTaskIds: readStringArray(plannedRecord.taskIds),
     deferredTasks: readDeferredTasks(plannedRecord),
     worktreeLeases,
@@ -523,6 +647,7 @@ const buildStages = (
       label: definition.label,
       state: resolved.state,
       detail: resolved.detail,
+      timestamp: resolveStageTimestamp(batchEvents, definition.id),
     };
   });
 };
@@ -539,8 +664,9 @@ const buildGates = (
       kind: "verification_failed",
       title: "Verification failed",
       message: "Hub verification did not pass for this batch.",
-      nextStep: "Inspect verification output, fix the repo, then rerun the flow.",
-      cliFallback: `archloop run . --flow ${metadata.flowId ?? "<id>"}`,
+      nextStep:
+        "Inspect verification output, fix the repo, then rerun the flow.",
+      cliFallback: createRunFlowCliFallback(metadata.flowId),
     });
   }
 
@@ -556,7 +682,7 @@ const buildGates = (
       message: "Merge selection or conflict resolution failed.",
       nextStep:
         "Resolve conflicts in the worktree, then resume merge with the same flow.",
-      cliFallback: `archloop run . --flow ${metadata.flowId ?? "<id>"}`,
+      cliFallback: createRunFlowCliFallback(metadata.flowId),
     });
   }
 
@@ -586,7 +712,7 @@ const buildGates = (
         "Dirty source files blocked task claim or merge.",
       nextStep:
         "Commit, stash, or revert dirty source files, then rerun the same flow.",
-      cliFallback: `archloop run . --flow ${metadata.flowId ?? "<id>"}`,
+      cliFallback: createRunFlowCliFallback(metadata.flowId),
     });
   }
 
@@ -628,7 +754,10 @@ const resolveTerminalPhase = (
   ) {
     return "failed";
   }
-  if (batchStatus === "done" && hasEventType(batchEvents, "verification_passed")) {
+  if (
+    batchStatus === "done" &&
+    hasEventType(batchEvents, "verification_passed")
+  ) {
     return "passed";
   }
   if (batchStatus === "done" || batchStatus === "partial_failed") {
@@ -643,26 +772,14 @@ const buildActions = (
   hasRecoverableFailure: boolean,
 ): readonly HubRunWorkbenchAction[] => {
   const actions: HubRunWorkbenchAction[] = [];
-  const flowId = metadata.flowId ?? "<id>";
-
-  actions.push({
-    id: "resume-merge",
-    label: "Resume merge",
-    description:
-      "Resume an unfinished merge-ready batch for this flow before claiming new tasks.",
-    kind: "cli_only",
-    cliFallback: `archloop run . --flow ${flowId}`,
-    disabledReason:
-      metadata.batchStatus === "merging"
-        ? undefined
-        : "Resume merge is available when a batch is merge-ready. Re-run the same flow from the CLI in v0.",
-  });
 
   actions.push({
     id: "cancel-run",
-    label: "Cancel run",
-    description: "Stop the active Hub run for this batch.",
+    label: "Cancel Run",
+    description:
+      "Stop the active run and recover through the CLI if the batch must be abandoned.",
     kind: "cli_only",
+    priority: "danger",
     cliFallback: "archloop run cancel <run-id>",
     disabledReason:
       "Run cancellation has no desktop preview/confirm path in v0. Use CLI or wait for the batch to finish.",
@@ -670,25 +787,37 @@ const buildActions = (
 
   if (hasRecoverableFailure && projectStatus) {
     const selectedTaskIds = new Set(metadata.selectedTaskIds);
-    const hasSelectedFailedTask = projectStatus.failedTasks.some((task) =>
-      selectedTaskIds.has(task.id),
-    );
-    const recoverableTasks = hasSelectedFailedTask
-      ? projectStatus.failedTasks.filter((task) => selectedTaskIds.has(task.id))
-      : projectStatus.failedTasks;
+    const recoverableTask =
+      projectStatus.failedTasks.find((task) => selectedTaskIds.has(task.id)) ??
+      projectStatus.failedTasks[0];
 
-    for (const task of recoverableTasks) {
+    if (recoverableTask) {
       actions.push({
-        id: `recover-${task.id}`,
-        label: `Recover ${task.id}`,
-        description: task.nextAction,
+        id: "recover-task",
+        label: "Recover Task",
+        description: recoverableTask.nextAction,
         kind: "bridge_preview",
+        priority: "primary",
         bridgeAction: "recover.preview",
-        bridgeParams: { taskId: task.id },
-        cliFallback: `archloop tasks recover ${task.id}`,
+        bridgeParams: { taskId: recoverableTask.id },
+        cliFallback: `archloop tasks recover ${recoverableTask.id}`,
       });
     }
   }
+
+  actions.push({
+    id: "resume-merge",
+    label: "Resume Merge",
+    description:
+      "Resume an unfinished merge-ready batch for this flow before claiming new tasks.",
+    kind: "cli_only",
+    priority: "secondary",
+    cliFallback: createRunFlowCliFallback(metadata.flowId),
+    disabledReason:
+      metadata.batchStatus === "merging"
+        ? undefined
+        : "Resume merge is available when a batch is merge-ready. Re-run the same flow from the CLI in v0.",
+  });
 
   return actions;
 };
@@ -722,10 +851,7 @@ export const buildHubRunWorkbenchModel = (
     };
   }
 
-  const defaultFocus = selectDefaultRunFocus(
-    runSummaries,
-    input.projectStatus,
-  );
+  const defaultFocus = selectDefaultRunFocus(runSummaries, input.projectStatus);
   const runId = input.selectedRunId ?? defaultFocus.runId;
   const batchId = input.selectedBatchId ?? defaultFocus.batchId;
   if (!runId || !batchId) {
