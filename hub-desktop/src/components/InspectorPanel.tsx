@@ -13,6 +13,7 @@ export interface InspectorPanelProps {
   readonly taskInspector?: HubTaskInspectorModel;
   readonly projectStatus?: HubProjectStatus;
   readonly style?: CSSProperties;
+  readonly onClose?: () => void;
   readonly onPreviewAction?: (
     action: HubRuntimePreviewAction,
     params: Record<string, unknown>,
@@ -27,10 +28,27 @@ export const InspectorPanel = ({
   taskInspector,
   projectStatus,
   style,
+  onClose,
   onPreviewAction,
   onConfirmAction,
 }: InspectorPanelProps) => (
   <aside className="hub-inspector" style={style} aria-label="Inspector">
+    <header className="hub-inspector-header">
+      <div className="hub-inspector-header-copy">
+        <p className="hub-eyebrow">Inspector</p>
+        <h2>Selected details</h2>
+      </div>
+      <button
+        type="button"
+        className="hub-button hub-focus-ring hub-inspector-close"
+        onClick={onClose}
+        disabled={!onClose}
+        aria-label="Close inspector"
+      >
+        Close
+      </button>
+    </header>
+
     <section className="hub-inspector-section">
       <h2>Project</h2>
       <dl className="hub-kv">
@@ -54,13 +72,17 @@ export const InspectorPanel = ({
     {taskInspector ? (
       <>
         <section className="hub-inspector-section">
-          <h2>{taskInspector.title}</h2>
-          <p className="hub-muted hub-mono">{taskInspector.taskId}</p>
-          <span
-            className={`hub-status hub-status-${taskInspector.hubStatus}`}
-          >
-            {taskInspector.hubStatus}
-          </span>
+          <div className="hub-inspector-task-header">
+            <div>
+              <h2>{taskInspector.title}</h2>
+              <p className="hub-muted hub-mono">{taskInspector.taskId}</p>
+            </div>
+            <span
+              className={`hub-status hub-status-${taskInspector.hubStatus}`}
+            >
+              {taskInspector.hubStatus}
+            </span>
+          </div>
           <p className="hub-muted">{taskInspector.commentsSummary}</p>
         </section>
 
@@ -107,7 +129,9 @@ export const InspectorPanel = ({
     ) : (
       <section className="hub-inspector-section">
         <h2>Selection</h2>
-        <p className="hub-muted">Select a task to inspect local Hub metadata.</p>
+        <p className="hub-muted">
+          Select a task to inspect local Hub metadata.
+        </p>
       </section>
     )}
   </aside>
