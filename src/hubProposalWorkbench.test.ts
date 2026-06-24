@@ -84,9 +84,20 @@ describe("hubProposalWorkbench", () => {
       }),
     );
     expect(model.sourceContext?.highlights).toEqual(
+      expect.arrayContaining([expect.stringContaining("docs/prd/hub-gui.md")]),
+    );
+    expect(model.sourceContext?.extractedRequirementText).toContain(
+      "proposal session review console",
+    );
+    expect(model.sourceContext?.requirements).toEqual(
       expect.arrayContaining([
-        expect.stringContaining("docs/prd/hub-gui.md"),
+        expect.stringContaining("source document pane"),
+        expect.stringContaining("bottom approve/reject bar"),
       ]),
+    );
+    expect(model.metadata?.confidenceSummary).toContain("Confidence index");
+    expect(model.metadata?.agentLogPath).toContain(
+      "logs/prd-decomposition-finalization.log",
     );
     expect(model.taskCards).toHaveLength(2);
     expect(model.taskCards[0]).toEqual(
@@ -186,7 +197,7 @@ describe("hubProposalWorkbench", () => {
     );
   });
 
-  it("exposes approve, reject, revise, and apply actions with disabled reasons", () => {
+  it("exposes preview-confirm approval and disabled reject/revise actions", () => {
     const runSummaries = createHubDesktopFixtureProposalRunSummaries();
     const awaiting = buildHubProposalWorkbenchModel({
       runSummaries,
@@ -199,14 +210,9 @@ describe("hubProposalWorkbench", () => {
     expect(awaiting.actions).toContainEqual(
       expect.objectContaining({
         id: "approve",
-        kind: "cli_only",
-        cliFallback: expect.stringContaining("archloop tasks from-prd"),
-      }),
-    );
-    expect(awaiting.actions).toContainEqual(
-      expect.objectContaining({
-        id: "apply",
-        disabledReason: expect.stringContaining("Approve"),
+        label: "Approve & Apply to Beads",
+        kind: "bridge_preview",
+        bridgeAction: "proposal.applyPreview",
       }),
     );
     expect(awaiting.actions).toContainEqual(
@@ -214,6 +220,15 @@ describe("hubProposalWorkbench", () => {
         id: "revise",
         kind: "cli_only",
       }),
+    );
+    expect(
+      awaiting.actions.find((action) => action.id === "reject")?.disabledReason,
+    ).toContain("not wired");
+    expect(
+      awaiting.actions.find((action) => action.id === "revise")?.disabledReason,
+    ).toContain("not wired");
+    expect(awaiting.actions.some((action) => action.id === "apply")).toBe(
+      false,
     );
 
     const applied = buildHubProposalWorkbenchModel({
@@ -252,7 +267,7 @@ describe("hubProposalWorkbench", () => {
     });
 
     expect(
-      model.actions.find((action) => action.id === "apply")?.disabledReason,
+      model.actions.find((action) => action.id === "approve")?.disabledReason,
     ).toContain("task store");
   });
 
@@ -266,7 +281,9 @@ describe("hubProposalWorkbench", () => {
   });
 
   it("uses stacked grid class on narrow viewports", () => {
-    expect(resolveHubProposalWorkbenchGridClass(1440)).toBe("hub-proposal-grid");
+    expect(resolveHubProposalWorkbenchGridClass(1440)).toBe(
+      "hub-proposal-grid",
+    );
     expect(resolveHubProposalWorkbenchGridClass(700)).toBe(
       "hub-proposal-grid hub-proposal-grid-narrow",
     );

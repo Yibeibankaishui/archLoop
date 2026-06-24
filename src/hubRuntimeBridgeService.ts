@@ -3,7 +3,11 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { readProposalSessionArtifacts } from "./hubProposalSession.js";
-import { HUB_ENV_KNOWN_KEYS, readHubEnvFile, resolveHubEnvPath } from "./hubEnv.js";
+import {
+  HUB_ENV_KNOWN_KEYS,
+  readHubEnvFile,
+  resolveHubEnvPath,
+} from "./hubEnv.js";
 import {
   listHubRunSummaries,
   resolveHubProjectStatus,
@@ -65,9 +69,7 @@ const createConfirmToken = (
   action: HubRuntimeAction,
   params: Record<string, unknown>,
 ): string =>
-  createHash("sha256")
-    .update(JSON.stringify({ action, params }))
-    .digest("hex");
+  createHash("sha256").update(JSON.stringify({ action, params })).digest("hex");
 
 const resolveCwd = (
   params: { readonly cwd?: string },
@@ -129,6 +131,140 @@ const buildTaskCreatePreview = (
   };
 };
 
+const createFixturePreview = (
+  action: HubRuntimeActionPreview["action"],
+  summary: string,
+  confirmToken: string,
+  cliFallback?: string,
+): HubRuntimeActionPreview => ({
+  action,
+  summary,
+  confirmToken,
+  cliFallback,
+});
+
+const readObject = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+const readString = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : undefined;
+
+const proposalSessionNotFoundError = (
+  runDir: string,
+): HubRuntimeBridgeError => ({
+  code: "not_found",
+  message: `Proposal session not found at ${runDir}`,
+});
+
+const validateProposalSessionRunDir = (
+  runDir: string,
+): HubRuntimeBridgeError | undefined =>
+  existsSync(runDir) ? undefined : proposalSessionNotFoundError(runDir);
+
+const readConfirmToken = (params: Record<string, unknown>): string | undefined =>
+  typeof params.confirmToken === "string" ? params.confirmToken : undefined;
+
+const confirmPreviewError = (
+  preview: HubRuntimeActionPreview,
+): HubRuntimeBridgeError | undefined => {
+  if (preview.disabledReason) {
+    return {
+      code: "action_disabled",
+      message: preview.disabledReason,
+      cliFallback: preview.cliFallback,
+    };
+  }
+
+  return undefined;
+};
+
+const validateConfirmToken = (
+  preview: HubRuntimeActionPreview,
+  params: Record<string, unknown>,
+): HubRuntimeBridgeError | undefined => {
+  const confirmToken = readConfirmToken(params);
+  if (!confirmToken || confirmToken !== preview.confirmToken) {
+    return {
+      code: "confirm_invalid",
+      message: "Confirm token is missing or invalid. Preview the action first.",
+      cliFallback: preview.cliFallback,
+    };
+  }
+
+  return undefined;
+};
+
+const inferProposalFlowId = (
+  preparedContext: Readonly<Record<string, unknown>>,
+): "prd-decomposition" | "triage" =>
+  readString(preparedContext.taskQuery) ? "triage" : "prd-decomposition";
+
+const countProposalTasks = (finalProposal: unknown): number => {
+  const record = readObject(finalProposal);
+  if (Array.isArray(record.slices)) {
+    return record.slices.length;
+  }
+  if (Array.isArray(record.decisions)) {
+    return record.decisions.length;
+  }
+  return 0;
+};
+
+const buildProposalApplyPreview = (
+  runDir: string,
+  cwd: string,
+): HubRuntimeActionPreview => {
+  const session = readProposalSessionArtifacts(runDir);
+  const flowId = inferProposalFlowId(session.preparedContext);
+  const finalProposal = session.finalProposal;
+  const taskCount = countProposalTasks(finalProposal);
+  const cliFallback =
+    flowId === "triage"
+      ? "archloop tasks triage <task-id>"
+      : "archloop tasks from-prd <ref>";
+
+  if (!finalProposal) {
+    return {
+      action: "proposal.applyExecute",
+      summary: "Final proposal is not available yet.",
+      confirmToken: "",
+      disabledReason:
+        "Load a finalized proposal session before approving local Beads writes.",
+      cliFallback,
+    };
+  }
+
+  const approved = session.applyResult?.status === "pending";
+  if (session.applyResult?.status === "applied") {
+    return {
+      action: "proposal.applyExecute",
+      summary: "Proposal is already applied to the local task store.",
+      confirmToken: "",
+      disabledReason:
+        "Proposal was already applied. Re-open the task board to inspect the local writes.",
+      cliFallback,
+    };
+  }
+
+  const params = { runDir, cwd };
+  return {
+    action: "proposal.applyExecute",
+    summary:
+      flowId === "triage"
+        ? `Approve and apply ${taskCount} triage decision${taskCount === 1 ? "" : "s"} to the local Beads store.`
+        : `Approve and apply ${taskCount} proposed task${taskCount === 1 ? "" : "s"} to the local Beads store.`,
+    confirmToken: createConfirmToken("proposal.applyExecute", params),
+    cliFallback,
+    disabledReason: approved
+      ? "Proposal is already approved and waiting for local apply."
+      : undefined,
+  };
+};
+
 const readRunEvents = (runDir: string) => {
   const eventsDir = join(runDir, "events");
   const files = existsSync(eventsDir)
@@ -152,15 +288,31 @@ const readRunEvents = (runDir: string) => {
 export const createHubRuntimeBridgeService = (
   options: HubRuntimeBridgeServiceOptions = {},
 ) => {
+  const queuePreviewExecution = <T>(
+    preview: HubRuntimeActionPreview,
+    params: Record<string, unknown>,
+    data: T,
+  ): HubRuntimeBridgeResult<T> => {
+    const previewError = confirmPreviewError(preview);
+    if (previewError) {
+      return failure(previewError);
+    }
+
+    const confirmError = validateConfirmToken(preview, params);
+    if (confirmError) {
+      return failure(confirmError);
+    }
+
+    return success(data);
+  };
+
   const invoke = async <A extends HubRuntimeAction>(
     request: HubRuntimeRequest<A>,
   ): Promise<HubRuntimeBridgeResult<HubRuntimeResponseMap[A]>> => {
     const actionMeta = describeHubRuntimeAction(request.action);
-    const params = request.params as HubRuntimeRequestMap[typeof request.action];
-    const cwd = resolveCwd(
-      "cwd" in params ? { cwd: params.cwd } : {},
-      options,
-    );
+    const params =
+      request.params as HubRuntimeRequestMap[typeof request.action];
+    const cwd = resolveCwd("cwd" in params ? { cwd: params.cwd } : {}, options);
 
     if (options.useFixtures) {
       return invokeFixture(request);
@@ -170,26 +322,37 @@ export const createHubRuntimeBridgeService = (
       switch (request.action) {
         case "project.getStatus":
           return success(
-            resolveHubProjectStatus({ cwd }) as unknown as HubRuntimeResponseMap[A],
+            resolveHubProjectStatus({
+              cwd,
+            }) as unknown as HubRuntimeResponseMap[A],
           );
         case "taskBoard.load":
-          return success(loadHubTaskBoard(cwd) as unknown as HubRuntimeResponseMap[A]);
+          return success(
+            loadHubTaskBoard(cwd) as unknown as HubRuntimeResponseMap[A],
+          );
         case "task.get": {
           const taskParams = params as HubRuntimeRequestMap["task.get"];
           return success(
-            loadHubTask(cwd, taskParams.taskId) as unknown as HubRuntimeResponseMap[A],
+            loadHubTask(
+              cwd,
+              taskParams.taskId,
+            ) as unknown as HubRuntimeResponseMap[A],
           );
         }
         case "run.listSummaries": {
           const status = resolveHubProjectStatus({ cwd });
           return success(
-            listHubRunSummaries(status.hubProjectDir) as unknown as HubRuntimeResponseMap[A],
+            listHubRunSummaries(
+              status.hubProjectDir,
+            ) as unknown as HubRuntimeResponseMap[A],
           );
         }
         case "run.readEvents": {
           const runParams = params as HubRuntimeRequestMap["run.readEvents"];
           return success(
-            readRunEvents(runParams.runDir) as unknown as HubRuntimeResponseMap[A],
+            readRunEvents(
+              runParams.runDir,
+            ) as unknown as HubRuntimeResponseMap[A],
           );
         }
         case "proposal.readSession": {
@@ -204,6 +367,22 @@ export const createHubRuntimeBridgeService = (
           return success(
             readProposalSessionArtifacts(
               proposalParams.runDir,
+            ) as unknown as HubRuntimeResponseMap[A],
+          );
+        }
+        case "proposal.applyPreview": {
+          const proposalParams =
+            params as HubRuntimeRequestMap["proposal.applyPreview"];
+          const runDirError = validateProposalSessionRunDir(
+            proposalParams.runDir,
+          );
+          if (runDirError) {
+            return failure(runDirError);
+          }
+          return success(
+            buildProposalApplyPreview(
+              proposalParams.runDir,
+              proposalParams.cwd ?? cwd,
             ) as unknown as HubRuntimeResponseMap[A],
           );
         }
@@ -233,7 +412,8 @@ export const createHubRuntimeBridgeService = (
           } as unknown as HubRuntimeResponseMap[A]);
         }
         case "recover.preview": {
-          const recoverParams = params as HubRuntimeRequestMap["recover.preview"];
+          const recoverParams =
+            params as HubRuntimeRequestMap["recover.preview"];
           const board = loadHubTaskBoard(cwd);
           const task = board.tasks.find(
             (entry) => entry.id === recoverParams.taskId,
@@ -250,7 +430,8 @@ export const createHubRuntimeBridgeService = (
               action: "recover.execute",
               summary: `Task ${recoverParams.taskId} is not failed`,
               confirmToken: "",
-              disabledReason: "Only failed tasks can be recovered from the Hub GUI.",
+              disabledReason:
+                "Only failed tasks can be recovered from the Hub GUI.",
               cliFallback: `archloop tasks show ${recoverParams.taskId}`,
             } as unknown as HubRuntimeResponseMap[A]);
           }
@@ -264,11 +445,17 @@ export const createHubRuntimeBridgeService = (
         }
         case "sync.pushPreview":
           return success(
-            buildSyncPreview("sync.pushExecute", cwd) as HubRuntimeResponseMap[A],
+            buildSyncPreview(
+              "sync.pushExecute",
+              cwd,
+            ) as HubRuntimeResponseMap[A],
           );
         case "sync.pullPreview":
           return success(
-            buildSyncPreview("sync.pullExecute", cwd) as HubRuntimeResponseMap[A],
+            buildSyncPreview(
+              "sync.pullExecute",
+              cwd,
+            ) as HubRuntimeResponseMap[A],
           );
         case "task.createPreview": {
           const createParams =
@@ -290,7 +477,19 @@ export const createHubRuntimeBridgeService = (
         case "recover.execute":
         case "sync.pushExecute":
         case "sync.pullExecute":
-        case "task.createExecute": {
+        case "task.createExecute":
+        case "proposal.applyExecute": {
+          if (request.action === "proposal.applyExecute") {
+            const proposalParams =
+              params as HubRuntimeRequestMap["proposal.applyExecute"];
+            const runDirError = validateProposalSessionRunDir(
+              proposalParams.runDir,
+            );
+            if (runDirError) {
+              return failure(runDirError);
+            }
+          }
+
           const preview = buildPreviewForMutatingAction(
             request.action,
             params as HubRuntimeRequestMap[typeof request.action],
@@ -302,25 +501,7 @@ export const createHubRuntimeBridgeService = (
               message: "Unable to build preview for mutating action",
             });
           }
-          if (preview.disabledReason) {
-            return failure({
-              code: "action_disabled",
-              message: preview.disabledReason,
-              cliFallback: preview.cliFallback,
-            });
-          }
-          const confirmToken = (
-            params as { readonly confirmToken?: string }
-          ).confirmToken;
-          if (!confirmToken || confirmToken !== preview.confirmToken) {
-            return failure({
-              code: "confirm_invalid",
-              message: "Confirm token is missing or invalid. Preview the action first.",
-              cliFallback: preview.cliFallback,
-            });
-          }
-
-          return success({
+          return queuePreviewExecution(preview, readObject(params), {
             status: "queued_for_cli",
             taskId:
               request.action === "recover.execute"
@@ -338,7 +519,8 @@ export const createHubRuntimeBridgeService = (
       const message =
         error instanceof Error ? error.message : "Hub runtime bridge failed";
       return failure({
-        code: actionMeta.kind === "read" ? "runtime_unavailable" : "command_failed",
+        code:
+          actionMeta.kind === "read" ? "runtime_unavailable" : "command_failed",
         message,
         cliFallback: cliFallbackForFailedAction(request.action),
       });
@@ -364,11 +546,20 @@ export const createHubRuntimeBridgeService = (
       case "sync.pullExecute":
         return buildSyncPreview("sync.pullExecute", cwd);
       case "task.createExecute": {
-        const createParams = params as HubRuntimeRequestMap["task.createExecute"];
+        const createParams =
+          params as HubRuntimeRequestMap["task.createExecute"];
         return buildTaskCreatePreview(
           createParams.title,
           createParams.description,
           cwd,
+        );
+      }
+      case "proposal.applyExecute": {
+        const proposalParams =
+          params as HubRuntimeRequestMap["proposal.applyExecute"];
+        return buildProposalApplyPreview(
+          proposalParams.runDir,
+          proposalParams.cwd ?? cwd,
         );
       }
       default:
@@ -381,7 +572,8 @@ export const createHubRuntimeBridgeService = (
   ): Promise<HubRuntimeBridgeResult<HubRuntimeResponseMap[A]>> => {
     const fixtureStatus = createHubDesktopFixtureProjectStatus();
     const fixtureBoard = createHubDesktopFixtureTaskBoard();
-    const params = request.params as HubRuntimeRequestMap[typeof request.action];
+    const params =
+      request.params as HubRuntimeRequestMap[typeof request.action];
     switch (request.action) {
       case "project.getStatus":
         return success(fixtureStatus as unknown as HubRuntimeResponseMap[A]);
@@ -401,12 +593,10 @@ export const createHubRuntimeBridgeService = (
         return success(task as unknown as HubRuntimeResponseMap[A]);
       }
       case "run.listSummaries":
-        return success(
-          [
-            ...createHubDesktopFixtureRunSummaries(),
-            ...createHubDesktopFixtureProposalRunSummaries(),
-          ] as unknown as HubRuntimeResponseMap[A],
-        );
+        return success([
+          ...createHubDesktopFixtureRunSummaries(),
+          ...createHubDesktopFixtureProposalRunSummaries(),
+        ] as unknown as HubRuntimeResponseMap[A]);
       case "run.readEvents": {
         const runParams = params as HubRuntimeRequestMap["run.readEvents"];
         if (runParams.runDir === FIXTURE_PROPOSAL_RUN_DIR) {
@@ -473,7 +663,8 @@ export const createHubRuntimeBridgeService = (
           ) as HubRuntimeResponseMap[A],
         );
       case "task.createPreview": {
-        const createParams = params as HubRuntimeRequestMap["task.createPreview"];
+        const createParams =
+          params as HubRuntimeRequestMap["task.createPreview"];
         return success(
           buildTaskCreatePreview(
             createParams.title,
@@ -482,25 +673,57 @@ export const createHubRuntimeBridgeService = (
           ) as HubRuntimeResponseMap[A],
         );
       }
+      case "proposal.applyPreview": {
+        const proposalParams =
+          params as HubRuntimeRequestMap["proposal.applyPreview"];
+        if (proposalParams.runDir !== FIXTURE_PROPOSAL_RUN_DIR) {
+          return failure({
+            code: "not_found",
+            message: "Fixture proposal session is unavailable",
+          });
+        }
+        return success(
+          createFixturePreview(
+            "proposal.applyExecute",
+            "Approve and apply 2 proposed tasks to the local Beads store.",
+            "fixture-proposal-apply",
+            "archloop tasks from-prd <ref>",
+          ) as HubRuntimeResponseMap[A],
+        );
+      }
       case "recover.execute":
       case "sync.pushExecute":
       case "sync.pullExecute":
-      case "task.createExecute": {
-        const preview = buildPreviewForMutatingAction(
-          request.action,
-          params as HubRuntimeRequestMap[typeof request.action],
-          HUB_DESKTOP_FIXTURE_REPO_ROOT,
-        );
-        const confirmToken = (
-          params as { readonly confirmToken?: string }
-        ).confirmToken;
-        if (!preview || !confirmToken || confirmToken !== preview.confirmToken) {
+      case "task.createExecute":
+      case "proposal.applyExecute": {
+        const preview =
+          request.action === "proposal.applyExecute"
+            ? createFixturePreview(
+                "proposal.applyExecute",
+                "Approve and apply 2 proposed tasks to the local Beads store.",
+                "fixture-proposal-apply",
+                "archloop tasks from-prd <ref>",
+              )
+            : buildPreviewForMutatingAction(
+                request.action,
+                params as HubRuntimeRequestMap[typeof request.action],
+                HUB_DESKTOP_FIXTURE_REPO_ROOT,
+              );
+        const confirmToken = (params as { readonly confirmToken?: string })
+          .confirmToken;
+        if (
+          !preview ||
+          !confirmToken ||
+          confirmToken !== preview.confirmToken
+        ) {
           return failure({
             code: "confirm_invalid",
             message: "Confirm token is missing or invalid",
           });
         }
-        return success({ status: "queued_for_cli" } as unknown as HubRuntimeResponseMap[A]);
+        return success({
+          status: "queued_for_cli",
+        } as unknown as HubRuntimeResponseMap[A]);
       }
       default:
         return failure({

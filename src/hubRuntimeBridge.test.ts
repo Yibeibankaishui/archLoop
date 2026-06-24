@@ -13,6 +13,7 @@ import {
   createHubDesktopFixtureProposalRunSummaries,
   createHubDesktopFixtureRunSummaries,
   createHubDesktopFixtureTaskBoard,
+  FIXTURE_PROPOSAL_RUN_DIR,
 } from "./hubRuntimeBridgeFixtures.js";
 import { createHubRuntimeBridgeService } from "./hubRuntimeBridgeService.js";
 import { isCanonicalHubTaskStatus } from "./taskBoard.js";
@@ -58,10 +59,27 @@ describe("hubRuntimeBridge contract", () => {
       title: "New task",
       confirmToken: "create-token",
     });
+    expect(
+      buildHubRuntimeExecuteParams(
+        {
+          action: "proposal.applyExecute",
+          summary: "Apply proposal",
+          confirmToken: "proposal-token",
+        },
+        { runDir: "/tmp/run" },
+      ),
+    ).toEqual({
+      runDir: "/tmp/run",
+      confirmToken: "proposal-token",
+    });
   });
 
   it("describes mutating actions as confirm-gated", () => {
     expect(describeHubRuntimeAction("recover.execute")).toEqual({
+      kind: "mutating",
+      requiresConfirm: true,
+    });
+    expect(describeHubRuntimeAction("proposal.applyExecute")).toEqual({
       kind: "mutating",
       requiresConfirm: true,
     });
@@ -70,6 +88,10 @@ describe("hubRuntimeBridge contract", () => {
       requiresConfirm: false,
     });
     expect(describeHubRuntimeAction("recover.preview")).toEqual({
+      kind: "preview",
+      requiresConfirm: false,
+    });
+    expect(describeHubRuntimeAction("proposal.applyPreview")).toEqual({
       kind: "preview",
       requiresConfirm: false,
     });
@@ -182,6 +204,33 @@ describe("hubRuntimeBridgeService", () => {
       },
     });
     expect(accepted.ok).toBe(true);
+  });
+
+  it("exposes proposal apply preview-confirm actions for session approval", async () => {
+    const bridge = createHubRuntimeBridgeService({ useFixtures: true });
+    const preview = await bridge.invoke({
+      action: "proposal.applyPreview",
+      params: { runDir: FIXTURE_PROPOSAL_RUN_DIR },
+    });
+
+    expect(preview.ok).toBe(true);
+    if (!preview.ok) {
+      return;
+    }
+    expect(preview.data.action).toBe("proposal.applyExecute");
+    expect(preview.data.summary).toContain("Approve");
+
+    const rejected = await bridge.invoke({
+      action: "proposal.applyExecute",
+      params: {
+        runDir: FIXTURE_PROPOSAL_RUN_DIR,
+        confirmToken: "invalid",
+      },
+    });
+    expect(rejected.ok).toBe(false);
+    if (!rejected.ok) {
+      expect(rejected.error.code).toBe("confirm_invalid");
+    }
   });
 
   it("returns disabled reasons for recover preview on non-failed tasks in real mode", async () => {
