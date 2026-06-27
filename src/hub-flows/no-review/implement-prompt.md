@@ -8,7 +8,25 @@ Only work on the task specified.
 
 Work on branch {{BRANCH}}. Make commits and run tests.
 
+# PROJECT DEVELOPMENT CONTRACT
+
+Hub project profile: {{PROJECT_PROFILE}}
+Hub project development contract: {{PROJECT_DEVELOPMENT_CONTRACT_PATH}}
+
+## Setup guidance
+
+{{PROJECT_DEVELOPMENT_CONTRACT_SETUP}}
+
+## Verification guidance
+
+{{PROJECT_DEVELOPMENT_CONTRACT_VERIFY}}
+
+## Project context
+
+{{PROJECT_DEVELOPMENT_CONTRACT_CONTEXT}}
+
 {{RETRY_CONTEXT}}
+
 # CONTEXT
 
 Here are the last 10 commits:
@@ -36,7 +54,7 @@ If applicable, use RGR to complete the task.
 
 # FEEDBACK LOOPS
 
-Before committing, run `npm run typecheck` and `npm run test` to ensure the tests pass.
+Before committing, run the verification guidance from the project development contract.
 
 # COMMIT
 

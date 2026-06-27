@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import {
   configureHubProjectDevelopmentContract,
   HUB_PROJECT_DEVELOPMENT_CONTRACT_FILE_NAME,
+  ensureHubProjectDevelopmentContractState,
   resolveHubProjectDevelopmentContractPath,
   resolveHubProjectDevelopmentContractState,
 } from "./hubProjectDevelopmentContract.js";
@@ -36,6 +37,27 @@ describe("hubProjectDevelopmentContract", () => {
     expect(state.contract.setup[0]).toContain("no-op baseline");
     expect(state.contract.context[0]).toContain("No obvious stack signals");
     expect(state.contract.context[1]).toContain("Generic profile selected");
+  });
+
+  it("persists a generic fallback contract when ensuring a missing contract", async () => {
+    const repoRoot = await createRepoRoot("hub-contract-ensure-");
+    const hubProjectDir = join(repoRoot, "hub-project");
+
+    const ensured = ensureHubProjectDevelopmentContractState({
+      repoRoot,
+      hubProjectDir,
+      now: new Date("2026-06-27T10:00:00.000Z"),
+    });
+
+    expect(ensured.persisted).toBe(true);
+    expect(ensured.createdGenericFallback).toBe(true);
+    expect(ensured.contract.projectProfile).toBe("generic");
+    expect(ensured.contractPath).toBe(
+      resolveHubProjectDevelopmentContractPath(hubProjectDir),
+    );
+    expect(await readFile(ensured.contractPath, "utf8")).toContain(
+      '"projectProfile": "generic"',
+    );
   });
 
   it("writes a pretty-printed contract and preserves same-profile edits while refreshing facts", async () => {

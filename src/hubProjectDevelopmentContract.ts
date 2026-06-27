@@ -54,6 +54,10 @@ export interface HubProjectDevelopmentContractState {
   readonly persisted: boolean;
 }
 
+export interface EnsureHubProjectDevelopmentContractStateResult extends HubProjectDevelopmentContractState {
+  readonly createdGenericFallback: boolean;
+}
+
 export interface ConfigureHubProjectDevelopmentContractResult extends HubProjectDevelopmentContractState {
   readonly backupPath?: string;
   readonly projectProfileChanged: boolean;
@@ -334,6 +338,11 @@ const writeHubProjectDevelopmentContractFile = (
   writeFileSync(contractPath, `${JSON.stringify(contract, null, 2)}\n`, "utf8");
 };
 
+const formatHubProjectDevelopmentContractPromptSection = (
+  lines: readonly string[],
+): string =>
+  lines.length > 0 ? lines.map((line) => `- ${line}`).join("\n") : "- (none)";
+
 export const resolveHubProjectDevelopmentContractPath = (
   hubProjectDir: string,
 ): string => contractPathFor(hubProjectDir);
@@ -402,6 +411,48 @@ export const resolveHubProjectDevelopmentContractState = (
       updatedAt: now,
     }),
     persisted: false,
+  };
+};
+
+export const buildHubProjectDevelopmentContractPromptArgs = (input: {
+  readonly contract: HubProjectDevelopmentContractState;
+}): Readonly<Record<string, string>> => ({
+  PROJECT_PROFILE: input.contract.contract.projectProfile,
+  PROJECT_DEVELOPMENT_CONTRACT_PATH: input.contract.contractPath,
+  PROJECT_DEVELOPMENT_CONTRACT_SETUP:
+    formatHubProjectDevelopmentContractPromptSection(
+      input.contract.contract.setup,
+    ),
+  PROJECT_DEVELOPMENT_CONTRACT_VERIFY:
+    formatHubProjectDevelopmentContractPromptSection(
+      input.contract.contract.verify,
+    ),
+  PROJECT_DEVELOPMENT_CONTRACT_CONTEXT:
+    formatHubProjectDevelopmentContractPromptSection(
+      input.contract.contract.context,
+    ),
+});
+
+export const ensureHubProjectDevelopmentContractState = (
+  input: ResolveHubProjectDevelopmentContractStateInput,
+): EnsureHubProjectDevelopmentContractStateResult => {
+  const resolved = resolveHubProjectDevelopmentContractState(input);
+  if (resolved.persisted) {
+    return {
+      ...resolved,
+      createdGenericFallback: false,
+    };
+  }
+
+  writeHubProjectDevelopmentContractFile(
+    resolved.contractPath,
+    resolved.contract,
+  );
+
+  return {
+    ...resolved,
+    persisted: true,
+    createdGenericFallback: true,
   };
 };
 
