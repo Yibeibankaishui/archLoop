@@ -383,6 +383,37 @@ const resolveHubFlowBatchResult = (input: {
   };
 };
 
+const resolveMergeOnlyHubFlowBatchResult = (input: {
+  readonly batchId: string;
+  readonly mergeResult?: RunHubBatchMergeResult;
+  readonly treatSkippedAsFailed?: boolean;
+}): HubFlowBatchResult | undefined => {
+  const { batchId, mergeResult, treatSkippedAsFailed = false } = input;
+  if (!mergeResult) {
+    return undefined;
+  }
+
+  if (mergeResult.batchStatus === "skipped") {
+    if (!treatSkippedAsFailed) {
+      return undefined;
+    }
+
+    return {
+      batchId,
+      selectedTaskIds: mergeResult.selectedTaskIds,
+      completedTaskCount: 0,
+      batchStatus: "failed",
+    };
+  }
+
+  return resolveHubFlowBatchResult({
+    batchId,
+    selectedTaskIds: [],
+    taskResults: [],
+    mergeResult,
+  });
+};
+
 const buildHubFlowBatchPlannedMetadata = (input: {
   readonly batchSelection?: HubBatchPlannerResult;
   readonly fallbackReason?: string;
@@ -1082,7 +1113,7 @@ export const runHubFlow = async (
       ...(batchSelectionResult ? { batchSelection: batchSelectionResult } : {}),
       ...(batchFallbackReason ? { fallbackReason: batchFallbackReason } : {}),
       ...(batchMergeResult ? { mergeResult: batchMergeResult } : {}),
-      ...(batchResult ? { batchResult } : {}),
+      ...(batchResult ? { batchResult: batchResult } : {}),
     };
   };
 
@@ -1090,11 +1121,10 @@ export const runHubFlow = async (
     const resumedMergeResult = await runBatchMergePhase(resumedBatchId);
 
     mergeResult = resumedMergeResult;
-    const resumedBatchResult = resolveHubFlowBatchResult({
+    const resumedBatchResult = resolveMergeOnlyHubFlowBatchResult({
       batchId: resumedBatchId,
-      selectedTaskIds: [],
-      taskResults: [],
       mergeResult: resumedMergeResult,
+      treatSkippedAsFailed: true,
     });
     if (resumedBatchResult) {
       batchResults.push(resumedBatchResult);
@@ -1119,25 +1149,26 @@ export const runHubFlow = async (
     if (fallbackReason === undefined && batchExecution.fallbackReason) {
       fallbackReason = batchExecution.fallbackReason;
     }
-    if (batchExecution.selectedTaskIds.length === 0) {
-      if (batchExecution.mergeResult) {
-        mergeResult = batchExecution.mergeResult;
-      }
-      stopReason = "no_ready_tasks";
-      break;
-    }
-
-    selectedTaskIds.push(...batchExecution.selectedTaskIds);
-    results.push(...batchExecution.results);
     if (batchExecution.mergeResult) {
       mergeResult = batchExecution.mergeResult;
     }
+
+    if (batchExecution.selectedTaskIds.length > 0) {
+      selectedTaskIds.push(...batchExecution.selectedTaskIds);
+      results.push(...batchExecution.results);
+    }
+
     if (batchExecution.batchResult) {
       batchResults.push(batchExecution.batchResult);
       if (batchExecution.batchResult.batchStatus === "failed") {
         stopReason = "batch_failed";
         break;
       }
+    }
+
+    if (batchExecution.selectedTaskIds.length === 0) {
+      stopReason = "no_ready_tasks";
+      break;
     }
 
     if (batchResults.length >= maxBatches) {
