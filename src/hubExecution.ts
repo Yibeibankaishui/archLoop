@@ -46,6 +46,24 @@ export interface HubRunStartedEvent {
   readonly hubProjectDir: string;
 }
 
+export interface HubRunCompletedBatchResult {
+  readonly batchId: string;
+  readonly selectedTaskIds: readonly string[];
+  readonly completedTaskCount: number;
+  readonly batchStatus: "completed" | "failed";
+}
+
+export interface HubRunCompletedEvent {
+  readonly type: "run_completed";
+  readonly runId: string;
+  readonly flowId: string;
+  readonly createdAt: string;
+  readonly completedBatchCount: number;
+  readonly completedTaskCount: number;
+  readonly stopReason: string;
+  readonly batchResults: readonly HubRunCompletedBatchResult[];
+}
+
 export interface HubBatchStartedEvent {
   readonly type: "batch_started";
   readonly runId: string;
@@ -303,7 +321,7 @@ export const createHubRunContext = (
 
 export const appendHubRunEvent = (
   runDir: string,
-  event: HubRunStartedEvent,
+  event: HubRunStartedEvent | HubRunCompletedEvent,
 ): string => {
   const { runEventsPath } = resolveHubRunEventsPaths(runDir);
   return appendHubEvent(

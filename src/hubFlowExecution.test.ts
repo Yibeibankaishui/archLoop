@@ -1385,6 +1385,10 @@ describe("with-review Hub flow execution", () => {
     expect(result.mode).toBe("no_ready");
     expect(result.selectedTaskIds).toEqual([]);
     expect(result.resumedBatchId).toBeUndefined();
+    expect(result.completedBatchCount).toBe(0);
+    expect(result.completedTaskCount).toBe(0);
+    expect(result.stopReason).toBe("no_ready_tasks");
+    expect(result.batchResults).toEqual([]);
     expect(result.mergeResult).toMatchObject({
       batchId: result.batchId,
       selectedTaskIds: [],
@@ -1394,9 +1398,25 @@ describe("with-review Hub flow execution", () => {
     expect(reviewCalls).toBe(0);
 
     const summary = formatHubFlowResultLines(result).join("\n");
+    expect(summary).toContain("Completed batches: 0");
+    expect(summary).toContain("Completed tasks: 0");
+    expect(summary).toContain("Stop reason: no_ready_tasks");
     expect(summary).toContain("No ready tasks selected.");
     expect(summary).toContain(
       "No unfinished with-review batch found to resume.",
+    );
+
+    const runEvents = await readJsonl(
+      join(result.runDir, "events", "run.jsonl"),
+    );
+    expect(runEvents).toContainEqual(
+      expect.objectContaining({
+        type: "run_completed",
+        runId: result.runId,
+        stopReason: "no_ready_tasks",
+        completedBatchCount: 0,
+        completedTaskCount: 0,
+      }),
     );
   });
 
@@ -1474,6 +1494,10 @@ describe("with-review Hub flow execution", () => {
     expect(result.selectedTaskIds).toEqual([]);
     expect(result.batchId).toBe(oldBatchId);
     expect(result.resumedBatchId).toBe(oldBatchId);
+    expect(result.stopReason).toBe("single_batch_completed");
+    expect(result.completedBatchCount).toBe(1);
+    expect(result.completedTaskCount).toBe(1);
+    expect(result.batchResults).toHaveLength(1);
     expect(result.mergeResult).toMatchObject({
       batchId: oldBatchId,
       selectedTaskIds: ["bd-resume"],
@@ -1502,6 +1526,19 @@ describe("with-review Hub flow execution", () => {
     );
     expect(formatHubFlowResultLines(result).join("\n")).toContain(
       `Resumed batch id: ${oldBatchId}`,
+    );
+
+    const runEvents = await readJsonl(
+      join(result.runDir, "events", "run.jsonl"),
+    );
+    expect(runEvents).toContainEqual(
+      expect.objectContaining({
+        type: "run_completed",
+        runId: result.runId,
+        stopReason: "single_batch_completed",
+        completedBatchCount: 1,
+        completedTaskCount: 1,
+      }),
     );
   });
 
@@ -1850,6 +1887,14 @@ describe("with-review Hub flow execution", () => {
       outcome: "agent_failed",
       hubStatus: "failed",
       failureReason: "agent_failed",
+    });
+    expect(result.stopReason).toBe("batch_failed");
+    expect(result.completedBatchCount).toBe(0);
+    expect(result.completedTaskCount).toBe(0);
+    expect(result.batchResults).toHaveLength(1);
+    expect(result.batchResults[0]).toMatchObject({
+      batchId: result.batchId,
+      batchStatus: "failed",
     });
 
     const taskEvents = await readJsonl(

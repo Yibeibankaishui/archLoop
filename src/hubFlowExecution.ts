@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { assertAgentCredentialsConfigured } from "./agentAuthGuidance.js";
 import type { AgentProvider } from "./AgentProvider.js";
 import {
+  appendHubRunEvent,
   appendHubBatchEvent,
   appendHubTaskEvent,
   createHubRunContext,
@@ -146,12 +147,28 @@ export interface HubFlowTaskResult {
   readonly implementationWork?: "new_commits" | "existing_unmerged_work";
 }
 
+export type HubFlowStopReason =
+  | "no_ready_tasks"
+  | "single_batch_completed"
+  | "batch_failed";
+
+export interface HubFlowBatchResult {
+  readonly batchId: string;
+  readonly selectedTaskIds: readonly string[];
+  readonly completedTaskCount: number;
+  readonly batchStatus: "completed" | "failed";
+}
+
 export interface RunHubFlowResult {
   readonly flowId: string;
   readonly runId: string;
   readonly batchId: string;
   readonly runDir: string;
   readonly mode: "new_batch" | "resumed_batch" | "no_ready";
+  readonly completedBatchCount: number;
+  readonly completedTaskCount: number;
+  readonly stopReason: HubFlowStopReason;
+  readonly batchResults: readonly HubFlowBatchResult[];
   readonly selectedTaskIds: readonly string[];
   readonly results: readonly HubFlowTaskResult[];
   readonly mergeResult?: RunHubBatchMergeResult;
@@ -205,6 +222,54 @@ const isSuccessfulImplementation = (result: HubImplementTaskResult): boolean =>
 
 const isSuccessfulReview = (result: HubReviewTaskResult): boolean =>
   result.outcome === "success" && result.completionSignal !== undefined;
+
+const isSuccessfulHubTaskResult = (result: HubFlowTaskResult): boolean =>
+  result.outcome === "implemented" || result.outcome === "reviewed";
+
+const countSuccessfulHubTaskResults = (
+  results: readonly HubFlowTaskResult[],
+): number => results.filter(isSuccessfulHubTaskResult).length;
+
+const countSuccessfulMergeResults = (
+  result: RunHubBatchMergeResult | undefined,
+): number =>
+  result?.results.filter((taskResult) => taskResult.outcome === "merged")
+    .length ?? 0;
+
+const resolveHubFlowBatchResult = (input: {
+  readonly batchId: string;
+  readonly selectedTaskIds: readonly string[];
+  readonly taskResults: readonly HubFlowTaskResult[];
+  readonly mergeResult?: RunHubBatchMergeResult;
+}): HubFlowBatchResult | undefined => {
+  if (
+    input.selectedTaskIds.length === 0 &&
+    input.taskResults.length === 0 &&
+    !input.mergeResult
+  ) {
+    return undefined;
+  }
+
+  const completedTaskCount =
+    input.taskResults.length > 0
+      ? countSuccessfulHubTaskResults(input.taskResults)
+      : countSuccessfulMergeResults(input.mergeResult);
+  const batchStatus =
+    input.taskResults.some((result) => !isSuccessfulHubTaskResult(result)) ||
+    input.mergeResult?.batchStatus === "partial_failed"
+      ? "failed"
+      : "completed";
+
+  return {
+    batchId: input.batchId,
+    selectedTaskIds:
+      input.selectedTaskIds.length > 0
+        ? input.selectedTaskIds
+        : (input.mergeResult?.selectedTaskIds ?? []),
+    completedTaskCount,
+    batchStatus,
+  };
+};
 
 const resolveHubFlowRoleEntry = (input: {
   readonly role: HubAgentRole;
@@ -843,12 +908,51 @@ export const runHubFlow = async (
     });
   }
 
+  const batchResult =
+    selectedTasks.length > 0 || isResumingMergeBatch
+      ? resolveHubFlowBatchResult({
+          batchId: effectiveBatchId,
+          selectedTaskIds,
+          taskResults: results,
+          mergeResult,
+        })
+      : undefined;
+  const batchResults = batchResult ? [batchResult] : [];
+  const completedBatchCount = batchResults.filter(
+    (entry) => entry.batchStatus === "completed",
+  ).length;
+  const completedTaskCount = batchResults.reduce(
+    (total, entry) => total + entry.completedTaskCount,
+    0,
+  );
+  const stopReason: HubFlowStopReason =
+    batchResults.length === 0
+      ? "no_ready_tasks"
+      : batchResults.some((entry) => entry.batchStatus === "failed")
+        ? "batch_failed"
+        : "single_batch_completed";
+
+  appendHubRunEvent(context.runDir, {
+    type: "run_completed",
+    runId: context.runId,
+    flowId: input.flowId,
+    createdAt: new Date().toISOString(),
+    completedBatchCount,
+    completedTaskCount,
+    stopReason,
+    batchResults,
+  });
+
   return {
     flowId: input.flowId,
     runId: context.runId,
     batchId: effectiveBatchId,
     runDir: context.runDir,
     mode,
+    completedBatchCount,
+    completedTaskCount,
+    stopReason,
+    batchResults,
     selectedTaskIds,
     results,
     mergeResult,
@@ -868,6 +972,9 @@ export const formatHubFlowResultLines = (
     `Run id: ${result.runId}`,
     `Batch id: ${result.batchId}`,
     `Mode: ${result.mode}`,
+    `Completed batches: ${result.completedBatchCount}`,
+    `Completed tasks: ${result.completedTaskCount}`,
+    `Stop reason: ${result.stopReason}`,
     `Selected tasks: ${selectedTaskCount}`,
   ];
   if (result.batchSelection) {

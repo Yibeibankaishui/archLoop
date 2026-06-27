@@ -3007,15 +3007,17 @@ const runCommand = Command.make(
           taskResult.outcome === "agent_failed" ||
           taskResult.outcome === "sandbox_failed",
       );
-      if (failures.length > 0) {
+      if (result.stopReason === "no_ready_tasks") {
+        yield* d.status("Hub flow found no ready tasks to run.", "info");
+      } else if (result.stopReason === "batch_failed") {
         yield* d.status(
-          `Hub flow completed with ${failures.length} failed task(s).`,
+          failures.length > 0
+            ? `Hub flow completed with ${failures.length} failed task(s).`
+            : "Hub flow stopped after a failed batch.",
           "warn",
         );
-      } else if (result.results.length > 0) {
-        yield* d.status("Hub flow completed.", "success");
       } else {
-        yield* d.status("Hub flow found no ready tasks to run.", "info");
+        yield* d.status("Hub flow completed.", "success");
       }
     }),
 );
