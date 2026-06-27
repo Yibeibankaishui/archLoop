@@ -851,11 +851,17 @@ Existing single-runtime projects remain valid. `archloop init` does not automati
 
 ### `archloop project status`
 
-Reports the canonical git repo root, the archLoop user data directory, the Hub project directory, whether `bd` is available, and a CLI-first Hub task board summary. It works from any git repository, even if you have not run `archloop init` yet.
+Reports the canonical git repo root, the archLoop user data directory, the Hub project directory, the selected Hub project profile, the Hub project development contract path, whether `bd` is available, and a CLI-first Hub task board summary. It works from any git repository, even if you have not run `archloop init` yet.
 
 The summary includes task counts by Hub status, active runs and batch statuses, failed tasks with failure reason and suggested next action, sync state counts such as `push_pending` or `conflict`, recent Hub events, and paths to Hub run directories for full logs and artifacts. Output remains useful when Beads is unavailable, there are no tasks, no active runs, or GitHub sync is not configured.
 
 archLoop resolves the user data directory from `XDG_DATA_HOME` when it is set and falls back to `~/.local/share/archloop`.
+
+### `archloop project configure`
+
+Creates or updates the Hub project development contract for the current repository. Pass `--project-profile <profile>` to choose the profile explicitly; supported profiles reuse the init registry (`generic`, `node`, `python`, `cpp`). In an interactive terminal, omit the flag to pick a profile from a prompt. The contract is written as pretty-printed JSON to the Hub project assets directory under `development-contract.json`.
+
+`project configure` reports the Hub project directory, the selected project profile, and the contract path after writing. `project status` shows the same path and profile when the contract already exists, and the generic profile is the fallback when no profile-specific contract has been created yet.
 
 ### `archloop agent-config path`
 

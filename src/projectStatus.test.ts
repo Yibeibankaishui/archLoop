@@ -12,6 +12,10 @@ import {
   resolveHubProjectStatus,
   resolveArchloopUserDataDir,
 } from "./projectStatus.js";
+import {
+  configureHubProjectDevelopmentContract,
+  resolveHubProjectDevelopmentContractPath,
+} from "./hubProjectDevelopmentContract.js";
 import type { HubTaskProjection } from "./taskBoard.js";
 
 const execAsync = promisify(exec);
@@ -112,6 +116,11 @@ describe("resolveHubProjectStatus", () => {
       localOnly: 0,
       synced: 0,
     });
+    expect(status.projectProfile).toBe("generic");
+    expect(status.projectDevelopmentContractPersisted).toBe(false);
+    expect(status.projectDevelopmentContractPath).toBe(
+      resolveHubProjectDevelopmentContractPath(status.hubProjectDir),
+    );
     expect(status.activeBatches).toEqual([]);
     expect(status.runDirectories).toEqual([]);
     expect(status.recentEvents).toEqual([]);
@@ -127,6 +136,39 @@ describe("resolveHubProjectStatus", () => {
       detectBeadsAvailable: () => false,
     });
     expect(secondStatus.projectRegistered).toBe(true);
+  });
+
+  it("reads back a configured Hub project development contract", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-status-contract-"));
+    await initRepo(repoDir);
+    await writeFile(join(repoDir, "package.json"), "{}");
+    await execAsync("git add package.json && git commit -m 'initial'", {
+      cwd: repoDir,
+    });
+
+    const canonicalRepoRoot = resolveGitRepoRoot(repoDir);
+    const archloopUserDataDir = join(repoDir, "data", "archloop");
+    const hubProjectDir = resolveHubProjectDir(
+      archloopUserDataDir,
+      canonicalRepoRoot,
+    );
+
+    const configured = configureHubProjectDevelopmentContract({
+      repoRoot: canonicalRepoRoot,
+      hubProjectDir,
+      projectProfileName: "python",
+      now: new Date("2026-06-27T10:00:00.000Z"),
+    });
+
+    const status = resolveHubProjectStatus({
+      cwd: repoDir,
+      archloopUserDataDir,
+      detectBeadsAvailable: () => false,
+    });
+
+    expect(status.projectProfile).toBe("python");
+    expect(status.projectDevelopmentContractPersisted).toBe(true);
+    expect(status.projectDevelopmentContractPath).toBe(configured.contractPath);
   });
 
   it("reports Beads counts when available", async () => {
