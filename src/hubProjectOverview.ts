@@ -55,6 +55,9 @@ export interface HubOverviewProjectPaths {
   readonly repoRoot: string;
   readonly archloopUserDataDir: string;
   readonly hubProjectDir: string;
+  readonly projectProfile?: string;
+  readonly projectDevelopmentContractPath?: string;
+  readonly projectDevelopmentContractPersisted?: boolean;
   readonly projectRegistered: boolean;
   readonly beadsAvailable: boolean;
   readonly taskStoreInitialized: boolean;
@@ -497,6 +500,10 @@ export const buildHubOverviewModel = (
       repoRoot: status.repoRoot,
       archloopUserDataDir: status.archloopUserDataDir,
       hubProjectDir: status.hubProjectDir,
+      projectProfile: status.projectProfile,
+      projectDevelopmentContractPath: status.projectDevelopmentContractPath,
+      projectDevelopmentContractPersisted:
+        status.projectDevelopmentContractPersisted,
       projectRegistered: status.projectRegistered,
       beadsAvailable: status.beadsAvailable,
       taskStoreInitialized: status.taskStoreInitialized,

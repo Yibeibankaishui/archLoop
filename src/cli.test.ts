@@ -17,6 +17,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { SilentDisplay, type DisplayEntry } from "./Display.js";
 import { createHubRunContext } from "./hubExecution.js";
+import { resolveGitRepoRoot, resolveHubProjectDir } from "./projectStatus.js";
+import { resolveHubProjectDevelopmentContractPath } from "./hubProjectDevelopmentContract.js";
 import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
 
 const execAsync = promisify(exec);
@@ -609,10 +611,7 @@ exit 1
     }
 
     try {
-      await runCli(
-        "run . --flow triage --max-tasks 2",
-        hostDir,
-      );
+      await runCli("run . --flow triage --max-tasks 2", hostDir);
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       expect(cliFailureOutput(err)).toMatch(
@@ -655,6 +654,7 @@ exit 1
   it("project --help shows the status subcommand", async () => {
     const { stdout } = await runCli("project --help", process.cwd());
     expect(stdout).toContain("status");
+    expect(stdout).toContain("configure");
   });
 
   it("tasks --help shows the list, sync, pull, and push subcommands", async () => {
@@ -734,10 +734,66 @@ exit 1
     expect(stdout).toContain("Hub project status");
     expect(stdout).toContain(hostDir);
     expect(stdout).toContain("xdg-data/archloop");
+    expect(stdout).toContain("Hub project profile");
+    expect(stdout).toContain("Hub project development contract");
     expect(stdout).toContain("Beads available");
     expect(stdout).toContain("Task store initialized");
     expect(stdout).toContain("Task board ready");
     expect(stdout).toContain("Task board total");
+  });
+
+  it("project configure writes a durable development contract and reports its path", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "package.json", "{}", "initial commit");
+
+    const dataDir = join(hostDir, "xdg-data");
+    const { stdout } = await runCli(
+      "project configure --project-profile node",
+      hostDir,
+      {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      },
+    );
+
+    const repoRoot = resolveGitRepoRoot(hostDir);
+    const hubProjectDir = resolveHubProjectDir(
+      join(dataDir, "archloop"),
+      repoRoot,
+    );
+    const contractPath =
+      resolveHubProjectDevelopmentContractPath(hubProjectDir);
+    const contract = JSON.parse(await readFile(contractPath, "utf8")) as {
+      projectProfile: string;
+      setup: string[];
+      verify: string[];
+    };
+
+    expect(stdout).toContain("Hub project development contract");
+    expect(stdout).toContain("node");
+    expect(stdout).toContain("development-contract.json");
+    expect(contract.projectProfile).toBe("node");
+    expect(contract.verify.join("\n")).toContain("npm run typecheck");
+    expect(contract.setup.join("\n")).toContain("Node bootstrap guidance");
+  });
+
+  it("project configure fails clearly when the profile is missing in non-interactive mode", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    try {
+      await runCli("project configure", hostDir, {
+        ...process.env,
+        XDG_DATA_HOME: join(hostDir, "xdg-data"),
+      });
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain("--project-profile");
+      expect(output).toContain("Available: generic, node, python, cpp");
+    }
   });
 
   it("tasks list points to archloop tasks init when the task store is missing", async () => {
