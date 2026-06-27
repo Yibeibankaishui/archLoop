@@ -27,6 +27,7 @@ import {
   configureHubProjectDevelopmentContract,
   resolveHubProjectDevelopmentContractState,
 } from "./hubProjectDevelopmentContract.js";
+import * as runModule from "./run.js";
 import {
   loadHubReadyQueue,
   resolveHubTaskBranch,
@@ -2470,6 +2471,60 @@ describe("with-review Hub flow execution", () => {
     }
   });
 
+  it("createHubFlowRunImplementer forwards the supplied env and development contract to the run invocation", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "hub-flow-implementer-run-"));
+    await initRepo(cwd);
+    const projectDevelopmentContract =
+      resolveHubProjectDevelopmentContractState({
+        repoRoot: cwd,
+        hubProjectDir: join(cwd, "hub-project"),
+        now: new Date("2026-06-27T10:00:00.000Z"),
+      });
+    const runSpy = vi.spyOn(runModule, "run").mockResolvedValue({
+      completionSignal: "<promise>COMPLETE</promise>",
+      commits: [{ sha: "abc123" }],
+      branch: "archloop/bd-1-test-task",
+      iterations: [],
+      stdout: "",
+    });
+    const implementer = createHubFlowRunImplementer({
+      cwd,
+      env: { OPENAI_KEY: "test-openai-key" },
+      roleEntry: { provider: "codex", model: "gpt-5.4-mini" },
+    });
+
+    vi.stubEnv("OPENAI_KEY", "");
+    vi.stubEnv("CODEX_HOME", "");
+    try {
+      const result = await implementer({
+        flowId: "no-review",
+        batchId: "batch-test",
+        taskId: "bd-1",
+        title: "Test task",
+        branch: "archloop/bd-1-test-task",
+        promptFile: "/tmp/prompt.md",
+        cwd,
+        runDir: cwd,
+        projectDevelopmentContract,
+      });
+
+      expect(result.outcome).toBe("success");
+      expect(runSpy).toHaveBeenCalledTimes(1);
+      expect(runSpy.mock.calls[0]?.[0].promptArgs).toMatchObject({
+        TASK_ID: "bd-1",
+        PROJECT_PROFILE: "generic",
+        PROJECT_DEVELOPMENT_CONTRACT_PATH:
+          projectDevelopmentContract.contractPath,
+      });
+      expect(
+        runSpy.mock.calls[0]?.[0].promptArgs?.PROJECT_DEVELOPMENT_CONTRACT_SETUP,
+      ).toContain("no-op baseline");
+    } finally {
+      runSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("createHubFlowRunReviewer uses the configured review role provider", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "hub-flow-review-preflight-"));
     const reviewer = createHubFlowRunReviewer({
@@ -2499,6 +2554,46 @@ describe("with-review Hub flow execution", () => {
       expect(result.message).not.toContain("Cursor agent credentials");
       expect(result.message).toContain("archloop env init");
     } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("createHubFlowRunReviewer forwards the supplied env to the run invocation", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "hub-flow-review-run-"));
+    await initRepo(cwd);
+    const runSpy = vi.spyOn(runModule, "run").mockResolvedValue({
+      completionSignal: "<promise>COMPLETE</promise>",
+      commits: [{ sha: "abc123" }],
+      branch: "archloop/bd-1-test-task",
+      iterations: [],
+      stdout: "",
+    });
+    const reviewer = createHubFlowRunReviewer({
+      cwd,
+      env: { OPENAI_KEY: "test-openai-key" },
+      roleEntry: { provider: "codex", model: "gpt-5.4" },
+    });
+
+    vi.stubEnv("OPENAI_KEY", "");
+    vi.stubEnv("CODEX_HOME", "");
+    try {
+      const result = await reviewer({
+        flowId: "with-review",
+        batchId: "batch-test",
+        taskId: "bd-1",
+        title: "Test task",
+        branch: "archloop/bd-1-test-task",
+        promptFile: "/tmp/prompt.md",
+        cwd,
+        runDir: cwd,
+        implementCommitCount: 1,
+      });
+
+      expect(result.outcome).toBe("success");
+      expect(runSpy).toHaveBeenCalledTimes(1);
+      expect(runSpy.mock.calls[0]?.[0].agent.name).toBe("codex");
+    } finally {
+      runSpy.mockRestore();
       vi.unstubAllEnvs();
     }
   });

@@ -1342,20 +1342,49 @@ const hasBranchUnmergedWork = async (
   }
 };
 
+const resolveHubFlowRunnerAgent = (
+  role: HubAgentRole,
+  options: {
+    readonly env?: NodeJS.ProcessEnv;
+    readonly homeDir?: string;
+    readonly roleEntry?: HubAgentRoleEntry;
+  },
+): AgentProvider =>
+  resolveHubAgentProvider(
+    resolveHubFlowRoleEntry({
+      role,
+      roleEntry: options.roleEntry,
+      env: options.env,
+      homeDir: options.homeDir,
+    }),
+  );
+
+const buildHubFlowRunnerFailure = (
+  error: unknown,
+): Pick<HubImplementTaskResult, "outcome" | "commits" | "message"> => {
+  const message = error instanceof Error ? error.message : String(error);
+  if (isSandboxFailureTag(getErrorTag(error))) {
+    return {
+      outcome: "sandbox_failed",
+      commits: [],
+      message,
+    };
+  }
+
+  return {
+    outcome: "agent_failed",
+    commits: [],
+    message,
+  };
+};
+
 export const createHubFlowRunImplementer = (options: {
   readonly cwd: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly homeDir?: string;
   readonly roleEntry?: HubAgentRoleEntry;
 }): HubFlowImplementer => {
-  const agent = resolveHubAgentProvider(
-    resolveHubFlowRoleEntry({
-      role: "implementation",
-      roleEntry: options.roleEntry,
-      env: options.env,
-      homeDir: options.homeDir,
-    }),
-  );
+  const agent = resolveHubFlowRunnerAgent("implementation", options);
 
   return async (input) => {
     try {
@@ -1371,7 +1400,9 @@ export const createHubFlowRunImplementer = (options: {
         runDir: input.runDir,
         name: `implement-${input.taskId}`,
         logFileName: `${input.taskId}.log`,
+        env: options.env,
         retryContext: input.retryContext,
+        projectDevelopmentContract: input.projectDevelopmentContract,
       });
 
       if (!result.completionSignal) {
@@ -1403,20 +1434,7 @@ export const createHubFlowRunImplementer = (options: {
         branchHasUnmergedWork,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (isSandboxFailureTag(getErrorTag(error))) {
-        return {
-          outcome: "sandbox_failed",
-          commits: [],
-          message,
-        };
-      }
-
-      return {
-        outcome: "agent_failed",
-        commits: [],
-        message,
-      };
+      return buildHubFlowRunnerFailure(error);
     }
   };
 };
@@ -1427,14 +1445,7 @@ export const createHubFlowRunReviewer = (options: {
   readonly homeDir?: string;
   readonly roleEntry?: HubAgentRoleEntry;
 }): HubFlowReviewer => {
-  const agent = resolveHubAgentProvider(
-    resolveHubFlowRoleEntry({
-      role: "review",
-      roleEntry: options.roleEntry,
-      env: options.env,
-      homeDir: options.homeDir,
-    }),
-  );
+  const agent = resolveHubFlowRunnerAgent("review", options);
 
   return async (input) => {
     try {
@@ -1450,6 +1461,7 @@ export const createHubFlowRunReviewer = (options: {
         runDir: input.runDir,
         name: `review-${input.taskId}`,
         logFileName: `${input.taskId}-review.log`,
+        env: options.env,
       });
 
       if (!result.completionSignal) {
@@ -1466,20 +1478,7 @@ export const createHubFlowRunReviewer = (options: {
         completionSignal: result.completionSignal,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (isSandboxFailureTag(getErrorTag(error))) {
-        return {
-          outcome: "sandbox_failed",
-          commits: [],
-          message,
-        };
-      }
-
-      return {
-        outcome: "agent_failed",
-        commits: [],
-        message,
-      };
+      return buildHubFlowRunnerFailure(error);
     }
   };
 };
