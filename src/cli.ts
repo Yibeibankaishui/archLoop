@@ -87,6 +87,7 @@ import {
   createHubFlowRunImplementer,
   createHubFlowRunReviewer,
   formatHubFlowResultLines,
+  parseHubFlowMaxBatches,
   runHubFlow,
 } from "./hubFlowExecution.js";
 import { createHubBatchPlannerInvoker } from "./hubBatchPlannerAgent.js";
@@ -2611,6 +2612,13 @@ const flowMaxTasksOption = Options.text("max-tasks").pipe(
   Options.optional,
 );
 
+const flowMaxBatchesOption = Options.text("max-batches").pipe(
+  Options.withDescription(
+    "Maximum batches to complete in one task-board flow run (positive integer; unlimited by default)",
+  ),
+  Options.optional,
+);
+
 const toHubAgentConfigError = (error: unknown): HubAgentConfigError =>
   error instanceof HubAgentConfigError
     ? error
@@ -3031,8 +3039,9 @@ const runCommand = Command.make(
     yes: flowYesOption,
     batchStrategy: flowBatchStrategyOption,
     maxTasks: flowMaxTasksOption,
+    maxBatches: flowMaxBatchesOption,
   },
-  ({ project, flow, input, yes, batchStrategy, maxTasks }) =>
+  ({ project, flow, input, yes, batchStrategy, maxTasks, maxBatches }) =>
     Effect.gen(function* () {
       const d = yield* Display;
       const projectDir = project.trim().length > 0 ? project : ".";
@@ -3054,6 +3063,21 @@ const runCommand = Command.make(
           }),
         catch: toHubFlowError,
       });
+      const maxBatchesValue = optionalTextValue(maxBatches);
+      const flowMaxBatches = yield* Effect.try({
+        try: () =>
+          maxBatchesValue !== undefined
+            ? parseHubFlowMaxBatches(maxBatchesValue)
+            : undefined,
+        catch: toHubFlowError,
+      });
+      if (flowDefinition.kind === "proposal" && flowMaxBatches !== undefined) {
+        return yield* Effect.fail(
+          new HubFlowError({
+            message: "Proposal flows do not support --max-batches.",
+          }),
+        );
+      }
 
       const repoRoot = yield* Effect.try({
         try: () => resolveGitRepoRoot(projectDir),
@@ -3125,6 +3149,7 @@ const runCommand = Command.make(
               : undefined,
             batchStrategy: batchSelectionOptions.batchStrategy,
             maxTasks: batchSelectionOptions.maxTasks,
+            maxBatches: flowMaxBatches,
             batchPlanner:
               batchSelectionOptions.batchStrategy === "planned"
                 ? createHubBatchPlannerInvoker({ env: process.env })
