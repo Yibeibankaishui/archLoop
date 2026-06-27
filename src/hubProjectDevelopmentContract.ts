@@ -126,16 +126,28 @@ const scanHubProjectFacts = (
   configuredScripts: readPackageJsonConfiguredScripts(repoRoot),
 });
 
+const hasProjectFactSummary = (
+  facts: HubProjectDevelopmentContractFacts,
+): boolean =>
+  facts.observedFiles.length > 0 || facts.configuredScripts.length > 0;
+
 export const formatHubProjectDevelopmentContractFactsSummary = (
   facts: HubProjectDevelopmentContractFacts,
-): string =>
-  facts.observedFiles.length > 0
-    ? facts.configuredScripts.length > 0
-      ? `${facts.observedFiles.join(", ")}; scripts: ${facts.configuredScripts.join(", ")}`
-      : facts.observedFiles.join(", ")
-    : facts.configuredScripts.length > 0
-      ? `scripts: ${facts.configuredScripts.join(", ")}`
-      : "no obvious stack signals";
+): string => {
+  if (facts.observedFiles.length > 0 && facts.configuredScripts.length > 0) {
+    return `${facts.observedFiles.join(", ")}; scripts: ${facts.configuredScripts.join(", ")}`;
+  }
+
+  if (facts.observedFiles.length > 0) {
+    return facts.observedFiles.join(", ");
+  }
+
+  if (facts.configuredScripts.length > 0) {
+    return `scripts: ${facts.configuredScripts.join(", ")}`;
+  }
+
+  return "no obvious stack signals";
+};
 
 const buildSetupLines = (
   profile: ProjectProfileEntry,
@@ -175,10 +187,9 @@ const buildContextLines = (
   profile: ProjectProfileEntry,
   facts: HubProjectDevelopmentContractFacts,
 ): readonly string[] => {
-  const observed =
-    facts.observedFiles.length > 0 || facts.configuredScripts.length > 0
-      ? `Observed repo facts: ${formatHubProjectDevelopmentContractFactsSummary(facts)}.`
-      : "No obvious stack signals were observed in the repository root.";
+  const observed = hasProjectFactSummary(facts)
+    ? `Observed repo facts: ${formatHubProjectDevelopmentContractFactsSummary(facts)}.`
+    : "No obvious stack signals were observed in the repository root.";
 
   const profileNote =
     profile.name === DEFAULT_PROJECT_PROFILE_NAME
