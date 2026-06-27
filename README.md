@@ -1033,6 +1033,8 @@ The `no-review` flow reads the Beads ready queue, selects a batch of eligible `r
 
 The `with-review` flow adds a reviewer stage after implementation: successful work moves to `reviewing`, the reviewer receives the task branch and diff/commit context from orchestration, and completed review advances the task to `waiting_for_merge`. Selected task pipelines run in parallel; each task's reviewer starts after that task's implementation succeeds. Review failures move tasks to `failed` with a failure reason.
 
+Hub flow runs now also write a run-level completion event and the CLI summary reports completed batches, completed tasks, and the stop reason for the execution slice.
+
 Task-board flows treat `ready_for_agent` as the **candidate pool**, not the automatic execution set. The **selected flow batch** is the subset chosen by the configured batch strategy before claim. Selected batch tasks run concurrently through implementation and any per-branch review; the merge phase waits for them and remains serialized. By default, `no-review` and `with-review` use the `planned` strategy with a maximum of **3** tasks. Override with `--batch-strategy` and `--max-tasks`:
 
 | Strategy            | Behavior                                                                                                                                                                                                                   |
@@ -1059,7 +1061,7 @@ Hub moves selected tasks to `merging`, merges each branch with per-task events, 
 | `--batch-strategy` | No       | Task-board batch selection strategy (`planned`, `limited`, `conservative`; default `planned`)                                   |
 | `--max-tasks`      | No       | Maximum tasks to select for a task-board batch (1–10; default `3`)                                                              |
 
-Hub flow runs write run, batch, and task event records into the Hub run directory under the archLoop user data directory. The task board uses that run history to keep claims and execution progress separate from normal Beads task status.
+Hub flow runs write run, batch, task, and run-completion event records into the Hub run directory under the archLoop user data directory. The task board uses that run history to keep claims and execution progress separate from normal Beads task status.
 
 Creates the following files (plus optional `agents/`, `skills/`, `agent-profiles.json`, and Mini Program capability files when applicable):
 
