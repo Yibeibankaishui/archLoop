@@ -55,7 +55,7 @@ export interface HubRunCompletedBatchResult {
 
 export type HubRunStopReason =
   | "no_ready_tasks"
-  | "single_batch_completed"
+  | "max_batches_reached"
   | "batch_failed";
 
 export interface HubRunCompletedEvent {
