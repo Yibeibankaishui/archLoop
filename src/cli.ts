@@ -80,6 +80,7 @@ import {
 } from "./projectStatus.js";
 import {
   configureHubProjectDevelopmentContract,
+  formatHubProjectDevelopmentContractFactsSummary,
   resolveHubProjectDevelopmentContractPath,
 } from "./hubProjectDevelopmentContract.js";
 import {
@@ -2518,10 +2519,33 @@ const projectConfigureCommand = Command.make(
         "Hub project dir": status.hubProjectDir,
         "Hub project profile": contract.contract.projectProfile,
         "Hub project development contract": contract.contractPath,
+        "Project facts refreshed":
+          formatHubProjectDevelopmentContractFactsSummary(
+            contract.contract.projectFacts,
+          ),
+        "User-edited setup/verify/context": contract.preservedUserEdits
+          ? "preserved"
+          : contract.projectProfileChanged
+            ? "replaced for the new project profile"
+            : "new contract",
+        "Previous contract backup": contract.backupPath ?? "none",
       });
 
-      if (contract.persisted) {
-        yield* d.status("Hub project development contract written.", "success");
+      if (contract.backupPath) {
+        yield* d.status(
+          `Backed up the previous contract to ${contract.backupPath}.`,
+          "success",
+        );
+      } else if (contract.preservedUserEdits) {
+        yield* d.status(
+          "Preserved user-edited setup, verify, and context while refreshing project facts.",
+          "success",
+        );
+      } else {
+        yield* d.status(
+          "Refreshed project facts and wrote a new Hub project development contract.",
+          "success",
+        );
       }
     }),
 );

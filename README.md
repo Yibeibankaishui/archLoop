@@ -895,7 +895,9 @@ archLoop resolves the user data directory from `XDG_DATA_HOME` when it is set an
 
 Creates or updates the Hub project development contract for the current repository. Pass `--project-profile <profile>` to choose the profile explicitly; supported profiles reuse the init registry (`generic`, `node`, `python`, `cpp`). In an interactive terminal, omit the flag to pick a profile from a prompt. The contract is written as pretty-printed JSON to the Hub project assets directory under `development-contract.json`.
 
-`project configure` reports the Hub project directory, the selected project profile, and the contract path after writing. `project status` shows the same path and profile when the contract already exists, and the generic profile is the fallback when no profile-specific contract has been created yet.
+`project configure` refreshes advisory project facts such as manifests, lockfiles, build files, and configured scripts on every run. Re-running with the same profile preserves any user-edited `setup`, `verify`, and `context` sections while updating the fact snapshot and timestamps. Changing the profile writes a timestamped backup of the previous contract before replacing it.
+
+`project configure` reports the Hub project directory, the selected project profile, the refreshed fact summary, whether user-edited sections were preserved, and any backup path after writing. `project status` shows the same path and profile when the contract already exists, and the generic profile is the fallback when no profile-specific contract has been created yet.
 
 ### `archloop agent-config path`
 

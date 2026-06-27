@@ -4,6 +4,7 @@ import {
   chmod,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   symlink,
   writeFile,
@@ -745,7 +746,16 @@ exit 1
   it("project configure writes a durable development contract and reports its path", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
-    await commitFile(hostDir, "package.json", "{}", "initial commit");
+    await commitFile(
+      hostDir,
+      "package.json",
+      JSON.stringify(
+        { scripts: { test: "vitest", typecheck: "tsc -p ." } },
+        null,
+        2,
+      ),
+      "initial commit",
+    );
 
     const dataDir = join(hostDir, "xdg-data");
     const { stdout } = await runCli(
@@ -766,16 +776,103 @@ exit 1
       resolveHubProjectDevelopmentContractPath(hubProjectDir);
     const contract = JSON.parse(await readFile(contractPath, "utf8")) as {
       projectProfile: string;
+      projectFacts: { observedFiles: string[]; configuredScripts: string[] };
       setup: string[];
       verify: string[];
     };
 
     expect(stdout).toContain("Hub project development contract");
+    expect(stdout).toContain("Project facts refreshed");
+    expect(stdout).toContain("User-edited setup/verify/context");
     expect(stdout).toContain("node");
     expect(stdout).toContain("development-contract.json");
     expect(contract.projectProfile).toBe("node");
+    expect(contract.projectFacts.observedFiles).toContain("package.json");
+    expect(contract.projectFacts.configuredScripts).toEqual([
+      "test",
+      "typecheck",
+    ]);
     expect(contract.verify.join("\n")).toContain("npm run typecheck");
     expect(contract.setup.join("\n")).toContain("Node bootstrap guidance");
+  });
+
+  it("project configure reports a backup when the profile changes", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "package.json", "{}", "initial commit");
+
+    const dataDir = join(hostDir, "xdg-data");
+    const repoRoot = resolveGitRepoRoot(hostDir);
+    const hubProjectDir = resolveHubProjectDir(
+      join(dataDir, "archloop"),
+      repoRoot,
+    );
+    const initialContractPath =
+      resolveHubProjectDevelopmentContractPath(hubProjectDir);
+
+    await runCli("project configure --project-profile node", hostDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+
+    await writeFile(
+      initialContractPath,
+      `${JSON.stringify(
+        {
+          ...(JSON.parse(await readFile(initialContractPath, "utf8")) as Record<
+            string,
+            unknown
+          >),
+          setup: ["custom node setup"],
+          verify: ["custom node verify"],
+          context: ["custom node context"],
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const { stdout } = await runCli(
+      "project configure --project-profile python",
+      hostDir,
+      {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      },
+    );
+
+    expect(stdout).toContain("Previous contract backup");
+    expect(stdout).toContain("Backed up the previous contract");
+    expect(stdout).toContain("replaced for the new project profile");
+
+    const changedContract = JSON.parse(
+      await readFile(initialContractPath, "utf8"),
+    ) as {
+      projectProfile: string;
+      setup: string[];
+      verify: string[];
+      context: string[];
+    };
+    expect(changedContract.projectProfile).toBe("python");
+    expect(changedContract.setup).not.toContain("custom node setup");
+    expect(changedContract.verify).not.toContain("custom node verify");
+    expect(changedContract.context).not.toContain("custom node context");
+
+    const backupPath = join(
+      hubProjectDir,
+      (await readdir(hubProjectDir)).find((entry) =>
+        entry.startsWith("development-contract.backup-node-"),
+      )!,
+    );
+    const backupContract = JSON.parse(await readFile(backupPath, "utf8")) as {
+      projectProfile: string;
+      setup: string[];
+      verify: string[];
+      context: string[];
+    };
+    expect(backupContract.projectProfile).toBe("node");
+    expect(backupContract.setup).toContain("custom node setup");
   });
 
   it("project configure fails clearly when the profile is missing in non-interactive mode", async () => {
