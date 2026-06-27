@@ -1,6 +1,6 @@
 # Hub projects do not require init
 
-**archLoop Hub** project onboarding is separate from `archloop init`. `archloop init` remains the supported path for generating a repo-local config directory and scaffolded `main.mts`, while Hub commands such as `archloop project add` and `archloop run <project> --flow <id>` use **Hub project config** and Hub-owned **flow** assets instead of requiring or reusing `.archloop/` scaffold output.
+**archLoop Hub** project onboarding is separate from `archloop init`. `archloop init` remains the supported path for generating a repo-local config directory and scaffolded `main.mts`, while Hub commands such as `archloop project add`, `archloop project configure`, and `archloop run <project> --flow <id>` use **Hub project config**, **project development contracts**, and Hub-owned **flow** assets instead of requiring or reusing `.archloop/` scaffold output.
 
 ## Considered Options
 

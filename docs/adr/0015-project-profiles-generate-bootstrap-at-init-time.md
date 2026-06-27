@@ -4,7 +4,7 @@
 
 ## Decision
 
-Project profiles are init-time scaffolding choices, not runtime options on `run()`, `createSandbox()`, or sandbox providers. A profile contributes project language and build-tool requirements to the Dockerfile or Containerfile and writes a user-editable bootstrap script owned by the host repo after init.
+For the init path, a project profile contributes project language and build-tool requirements to the Dockerfile or Containerfile and writes a user-editable bootstrap script owned by the host repo after init. Project profiles are also stored by **Hub project config** and feed **project development contracts** (see ADR-0029), but they remain outside low-level runtime APIs such as `run()`, `createSandbox()`, and sandbox providers.
 
 The bootstrap script is not part of image build. It runs inside the sandbox after the worktree is mounted and before the agent runs, and it prepares the repo for agent work without running full project verification by default.
 

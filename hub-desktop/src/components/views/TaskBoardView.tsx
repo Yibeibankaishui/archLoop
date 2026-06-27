@@ -221,49 +221,6 @@ export const TaskBoardView = ({
         </p>
       </div>
 
-      <div className="hub-task-board-toolbar-actions">
-        <div className="hub-task-board-toolbar-card">
-          <div className="hub-task-board-create-fields">
-            <label className="hub-task-board-create-field">
-              <span className="hub-muted">Task title</span>
-              <input
-                type="text"
-                className="hub-input hub-focus-ring"
-                value={createTaskTitle}
-                placeholder="Restore task board fidelity"
-                onChange={(event) => setCreateTaskTitle(event.target.value)}
-              />
-            </label>
-            <label className="hub-task-board-create-field">
-              <span className="hub-muted">Description</span>
-              <textarea
-                className="hub-input hub-focus-ring hub-task-board-create-textarea"
-                value={createTaskDescription}
-                placeholder="Optional local task details"
-                onChange={(event) =>
-                  setCreateTaskDescription(event.target.value)
-                }
-              />
-            </label>
-          </div>
-          <HubWorkbenchActionButton
-            action={createTaskAction}
-            variant="task-board"
-            onPreviewAction={onPreviewAction}
-            onConfirmAction={onConfirmAction}
-          />
-        </div>
-
-        <div className="hub-task-board-toolbar-card">
-          <HubWorkbenchActionButton
-            action={runTriageAction}
-            variant="task-board"
-            onPreviewAction={onPreviewAction}
-            onConfirmAction={onConfirmAction}
-          />
-        </div>
-      </div>
-
       <div className="hub-task-board-filter-strip">
         <label className="hub-task-board-search">
           <span className="hub-muted">Search</span>
@@ -331,6 +288,52 @@ export const TaskBoardView = ({
         <p className="hub-muted hub-task-board-count">
           Showing {model.filteredTaskCount} of {model.totalTaskCount} tasks
         </p>
+      </div>
+
+      <div className="hub-task-board-toolbar-actions">
+        <div className="hub-task-board-toolbar-card hub-task-board-toolbar-card-create">
+          <div className="hub-task-board-create-fields">
+            <label className="hub-task-board-create-field">
+              <span className="hub-muted">Task title</span>
+              <input
+                type="text"
+                className="hub-input hub-focus-ring"
+                value={createTaskTitle}
+                placeholder="Restore task board fidelity"
+                onChange={(event) => setCreateTaskTitle(event.target.value)}
+              />
+            </label>
+            <label className="hub-task-board-create-field hub-task-board-create-description-field">
+              <span className="hub-muted">Description</span>
+              <input
+                type="text"
+                className="hub-input hub-focus-ring"
+                value={createTaskDescription}
+                placeholder="Optional local task details"
+                onChange={(event) =>
+                  setCreateTaskDescription(event.target.value)
+                }
+              />
+            </label>
+          </div>
+          <HubWorkbenchActionButton
+            action={createTaskAction}
+            variant="task-board"
+            layout="compact"
+            onPreviewAction={onPreviewAction}
+            onConfirmAction={onConfirmAction}
+          />
+        </div>
+
+        <div className="hub-task-board-toolbar-card hub-task-board-toolbar-card-triage">
+          <HubWorkbenchActionButton
+            action={runTriageAction}
+            variant="task-board"
+            layout="compact"
+            onPreviewAction={onPreviewAction}
+            onConfirmAction={onConfirmAction}
+          />
+        </div>
       </div>
     </section>
   );
@@ -433,11 +436,14 @@ export const TaskBoardView = ({
       {renderBoard()}
 
       {model.actions.length > 0 ? (
-        <section
+        <details
           className="hub-panel hub-task-board-actions"
           aria-label="Task board actions"
         >
-          <h2>Board actions</h2>
+          <summary className="hub-task-board-actions-summary hub-focus-ring">
+            <span>Board actions</span>
+            <span className="hub-chip">{model.actions.length}</span>
+          </summary>
           <div className="hub-task-board-action-list">
             {model.actions.map((action) => (
               <div key={action.id}>
@@ -450,7 +456,7 @@ export const TaskBoardView = ({
               </div>
             ))}
           </div>
-        </section>
+        </details>
       ) : null}
     </div>
   );

@@ -5,7 +5,7 @@ description: Generate a design-agent-ready UI brief from current codebase, PRD, 
 
 # To UI Brief
 
-Create `ui_brief.md`: a compact, structured handoff for a design agent. Optimize for design quality, implementation fidelity, and easy comparison of multiple design directions.
+Create `ui_brief.md`: a compact, structured handoff for a design agent. Optimize for design quality, UX focus, information architecture, implementation fidelity, and easy comparison of multiple design directions.
 
 ## Boundaries
 
@@ -15,6 +15,7 @@ Create `ui_brief.md`: a compact, structured handoff for a design agent. Optimize
 - Treat missing context as an assumption and list it explicitly.
 - Prefer the project's product terminology, existing docs, design system, routes, and component names over generic wording.
 - Make any pasteable prompt self-contained. A design tool such as Google Stitch cannot see local files, URLs, screenshots, PRDs, issues, or "reference" sections unless their relevant contents are summarized or embedded in the pasted text.
+- Do not produce a feature inventory dump. Force a primary user job, priority ladder, screen narrative, and explicit deferred content so the design agent composes an experience instead of stacking every element.
 
 ## Workflow
 
@@ -30,16 +31,21 @@ Create `ui_brief.md`: a compact, structured handoff for a design agent. Optimize
    - User tasks and information hierarchy.
    - Visual direction, density, tone, and anti-goals.
    - Interaction requirements and state coverage.
-4. Resolve references into usable context:
+4. Define the UX strategy before visual style:
+   - Primary user job, primary decision/action, and what should be visually dominant.
+   - What belongs above the fold, what is secondary, and what should be deferred.
+   - The reading/action order for each primary screen.
+   - The design concept or composition thesis that organizes the screen.
+5. Resolve references into usable context:
    - Read or inspect referenced local files, docs, screenshots, PRDs, issues, and existing UI surfaces when available.
    - Distill each relevant reference into concrete facts the design agent must know.
    - Do not rely on "see reference" wording for information needed by the design agent.
-5. Produce `ui_brief.md` using the template below.
-6. If the user is about to use Stitch, Figma, or another design agent, include a self-contained prompt block that can be pasted into that tool.
+6. Produce `ui_brief.md` using the template below.
+7. If the user is about to use Stitch, Figma, or another design agent, include a self-contained prompt block that can be pasted into that tool.
 
 ## Template
 
-```markdown
+````markdown
 # UI Brief: <feature or surface name>
 
 ## Goal
@@ -68,6 +74,52 @@ Use this only for human traceability. Do not assume the design agent can access 
 - Usage frequency:
 - Environment:
 - Constraints:
+
+## UX Strategy
+
+- Primary user job:
+- Moment this UI must improve:
+- Desired user decision/action:
+- Success metric or quality signal:
+- Primary CTA:
+- Secondary actions:
+- Explicitly deferred actions/content:
+- What must be understood in the first 5 seconds:
+
+## Design Concept
+
+- Named concept:
+- Composition principle:
+- Visual anchor:
+- Rhythm:
+- Density strategy:
+- Trust/clarity cues:
+- Anti-patterns to avoid:
+
+## Priority Ladder
+
+1. Hero/primary information:
+2. Supporting context:
+3. Secondary controls:
+4. Advanced or rare actions:
+5. Hidden/deferred content:
+
+## Information Architecture
+
+- Navigation model:
+- Main screen regions:
+- Above-the-fold content:
+- Grouping rules:
+- Progressive disclosure:
+- What should not appear together:
+
+## Screen Narrative
+
+For each primary screen, describe the intended reading/action order.
+
+| Screen   | First glance                      | Scan path        | Decision point     | Primary action    | Feedback/next state |
+| -------- | --------------------------------- | ---------------- | ------------------ | ----------------- | ------------------- |
+| <screen> | <what the user understands first> | <ordered groups> | <what they decide> | <dominant action> | <resulting state>   |
 
 ## Design Scope
 
@@ -105,6 +157,7 @@ Out of scope:
 
 ## Visual Direction
 
+- How this supports the design concept:
 - Desired feel:
 - Information density:
 - Typography direction:
@@ -131,9 +184,22 @@ Out of scope:
 - Success:
 - Permission/disabled:
 
+## Prompt Constraints
+
+- Design one primary screen or one short flow at a time unless the user explicitly asks for a full app.
+- Do not display every requirement, state, filter, and action simultaneously.
+- Loading, empty, error, disabled, permission, and success states should be separate variants, not all visible in the default screen.
+- Give one action or decision clear visual dominance.
+- Use progressive disclosure for secondary or advanced controls.
+- Avoid card grids unless the product model is actually a collection of peer items.
+- Do not mix multiple design directions into one screen.
+- Avoid stacked cards, equal-weight panels, decorative sections, and visible controls that are not needed for the primary user job.
+
 ## Design Agent Instructions
 
-Create 2-3 distinct design directions before converging. Preserve the functional requirements and information hierarchy. Prefer reusable UI patterns over decorative novelty.
+If exploring multiple directions, produce them as separate named alternatives. Each direction must have one concept, one primary screen composition, and a clear priority ladder. Do not merge alternatives into a single layout.
+
+Preserve the functional requirements and information hierarchy. Prefer reusable UI patterns over decorative novelty. Compose the experience around the primary user job; do not simply render every requirement as a visible component.
 
 Output:
 
@@ -147,11 +213,70 @@ Output:
 
 ## Pasteable Design-Agent Prompt
 
-<Self-contained prompt for Stitch/Figma/etc. based on the sections above. Include the necessary reference digest inline. Do not say "see ui_brief.md", "see screenshot", "see PRD", "use the attached file", or similar unless the user will actually attach that artifact to the design tool.>
+Use this structure for Stitch/Figma/etc. Keep it self-contained and include the necessary reference digest inline. Do not say "see ui_brief.md", "see screenshot", "see PRD", "use the attached file", or similar unless the user will actually attach that artifact to the design tool.
+
+```markdown
+Design a focused UI direction for <product/surface>.
+
+Product context:
+<1-3 sentences about what the product does and why this screen matters.>
+
+Primary user:
+<Who uses it, their expertise level, frequency, and environment.>
+
+Primary UX job:
+The screen must help the user <do one concrete job>. The most important outcome is <decision/action/result>.
+
+Design concept:
+Use the concept "<named concept>". The layout should feel like <composition metaphor, e.g. "a focused review console with one dominant work area and a compact decision rail">.
+
+Priority ladder:
+
+1. Most important: <content/action that must dominate>
+2. Supporting: <context needed to make the decision>
+3. Secondary: <tools/actions available but visually quieter>
+4. Deferred: <advanced/rare items hidden behind tabs, drawer, menu, or secondary screen>
+
+Information architecture:
+
+- Primary region: <main content/work area>
+- Secondary region: <context, summary, metadata, or controls>
+- Navigation: <tabs/sidebar/topbar/etc.>
+- Above the fold: show only <specific content>
+- Do not show <things that should not appear together>
+
+Screen narrative:
+First glance: user understands <main status/value>.
+Then they scan <ordered groups>.
+Then they choose <primary action>.
+After action, show <feedback/next state>.
+
+Required content:
+
+- <realistic data/content examples>
+- <required fields>
+- <required actions>
+
+States:
+Design the default state first. Include loading, empty, error, disabled, permission, and success as separate variants or notes, not visible in the default screen.
+
+Visual direction:
+
+- Density: <quiet/dense/spacious/etc.>
+- Typography: <specific direction>
+- Color: <role-based guidance, not just palette>
+- Components: <preferred components/patterns>
+- Avoid: stacked cards, equal-weight panels, decorative sections, showing all controls at once.
+
+Output:
+Create one desktop screen and one mobile adaptation for this single direction. Include concise notes explaining hierarchy, layout regions, and why secondary elements are deferred.
+```
+````
 
 ## Assumptions and Open Questions
 
 - <Assumption or question>
+
 ```
 
 ## Quality Bar
@@ -163,3 +288,10 @@ Output:
 - Use `Reference Index` only for traceability, not as required context for the design agent.
 - Ask for structured design artifacts, not only screenshots.
 - Preserve implementation constraints so the chosen design can be built without reinterpreting the product.
+- Verify the brief says what the user should do first.
+- Verify the brief says what is less important and should be deferred.
+- Verify the brief defines screen regions and reading order.
+- Verify the default screen does not include every state at once.
+- Verify the design concept is more specific than a visual mood.
+- Verify the pasteable prompt can produce a composed screen, not an inventory dump.
+```

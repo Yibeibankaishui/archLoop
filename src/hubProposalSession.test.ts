@@ -71,355 +71,389 @@ const createFakeInvoker = (
 };
 
 const createHubProjectDir = (prefix: string) => mkdtemp(join(tmpdir(), prefix));
+const PROPOSAL_SESSION_TEST_TIMEOUT_MS = 30_000;
 
 describe("runProposalSession", () => {
-  it("runs an initial draft turn from prepared context and persists artifacts", async () => {
-    const repoDir = await mkdtemp(join(tmpdir(), "proposal-session-draft-"));
-    await initRepo(repoDir);
-    const hubProjectDir = await createHubProjectDir(
-      "proposal-session-draft-hub-",
-    );
+  it(
+    "runs an initial draft turn from prepared context and persists artifacts",
+    async () => {
+      const repoDir = await mkdtemp(join(tmpdir(), "proposal-session-draft-"));
+      await initRepo(repoDir);
+      const hubProjectDir = await createHubProjectDir(
+        "proposal-session-draft-hub-",
+      );
 
-    const { invoker, calls } = createFakeInvoker({
-      draft: { assistantMessage: "Draft proposal summary" },
-      finalization: {
-        assistantMessage:
-          'Approved.\n<task-proposal>{"title":"Slice one"}</task-proposal>',
-      },
-    });
-
-    const result = await runProposalSession({
-      flowId: "prd-decomposition",
-      cwd: repoDir,
-      hubProjectDir,
-      preparedContext: { prdRef: "docs/prd.md", summary: "Build feature" },
-      draftPrompt: "Draft a PRD decomposition proposal.",
-      finalizationPrompt: "Emit the final task proposal.",
-      output: Output.object({
-        tag: "task-proposal",
-        schema: testProposalSchema(),
-      }),
-      agentInvoker: invoker,
-      oneShot: true,
-      approve: true,
-    });
-
-    expect(result.outcome).toBe("completed");
-    if (result.outcome !== "completed") {
-      throw new Error("expected completed proposal session");
-    }
-    expect(result.finalProposal).toEqual({ title: "Slice one" });
-    expect(calls).toHaveLength(2);
-    expect(calls[0]?.phase).toBe("draft");
-    expect(calls[0]?.preparedContext).toEqual({
-      prdRef: "docs/prd.md",
-      summary: "Build feature",
-    });
-
-    const preparedContext = await readJson<Record<string, unknown>>(
-      join(result.runDir, "artifacts", "prepared-context.json"),
-    );
-    const transcript = await readJson<
-      Array<{ role: string; content: string; phase?: string }>
-    >(join(result.runDir, "artifacts", "transcript.json"));
-    const finalProposal = await readJson<TestProposal>(
-      join(result.runDir, "artifacts", "final-proposal.json"),
-    );
-    const applyResult = await readJson<{ status: string }>(
-      join(result.runDir, "artifacts", "apply-result.json"),
-    );
-    const events = await readJsonl(
-      join(result.runDir, "events", "proposal.jsonl"),
-    );
-
-    expect(preparedContext).toEqual({
-      prdRef: "docs/prd.md",
-      summary: "Build feature",
-    });
-    expect(transcript.map((turn) => turn.role)).toEqual(["assistant"]);
-    expect(transcript[0]?.phase).toBe("draft");
-    expect(finalProposal).toEqual({ title: "Slice one" });
-    expect(applyResult).toEqual({ status: "pending" });
-    expect(
-      events.some(
-        (event) => (event as { type?: string }).type === "session_started",
-      ),
-    ).toBe(true);
-    expect(
-      events.some(
-        (event) => (event as { type?: string }).type === "draft_succeeded",
-      ),
-    ).toBe(true);
-  });
-
-  it("appends user refinement turns and invokes the agent with transcript context", async () => {
-    const repoDir = await mkdtemp(join(tmpdir(), "proposal-session-refine-"));
-    await initRepo(repoDir);
-    const hubProjectDir = await createHubProjectDir(
-      "proposal-session-refine-hub-",
-    );
-
-    const { invoker, calls } = createFakeInvoker({
-      draft: { assistantMessage: "Initial draft" },
-      refinement: { assistantMessage: "Refined draft after split" },
-      finalization: {
-        assistantMessage:
-          '<task-proposal>{"title":"Split slice"}</task-proposal>',
-      },
-    });
-
-    const result = await runProposalSession({
-      flowId: "prd-decomposition",
-      cwd: repoDir,
-      hubProjectDir,
-      preparedContext: { prdRef: "docs/prd.md" },
-      draftPrompt: "Draft a PRD decomposition proposal.",
-      finalizationPrompt: "Emit the final task proposal.",
-      output: Output.object({
-        tag: "task-proposal",
-        schema: testProposalSchema(),
-      }),
-      agentInvoker: invoker,
-      refinements: ["Please split slice two into smaller tasks"],
-      approve: true,
-    });
-
-    expect(result.outcome).toBe("completed");
-    expect(calls).toHaveLength(3);
-    expect(calls[1]?.phase).toBe("refinement");
-    expect(calls[1]?.transcript.at(-2)).toMatchObject({
-      role: "user",
-      content: "Please split slice two into smaller tasks",
-      phase: "refinement",
-    });
-    expect(calls[1]?.prompt).toContain(
-      "Please split slice two into smaller tasks",
-    );
-    expect(calls[1]?.prompt).toContain("Initial draft");
-
-    const transcript = await readJson<
-      Array<{ role: string; content: string; phase?: string }>
-    >(join(result.runDir, "artifacts", "transcript.json"));
-    expect(transcript.map((turn) => [turn.role, turn.phase])).toEqual([
-      ["assistant", "draft"],
-      ["user", "refinement"],
-      ["assistant", "refinement"],
-    ]);
-  });
-
-  it("notifies interaction hooks after draft and refinement turns", async () => {
-    const repoDir = await mkdtemp(join(tmpdir(), "proposal-session-notify-"));
-    await initRepo(repoDir);
-    const hubProjectDir = await createHubProjectDir(
-      "proposal-session-notify-hub-",
-    );
-    const notifications: string[] = [];
-
-    const { invoker } = createFakeInvoker({
-      draft: { assistantMessage: "Initial draft" },
-      refinement: { assistantMessage: "Refined draft" },
-      finalization: {
-        assistantMessage:
-          '<task-proposal>{"title":"Slice one"}</task-proposal>',
-      },
-    });
-
-    await runProposalSession({
-      flowId: "prd-decomposition",
-      cwd: repoDir,
-      hubProjectDir,
-      preparedContext: { prdRef: "docs/prd.md" },
-      draftPrompt: "Draft a PRD decomposition proposal.",
-      finalizationPrompt: "Emit the final task proposal.",
-      output: Output.object({
-        tag: "task-proposal",
-        schema: testProposalSchema(),
-      }),
-      agentInvoker: invoker,
-      refinements: ["Split slice two"],
-      interaction: {
-        onAssistantMessage: async (input) => {
-          notifications.push(`${input.phase}:${input.message}`);
+      const { invoker, calls } = createFakeInvoker({
+        draft: { assistantMessage: "Draft proposal summary" },
+        finalization: {
+          assistantMessage:
+            'Approved.\n<task-proposal>{"title":"Slice one"}</task-proposal>',
         },
-      },
-      approve: true,
-    });
+      });
 
-    expect(notifications).toEqual([
-      "draft:Initial draft",
-      "refinement:Refined draft",
-    ]);
-  });
+      const result = await runProposalSession({
+        flowId: "prd-decomposition",
+        cwd: repoDir,
+        hubProjectDir,
+        preparedContext: { prdRef: "docs/prd.md", summary: "Build feature" },
+        draftPrompt: "Draft a PRD decomposition proposal.",
+        finalizationPrompt: "Emit the final task proposal.",
+        output: Output.object({
+          tag: "task-proposal",
+          schema: testProposalSchema(),
+        }),
+        agentInvoker: invoker,
+        oneShot: true,
+        approve: true,
+      });
 
-  it("continues to approval when refinement is skipped", async () => {
-    const repoDir = await mkdtemp(join(tmpdir(), "proposal-session-skip-"));
-    await initRepo(repoDir);
-    const hubProjectDir = await createHubProjectDir(
-      "proposal-session-skip-hub-",
-    );
+      expect(result.outcome).toBe("completed");
+      if (result.outcome !== "completed") {
+        throw new Error("expected completed proposal session");
+      }
+      expect(result.finalProposal).toEqual({ title: "Slice one" });
+      expect(calls).toHaveLength(2);
+      expect(calls[0]?.phase).toBe("draft");
+      expect(calls[0]?.preparedContext).toEqual({
+        prdRef: "docs/prd.md",
+        summary: "Build feature",
+      });
 
-    const { invoker, calls } = createFakeInvoker({
-      draft: { assistantMessage: "Initial draft" },
-      finalization: {
-        assistantMessage:
-          '<task-proposal>{"title":"Slice one"}</task-proposal>',
-      },
-    });
+      const preparedContext = await readJson<Record<string, unknown>>(
+        join(result.runDir, "artifacts", "prepared-context.json"),
+      );
+      const transcript = await readJson<
+        Array<{ role: string; content: string; phase?: string }>
+      >(join(result.runDir, "artifacts", "transcript.json"));
+      const finalProposal = await readJson<TestProposal>(
+        join(result.runDir, "artifacts", "final-proposal.json"),
+      );
+      const applyResult = await readJson<{ status: string }>(
+        join(result.runDir, "artifacts", "apply-result.json"),
+      );
+      const events = await readJsonl(
+        join(result.runDir, "events", "proposal.jsonl"),
+      );
 
-    const result = await runProposalSession({
-      flowId: "prd-decomposition",
-      cwd: repoDir,
-      hubProjectDir,
-      preparedContext: { prdRef: "docs/prd.md" },
-      draftPrompt: "Draft a PRD decomposition proposal.",
-      finalizationPrompt: "Emit the final task proposal.",
-      output: Output.object({
-        tag: "task-proposal",
-        schema: testProposalSchema(),
-      }),
-      agentInvoker: invoker,
-      interaction: {
-        requestRefinement: async () => null,
-        requestApproval: async (_proposal) => true,
-      },
-    });
+      expect(preparedContext).toEqual({
+        prdRef: "docs/prd.md",
+        summary: "Build feature",
+      });
+      expect(transcript.map((turn) => turn.role)).toEqual(["assistant"]);
+      expect(transcript[0]?.phase).toBe("draft");
+      expect(finalProposal).toEqual({ title: "Slice one" });
+      expect(applyResult).toEqual({ status: "pending" });
+      expect(
+        events.some(
+          (event) => (event as { type?: string }).type === "session_started",
+        ),
+      ).toBe(true);
+      expect(
+        events.some(
+          (event) => (event as { type?: string }).type === "draft_succeeded",
+        ),
+      ).toBe(true);
+    },
+    PROPOSAL_SESSION_TEST_TIMEOUT_MS,
+  );
 
-    expect(result.outcome).toBe("completed");
-    expect(calls.map((call) => call.phase)).toEqual(["draft", "finalization"]);
-  });
+  it(
+    "appends user refinement turns and invokes the agent with transcript context",
+    async () => {
+      const repoDir = await mkdtemp(join(tmpdir(), "proposal-session-refine-"));
+      await initRepo(repoDir);
+      const hubProjectDir = await createHubProjectDir(
+        "proposal-session-refine-hub-",
+      );
 
-  it("fails when final structured output is missing or invalid", async () => {
-    const repoDir = await mkdtemp(join(tmpdir(), "proposal-session-invalid-"));
-    await initRepo(repoDir);
-    const hubProjectDir = await createHubProjectDir(
-      "proposal-session-invalid-hub-",
-    );
+      const { invoker, calls } = createFakeInvoker({
+        draft: { assistantMessage: "Initial draft" },
+        refinement: { assistantMessage: "Refined draft after split" },
+        finalization: {
+          assistantMessage:
+            '<task-proposal>{"title":"Split slice"}</task-proposal>',
+        },
+      });
 
-    const missingTagInvoker = createFakeInvoker({
-      draft: { assistantMessage: "Draft only" },
-      finalization: { assistantMessage: "No structured tag here" },
-    }).invoker;
+      const result = await runProposalSession({
+        flowId: "prd-decomposition",
+        cwd: repoDir,
+        hubProjectDir,
+        preparedContext: { prdRef: "docs/prd.md" },
+        draftPrompt: "Draft a PRD decomposition proposal.",
+        finalizationPrompt: "Emit the final task proposal.",
+        output: Output.object({
+          tag: "task-proposal",
+          schema: testProposalSchema(),
+        }),
+        agentInvoker: invoker,
+        refinements: ["Please split slice two into smaller tasks"],
+        approve: true,
+      });
 
-    const missingTagResult = await runProposalSession({
-      flowId: "triage",
-      cwd: repoDir,
-      hubProjectDir,
-      preparedContext: { query: "inbox" },
-      draftPrompt: "Draft triage recommendations.",
-      finalizationPrompt: "Emit the final task proposal.",
-      output: Output.object({
-        tag: "task-proposal",
-        schema: testProposalSchema(),
-      }),
-      agentInvoker: missingTagInvoker,
-      oneShot: true,
-      approve: true,
-    });
+      expect(result.outcome).toBe("completed");
+      expect(calls).toHaveLength(3);
+      expect(calls[1]?.phase).toBe("refinement");
+      expect(calls[1]?.transcript.at(-2)).toMatchObject({
+        role: "user",
+        content: "Please split slice two into smaller tasks",
+        phase: "refinement",
+      });
+      expect(calls[1]?.prompt).toContain(
+        "Please split slice two into smaller tasks",
+      );
+      expect(calls[1]?.prompt).toContain("Initial draft");
 
-    expect(missingTagResult.outcome).toBe("failed");
-    if (missingTagResult.outcome !== "failed") {
-      throw new Error("expected failed proposal session");
-    }
-    expect(missingTagResult.reason).toContain("task-proposal");
+      const transcript = await readJson<
+        Array<{ role: string; content: string; phase?: string }>
+      >(join(result.runDir, "artifacts", "transcript.json"));
+      expect(transcript.map((turn) => [turn.role, turn.phase])).toEqual([
+        ["assistant", "draft"],
+        ["user", "refinement"],
+        ["assistant", "refinement"],
+      ]);
+    },
+    PROPOSAL_SESSION_TEST_TIMEOUT_MS,
+  );
 
-    const invalidJsonInvoker = createFakeInvoker({
-      draft: { assistantMessage: "Draft only" },
-      finalization: {
-        assistantMessage: "<task-proposal>not-json</task-proposal>",
-      },
-    }).invoker;
+  it(
+    "notifies interaction hooks after draft and refinement turns",
+    async () => {
+      const repoDir = await mkdtemp(join(tmpdir(), "proposal-session-notify-"));
+      await initRepo(repoDir);
+      const hubProjectDir = await createHubProjectDir(
+        "proposal-session-notify-hub-",
+      );
+      const notifications: string[] = [];
 
-    const invalidJsonResult = await runProposalSession({
-      flowId: "triage",
-      cwd: repoDir,
-      hubProjectDir,
-      preparedContext: { query: "inbox" },
-      draftPrompt: "Draft triage recommendations.",
-      finalizationPrompt: "Emit the final task proposal.",
-      output: Output.object({
-        tag: "task-proposal",
-        schema: testProposalSchema(),
-      }),
-      agentInvoker: invalidJsonInvoker,
-      oneShot: true,
-      approve: true,
-    });
+      const { invoker } = createFakeInvoker({
+        draft: { assistantMessage: "Initial draft" },
+        refinement: { assistantMessage: "Refined draft" },
+        finalization: {
+          assistantMessage:
+            '<task-proposal>{"title":"Slice one"}</task-proposal>',
+        },
+      });
 
-    expect(invalidJsonResult.outcome).toBe("failed");
-    if (invalidJsonResult.outcome !== "failed") {
-      throw new Error("expected failed proposal session");
-    }
-    expect(invalidJsonResult.reason).toContain("invalid JSON");
+      await runProposalSession({
+        flowId: "prd-decomposition",
+        cwd: repoDir,
+        hubProjectDir,
+        preparedContext: { prdRef: "docs/prd.md" },
+        draftPrompt: "Draft a PRD decomposition proposal.",
+        finalizationPrompt: "Emit the final task proposal.",
+        output: Output.object({
+          tag: "task-proposal",
+          schema: testProposalSchema(),
+        }),
+        agentInvoker: invoker,
+        refinements: ["Split slice two"],
+        interaction: {
+          onAssistantMessage: async (input) => {
+            notifications.push(`${input.phase}:${input.message}`);
+          },
+        },
+        approve: true,
+      });
 
-    await expect(
-      readFile(
-        join(missingTagResult.runDir, "artifacts", "final-proposal.json"),
+      expect(notifications).toEqual([
+        "draft:Initial draft",
+        "refinement:Refined draft",
+      ]);
+    },
+    PROPOSAL_SESSION_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "continues to approval when refinement is skipped",
+    async () => {
+      const repoDir = await mkdtemp(join(tmpdir(), "proposal-session-skip-"));
+      await initRepo(repoDir);
+      const hubProjectDir = await createHubProjectDir(
+        "proposal-session-skip-hub-",
+      );
+
+      const { invoker, calls } = createFakeInvoker({
+        draft: { assistantMessage: "Initial draft" },
+        finalization: {
+          assistantMessage:
+            '<task-proposal>{"title":"Slice one"}</task-proposal>',
+        },
+      });
+
+      const result = await runProposalSession({
+        flowId: "prd-decomposition",
+        cwd: repoDir,
+        hubProjectDir,
+        preparedContext: { prdRef: "docs/prd.md" },
+        draftPrompt: "Draft a PRD decomposition proposal.",
+        finalizationPrompt: "Emit the final task proposal.",
+        output: Output.object({
+          tag: "task-proposal",
+          schema: testProposalSchema(),
+        }),
+        agentInvoker: invoker,
+        interaction: {
+          requestRefinement: async () => null,
+          requestApproval: async (_proposal) => true,
+        },
+      });
+
+      expect(result.outcome).toBe("completed");
+      expect(calls.map((call) => call.phase)).toEqual([
+        "draft",
+        "finalization",
+      ]);
+    },
+    PROPOSAL_SESSION_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "fails when final structured output is missing or invalid",
+    async () => {
+      const repoDir = await mkdtemp(
+        join(tmpdir(), "proposal-session-invalid-"),
+      );
+      await initRepo(repoDir);
+      const hubProjectDir = await createHubProjectDir(
+        "proposal-session-invalid-hub-",
+      );
+
+      const missingTagInvoker = createFakeInvoker({
+        draft: { assistantMessage: "Draft only" },
+        finalization: { assistantMessage: "No structured tag here" },
+      }).invoker;
+
+      const missingTagResult = await runProposalSession({
+        flowId: "triage",
+        cwd: repoDir,
+        hubProjectDir,
+        preparedContext: { query: "inbox" },
+        draftPrompt: "Draft triage recommendations.",
+        finalizationPrompt: "Emit the final task proposal.",
+        output: Output.object({
+          tag: "task-proposal",
+          schema: testProposalSchema(),
+        }),
+        agentInvoker: missingTagInvoker,
+        oneShot: true,
+        approve: true,
+      });
+
+      expect(missingTagResult.outcome).toBe("failed");
+      if (missingTagResult.outcome !== "failed") {
+        throw new Error("expected failed proposal session");
+      }
+      expect(missingTagResult.reason).toContain("task-proposal");
+
+      const invalidJsonInvoker = createFakeInvoker({
+        draft: { assistantMessage: "Draft only" },
+        finalization: {
+          assistantMessage: "<task-proposal>not-json</task-proposal>",
+        },
+      }).invoker;
+
+      const invalidJsonResult = await runProposalSession({
+        flowId: "triage",
+        cwd: repoDir,
+        hubProjectDir,
+        preparedContext: { query: "inbox" },
+        draftPrompt: "Draft triage recommendations.",
+        finalizationPrompt: "Emit the final task proposal.",
+        output: Output.object({
+          tag: "task-proposal",
+          schema: testProposalSchema(),
+        }),
+        agentInvoker: invalidJsonInvoker,
+        oneShot: true,
+        approve: true,
+      });
+
+      expect(invalidJsonResult.outcome).toBe("failed");
+      if (invalidJsonResult.outcome !== "failed") {
+        throw new Error("expected failed proposal session");
+      }
+      expect(invalidJsonResult.reason).toContain("invalid JSON");
+
+      await expect(
+        readFile(
+          join(missingTagResult.runDir, "artifacts", "final-proposal.json"),
+          "utf8",
+        ),
+      ).rejects.toThrow();
+      await expect(
+        readFile(
+          join(missingTagResult.runDir, "artifacts", "apply-result.json"),
+          "utf8",
+        ),
+      ).rejects.toThrow();
+
+      const events = await readJsonl(
+        join(missingTagResult.runDir, "events", "proposal.jsonl"),
+      );
+      expect(
+        events.some(
+          (event) =>
+            (event as { type?: string }).type === "finalization_failed",
+        ),
+      ).toBe(true);
+    },
+    PROPOSAL_SESSION_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "cancels the session when approval is rejected",
+    async () => {
+      const repoDir = await mkdtemp(join(tmpdir(), "proposal-session-cancel-"));
+      await initRepo(repoDir);
+      const hubProjectDir = await createHubProjectDir(
+        "proposal-session-cancel-hub-",
+      );
+
+      const { invoker, calls } = createFakeInvoker({
+        draft: { assistantMessage: "Draft proposal" },
+        finalization: {
+          assistantMessage:
+            '<task-proposal>{"title":"Slice one"}</task-proposal>',
+        },
+      });
+
+      const result = await runProposalSession({
+        flowId: "prd-decomposition",
+        cwd: repoDir,
+        hubProjectDir,
+        preparedContext: { prdRef: "docs/prd.md" },
+        draftPrompt: "Draft a PRD decomposition proposal.",
+        finalizationPrompt: "Emit the final task proposal.",
+        output: Output.object({
+          tag: "task-proposal",
+          schema: testProposalSchema(),
+        }),
+        agentInvoker: invoker,
+        oneShot: true,
+        approve: false,
+      });
+
+      expect(result.outcome).toBe("cancelled");
+      expect(calls.map((call) => call.phase)).toEqual([
+        "draft",
+        "finalization",
+      ]);
+      const finalProposal = await readFile(
+        join(result.runDir, "artifacts", "final-proposal.json"),
         "utf8",
-      ),
-    ).rejects.toThrow();
-    await expect(
-      readFile(
-        join(missingTagResult.runDir, "artifacts", "apply-result.json"),
-        "utf8",
-      ),
-    ).rejects.toThrow();
+      );
+      expect(finalProposal).toContain("Slice one");
 
-    const events = await readJsonl(
-      join(missingTagResult.runDir, "events", "proposal.jsonl"),
-    );
-    expect(
-      events.some(
-        (event) => (event as { type?: string }).type === "finalization_failed",
-      ),
-    ).toBe(true);
-  });
-
-  it("cancels the session when approval is rejected", async () => {
-    const repoDir = await mkdtemp(join(tmpdir(), "proposal-session-cancel-"));
-    await initRepo(repoDir);
-    const hubProjectDir = await createHubProjectDir(
-      "proposal-session-cancel-hub-",
-    );
-
-    const { invoker, calls } = createFakeInvoker({
-      draft: { assistantMessage: "Draft proposal" },
-      finalization: {
-        assistantMessage:
-          '<task-proposal>{"title":"Slice one"}</task-proposal>',
-      },
-    });
-
-    const result = await runProposalSession({
-      flowId: "prd-decomposition",
-      cwd: repoDir,
-      hubProjectDir,
-      preparedContext: { prdRef: "docs/prd.md" },
-      draftPrompt: "Draft a PRD decomposition proposal.",
-      finalizationPrompt: "Emit the final task proposal.",
-      output: Output.object({
-        tag: "task-proposal",
-        schema: testProposalSchema(),
-      }),
-      agentInvoker: invoker,
-      oneShot: true,
-      approve: false,
-    });
-
-    expect(result.outcome).toBe("cancelled");
-    expect(calls.map((call) => call.phase)).toEqual(["draft", "finalization"]);
-    const finalProposal = await readFile(
-      join(result.runDir, "artifacts", "final-proposal.json"),
-      "utf8",
-    );
-    expect(finalProposal).toContain("Slice one");
-
-    const events = await readJsonl(
-      join(result.runDir, "events", "proposal.jsonl"),
-    );
-    expect(
-      events.some(
-        (event) => (event as { type?: string }).type === "session_cancelled",
-      ),
-    ).toBe(true);
-  });
+      const events = await readJsonl(
+        join(result.runDir, "events", "proposal.jsonl"),
+      );
+      expect(
+        events.some(
+          (event) => (event as { type?: string }).type === "session_cancelled",
+        ),
+      ).toBe(true);
+    },
+    PROPOSAL_SESSION_TEST_TIMEOUT_MS,
+  );
 });

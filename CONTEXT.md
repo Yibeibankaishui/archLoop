@@ -38,6 +38,14 @@ _Avoid_: "config directory", ".archloop config", "init config"
 Editable files owned by **archLoop Hub** for one **Hub project**, such as Hub-managed bootstrap, verification, and context files.
 _Avoid_: "config directory", "scaffolded project files", "repo assets"
 
+**Project development contract**:
+A **Hub project**-owned description of how an **agent** should prepare, understand, verify, and diagnose a **host** repo. It is derived from the **Hub project**'s **project profile**, observed project facts, and user edits, then consumed by **flows** through **Hub project assets**.
+_Avoid_: "project profile" (only the starting prior), "prompt" (only one carrier), "bootstrap" (only setup)
+
+**Project facts**:
+Observed, non-authoritative signals about a **host** repo, such as package manifests, lockfiles, build files, or configured scripts, used to help derive a **project development contract**.
+_Avoid_: "project profile" (user-confirmed prior), "source of truth", "auto-detected config"
+
 **Hub asset mount**:
 The sandbox-visible location where **Hub project assets** are made available during a **flow** run.
 _Avoid_: "worktree copy", "repo mount", ".archloop"
@@ -162,6 +170,10 @@ _Avoid_: "run" (ambiguous with the JS `run()` function), "cycle", "loop"
 A runtime-selectable orchestration shape for a archLoop run.
 _Avoid_: "template" (reserved for scaffolded files), "script", "main file", "agent-flow" (too narrow)
 
+**Flow execution**:
+One invocation of a **flow** through **archLoop Hub**, coordinating zero or more **flow batches** until a stop condition is reached.
+_Avoid_: "batch" (too narrow), "run" (ambiguous with the JS `run()` function)
+
 **Agent-driven task command**:
 A task-board CLI command whose judgment-producing work is performed by a **flow**, while the command remains as a user-friendly shortcut and archLoop owns validation, confirmation, and state writes.
 _Avoid_: "plain CLI logic" (misses the **agent** judgment), "skill call" (too provider-specific), "hidden flow"
@@ -285,7 +297,7 @@ A pluggable source of **tasks** for the **agent**, selected during **init** (e.g
 _Avoid_: "task source", "issue tracker"
 
 **Project profile**:
-A project-type choice made during **init** that describes the host repo's language or build-system shape (e.g. Node, Python, C++), independent of the selected **template** or **backlog manager**.
+A project-type choice that describes the **host** repo's language or build-system shape (e.g. Node, Python, C++), shared by **init** scaffolding and **Hub project config**.
 _Avoid_: "task type", "project template", "stack" (ambiguous with runtime stack)
 
 **Capability pack**:
@@ -411,6 +423,7 @@ _Avoid_: "log event" (the log file contains more than just agent output), "displ
 - The **generic project profile** generates a no-op bootstrap script and does not add language-specific tools to the generated Dockerfile or Containerfile.
 - An **agent runtime** contributes the agent CLI installation layer; a **backlog manager** contributes task-source tooling; a **sandbox provider** decides the containerfile name and runtime family.
 - Interactive **init** asks users to choose a **project profile**; that choice drives the generated Dockerfile or Containerfile and the generated bootstrap script.
+- A **Hub project config** stores the **project profile** for that **Hub project**, so **archLoop Hub** can run flows with project-specific language and build-system guidance across multiple repos.
 - **Init** generates the bootstrap script directly from the selected **project profile**; templates do not generate it at run time.
 - Scaffolded templates run the generated bootstrap script through a **sandbox hook**; they do not scaffold a bootstrap-generation prompt.
 - **Init** does not execute or validate the generated bootstrap script; it is first run by the scaffolded workflow's **sandbox hook**.
@@ -422,7 +435,9 @@ _Avoid_: "log event" (the log file contains more than just agent output), "displ
 - Durable human decisions or human work should be represented as separate **tasks**; dependent agent-ready **tasks** are **blocked** by those human-owned dependencies.
 - **Waiting for merge** is a stable **Hub task board** status because a task may finish implementation and review before the rest of its flow batch is ready to merge.
 - When a **flow batch** enters merge, all eligible **tasks** in that batch move from waiting for merge to merging together.
-- A **project profile** is an **init** scaffolding choice, not a public runtime option on `run()`, `createSandbox()`, or a **sandbox provider**.
+- A task-board **flow execution** may coordinate multiple **flow batches**. It continues to the next **flow batch** only after the current batch completes successfully; any failed batch stops the **flow execution** for recovery.
+- A task-board **flow execution** that reaches an empty ready queue stops normally with a no-ready-tasks stop reason.
+- A **project profile** is shared by **init** and **Hub project config**, but remains outside low-level public runtime APIs such as `run()`, `createSandbox()`, and **sandbox providers**.
 - The generated bootstrap script is a user-editable scaffold artifact owned by the host repo after **init**.
 - The generated bootstrap script prepares the repo for agent work; it does not run full project verification by default.
 - **Init** performs **template argument substitution** on Dockerfiles and scaffold `.md` files, replacing **template arguments** with values derived from the user's choices

@@ -1,6 +1,6 @@
 # Project profiles generate bootstrap at init time
 
-archLoop init asks for a **Project profile** (`generic`, `node`, `python`, `cpp`) that is independent of workflow template, agent runtime, and backlog manager. The selected profile drives init-time artifacts: optional Dockerfile / Containerfile tool layers (`PROJECT_PROFILE_TOOLS`), `.archloop/bootstrap.sh`, and stack-specific verification guidance substituted into scaffolded workflow prompts (`PROJECT_PROFILE_VERIFY_GUIDANCE`).
+archLoop init asks for a **Project profile** (`generic`, `node`, `python`, `cpp`) that is independent of workflow template, agent runtime, and backlog manager. In the init path, the selected profile drives init-time artifacts: optional Dockerfile / Containerfile tool layers (`PROJECT_PROFILE_TOOLS`), `.archloop/bootstrap.sh`, and stack-specific verification guidance substituted into scaffolded workflow prompts (`PROJECT_PROFILE_VERIFY_GUIDANCE`).
 
 ## Decision
 
@@ -8,7 +8,7 @@ archLoop init asks for a **Project profile** (`generic`, `node`, `python`, `cpp`
 2. **Runtime hook only** — Non-blank workflow templates run the scaffolded `bootstrap.sh` from `sandbox.onSandboxReady` after the worktree is mounted. Templates do not generate, repair, or prompt for bootstrap at run time.
 3. **Image vs repo setup** — Project profiles may add language or build-tool packages to the containerfile. Bootstrap is not part of image build; it prepares the mounted repository at sandbox ready time.
 4. **Orthogonal choices** — Project profile does not alter `.env.example`, cache mounts, or `copyToWorktree` defaults in the first version.
-5. **Init-only surface** — Project profile is an init-time CLI concept (`--project-profile`, interactive prompt after template selection). Public runtime sandbox APIs do not expose language-stack profile options.
+5. **Runtime API boundary** — Project profile is shared by init and **Hub project config** (see ADR-0029), but public runtime sandbox APIs such as `run()`, `createSandbox()`, and sandbox providers do not expose language-stack profile options.
 
 Bootstrap rendering lives in `src/bootstrap.ts` (`renderBootstrapScript`); profile definitions and containerfile fragments live in `src/projectProfiles.ts`.
 
@@ -24,3 +24,4 @@ Bootstrap rendering lives in `src/bootstrap.ts` (`renderBootstrapScript`); profi
 - Adding a profile means extending `projectProfiles.ts`, tests for bootstrap and containerfile output, and init CLI help.
 - Existing `.archloop` directories are not migrated automatically.
 - Full test/build verification stays out of generated bootstrap scripts by default (setup-only).
+- Hub flows use project profiles through **Hub project config** and **project development contracts**, not by reusing init-generated `.archloop/` scaffold files.

@@ -23,7 +23,7 @@ const createWindow = async (): Promise<BrowserWindow> => {
     backgroundColor: "#f8fafc",
     title: "archLoop Hub",
     webPreferences: {
-      preload: join(__dirname, "preload.js"),
+      preload: join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,

@@ -14,7 +14,7 @@
     "build": "vite build && npm run build:electron",
     "prebuild:renderer-fixtures": "npm --prefix .. run build",
     "build:renderer-fixtures": "cross-env VITE_HUB_DESKTOP_FIXTURES=1 vite build --outDir dist-fixtures",
-    "build:electron": "tsc -p tsconfig.electron.json",
+    "build:electron": "rm -rf dist-electron && tsc -p tsconfig.electron.json",
     "preview": "npm run build && electron .",
     "pretypecheck": "npm --prefix .. run build",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.electron.json",

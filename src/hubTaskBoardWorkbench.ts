@@ -899,18 +899,10 @@ export const buildHubTaskBoardWorkbenchModel = (
   };
 };
 
-export const resolveHubTaskBoardGridClass = (
-  viewportWidth: number,
-): string => {
-  const classNames = [
-    resolveHubDesktopSurfaceGridClass(
-      "hub-task-board-grid",
-      "hub-task-board-grid-narrow",
-      viewportWidth,
-    ),
-  ];
-  if (viewportWidth >= HUB_DESKTOP_LAYOUT.denseSurfaceBreakpointPx) {
-    classNames.push("hub-task-board-grid-board-first");
-  }
-  return classNames.join(" ");
+export const resolveHubTaskBoardGridClass = (viewportWidth: number): string => {
+  return resolveHubDesktopSurfaceGridClass(
+    "hub-task-board-grid",
+    "hub-task-board-grid-narrow",
+    viewportWidth,
+  );
 };

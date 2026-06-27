@@ -1,0 +1,5085 @@
+{
+  "results": [
+    {
+      "viewport": {
+        "name": "desktop",
+        "width": 1440,
+        "height": 900
+      },
+      "section": "overview",
+      "screenshot": "/Users/yibeibankaishui/projects/ref/sandcastle/output/playwright/hub-overview-desktop.png",
+      "metrics": {
+        "title": "Overview",
+        "bodyScrollWidth": 1440,
+        "bodyClientWidth": 1440,
+        "root": {
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900,
+          "scrollWidth": 1440,
+          "scrollHeight": 900,
+          "clientWidth": 1440,
+          "clientHeight": 900
+        },
+        "shell": {
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900,
+          "scrollWidth": 1440,
+          "scrollHeight": 900,
+          "clientWidth": 1440,
+          "clientHeight": 900
+        },
+        "header": {
+          "x": 60,
+          "y": 0,
+          "width": 1380,
+          "height": 64,
+          "scrollWidth": 1380,
+          "scrollHeight": 63,
+          "clientWidth": 1380,
+          "clientHeight": 63
+        },
+        "rail": {
+          "x": 0,
+          "y": 0,
+          "width": 60,
+          "height": 900,
+          "scrollWidth": 59,
+          "scrollHeight": 900,
+          "clientWidth": 59,
+          "clientHeight": 900
+        },
+        "main": {
+          "x": 60,
+          "y": 64,
+          "width": 1000,
+          "height": 836,
+          "scrollWidth": 1000,
+          "scrollHeight": 3125,
+          "clientWidth": 1000,
+          "clientHeight": 836
+        },
+        "inspector": {
+          "x": 1060,
+          "y": 64,
+          "width": 380,
+          "height": 836,
+          "scrollWidth": 379,
+          "scrollHeight": 836,
+          "clientWidth": 379,
+          "clientHeight": 836
+        },
+        "buttons": [
+          {
+            "text": "Overview OV",
+            "aria": "",
+            "title": "Overview",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 56,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Task Board TB",
+            "aria": "",
+            "title": "Task Board",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 104,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Run Workbench RW",
+            "aria": "",
+            "title": "Run Workbench",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 152,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Proposal Session PS",
+            "aria": "",
+            "title": "Proposal Session",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 200,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Project",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 515,
+              "y": 21,
+              "width": 62,
+              "height": 22
+            }
+          },
+          {
+            "text": "Run",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 581,
+              "y": 21,
+              "width": 44,
+              "height": 22
+            }
+          },
+          {
+            "text": "Batch",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 629,
+              "y": 21,
+              "width": 55,
+              "height": 22
+            }
+          },
+          {
+            "text": "Sync",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 700,
+              "y": 6,
+              "width": 205,
+              "height": 32
+            }
+          },
+          {
+            "text": "Run Flow",
+            "aria": "Run Flow unavailable in desktop v0",
+            "title": "Use archloop run . --flow <id>",
+            "disabled": true,
+            "rect": {
+              "x": 913,
+              "y": 6,
+              "width": 255,
+              "height": 32
+            }
+          },
+          {
+            "text": "Hide inspector",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 1176,
+              "y": 16,
+              "width": 128,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Notifications",
+            "title": "Notifications",
+            "disabled": true,
+            "rect": {
+              "x": 1312,
+              "y": 16,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Help",
+            "title": "Help",
+            "disabled": true,
+            "rect": {
+              "x": 1352,
+              "y": 16,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Account",
+            "title": "Account",
+            "disabled": true,
+            "rect": {
+              "x": 1392,
+              "y": 16,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "SYNC NOW",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 940,
+              "y": 93,
+              "width": 107,
+              "height": 32
+            }
+          },
+          {
+            "text": "CLI only",
+            "aria": "Initialize task store unavailable in desktop v0",
+            "title": "",
+            "disabled": true,
+            "rect": {
+              "x": 89,
+              "y": 1518,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "Preview Preview push",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 89,
+              "y": 1699,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "Preview Preview pull",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 89,
+              "y": 1880,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "CLI only",
+            "aria": "Review agent config unavailable in desktop v0",
+            "title": "",
+            "disabled": true,
+            "rect": {
+              "x": 89,
+              "y": 2149,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "Preview Recover arch-2",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 89,
+              "y": 2330,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "Flow batchrun-fixture-1 / batch-fixture-1mergingFlow batch merging with 1 task(s) on with-review.…/archloop-user-data/projects/fixture/runs/run-fixture-1",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 395,
+              "y": 300,
+              "width": 320,
+              "height": 163
+            }
+          },
+          {
+            "text": "Failed taskarch-2 · Recover stale claimDONEagent_failed detected. archloop tasks recover arch-2/tmp/archloop-user-data/projects/fixture",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 395,
+              "y": 471,
+              "width": 320,
+              "height": 132
+            }
+          },
+          {
+            "text": "Leasearch-2 · worktree lease stale with failed claimDONEWorktree lease is stale while task arch-2 remains failed.archloop/arch-2-recover-stale-claim",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 395,
+              "y": 611,
+              "width": 320,
+              "height": 135
+            }
+          },
+          {
+            "text": "ActivityEvent 1Activityrun run-fixture-1 started flow with-review/tmp/archloop-hub-fixture",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 395,
+              "y": 753,
+              "width": 320,
+              "height": 118
+            }
+          },
+          {
+            "text": "ActivityEvent 2Activitytask arch-3 claimed on branch archloop/arch-3-awaiting-merge/tmp/archloop-hub-fixture",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 395,
+              "y": 879,
+              "width": 320,
+              "height": 118
+            }
+          },
+          {
+            "text": "Generate Report",
+            "aria": "",
+            "title": "Generate a report from the CLI path in v0.",
+            "disabled": true,
+            "rect": {
+              "x": 674,
+              "y": 3068,
+              "width": 142,
+              "height": 32
+            }
+          },
+          {
+            "text": "View Repo Info",
+            "aria": "",
+            "title": "Open repo information from the CLI path in v0.",
+            "disabled": true,
+            "rect": {
+              "x": 824,
+              "y": 3068,
+              "width": 130,
+              "height": 32
+            }
+          },
+          {
+            "text": "Close",
+            "aria": "Close inspector",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 1356,
+              "y": 76,
+              "width": 72,
+              "height": 32
+            }
+          }
+        ],
+        "disabledButtonCount": 8,
+        "buttonCount": 27,
+        "headings": [
+          "1",
+          "Overview",
+          "SYNC NOW",
+          "Hub project",
+          "System status",
+          "Status banners",
+          "Hub actions",
+          "Initialize task store",
+          "Preview push",
+          "Preview pull",
+          "Review agent config",
+          "Recover arch-2",
+          "Remote metadata",
+          "Activity timeline",
+          "run-fixture-1 / batch-fixture-1",
+          "arch-2 · Recover stale claim",
+          "arch-2 · worktree lease stale with failed claim",
+          "Event 1",
+          "Event 2",
+          "Lease inspector",
+          "Operational summary",
+          "Selected details",
+          "Project",
+          "Selection"
+        ],
+        "overflowElements": []
+      }
+    },
+    {
+      "viewport": {
+        "name": "desktop",
+        "width": 1440,
+        "height": 900
+      },
+      "section": "task-board",
+      "screenshot": "/Users/yibeibankaishui/projects/ref/sandcastle/output/playwright/hub-task-board-desktop.png",
+      "metrics": {
+        "title": "Task Board",
+        "bodyScrollWidth": 1440,
+        "bodyClientWidth": 1440,
+        "root": {
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900,
+          "scrollWidth": 1440,
+          "scrollHeight": 900,
+          "clientWidth": 1440,
+          "clientHeight": 900
+        },
+        "shell": {
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900,
+          "scrollWidth": 1440,
+          "scrollHeight": 900,
+          "clientWidth": 1440,
+          "clientHeight": 900
+        },
+        "header": {
+          "x": 60,
+          "y": 0,
+          "width": 1380,
+          "height": 64,
+          "scrollWidth": 1380,
+          "scrollHeight": 63,
+          "clientWidth": 1380,
+          "clientHeight": 63
+        },
+        "rail": {
+          "x": 0,
+          "y": 0,
+          "width": 60,
+          "height": 900,
+          "scrollWidth": 59,
+          "scrollHeight": 900,
+          "clientWidth": 59,
+          "clientHeight": 900
+        },
+        "main": {
+          "x": 60,
+          "y": 64,
+          "width": 1000,
+          "height": 836,
+          "scrollWidth": 1000,
+          "scrollHeight": 848,
+          "clientWidth": 1000,
+          "clientHeight": 836
+        },
+        "inspector": {
+          "x": 1060,
+          "y": 64,
+          "width": 380,
+          "height": 836,
+          "scrollWidth": 379,
+          "scrollHeight": 836,
+          "clientWidth": 379,
+          "clientHeight": 836
+        },
+        "buttons": [
+          {
+            "text": "Overview OV",
+            "aria": "",
+            "title": "Overview",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 56,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Task Board TB",
+            "aria": "",
+            "title": "Task Board",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 104,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Run Workbench RW",
+            "aria": "",
+            "title": "Run Workbench",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 152,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Proposal Session PS",
+            "aria": "",
+            "title": "Proposal Session",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 200,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Project",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 515,
+              "y": 21,
+              "width": 62,
+              "height": 22
+            }
+          },
+          {
+            "text": "Run",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 581,
+              "y": 21,
+              "width": 44,
+              "height": 22
+            }
+          },
+          {
+            "text": "Batch",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 629,
+              "y": 21,
+              "width": 55,
+              "height": 22
+            }
+          },
+          {
+            "text": "Sync",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 700,
+              "y": 6,
+              "width": 205,
+              "height": 32
+            }
+          },
+          {
+            "text": "Run Flow",
+            "aria": "Run Flow unavailable in desktop v0",
+            "title": "Use archloop run . --flow <id>",
+            "disabled": true,
+            "rect": {
+              "x": 913,
+              "y": 6,
+              "width": 255,
+              "height": 32
+            }
+          },
+          {
+            "text": "Hide inspector",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 1176,
+              "y": 16,
+              "width": 128,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Notifications",
+            "title": "Notifications",
+            "disabled": true,
+            "rect": {
+              "x": 1312,
+              "y": 16,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Help",
+            "title": "Help",
+            "disabled": true,
+            "rect": {
+              "x": 1352,
+              "y": 16,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Account",
+            "title": "Account",
+            "disabled": true,
+            "rect": {
+              "x": 1392,
+              "y": 16,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "",
+            "title": "Enter a task title to preview the local Beads write.",
+            "disabled": true,
+            "rect": {
+              "x": 735,
+              "y": 118,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "Confirm",
+            "aria": "",
+            "title": "archloop tasks create --title <title>",
+            "disabled": true,
+            "rect": {
+              "x": 822,
+              "y": 118,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "CLI only",
+            "aria": "",
+            "title": "The desktop does not expose a triage proposal preview in v0. Use archloop tasks triage --query inbox,needs_info from the CLI.",
+            "disabled": true,
+            "rect": {
+              "x": 980,
+              "y": 123,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "arch-5inbox · 0%Remote-linked inbox taskinboxprd-warning-mediumprd mediumgithub#156run-proposal-fixture-1",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 85,
+              "y": 221,
+              "width": 206,
+              "height": 194
+            }
+          },
+          {
+            "text": "arch-1ready for agent · 17%Wire project overviewready_for_agenthub-guigithub#140",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 317,
+              "y": 221,
+              "width": 206,
+              "height": 153
+            }
+          },
+          {
+            "text": "arch-4blocked · 33%Blocked by dependencyblockedlocal onlyhub-guilocal onlyblocked by arch-1",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 549,
+              "y": 221,
+              "width": 206,
+              "height": 179
+            }
+          },
+          {
+            "text": "arch-3waiting for merge · 58%Awaiting mergewaiting_for_mergeActive claimclaim active · archloop/arch-3-awaiting-merge · run run-fixture-1claim activerun-fixture-1",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 781,
+              "y": 221,
+              "width": 206,
+              "height": 250
+            }
+          },
+          {
+            "text": "arch-2failed · 92%Recover stale claimfailedpush pendingrecoverypush pendingagent_failedrun-fixture-1",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 1013,
+              "y": 221,
+              "width": 206,
+              "height": 174
+            }
+          },
+          {
+            "text": "CLI only",
+            "aria": "",
+            "title": "Task store is already initialized.",
+            "disabled": true,
+            "rect": {
+              "x": 85,
+              "y": 1040,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "",
+            "title": "archloop tasks push",
+            "disabled": false,
+            "rect": {
+              "x": 85,
+              "y": 1199,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "Confirm",
+            "aria": "",
+            "title": "archloop tasks push",
+            "disabled": true,
+            "rect": {
+              "x": 172,
+              "y": 1199,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "",
+            "title": "archloop tasks pull",
+            "disabled": false,
+            "rect": {
+              "x": 85,
+              "y": 1358,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "Confirm",
+            "aria": "",
+            "title": "archloop tasks pull",
+            "disabled": true,
+            "rect": {
+              "x": 172,
+              "y": 1358,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Close",
+            "aria": "Close inspector",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 1356,
+              "y": 76,
+              "width": 72,
+              "height": 32
+            }
+          }
+        ],
+        "disabledButtonCount": 10,
+        "buttonCount": 27,
+        "headings": [
+          "1",
+          "Task Board",
+          "Task Board",
+          "Create Task",
+          "Run Triage",
+          "inbox",
+          "ready for agent",
+          "blocked",
+          "waiting for merge",
+          "failed",
+          "Initialize task store",
+          "Preview push",
+          "Preview pull",
+          "Selected details",
+          "Project",
+          "Selection"
+        ],
+        "overflowElements": []
+      }
+    },
+    {
+      "viewport": {
+        "name": "desktop",
+        "width": 1440,
+        "height": 900
+      },
+      "section": "run-workbench",
+      "screenshot": "/Users/yibeibankaishui/projects/ref/sandcastle/output/playwright/hub-run-workbench-desktop.png",
+      "metrics": {
+        "title": "Run Workbench",
+        "bodyScrollWidth": 1440,
+        "bodyClientWidth": 1440,
+        "root": {
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900,
+          "scrollWidth": 1440,
+          "scrollHeight": 900,
+          "clientWidth": 1440,
+          "clientHeight": 900
+        },
+        "shell": {
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900,
+          "scrollWidth": 1440,
+          "scrollHeight": 900,
+          "clientWidth": 1440,
+          "clientHeight": 900
+        },
+        "header": {
+          "x": 60,
+          "y": 0,
+          "width": 1380,
+          "height": 64,
+          "scrollWidth": 1380,
+          "scrollHeight": 63,
+          "clientWidth": 1380,
+          "clientHeight": 63
+        },
+        "rail": {
+          "x": 0,
+          "y": 0,
+          "width": 60,
+          "height": 900,
+          "scrollWidth": 59,
+          "scrollHeight": 900,
+          "clientWidth": 59,
+          "clientHeight": 900
+        },
+        "main": {
+          "x": 60,
+          "y": 64,
+          "width": 1380,
+          "height": 836,
+          "scrollWidth": 1380,
+          "scrollHeight": 848,
+          "clientWidth": 1380,
+          "clientHeight": 836
+        },
+        "buttons": [
+          {
+            "text": "Overview OV",
+            "aria": "",
+            "title": "Overview",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 56,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Task Board TB",
+            "aria": "",
+            "title": "Task Board",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 104,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Run Workbench RW",
+            "aria": "",
+            "title": "Run Workbench",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 152,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Proposal Session PS",
+            "aria": "",
+            "title": "Proposal Session",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 200,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Project",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 509,
+              "y": 21,
+              "width": 62,
+              "height": 22
+            }
+          },
+          {
+            "text": "Run",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 575,
+              "y": 21,
+              "width": 44,
+              "height": 22
+            }
+          },
+          {
+            "text": "Batch",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 623,
+              "y": 21,
+              "width": 55,
+              "height": 22
+            }
+          },
+          {
+            "text": "Sync",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 694,
+              "y": 6,
+              "width": 205,
+              "height": 32
+            }
+          },
+          {
+            "text": "Run Flow",
+            "aria": "Run Flow unavailable in desktop v0",
+            "title": "Use archloop run . --flow <id>",
+            "disabled": true,
+            "rect": {
+              "x": 907,
+              "y": 6,
+              "width": 255,
+              "height": 32
+            }
+          },
+          {
+            "text": "Show inspector",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 1170,
+              "y": 16,
+              "width": 134,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Notifications",
+            "title": "Notifications",
+            "disabled": true,
+            "rect": {
+              "x": 1312,
+              "y": 16,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Help",
+            "title": "Help",
+            "disabled": true,
+            "rect": {
+              "x": 1352,
+              "y": 16,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Account",
+            "title": "Account",
+            "disabled": true,
+            "rect": {
+              "x": 1392,
+              "y": 16,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "CLI only",
+            "aria": "Cancel Run unavailable in desktop v0",
+            "title": "",
+            "disabled": true,
+            "rect": {
+              "x": 102,
+              "y": 728,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "Preview Recover Task",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 545,
+              "y": 693,
+              "width": 79,
+              "height": 67
+            }
+          },
+          {
+            "text": "Confirm",
+            "aria": "Confirm Recover Task",
+            "title": "",
+            "disabled": true,
+            "rect": {
+              "x": 632,
+              "y": 693,
+              "width": 80,
+              "height": 67
+            }
+          },
+          {
+            "text": "CLI only",
+            "aria": "Resume Merge unavailable in desktop v0",
+            "title": "",
+            "disabled": true,
+            "rect": {
+              "x": 989,
+              "y": 702,
+              "width": 80,
+              "height": 58
+            }
+          },
+          {
+            "text": "Terminal Output",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 94,
+              "y": 816,
+              "width": 113,
+              "height": 25
+            }
+          },
+          {
+            "text": "JSONL Stream",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 211,
+              "y": 816,
+              "width": 105,
+              "height": 25
+            }
+          }
+        ],
+        "disabledButtonCount": 7,
+        "buttonCount": 19,
+        "headings": [
+          "1",
+          "Run Workbench",
+          "run-fixture-1 / batch-fixture-1",
+          "Stale claim metadata",
+          "Batch timeline focus",
+          "Stage timeline",
+          "Batch details",
+          "Run controls",
+          "Cancel Run",
+          "Recover Task",
+          "Resume Merge"
+        ],
+        "overflowElements": []
+      }
+    },
+    {
+      "viewport": {
+        "name": "desktop",
+        "width": 1440,
+        "height": 900
+      },
+      "section": "proposal-session",
+      "screenshot": "/Users/yibeibankaishui/projects/ref/sandcastle/output/playwright/hub-proposal-session-desktop.png",
+      "metrics": {
+        "title": "Proposal Session",
+        "bodyScrollWidth": 1440,
+        "bodyClientWidth": 1440,
+        "root": {
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900,
+          "scrollWidth": 1440,
+          "scrollHeight": 900,
+          "clientWidth": 1440,
+          "clientHeight": 900
+        },
+        "shell": {
+          "x": 0,
+          "y": 0,
+          "width": 1440,
+          "height": 900,
+          "scrollWidth": 1440,
+          "scrollHeight": 900,
+          "clientWidth": 1440,
+          "clientHeight": 900
+        },
+        "header": {
+          "x": 60,
+          "y": 0,
+          "width": 1380,
+          "height": 64,
+          "scrollWidth": 1380,
+          "scrollHeight": 63,
+          "clientWidth": 1380,
+          "clientHeight": 63
+        },
+        "rail": {
+          "x": 0,
+          "y": 0,
+          "width": 60,
+          "height": 900,
+          "scrollWidth": 59,
+          "scrollHeight": 900,
+          "clientWidth": 59,
+          "clientHeight": 900
+        },
+        "main": {
+          "x": 60,
+          "y": 64,
+          "width": 1000,
+          "height": 836,
+          "scrollWidth": 1000,
+          "scrollHeight": 848,
+          "clientWidth": 1000,
+          "clientHeight": 836
+        },
+        "inspector": {
+          "x": 1060,
+          "y": 64,
+          "width": 380,
+          "height": 836,
+          "scrollWidth": 379,
+          "scrollHeight": 836,
+          "clientWidth": 379,
+          "clientHeight": 836
+        },
+        "buttons": [
+          {
+            "text": "Overview OV",
+            "aria": "",
+            "title": "Overview",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 56,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Task Board TB",
+            "aria": "",
+            "title": "Task Board",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 104,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Run Workbench RW",
+            "aria": "",
+            "title": "Run Workbench",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 152,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Proposal Session PS",
+            "aria": "",
+            "title": "Proposal Session",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 200,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Project",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 515,
+              "y": 21,
+              "width": 62,
+              "height": 22
+            }
+          },
+          {
+            "text": "Run",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 581,
+              "y": 21,
+              "width": 44,
+              "height": 22
+            }
+          },
+          {
+            "text": "Batch",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 629,
+              "y": 21,
+              "width": 55,
+              "height": 22
+            }
+          },
+          {
+            "text": "Sync",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 700,
+              "y": 6,
+              "width": 205,
+              "height": 32
+            }
+          },
+          {
+            "text": "Run Flow",
+            "aria": "Run Flow unavailable in desktop v0",
+            "title": "Use archloop run . --flow <id>",
+            "disabled": true,
+            "rect": {
+              "x": 913,
+              "y": 6,
+              "width": 255,
+              "height": 32
+            }
+          },
+          {
+            "text": "Hide inspector",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 1176,
+              "y": 16,
+              "width": 128,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Notifications",
+            "title": "Notifications",
+            "disabled": true,
+            "rect": {
+              "x": 1312,
+              "y": 16,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Help",
+            "title": "Help",
+            "disabled": true,
+            "rect": {
+              "x": 1352,
+              "y": 16,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Account",
+            "title": "Account",
+            "disabled": true,
+            "rect": {
+              "x": 1392,
+              "y": 16,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "Reject",
+            "aria": "",
+            "title": "Desktop reject is not wired in v0. Re-open the proposal session with archloop tasks from-prd <ref> if you need to cancel or restart.",
+            "disabled": true,
+            "rect": {
+              "x": 467,
+              "y": 592,
+              "width": 208,
+              "height": 32
+            }
+          },
+          {
+            "text": "Revise",
+            "aria": "",
+            "title": "Desktop revise is not wired in v0. Re-open the proposal session with archloop tasks from-prd <ref> to refine it in the CLI.",
+            "disabled": true,
+            "rect": {
+              "x": 683,
+              "y": 592,
+              "width": 208,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "",
+            "title": "archloop tasks from-prd <ref>",
+            "disabled": false,
+            "rect": {
+              "x": 899,
+              "y": 797,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "Confirm",
+            "aria": "",
+            "title": "archloop tasks from-prd <ref>",
+            "disabled": true,
+            "rect": {
+              "x": 986,
+              "y": 797,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Close",
+            "aria": "Close inspector",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 1356,
+              "y": 76,
+              "width": 72,
+              "height": 32
+            }
+          }
+        ],
+        "disabledButtonCount": 7,
+        "buttonCount": 18,
+        "headings": [
+          "1",
+          "Proposal Session",
+          "Source document",
+          "Extracted requirement",
+          "Agent rationale",
+          "Proposed tasks",
+          "Build proposal session slice",
+          "Confirm Stitch alignment with maintainer",
+          "Worktree lease",
+          "Prepared context",
+          "Transcript",
+          "Final proposal",
+          "Apply result",
+          "Proposal events",
+          "Note",
+          "Proposal state",
+          "Approve & Apply to Beads",
+          "Selected details",
+          "Project",
+          "Selection"
+        ],
+        "overflowElements": []
+      }
+    },
+    {
+      "viewport": {
+        "name": "tablet",
+        "width": 1024,
+        "height": 768
+      },
+      "section": "overview",
+      "screenshot": "/Users/yibeibankaishui/projects/ref/sandcastle/output/playwright/hub-overview-tablet.png",
+      "metrics": {
+        "title": "Overview",
+        "bodyScrollWidth": 1024,
+        "bodyClientWidth": 1024,
+        "root": {
+          "x": 0,
+          "y": 0,
+          "width": 1024,
+          "height": 768,
+          "scrollWidth": 1024,
+          "scrollHeight": 768,
+          "clientWidth": 1024,
+          "clientHeight": 768
+        },
+        "shell": {
+          "x": 0,
+          "y": 0,
+          "width": 1024,
+          "height": 768,
+          "scrollWidth": 1024,
+          "scrollHeight": 768,
+          "clientWidth": 1024,
+          "clientHeight": 768
+        },
+        "header": {
+          "x": 60,
+          "y": 0,
+          "width": 964,
+          "height": 93,
+          "scrollWidth": 964,
+          "scrollHeight": 92,
+          "clientWidth": 964,
+          "clientHeight": 92
+        },
+        "rail": {
+          "x": 0,
+          "y": 0,
+          "width": 60,
+          "height": 768,
+          "scrollWidth": 59,
+          "scrollHeight": 768,
+          "clientWidth": 59,
+          "clientHeight": 768
+        },
+        "main": {
+          "x": 60,
+          "y": 93,
+          "width": 584,
+          "height": 675,
+          "scrollWidth": 1000,
+          "scrollHeight": 3125,
+          "clientWidth": 584,
+          "clientHeight": 675
+        },
+        "inspector": {
+          "x": 644,
+          "y": 93,
+          "width": 380,
+          "height": 675,
+          "scrollWidth": 379,
+          "scrollHeight": 675,
+          "clientWidth": 379,
+          "clientHeight": 675
+        },
+        "buttons": [
+          {
+            "text": "Overview OV",
+            "aria": "",
+            "title": "Overview",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 56,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Task Board TB",
+            "aria": "",
+            "title": "Task Board",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 104,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Run Workbench RW",
+            "aria": "",
+            "title": "Run Workbench",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 152,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Proposal Session PS",
+            "aria": "",
+            "title": "Proposal Session",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 200,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Project",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 313,
+              "y": 35,
+              "width": 62,
+              "height": 22
+            }
+          },
+          {
+            "text": "Run",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 379,
+              "y": 35,
+              "width": 44,
+              "height": 22
+            }
+          },
+          {
+            "text": "Batch",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 427,
+              "y": 35,
+              "width": 55,
+              "height": 22
+            }
+          },
+          {
+            "text": "Sync",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 540,
+              "y": 0,
+              "width": 205,
+              "height": 32
+            }
+          },
+          {
+            "text": "Run Flow",
+            "aria": "Run Flow unavailable in desktop v0",
+            "title": "Use archloop run . --flow <id>",
+            "disabled": true,
+            "rect": {
+              "x": 753,
+              "y": 0,
+              "width": 255,
+              "height": 32
+            }
+          },
+          {
+            "text": "Hide inspector",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 760,
+              "y": 60,
+              "width": 128,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Notifications",
+            "title": "Notifications",
+            "disabled": true,
+            "rect": {
+              "x": 896,
+              "y": 60,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Help",
+            "title": "Help",
+            "disabled": true,
+            "rect": {
+              "x": 936,
+              "y": 60,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Account",
+            "title": "Account",
+            "disabled": true,
+            "rect": {
+              "x": 976,
+              "y": 60,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "SYNC NOW",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 940,
+              "y": 122,
+              "width": 107,
+              "height": 32
+            }
+          },
+          {
+            "text": "CLI only",
+            "aria": "Initialize task store unavailable in desktop v0",
+            "title": "",
+            "disabled": true,
+            "rect": {
+              "x": 89,
+              "y": 1547,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "Preview Preview push",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 89,
+              "y": 1728,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "Preview Preview pull",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 89,
+              "y": 1909,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "CLI only",
+            "aria": "Review agent config unavailable in desktop v0",
+            "title": "",
+            "disabled": true,
+            "rect": {
+              "x": 89,
+              "y": 2178,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "Preview Recover arch-2",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 89,
+              "y": 2359,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "Flow batchrun-fixture-1 / batch-fixture-1mergingFlow batch merging with 1 task(s) on with-review.…/archloop-user-data/projects/fixture/runs/run-fixture-1",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 395,
+              "y": 329,
+              "width": 320,
+              "height": 163
+            }
+          },
+          {
+            "text": "Failed taskarch-2 · Recover stale claimDONEagent_failed detected. archloop tasks recover arch-2/tmp/archloop-user-data/projects/fixture",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 395,
+              "y": 499,
+              "width": 320,
+              "height": 132
+            }
+          },
+          {
+            "text": "Leasearch-2 · worktree lease stale with failed claimDONEWorktree lease is stale while task arch-2 remains failed.archloop/arch-2-recover-stale-claim",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 395,
+              "y": 639,
+              "width": 320,
+              "height": 135
+            }
+          },
+          {
+            "text": "ActivityEvent 1Activityrun run-fixture-1 started flow with-review/tmp/archloop-hub-fixture",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 395,
+              "y": 782,
+              "width": 320,
+              "height": 118
+            }
+          },
+          {
+            "text": "ActivityEvent 2Activitytask arch-3 claimed on branch archloop/arch-3-awaiting-merge/tmp/archloop-hub-fixture",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 395,
+              "y": 908,
+              "width": 320,
+              "height": 118
+            }
+          },
+          {
+            "text": "Generate Report",
+            "aria": "",
+            "title": "Generate a report from the CLI path in v0.",
+            "disabled": true,
+            "rect": {
+              "x": 674,
+              "y": 3097,
+              "width": 142,
+              "height": 32
+            }
+          },
+          {
+            "text": "View Repo Info",
+            "aria": "",
+            "title": "Open repo information from the CLI path in v0.",
+            "disabled": true,
+            "rect": {
+              "x": 824,
+              "y": 3097,
+              "width": 130,
+              "height": 32
+            }
+          },
+          {
+            "text": "Close",
+            "aria": "Close inspector",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 940,
+              "y": 105,
+              "width": 72,
+              "height": 32
+            }
+          }
+        ],
+        "disabledButtonCount": 8,
+        "buttonCount": 27,
+        "headings": [
+          "1",
+          "Overview",
+          "SYNC NOW",
+          "Hub project",
+          "System status",
+          "Status banners",
+          "Hub actions",
+          "Initialize task store",
+          "Preview push",
+          "Preview pull",
+          "Review agent config",
+          "Recover arch-2",
+          "Remote metadata",
+          "Activity timeline",
+          "run-fixture-1 / batch-fixture-1",
+          "arch-2 · Recover stale claim",
+          "arch-2 · worktree lease stale with failed claim",
+          "Event 1",
+          "Event 2",
+          "Lease inspector",
+          "Operational summary",
+          "Selected details",
+          "Project",
+          "Selection"
+        ],
+        "overflowElements": [
+          {
+            "className": "hub-panel hub-banner hub-overview-sync-banner hub-overview-span",
+            "text": "Project OverviewSYNC NOWRemote sync is preview-confirm gated. Local task metadata stays separate from remote task source",
+            "left": 76,
+            "right": 1060,
+            "width": 984
+          },
+          {
+            "className": "hub-overview-sync-controls",
+            "text": "SYNC NOW5 status bucket(s)1 ready",
+            "left": 866,
+            "right": 1047,
+            "width": 181
+          },
+          {
+            "className": "hub-overview-sync-action",
+            "text": "SYNC NOW",
+            "left": 940,
+            "right": 1047,
+            "width": 107
+          },
+          {
+            "className": "hub-button hub-focus-ring",
+            "text": "SYNC NOW",
+            "left": 940,
+            "right": 1047,
+            "width": 107
+          },
+          {
+            "className": "hub-overview-sync-summary",
+            "text": "5 status bucket(s)1 ready",
+            "left": 866,
+            "right": 1047,
+            "width": 181
+          },
+          {
+            "className": "hub-chip is-active",
+            "text": "5 status bucket(s)",
+            "left": 926,
+            "right": 1047,
+            "width": 121
+          },
+          {
+            "className": "hub-chip is-ready",
+            "text": "1 ready",
+            "left": 988,
+            "right": 1047,
+            "width": 59
+          },
+          {
+            "className": "hub-overview-grid",
+            "text": "Project healthHub projectregisteredRepo root/tmp/archloop-hub-fixturearchLoop user data/tmp/archloop-user-dataHub projec",
+            "left": 76,
+            "right": 1060,
+            "width": 984
+          },
+          {
+            "className": "hub-panel hub-overview-column hub-overview-right",
+            "text": "InspectorLease inspectorDONEarch-2 · worktree lease stale with failed claimWorktree lease is stale while task arch-2 rem",
+            "left": 740,
+            "right": 1060,
+            "width": 320
+          },
+          {
+            "className": "hub-overview-heading-row",
+            "text": "InspectorLease inspectorDONE",
+            "left": 753,
+            "right": 1047,
+            "width": 294
+          },
+          {
+            "className": "hub-chip is-ready",
+            "text": "DONE",
+            "left": 995,
+            "right": 1047,
+            "width": 52
+          },
+          {
+            "className": "hub-overview-inspector",
+            "text": "arch-2 · worktree lease stale with failed claimWorktree lease is stale while task arch-2 remains failed.Lease IDarchloop",
+            "left": 753,
+            "right": 1047,
+            "width": 294
+          },
+          {
+            "className": "hub-overview-inspector-card",
+            "text": "arch-2 · worktree lease stale with failed claimWorktree lease is stale while task arch-2 remains failed.",
+            "left": 753,
+            "right": 1047,
+            "width": 294
+          },
+          {
+            "className": "H3",
+            "text": "arch-2 · worktree lease stale with failed claim",
+            "left": 753,
+            "right": 1047,
+            "width": 294
+          },
+          {
+            "className": "hub-muted",
+            "text": "Worktree lease is stale while task arch-2 remains failed.",
+            "left": 753,
+            "right": 1047,
+            "width": 294
+          },
+          {
+            "className": "hub-kv hub-overview-kv",
+            "text": "Lease IDarchloop-arch-2-recover-stale-claimBrancharchloop/arch-2-recover-stale-claimLease statestaleClaim statestaleNext",
+            "left": 753,
+            "right": 1047,
+            "width": 294
+          },
+          {
+            "className": "DIV",
+            "text": "Lease IDarchloop-arch-2-recover-stale-claim",
+            "left": 753,
+            "right": 1047,
+            "width": 294
+          },
+          {
+            "className": "DT",
+            "text": "Lease ID",
+            "left": 753,
+            "right": 1047,
+            "width": 294
+          },
+          {
+            "className": "hub-mono",
+            "text": "archloop-arch-2-recover-stale-claim",
+            "left": 753,
+            "right": 1047,
+            "width": 294
+          },
+          {
+            "className": "DIV",
+            "text": "Brancharchloop/arch-2-recover-stale-claim",
+            "left": 753,
+            "right": 1047,
+            "width": 294
+          },
+          {
+            "className": "DT",
+            "text": "Branch",
+            "left": 753,
+            "right": 1047,
+            "width": 294
+          },
+          {
+            "className": "hub-mono",
+            "text": "archloop/arch-2-recover-stale-claim",
+            "left": 753,
+            "right": 1047,
+            "width": 294
+          },
+          {
+            "className": "DIV",
+            "text": "Lease statestale",
+            "left": 753,
+            "right": 1047,
+            "width": 294
+          },
+          {
+            "className": "DT",
+            "text": "Lease state",
+            "left": 753,
+            "right": 1047,
+            "width": 294
+          },
+          {
+            "className": "hub-mono",
+            "text": "stale",
+            "left": 753,
+            "right": 1047,
+            "width": 294
+          }
+        ]
+      }
+    },
+    {
+      "viewport": {
+        "name": "tablet",
+        "width": 1024,
+        "height": 768
+      },
+      "section": "task-board",
+      "screenshot": "/Users/yibeibankaishui/projects/ref/sandcastle/output/playwright/hub-task-board-tablet.png",
+      "metrics": {
+        "title": "Task Board",
+        "bodyScrollWidth": 1024,
+        "bodyClientWidth": 1024,
+        "root": {
+          "x": 0,
+          "y": 0,
+          "width": 1024,
+          "height": 768,
+          "scrollWidth": 1024,
+          "scrollHeight": 768,
+          "clientWidth": 1024,
+          "clientHeight": 768
+        },
+        "shell": {
+          "x": 0,
+          "y": 0,
+          "width": 1024,
+          "height": 768,
+          "scrollWidth": 1024,
+          "scrollHeight": 768,
+          "clientWidth": 1024,
+          "clientHeight": 768
+        },
+        "header": {
+          "x": 60,
+          "y": 0,
+          "width": 964,
+          "height": 93,
+          "scrollWidth": 964,
+          "scrollHeight": 92,
+          "clientWidth": 964,
+          "clientHeight": 92
+        },
+        "rail": {
+          "x": 0,
+          "y": 0,
+          "width": 60,
+          "height": 768,
+          "scrollWidth": 59,
+          "scrollHeight": 768,
+          "clientWidth": 59,
+          "clientHeight": 768
+        },
+        "main": {
+          "x": 60,
+          "y": 93,
+          "width": 584,
+          "height": 675,
+          "scrollWidth": 1327,
+          "scrollHeight": 684,
+          "clientWidth": 584,
+          "clientHeight": 675
+        },
+        "inspector": {
+          "x": 644,
+          "y": 93,
+          "width": 380,
+          "height": 675,
+          "scrollWidth": 379,
+          "scrollHeight": 675,
+          "clientWidth": 379,
+          "clientHeight": 675
+        },
+        "buttons": [
+          {
+            "text": "Overview OV",
+            "aria": "",
+            "title": "Overview",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 56,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Task Board TB",
+            "aria": "",
+            "title": "Task Board",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 104,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Run Workbench RW",
+            "aria": "",
+            "title": "Run Workbench",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 152,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Proposal Session PS",
+            "aria": "",
+            "title": "Proposal Session",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 200,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Project",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 313,
+              "y": 35,
+              "width": 62,
+              "height": 22
+            }
+          },
+          {
+            "text": "Run",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 379,
+              "y": 35,
+              "width": 44,
+              "height": 22
+            }
+          },
+          {
+            "text": "Batch",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 427,
+              "y": 35,
+              "width": 55,
+              "height": 22
+            }
+          },
+          {
+            "text": "Sync",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 540,
+              "y": 0,
+              "width": 205,
+              "height": 32
+            }
+          },
+          {
+            "text": "Run Flow",
+            "aria": "Run Flow unavailable in desktop v0",
+            "title": "Use archloop run . --flow <id>",
+            "disabled": true,
+            "rect": {
+              "x": 753,
+              "y": 0,
+              "width": 255,
+              "height": 32
+            }
+          },
+          {
+            "text": "Hide inspector",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 760,
+              "y": 60,
+              "width": 128,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Notifications",
+            "title": "Notifications",
+            "disabled": true,
+            "rect": {
+              "x": 896,
+              "y": 60,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Help",
+            "title": "Help",
+            "disabled": true,
+            "rect": {
+              "x": 936,
+              "y": 60,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Account",
+            "title": "Account",
+            "disabled": true,
+            "rect": {
+              "x": 976,
+              "y": 60,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "",
+            "title": "Enter a task title to preview the local Beads write.",
+            "disabled": true,
+            "rect": {
+              "x": 263,
+              "y": 380,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "Confirm",
+            "aria": "",
+            "title": "archloop tasks create --title <title>",
+            "disabled": true,
+            "rect": {
+              "x": 350,
+              "y": 380,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "CLI only",
+            "aria": "",
+            "title": "The desktop does not expose a triage proposal preview in v0. Use archloop tasks triage --query inbox,needs_info from the CLI.",
+            "disabled": true,
+            "rect": {
+              "x": 469,
+              "y": 380,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "arch-5inbox · 0%Remote-linked inbox taskinboxprd-warning-mediumprd mediumgithub#156run-proposal-fixture-1",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 85,
+              "y": 482,
+              "width": 282,
+              "height": 194
+            }
+          },
+          {
+            "text": "arch-1ready for agent · 17%Wire project overviewready_for_agenthub-guigithub#140",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 397,
+              "y": 482,
+              "width": 282,
+              "height": 153
+            }
+          },
+          {
+            "text": "arch-4blocked · 33%Blocked by dependencyblockedlocal onlyhub-guilocal onlyblocked by arch-1",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 709,
+              "y": 482,
+              "width": 282,
+              "height": 154
+            }
+          },
+          {
+            "text": "arch-3waiting for merge · 58%Awaiting mergewaiting_for_mergeActive claimclaim active · archloop/arch-3-awaiting-merge · run run-fixture-1claim activerun-fixture-1",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 1021,
+              "y": 482,
+              "width": 282,
+              "height": 210
+            }
+          },
+          {
+            "text": "arch-2failed · 92%Recover stale claimfailedpush pendingrecoverypush pendingagent_failedrun-fixture-1",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 1333,
+              "y": 482,
+              "width": 282,
+              "height": 174
+            }
+          },
+          {
+            "text": "CLI only",
+            "aria": "",
+            "title": "Task store is already initialized.",
+            "disabled": true,
+            "rect": {
+              "x": 85,
+              "y": 904,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "",
+            "title": "archloop tasks push",
+            "disabled": false,
+            "rect": {
+              "x": 85,
+              "y": 1063,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "Confirm",
+            "aria": "",
+            "title": "archloop tasks push",
+            "disabled": true,
+            "rect": {
+              "x": 172,
+              "y": 1063,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "",
+            "title": "archloop tasks pull",
+            "disabled": false,
+            "rect": {
+              "x": 85,
+              "y": 1222,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "Confirm",
+            "aria": "",
+            "title": "archloop tasks pull",
+            "disabled": true,
+            "rect": {
+              "x": 172,
+              "y": 1222,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Close",
+            "aria": "Close inspector",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 940,
+              "y": 105,
+              "width": 72,
+              "height": 32
+            }
+          }
+        ],
+        "disabledButtonCount": 10,
+        "buttonCount": 27,
+        "headings": [
+          "1",
+          "Task Board",
+          "Task Board",
+          "Create Task",
+          "Run Triage",
+          "inbox",
+          "ready for agent",
+          "blocked",
+          "waiting for merge",
+          "failed",
+          "Initialize task store",
+          "Preview push",
+          "Preview pull",
+          "Selected details",
+          "Project",
+          "Selection"
+        ],
+        "overflowElements": [
+          {
+            "className": "hub-task-board-action is-compact",
+            "text": "Run TriageThe desktop does not expose a triage proposal preview in v0. Use archloop tasks triage --query inbox,needs_inf",
+            "left": 469,
+            "right": 1387,
+            "width": 918
+          },
+          {
+            "className": "hub-task-board-action-copy",
+            "text": "Run TriageThe desktop does not expose a triage proposal preview in v0. Use archloop tasks triage --query inbox,needs_inf",
+            "left": 469,
+            "right": 1387,
+            "width": 918
+          },
+          {
+            "className": "hub-muted hub-action-compact-note",
+            "text": "The desktop does not expose a triage proposal preview in v0. Use archloop tasks triage --query inbox,needs_info from the",
+            "left": 469,
+            "right": 1387,
+            "width": 918
+          },
+          {
+            "className": "hub-task-board-action-controls",
+            "text": "CLI only",
+            "left": 469,
+            "right": 1387,
+            "width": 918
+          },
+          {
+            "className": "hub-board-column",
+            "text": "waiting for merge1arch-3waiting for merge · 58%Awaiting mergewaiting_for_mergeActive claimclaim active · archloop/arch-3",
+            "left": 1012,
+            "right": 1312,
+            "width": 300
+          },
+          {
+            "className": "hub-board-column-header",
+            "text": "waiting for merge1",
+            "left": 1021,
+            "right": 1303,
+            "width": 282
+          },
+          {
+            "className": "hub-mono hub-task-board-column-label",
+            "text": "waiting for merge",
+            "left": 1021,
+            "right": 1160,
+            "width": 139
+          },
+          {
+            "className": "hub-chip",
+            "text": "1",
+            "left": 1279,
+            "right": 1303,
+            "width": 24
+          },
+          {
+            "className": "hub-board-cards",
+            "text": "arch-3waiting for merge · 58%Awaiting mergewaiting_for_mergeActive claimclaim active · archloop/arch-3-awaiting-merge · ",
+            "left": 1021,
+            "right": 1303,
+            "width": 282
+          },
+          {
+            "className": "LI",
+            "text": "arch-3waiting for merge · 58%Awaiting mergewaiting_for_mergeActive claimclaim active · archloop/arch-3-awaiting-merge · ",
+            "left": 1021,
+            "right": 1303,
+            "width": 282
+          },
+          {
+            "className": "hub-card hub-focus-ring ",
+            "text": "arch-3waiting for merge · 58%Awaiting mergewaiting_for_mergeActive claimclaim active · archloop/arch-3-awaiting-merge · ",
+            "left": 1021,
+            "right": 1303,
+            "width": 282
+          },
+          {
+            "className": "hub-card-topline",
+            "text": "arch-3waiting for merge · 58%",
+            "left": 1030,
+            "right": 1294,
+            "width": 264
+          },
+          {
+            "className": "hub-mono hub-card-id",
+            "text": "arch-3",
+            "left": 1030,
+            "right": 1073,
+            "width": 43
+          },
+          {
+            "className": "hub-chip hub-card-progress-chip",
+            "text": "waiting for merge · 58%",
+            "left": 1151,
+            "right": 1294,
+            "width": 143
+          },
+          {
+            "className": "hub-card-title",
+            "text": "Awaiting merge",
+            "left": 1030,
+            "right": 1294,
+            "width": 264
+          },
+          {
+            "className": "hub-card-progress",
+            "text": "",
+            "left": 1030,
+            "right": 1294,
+            "width": 264
+          },
+          {
+            "className": "hub-card-progress-fill hub-status-waiting_for_merge",
+            "text": "",
+            "left": 1030,
+            "right": 1183,
+            "width": 153
+          },
+          {
+            "className": "hub-card-meta-row",
+            "text": "waiting_for_merge",
+            "left": 1030,
+            "right": 1294,
+            "width": 264
+          },
+          {
+            "className": "hub-status hub-status-waiting_for_merge",
+            "text": "waiting_for_merge",
+            "left": 1030,
+            "right": 1154,
+            "width": 124
+          },
+          {
+            "className": "hub-card-claim-row",
+            "text": "Active claimclaim active · archloop/arch-3-awaiting-merge · run run-fixture-1",
+            "left": 1030,
+            "right": 1294,
+            "width": 264
+          },
+          {
+            "className": "hub-eyebrow",
+            "text": "Active claim",
+            "left": 1039,
+            "right": 1285,
+            "width": 246
+          },
+          {
+            "className": "hub-mono",
+            "text": "claim active · archloop/arch-3-awaiting-merge · run run-fixture-1",
+            "left": 1039,
+            "right": 1285,
+            "width": 246
+          },
+          {
+            "className": "hub-card-markers",
+            "text": "claim active",
+            "left": 1030,
+            "right": 1294,
+            "width": 264
+          },
+          {
+            "className": "hub-chip is-active",
+            "text": "claim active",
+            "left": 1030,
+            "right": 1115,
+            "width": 85
+          },
+          {
+            "className": "hub-mono hub-muted",
+            "text": "run-fixture-1",
+            "left": 1030,
+            "right": 1294,
+            "width": 264
+          }
+        ]
+      }
+    },
+    {
+      "viewport": {
+        "name": "tablet",
+        "width": 1024,
+        "height": 768
+      },
+      "section": "run-workbench",
+      "screenshot": "/Users/yibeibankaishui/projects/ref/sandcastle/output/playwright/hub-run-workbench-tablet.png",
+      "metrics": {
+        "title": "Run Workbench",
+        "bodyScrollWidth": 1024,
+        "bodyClientWidth": 1024,
+        "root": {
+          "x": 0,
+          "y": 0,
+          "width": 1024,
+          "height": 768,
+          "scrollWidth": 1024,
+          "scrollHeight": 768,
+          "clientWidth": 1024,
+          "clientHeight": 768
+        },
+        "shell": {
+          "x": 0,
+          "y": 0,
+          "width": 1024,
+          "height": 768,
+          "scrollWidth": 1024,
+          "scrollHeight": 768,
+          "clientWidth": 1024,
+          "clientHeight": 768
+        },
+        "header": {
+          "x": 60,
+          "y": 0,
+          "width": 964,
+          "height": 93,
+          "scrollWidth": 964,
+          "scrollHeight": 92,
+          "clientWidth": 964,
+          "clientHeight": 92
+        },
+        "rail": {
+          "x": 0,
+          "y": 0,
+          "width": 60,
+          "height": 768,
+          "scrollWidth": 59,
+          "scrollHeight": 768,
+          "clientWidth": 59,
+          "clientHeight": 768
+        },
+        "main": {
+          "x": 60,
+          "y": 93,
+          "width": 964,
+          "height": 675,
+          "scrollWidth": 964,
+          "scrollHeight": 2847,
+          "clientWidth": 964,
+          "clientHeight": 675
+        },
+        "buttons": [
+          {
+            "text": "Overview OV",
+            "aria": "",
+            "title": "Overview",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 56,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Task Board TB",
+            "aria": "",
+            "title": "Task Board",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 104,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Run Workbench RW",
+            "aria": "",
+            "title": "Run Workbench",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 152,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Proposal Session PS",
+            "aria": "",
+            "title": "Proposal Session",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 200,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Project",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 313,
+              "y": 35,
+              "width": 62,
+              "height": 22
+            }
+          },
+          {
+            "text": "Run",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 379,
+              "y": 35,
+              "width": 44,
+              "height": 22
+            }
+          },
+          {
+            "text": "Batch",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 427,
+              "y": 35,
+              "width": 55,
+              "height": 22
+            }
+          },
+          {
+            "text": "Sync",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 540,
+              "y": 0,
+              "width": 205,
+              "height": 32
+            }
+          },
+          {
+            "text": "Run Flow",
+            "aria": "Run Flow unavailable in desktop v0",
+            "title": "Use archloop run . --flow <id>",
+            "disabled": true,
+            "rect": {
+              "x": 753,
+              "y": 0,
+              "width": 255,
+              "height": 32
+            }
+          },
+          {
+            "text": "Show inspector",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 754,
+              "y": 60,
+              "width": 134,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Notifications",
+            "title": "Notifications",
+            "disabled": true,
+            "rect": {
+              "x": 896,
+              "y": 60,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Help",
+            "title": "Help",
+            "disabled": true,
+            "rect": {
+              "x": 936,
+              "y": 60,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Account",
+            "title": "Account",
+            "disabled": true,
+            "rect": {
+              "x": 976,
+              "y": 60,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "CLI only",
+            "aria": "Cancel Run unavailable in desktop v0",
+            "title": "",
+            "disabled": true,
+            "rect": {
+              "x": 102,
+              "y": 2514,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "Preview Recover Task",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 102,
+              "y": 2690,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "Confirm",
+            "aria": "Confirm Recover Task",
+            "title": "",
+            "disabled": true,
+            "rect": {
+              "x": 189,
+              "y": 2690,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "CLI only",
+            "aria": "Resume Merge unavailable in desktop v0",
+            "title": "",
+            "disabled": true,
+            "rect": {
+              "x": 102,
+              "y": 2866,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Terminal Output",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 94,
+              "y": 507,
+              "width": 113,
+              "height": 25
+            }
+          },
+          {
+            "text": "JSONL Stream",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 211,
+              "y": 507,
+              "width": 105,
+              "height": 25
+            }
+          }
+        ],
+        "disabledButtonCount": 7,
+        "buttonCount": 19,
+        "headings": [
+          "1",
+          "Run Workbench",
+          "run-fixture-1 / batch-fixture-1",
+          "Stale claim metadata",
+          "Batch timeline focus",
+          "Stage timeline",
+          "Batch details",
+          "Run controls",
+          "Cancel Run",
+          "Recover Task",
+          "Resume Merge"
+        ],
+        "overflowElements": []
+      }
+    },
+    {
+      "viewport": {
+        "name": "tablet",
+        "width": 1024,
+        "height": 768
+      },
+      "section": "proposal-session",
+      "screenshot": "/Users/yibeibankaishui/projects/ref/sandcastle/output/playwright/hub-proposal-session-tablet.png",
+      "metrics": {
+        "title": "Proposal Session",
+        "bodyScrollWidth": 1024,
+        "bodyClientWidth": 1024,
+        "root": {
+          "x": 0,
+          "y": 0,
+          "width": 1024,
+          "height": 768,
+          "scrollWidth": 1024,
+          "scrollHeight": 768,
+          "clientWidth": 1024,
+          "clientHeight": 768
+        },
+        "shell": {
+          "x": 0,
+          "y": 0,
+          "width": 1024,
+          "height": 768,
+          "scrollWidth": 1024,
+          "scrollHeight": 768,
+          "clientWidth": 1024,
+          "clientHeight": 768
+        },
+        "header": {
+          "x": 60,
+          "y": 0,
+          "width": 964,
+          "height": 93,
+          "scrollWidth": 964,
+          "scrollHeight": 92,
+          "clientWidth": 964,
+          "clientHeight": 92
+        },
+        "rail": {
+          "x": 0,
+          "y": 0,
+          "width": 60,
+          "height": 768,
+          "scrollWidth": 59,
+          "scrollHeight": 768,
+          "clientWidth": 59,
+          "clientHeight": 768
+        },
+        "main": {
+          "x": 60,
+          "y": 93,
+          "width": 584,
+          "height": 675,
+          "scrollWidth": 1060,
+          "scrollHeight": 1483,
+          "clientWidth": 584,
+          "clientHeight": 675
+        },
+        "inspector": {
+          "x": 644,
+          "y": 93,
+          "width": 380,
+          "height": 675,
+          "scrollWidth": 379,
+          "scrollHeight": 675,
+          "clientWidth": 379,
+          "clientHeight": 675
+        },
+        "buttons": [
+          {
+            "text": "Overview OV",
+            "aria": "",
+            "title": "Overview",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 56,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Task Board TB",
+            "aria": "",
+            "title": "Task Board",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 104,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Run Workbench RW",
+            "aria": "",
+            "title": "Run Workbench",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 152,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Proposal Session PS",
+            "aria": "",
+            "title": "Proposal Session",
+            "disabled": false,
+            "rect": {
+              "x": 8,
+              "y": 200,
+              "width": 43,
+              "height": 40
+            }
+          },
+          {
+            "text": "Project",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 313,
+              "y": 35,
+              "width": 62,
+              "height": 22
+            }
+          },
+          {
+            "text": "Run",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 379,
+              "y": 35,
+              "width": 44,
+              "height": 22
+            }
+          },
+          {
+            "text": "Batch",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 427,
+              "y": 35,
+              "width": 55,
+              "height": 22
+            }
+          },
+          {
+            "text": "Sync",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 540,
+              "y": 0,
+              "width": 205,
+              "height": 32
+            }
+          },
+          {
+            "text": "Run Flow",
+            "aria": "Run Flow unavailable in desktop v0",
+            "title": "Use archloop run . --flow <id>",
+            "disabled": true,
+            "rect": {
+              "x": 753,
+              "y": 0,
+              "width": 255,
+              "height": 32
+            }
+          },
+          {
+            "text": "Hide inspector",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 760,
+              "y": 60,
+              "width": 128,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Notifications",
+            "title": "Notifications",
+            "disabled": true,
+            "rect": {
+              "x": 896,
+              "y": 60,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Help",
+            "title": "Help",
+            "disabled": true,
+            "rect": {
+              "x": 936,
+              "y": 60,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Account",
+            "title": "Account",
+            "disabled": true,
+            "rect": {
+              "x": 976,
+              "y": 60,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "Reject",
+            "aria": "",
+            "title": "Desktop reject is not wired in v0. Re-open the proposal session with archloop tasks from-prd <ref> if you need to cancel or restart.",
+            "disabled": true,
+            "rect": {
+              "x": 467,
+              "y": 1268,
+              "width": 208,
+              "height": 32
+            }
+          },
+          {
+            "text": "Revise",
+            "aria": "",
+            "title": "Desktop revise is not wired in v0. Re-open the proposal session with archloop tasks from-prd <ref> to refine it in the CLI.",
+            "disabled": true,
+            "rect": {
+              "x": 683,
+              "y": 1268,
+              "width": 208,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "",
+            "title": "archloop tasks from-prd <ref>",
+            "disabled": false,
+            "rect": {
+              "x": 899,
+              "y": 1473,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "Confirm",
+            "aria": "",
+            "title": "archloop tasks from-prd <ref>",
+            "disabled": true,
+            "rect": {
+              "x": 986,
+              "y": 1473,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Close",
+            "aria": "Close inspector",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 940,
+              "y": 105,
+              "width": 72,
+              "height": 32
+            }
+          }
+        ],
+        "disabledButtonCount": 7,
+        "buttonCount": 18,
+        "headings": [
+          "1",
+          "Proposal Session",
+          "Source document",
+          "Extracted requirement",
+          "Agent rationale",
+          "Proposed tasks",
+          "Build proposal session slice",
+          "Confirm Stitch alignment with maintainer",
+          "Worktree lease",
+          "Prepared context",
+          "Transcript",
+          "Final proposal",
+          "Apply result",
+          "Proposal events",
+          "Note",
+          "Proposal state",
+          "Approve & Apply to Beads",
+          "Selected details",
+          "Project",
+          "Selection"
+        ],
+        "overflowElements": [
+          {
+            "className": "hub-panel hub-proposal-pane hub-proposal-inspector-pane",
+            "text": "InspectorWorktree leaserun-proposal-fixture-1Worktree leaseproposal/prd-decomposition · run run-proposal-fixture-1Local ",
+            "left": 820,
+            "right": 1120,
+            "width": 300
+          },
+          {
+            "className": "hub-proposal-pane-header",
+            "text": "InspectorWorktree leaserun-proposal-fixture-1",
+            "left": 833,
+            "right": 1107,
+            "width": 274
+          },
+          {
+            "className": "CODE",
+            "text": "run-proposal-fixture-1",
+            "left": 954,
+            "right": 1107,
+            "width": 153
+          },
+          {
+            "className": "hub-kv hub-proposal-inspector-kv",
+            "text": "Worktree leaseproposal/prd-decomposition · run run-proposal-fixture-1Local writesLocal Beads writes only. Remote GitHub ",
+            "left": 833,
+            "right": 1107,
+            "width": 274
+          },
+          {
+            "className": "DIV",
+            "text": "Worktree leaseproposal/prd-decomposition · run run-proposal-fixture-1",
+            "left": 833,
+            "right": 1107,
+            "width": 274
+          },
+          {
+            "className": "DT",
+            "text": "Worktree lease",
+            "left": 833,
+            "right": 1107,
+            "width": 274
+          },
+          {
+            "className": "DD",
+            "text": "proposal/prd-decomposition · run run-proposal-fixture-1",
+            "left": 833,
+            "right": 1107,
+            "width": 274
+          },
+          {
+            "className": "DIV",
+            "text": "Local writesLocal Beads writes only. Remote GitHub sync stays separate.",
+            "left": 833,
+            "right": 1107,
+            "width": 274
+          },
+          {
+            "className": "DT",
+            "text": "Local writes",
+            "left": 833,
+            "right": 1107,
+            "width": 274
+          },
+          {
+            "className": "DD",
+            "text": "Local Beads writes only. Remote GitHub sync stays separate.",
+            "left": 833,
+            "right": 1107,
+            "width": 274
+          },
+          {
+            "className": "DIV",
+            "text": "Agent log…/logs/prd-decomposition-finalization.log",
+            "left": 833,
+            "right": 1107,
+            "width": 274
+          },
+          {
+            "className": "DT",
+            "text": "Agent log",
+            "left": 833,
+            "right": 1107,
+            "width": 274
+          },
+          {
+            "className": "hub-mono",
+            "text": "…/logs/prd-decomposition-finalization.log",
+            "left": 833,
+            "right": 1107,
+            "width": 274
+          },
+          {
+            "className": "DIV",
+            "text": "IDrun-proposal-fixture-1",
+            "left": 833,
+            "right": 1107,
+            "width": 274
+          },
+          {
+            "className": "DT",
+            "text": "ID",
+            "left": 833,
+            "right": 1107,
+            "width": 274
+          },
+          {
+            "className": "hub-mono",
+            "text": "run-proposal-fixture-1",
+            "left": 833,
+            "right": 1107,
+            "width": 274
+          },
+          {
+            "className": "hub-proposal-artifacts",
+            "text": "ArtifactsPrepared context…/run-proposal-fixture-1/artifacts/prepared-context.jsonTranscript…/runs/run-proposal-fixture-1",
+            "left": 833,
+            "right": 1107,
+            "width": 274
+          },
+          {
+            "className": "hub-run-subheading",
+            "text": "Artifacts",
+            "left": 833,
+            "right": 1107,
+            "width": 274
+          },
+          {
+            "className": "hub-list",
+            "text": "Prepared context…/run-proposal-fixture-1/artifacts/prepared-context.jsonTranscript…/runs/run-proposal-fixture-1/artifact",
+            "left": 833,
+            "right": 1107,
+            "width": 274
+          },
+          {
+            "className": "LI",
+            "text": "Prepared context…/run-proposal-fixture-1/artifacts/prepared-context.json",
+            "left": 851,
+            "right": 1107,
+            "width": 256
+          },
+          {
+            "className": "CODE",
+            "text": "…/run-proposal-fixture-1/artifacts/prepared-context.json",
+            "left": 851,
+            "right": 1089,
+            "width": 238
+          },
+          {
+            "className": "LI",
+            "text": "Transcript…/runs/run-proposal-fixture-1/artifacts/transcript.json",
+            "left": 851,
+            "right": 1107,
+            "width": 256
+          },
+          {
+            "className": "CODE",
+            "text": "…/runs/run-proposal-fixture-1/artifacts/transcript.json",
+            "left": 851,
+            "right": 1053,
+            "width": 202
+          },
+          {
+            "className": "LI",
+            "text": "Final proposal…/run-proposal-fixture-1/artifacts/final-proposal.json",
+            "left": 851,
+            "right": 1107,
+            "width": 256
+          },
+          {
+            "className": "CODE",
+            "text": "…/run-proposal-fixture-1/artifacts/final-proposal.json",
+            "left": 851,
+            "right": 1074,
+            "width": 223
+          }
+        ]
+      }
+    },
+    {
+      "viewport": {
+        "name": "mobile",
+        "width": 390,
+        "height": 844
+      },
+      "section": "initial-inspector-drawer",
+      "screenshot": "/Users/yibeibankaishui/projects/ref/sandcastle/output/playwright/hub-initial-inspector-drawer-mobile.png",
+      "metrics": {
+        "note": "Inspector drawer is open on initial narrow viewport load."
+      }
+    },
+    {
+      "viewport": {
+        "name": "mobile",
+        "width": 390,
+        "height": 844
+      },
+      "section": "overview",
+      "screenshot": "/Users/yibeibankaishui/projects/ref/sandcastle/output/playwright/hub-overview-mobile.png",
+      "metrics": {
+        "title": "Overview",
+        "bodyScrollWidth": 390,
+        "bodyClientWidth": 390,
+        "root": {
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 844,
+          "scrollWidth": 390,
+          "scrollHeight": 844,
+          "clientWidth": 390,
+          "clientHeight": 844
+        },
+        "shell": {
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 844,
+          "scrollWidth": 390,
+          "scrollHeight": 844,
+          "clientWidth": 390,
+          "clientHeight": 844
+        },
+        "header": {
+          "x": 0,
+          "y": 0,
+          "width": 307,
+          "height": 287,
+          "scrollWidth": 307,
+          "scrollHeight": 286,
+          "clientWidth": 307,
+          "clientHeight": 286
+        },
+        "rail": {
+          "x": 307,
+          "y": 518,
+          "width": 84,
+          "height": 326,
+          "scrollWidth": 83,
+          "scrollHeight": 326,
+          "clientWidth": 83,
+          "clientHeight": 326
+        },
+        "main": {
+          "x": 0,
+          "y": 287,
+          "width": 307,
+          "height": 231,
+          "scrollWidth": 307,
+          "scrollHeight": 4933,
+          "clientWidth": 307,
+          "clientHeight": 231
+        },
+        "buttons": [
+          {
+            "text": "Overview OV",
+            "aria": "",
+            "title": "Overview",
+            "disabled": false,
+            "rect": {
+              "x": 315,
+              "y": 574,
+              "width": 67,
+              "height": 40
+            }
+          },
+          {
+            "text": "Task Board TB",
+            "aria": "",
+            "title": "Task Board",
+            "disabled": false,
+            "rect": {
+              "x": 315,
+              "y": 622,
+              "width": 67,
+              "height": 40
+            }
+          },
+          {
+            "text": "Run Workbench RW",
+            "aria": "",
+            "title": "Run Workbench",
+            "disabled": false,
+            "rect": {
+              "x": 315,
+              "y": 670,
+              "width": 67,
+              "height": 40
+            }
+          },
+          {
+            "text": "Proposal Session PS",
+            "aria": "",
+            "title": "Proposal Session",
+            "disabled": false,
+            "rect": {
+              "x": 315,
+              "y": 718,
+              "width": 67,
+              "height": 40
+            }
+          },
+          {
+            "text": "Project",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 21,
+              "y": 88,
+              "width": 62,
+              "height": 22
+            }
+          },
+          {
+            "text": "Run",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 87,
+              "y": 88,
+              "width": 44,
+              "height": 22
+            }
+          },
+          {
+            "text": "Batch",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 135,
+              "y": 88,
+              "width": 55,
+              "height": 22
+            }
+          },
+          {
+            "text": "Sync",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 16,
+              "y": 127,
+              "width": 205,
+              "height": 32
+            }
+          },
+          {
+            "text": "Run Flow",
+            "aria": "Run Flow unavailable in desktop v0",
+            "title": "Use archloop run . --flow <id>",
+            "disabled": true,
+            "rect": {
+              "x": 16,
+              "y": 187,
+              "width": 255,
+              "height": 32
+            }
+          },
+          {
+            "text": "Open inspector",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 16,
+              "y": 246,
+              "width": 134,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Notifications",
+            "title": "Notifications",
+            "disabled": true,
+            "rect": {
+              "x": 158,
+              "y": 246,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Help",
+            "title": "Help",
+            "disabled": true,
+            "rect": {
+              "x": 198,
+              "y": 246,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Account",
+            "title": "Account",
+            "disabled": true,
+            "rect": {
+              "x": 238,
+              "y": 246,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "SYNC NOW",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 25,
+              "y": 483,
+              "width": 107,
+              "height": 32
+            }
+          },
+          {
+            "text": "CLI only",
+            "aria": "Initialize task store unavailable in desktop v0",
+            "title": "",
+            "disabled": true,
+            "rect": {
+              "x": 25,
+              "y": 1966,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "Preview Preview push",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 25,
+              "y": 2147,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "Preview Preview pull",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 25,
+              "y": 2328,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "CLI only",
+            "aria": "Review agent config unavailable in desktop v0",
+            "title": "",
+            "disabled": true,
+            "rect": {
+              "x": 25,
+              "y": 2597,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "Preview Recover arch-2",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 25,
+              "y": 2778,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "Flow batchrun-fixture-1 / batch-fixture-1mergingFlow batch merging with 1 task(s) on with-review.…/archloop-user-data/projects/fixture/runs/run-fixture-1",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 39,
+              "y": 3563,
+              "width": 243,
+              "height": 163
+            }
+          },
+          {
+            "text": "Failed taskarch-2 · Recover stale claimDONEagent_failed detected. archloop tasks recover arch-2/tmp/archloop-user-data/projects/fixture",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 39,
+              "y": 3733,
+              "width": 243,
+              "height": 167
+            }
+          },
+          {
+            "text": "Leasearch-2 · worktree lease stale with failed claimDONEWorktree lease is stale while task arch-2 remains failed.archloop/arch-2-recover-stale-claim",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 39,
+              "y": 3908,
+              "width": 243,
+              "height": 183
+            }
+          },
+          {
+            "text": "ActivityEvent 1Activityrun run-fixture-1 started flow with-review/tmp/archloop-hub-fixture",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 39,
+              "y": 4099,
+              "width": 243,
+              "height": 118
+            }
+          },
+          {
+            "text": "ActivityEvent 2Activitytask arch-3 claimed on branch archloop/arch-3-awaiting-merge/tmp/archloop-hub-fixture",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 39,
+              "y": 4225,
+              "width": 243,
+              "height": 136
+            }
+          },
+          {
+            "text": "Generate Report",
+            "aria": "",
+            "title": "Generate a report from the CLI path in v0.",
+            "disabled": true,
+            "rect": {
+              "x": 25,
+              "y": 5123,
+              "width": 142,
+              "height": 32
+            }
+          },
+          {
+            "text": "View Repo Info",
+            "aria": "",
+            "title": "Open repo information from the CLI path in v0.",
+            "disabled": true,
+            "rect": {
+              "x": 25,
+              "y": 5163,
+              "width": 130,
+              "height": 32
+            }
+          }
+        ],
+        "disabledButtonCount": 8,
+        "buttonCount": 26,
+        "headings": [
+          "1",
+          "Overview",
+          "SYNC NOW",
+          "Hub project",
+          "System status",
+          "Status banners",
+          "Hub actions",
+          "Initialize task store",
+          "Preview push",
+          "Preview pull",
+          "Review agent config",
+          "Recover arch-2",
+          "Remote metadata",
+          "Activity timeline",
+          "run-fixture-1 / batch-fixture-1",
+          "arch-2 · Recover stale claim",
+          "arch-2 · worktree lease stale with failed claim",
+          "Event 1",
+          "Event 2",
+          "Lease inspector",
+          "Operational summary"
+        ],
+        "overflowElements": []
+      }
+    },
+    {
+      "viewport": {
+        "name": "mobile",
+        "width": 390,
+        "height": 844
+      },
+      "section": "task-board",
+      "screenshot": "/Users/yibeibankaishui/projects/ref/sandcastle/output/playwright/hub-task-board-mobile.png",
+      "metrics": {
+        "title": "Task Board",
+        "bodyScrollWidth": 390,
+        "bodyClientWidth": 390,
+        "root": {
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 844,
+          "scrollWidth": 390,
+          "scrollHeight": 844,
+          "clientWidth": 390,
+          "clientHeight": 844
+        },
+        "shell": {
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 844,
+          "scrollWidth": 390,
+          "scrollHeight": 844,
+          "clientWidth": 390,
+          "clientHeight": 844
+        },
+        "header": {
+          "x": 0,
+          "y": 0,
+          "width": 307,
+          "height": 287,
+          "scrollWidth": 307,
+          "scrollHeight": 286,
+          "clientWidth": 307,
+          "clientHeight": 286
+        },
+        "rail": {
+          "x": 307,
+          "y": 518,
+          "width": 84,
+          "height": 326,
+          "scrollWidth": 83,
+          "scrollHeight": 326,
+          "clientWidth": 83,
+          "clientHeight": 326
+        },
+        "main": {
+          "x": 0,
+          "y": 287,
+          "width": 307,
+          "height": 231,
+          "scrollWidth": 970,
+          "scrollHeight": 973,
+          "clientWidth": 307,
+          "clientHeight": 231
+        },
+        "buttons": [
+          {
+            "text": "Overview OV",
+            "aria": "",
+            "title": "Overview",
+            "disabled": false,
+            "rect": {
+              "x": 315,
+              "y": 574,
+              "width": 67,
+              "height": 40
+            }
+          },
+          {
+            "text": "Task Board TB",
+            "aria": "",
+            "title": "Task Board",
+            "disabled": false,
+            "rect": {
+              "x": 315,
+              "y": 622,
+              "width": 67,
+              "height": 40
+            }
+          },
+          {
+            "text": "Run Workbench RW",
+            "aria": "",
+            "title": "Run Workbench",
+            "disabled": false,
+            "rect": {
+              "x": 315,
+              "y": 670,
+              "width": 67,
+              "height": 40
+            }
+          },
+          {
+            "text": "Proposal Session PS",
+            "aria": "",
+            "title": "Proposal Session",
+            "disabled": false,
+            "rect": {
+              "x": 315,
+              "y": 718,
+              "width": 67,
+              "height": 40
+            }
+          },
+          {
+            "text": "Project",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 21,
+              "y": 88,
+              "width": 62,
+              "height": 22
+            }
+          },
+          {
+            "text": "Run",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 87,
+              "y": 88,
+              "width": 44,
+              "height": 22
+            }
+          },
+          {
+            "text": "Batch",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 135,
+              "y": 88,
+              "width": 55,
+              "height": 22
+            }
+          },
+          {
+            "text": "Sync",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 16,
+              "y": 127,
+              "width": 205,
+              "height": 32
+            }
+          },
+          {
+            "text": "Run Flow",
+            "aria": "Run Flow unavailable in desktop v0",
+            "title": "Use archloop run . --flow <id>",
+            "disabled": true,
+            "rect": {
+              "x": 16,
+              "y": 187,
+              "width": 255,
+              "height": 32
+            }
+          },
+          {
+            "text": "Open inspector",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 16,
+              "y": 246,
+              "width": 134,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Notifications",
+            "title": "Notifications",
+            "disabled": true,
+            "rect": {
+              "x": 158,
+              "y": 246,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Help",
+            "title": "Help",
+            "disabled": true,
+            "rect": {
+              "x": 198,
+              "y": 246,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Account",
+            "title": "Account",
+            "disabled": true,
+            "rect": {
+              "x": 238,
+              "y": 246,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "",
+            "title": "Enter a task title to preview the local Beads write.",
+            "disabled": true,
+            "rect": {
+              "x": 602,
+              "y": 755,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "Confirm",
+            "aria": "",
+            "title": "archloop tasks create --title <title>",
+            "disabled": true,
+            "rect": {
+              "x": 689,
+              "y": 755,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "CLI only",
+            "aria": "",
+            "title": "The desktop does not expose a triage proposal preview in v0. Use archloop tasks triage --query inbox,needs_info from the CLI.",
+            "disabled": true,
+            "rect": {
+              "x": 32,
+              "y": 868,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "arch-5inbox · 0%Remote-linked inbox taskinboxprd-warning-mediumprd mediumgithub#156run-proposal-fixture-1",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 21,
+              "y": 970,
+              "width": 282,
+              "height": 194
+            }
+          },
+          {
+            "text": "arch-1ready for agent · 17%Wire project overviewready_for_agenthub-guigithub#140",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 333,
+              "y": 970,
+              "width": 282,
+              "height": 153
+            }
+          },
+          {
+            "text": "arch-4blocked · 33%Blocked by dependencyblockedlocal onlyhub-guilocal onlyblocked by arch-1",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 645,
+              "y": 970,
+              "width": 282,
+              "height": 154
+            }
+          },
+          {
+            "text": "arch-3waiting for merge · 58%Awaiting mergewaiting_for_mergeActive claimclaim active · archloop/arch-3-awaiting-merge · run run-fixture-1claim activerun-fixture-1",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 957,
+              "y": 970,
+              "width": 282,
+              "height": 210
+            }
+          },
+          {
+            "text": "arch-2failed · 92%Recover stale claimfailedpush pendingrecoverypush pendingagent_failedrun-fixture-1",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 1269,
+              "y": 970,
+              "width": 282,
+              "height": 174
+            }
+          },
+          {
+            "text": "CLI only",
+            "aria": "",
+            "title": "Task store is already initialized.",
+            "disabled": true,
+            "rect": {
+              "x": 21,
+              "y": 1392,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "",
+            "title": "archloop tasks push",
+            "disabled": false,
+            "rect": {
+              "x": 21,
+              "y": 1551,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "Confirm",
+            "aria": "",
+            "title": "archloop tasks push",
+            "disabled": true,
+            "rect": {
+              "x": 108,
+              "y": 1551,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "",
+            "title": "archloop tasks pull",
+            "disabled": false,
+            "rect": {
+              "x": 21,
+              "y": 1710,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "Confirm",
+            "aria": "",
+            "title": "archloop tasks pull",
+            "disabled": true,
+            "rect": {
+              "x": 108,
+              "y": 1710,
+              "width": 80,
+              "height": 32
+            }
+          }
+        ],
+        "disabledButtonCount": 10,
+        "buttonCount": 26,
+        "headings": [
+          "1",
+          "Task Board",
+          "Task Board",
+          "Create Task",
+          "Run Triage",
+          "inbox",
+          "ready for agent",
+          "blocked",
+          "waiting for merge",
+          "failed",
+          "Initialize task store",
+          "Preview push",
+          "Preview pull"
+        ],
+        "overflowElements": [
+          {
+            "className": "hub-panel hub-task-board-toolbar",
+            "text": "LOCAL PROJECTIONTask BoardDense Kanban projection of the local Beads task store, flow state, and sync metadata.SearchSta",
+            "left": 12,
+            "right": 970,
+            "width": 958
+          },
+          {
+            "className": "hub-task-board-toolbar-copy",
+            "text": "LOCAL PROJECTIONTask BoardDense Kanban projection of the local Beads task store, flow state, and sync metadata.",
+            "left": 25,
+            "right": 957,
+            "width": 932
+          },
+          {
+            "className": "hub-eyebrow hub-mono",
+            "text": "LOCAL PROJECTION",
+            "left": 25,
+            "right": 957,
+            "width": 932
+          },
+          {
+            "className": "H2",
+            "text": "Task Board",
+            "left": 25,
+            "right": 957,
+            "width": 932
+          },
+          {
+            "className": "hub-muted",
+            "text": "Dense Kanban projection of the local Beads task store, flow state, and sync metadata.",
+            "left": 25,
+            "right": 957,
+            "width": 932
+          },
+          {
+            "className": "hub-task-board-filter-strip",
+            "text": "SearchStatusAll statusesinbox (1)ready for agent (1)blocked (1)waiting for merge (1)failed (1)ClaimAny claim stateActive",
+            "left": 25,
+            "right": 957,
+            "width": 932
+          },
+          {
+            "className": "hub-task-board-search",
+            "text": "Search",
+            "left": 32,
+            "right": 950,
+            "width": 918
+          },
+          {
+            "className": "hub-muted",
+            "text": "Search",
+            "left": 32,
+            "right": 950,
+            "width": 918
+          },
+          {
+            "className": "hub-input hub-focus-ring hub-task-board-terminal-filter",
+            "text": "",
+            "left": 32,
+            "right": 950,
+            "width": 918
+          },
+          {
+            "className": "hub-task-board-filter",
+            "text": "StatusAll statusesinbox (1)ready for agent (1)blocked (1)waiting for merge (1)failed (1)",
+            "left": 32,
+            "right": 950,
+            "width": 918
+          },
+          {
+            "className": "hub-muted",
+            "text": "Status",
+            "left": 32,
+            "right": 950,
+            "width": 918
+          },
+          {
+            "className": "hub-input hub-focus-ring",
+            "text": "All statusesinbox (1)ready for agent (1)blocked (1)waiting for merge (1)failed (1)",
+            "left": 32,
+            "right": 950,
+            "width": 918
+          },
+          {
+            "className": "hub-task-board-filter",
+            "text": "ClaimAny claim stateActive claimStale claimUnclaimed",
+            "left": 32,
+            "right": 950,
+            "width": 918
+          },
+          {
+            "className": "hub-muted",
+            "text": "Claim",
+            "left": 32,
+            "right": 950,
+            "width": 918
+          },
+          {
+            "className": "hub-input hub-focus-ring",
+            "text": "Any claim stateActive claimStale claimUnclaimed",
+            "left": 32,
+            "right": 950,
+            "width": 918
+          },
+          {
+            "className": "hub-task-board-filter",
+            "text": "SyncAny sync stateSyncedPush pendingPull pendingLocal onlyConflict",
+            "left": 32,
+            "right": 950,
+            "width": 918
+          },
+          {
+            "className": "hub-muted",
+            "text": "Sync",
+            "left": 32,
+            "right": 950,
+            "width": 918
+          },
+          {
+            "className": "hub-input hub-focus-ring",
+            "text": "Any sync stateSyncedPush pendingPull pendingLocal onlyConflict",
+            "left": 32,
+            "right": 950,
+            "width": 918
+          },
+          {
+            "className": "hub-muted hub-task-board-count",
+            "text": "Showing 5 of 5 tasks",
+            "left": 32,
+            "right": 950,
+            "width": 918
+          },
+          {
+            "className": "hub-task-board-toolbar-actions",
+            "text": "Task titleDescriptionCreate TaskEnter a task title to preview the local Beads write.PreviewConfirmRun TriageThe desktop ",
+            "left": 25,
+            "right": 957,
+            "width": 932
+          },
+          {
+            "className": "hub-task-board-toolbar-card hub-task-board-toolbar-card-create",
+            "text": "Task titleDescriptionCreate TaskEnter a task title to preview the local Beads write.PreviewConfirm",
+            "left": 25,
+            "right": 957,
+            "width": 932
+          },
+          {
+            "className": "hub-task-board-create-fields",
+            "text": "Task titleDescription",
+            "left": 32,
+            "right": 594,
+            "width": 562
+          },
+          {
+            "className": "hub-task-board-create-field hub-task-board-create-description-field",
+            "text": "Description",
+            "left": 348,
+            "right": 594,
+            "width": 246
+          },
+          {
+            "className": "hub-muted",
+            "text": "Description",
+            "left": 348,
+            "right": 594,
+            "width": 246
+          },
+          {
+            "className": "hub-input hub-focus-ring",
+            "text": "",
+            "left": 348,
+            "right": 594,
+            "width": 246
+          }
+        ]
+      }
+    },
+    {
+      "viewport": {
+        "name": "mobile",
+        "width": 390,
+        "height": 844
+      },
+      "section": "run-workbench",
+      "screenshot": "/Users/yibeibankaishui/projects/ref/sandcastle/output/playwright/hub-run-workbench-mobile.png",
+      "metrics": {
+        "title": "Run Workbench",
+        "bodyScrollWidth": 390,
+        "bodyClientWidth": 390,
+        "root": {
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 844,
+          "scrollWidth": 390,
+          "scrollHeight": 844,
+          "clientWidth": 390,
+          "clientHeight": 844
+        },
+        "shell": {
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 844,
+          "scrollWidth": 390,
+          "scrollHeight": 844,
+          "clientWidth": 390,
+          "clientHeight": 844
+        },
+        "header": {
+          "x": 0,
+          "y": 0,
+          "width": 307,
+          "height": 287,
+          "scrollWidth": 307,
+          "scrollHeight": 286,
+          "clientWidth": 307,
+          "clientHeight": 286
+        },
+        "rail": {
+          "x": 307,
+          "y": 518,
+          "width": 84,
+          "height": 326,
+          "scrollWidth": 83,
+          "scrollHeight": 326,
+          "clientWidth": 83,
+          "clientHeight": 326
+        },
+        "main": {
+          "x": 0,
+          "y": 287,
+          "width": 307,
+          "height": 231,
+          "scrollWidth": 312,
+          "scrollHeight": 3447,
+          "clientWidth": 307,
+          "clientHeight": 231
+        },
+        "buttons": [
+          {
+            "text": "Overview OV",
+            "aria": "",
+            "title": "Overview",
+            "disabled": false,
+            "rect": {
+              "x": 315,
+              "y": 574,
+              "width": 67,
+              "height": 40
+            }
+          },
+          {
+            "text": "Task Board TB",
+            "aria": "",
+            "title": "Task Board",
+            "disabled": false,
+            "rect": {
+              "x": 315,
+              "y": 622,
+              "width": 67,
+              "height": 40
+            }
+          },
+          {
+            "text": "Run Workbench RW",
+            "aria": "",
+            "title": "Run Workbench",
+            "disabled": false,
+            "rect": {
+              "x": 315,
+              "y": 670,
+              "width": 67,
+              "height": 40
+            }
+          },
+          {
+            "text": "Proposal Session PS",
+            "aria": "",
+            "title": "Proposal Session",
+            "disabled": false,
+            "rect": {
+              "x": 315,
+              "y": 718,
+              "width": 67,
+              "height": 40
+            }
+          },
+          {
+            "text": "Project",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 21,
+              "y": 88,
+              "width": 62,
+              "height": 22
+            }
+          },
+          {
+            "text": "Run",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 87,
+              "y": 88,
+              "width": 44,
+              "height": 22
+            }
+          },
+          {
+            "text": "Batch",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 135,
+              "y": 88,
+              "width": 55,
+              "height": 22
+            }
+          },
+          {
+            "text": "Sync",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 16,
+              "y": 127,
+              "width": 205,
+              "height": 32
+            }
+          },
+          {
+            "text": "Run Flow",
+            "aria": "Run Flow unavailable in desktop v0",
+            "title": "Use archloop run . --flow <id>",
+            "disabled": true,
+            "rect": {
+              "x": 16,
+              "y": 187,
+              "width": 255,
+              "height": 32
+            }
+          },
+          {
+            "text": "Open inspector",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 16,
+              "y": 246,
+              "width": 134,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Notifications",
+            "title": "Notifications",
+            "disabled": true,
+            "rect": {
+              "x": 158,
+              "y": 246,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Help",
+            "title": "Help",
+            "disabled": true,
+            "rect": {
+              "x": 198,
+              "y": 246,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Account",
+            "title": "Account",
+            "disabled": true,
+            "rect": {
+              "x": 238,
+              "y": 246,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "CLI only",
+            "aria": "Cancel Run unavailable in desktop v0",
+            "title": "",
+            "disabled": true,
+            "rect": {
+              "x": 38,
+              "y": 2951,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "Preview Recover Task",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 38,
+              "y": 3145,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "Confirm",
+            "aria": "Confirm Recover Task",
+            "title": "",
+            "disabled": true,
+            "rect": {
+              "x": 125,
+              "y": 3145,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "CLI only",
+            "aria": "Resume Merge unavailable in desktop v0",
+            "title": "",
+            "disabled": true,
+            "rect": {
+              "x": 38,
+              "y": 3375,
+              "width": 80,
+              "height": 32
+            }
+          },
+          {
+            "text": "Terminal Output",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 30,
+              "y": 3463,
+              "width": 113,
+              "height": 25
+            }
+          },
+          {
+            "text": "JSONL Stream",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 147,
+              "y": 3463,
+              "width": 105,
+              "height": 25
+            }
+          }
+        ],
+        "disabledButtonCount": 7,
+        "buttonCount": 19,
+        "headings": [
+          "1",
+          "Run Workbench",
+          "run-fixture-1 / batch-fixture-1",
+          "Stale claim metadata",
+          "Batch timeline focus",
+          "Stage timeline",
+          "Batch details",
+          "Run controls",
+          "Cancel Run",
+          "Recover Task",
+          "Resume Merge"
+        ],
+        "overflowElements": []
+      }
+    },
+    {
+      "viewport": {
+        "name": "mobile",
+        "width": 390,
+        "height": 844
+      },
+      "section": "proposal-session",
+      "screenshot": "/Users/yibeibankaishui/projects/ref/sandcastle/output/playwright/hub-proposal-session-mobile.png",
+      "metrics": {
+        "title": "Proposal Session",
+        "bodyScrollWidth": 390,
+        "bodyClientWidth": 390,
+        "root": {
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 844,
+          "scrollWidth": 390,
+          "scrollHeight": 844,
+          "clientWidth": 390,
+          "clientHeight": 844
+        },
+        "shell": {
+          "x": 0,
+          "y": 0,
+          "width": 390,
+          "height": 844,
+          "scrollWidth": 390,
+          "scrollHeight": 844,
+          "clientWidth": 390,
+          "clientHeight": 844
+        },
+        "header": {
+          "x": 0,
+          "y": 0,
+          "width": 307,
+          "height": 287,
+          "scrollWidth": 307,
+          "scrollHeight": 286,
+          "clientWidth": 307,
+          "clientHeight": 286
+        },
+        "rail": {
+          "x": 307,
+          "y": 518,
+          "width": 84,
+          "height": 326,
+          "scrollWidth": 83,
+          "scrollHeight": 326,
+          "clientWidth": 83,
+          "clientHeight": 326
+        },
+        "main": {
+          "x": 0,
+          "y": 287,
+          "width": 307,
+          "height": 231,
+          "scrollWidth": 313,
+          "scrollHeight": 3559,
+          "clientWidth": 307,
+          "clientHeight": 231
+        },
+        "buttons": [
+          {
+            "text": "Overview OV",
+            "aria": "",
+            "title": "Overview",
+            "disabled": false,
+            "rect": {
+              "x": 315,
+              "y": 574,
+              "width": 67,
+              "height": 40
+            }
+          },
+          {
+            "text": "Task Board TB",
+            "aria": "",
+            "title": "Task Board",
+            "disabled": false,
+            "rect": {
+              "x": 315,
+              "y": 622,
+              "width": 67,
+              "height": 40
+            }
+          },
+          {
+            "text": "Run Workbench RW",
+            "aria": "",
+            "title": "Run Workbench",
+            "disabled": false,
+            "rect": {
+              "x": 315,
+              "y": 670,
+              "width": 67,
+              "height": 40
+            }
+          },
+          {
+            "text": "Proposal Session PS",
+            "aria": "",
+            "title": "Proposal Session",
+            "disabled": false,
+            "rect": {
+              "x": 315,
+              "y": 718,
+              "width": 67,
+              "height": 40
+            }
+          },
+          {
+            "text": "Project",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 21,
+              "y": 88,
+              "width": 62,
+              "height": 22
+            }
+          },
+          {
+            "text": "Run",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 87,
+              "y": 88,
+              "width": 44,
+              "height": 22
+            }
+          },
+          {
+            "text": "Batch",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 135,
+              "y": 88,
+              "width": 55,
+              "height": 22
+            }
+          },
+          {
+            "text": "Sync",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 16,
+              "y": 127,
+              "width": 205,
+              "height": 32
+            }
+          },
+          {
+            "text": "Run Flow",
+            "aria": "Run Flow unavailable in desktop v0",
+            "title": "Use archloop run . --flow <id>",
+            "disabled": true,
+            "rect": {
+              "x": 16,
+              "y": 187,
+              "width": 255,
+              "height": 32
+            }
+          },
+          {
+            "text": "Open inspector",
+            "aria": "",
+            "title": "",
+            "disabled": false,
+            "rect": {
+              "x": 16,
+              "y": 246,
+              "width": 134,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Notifications",
+            "title": "Notifications",
+            "disabled": true,
+            "rect": {
+              "x": 158,
+              "y": 246,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Help",
+            "title": "Help",
+            "disabled": true,
+            "rect": {
+              "x": 198,
+              "y": 246,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "",
+            "aria": "Account",
+            "title": "Account",
+            "disabled": true,
+            "rect": {
+              "x": 238,
+              "y": 246,
+              "width": 32,
+              "height": 32
+            }
+          },
+          {
+            "text": "Reject",
+            "aria": "",
+            "title": "Desktop reject is not wired in v0. Re-open the proposal session with archloop tasks from-prd <ref> if you need to cancel or restart.",
+            "disabled": true,
+            "rect": {
+              "x": 25,
+              "y": 3133,
+              "width": 257,
+              "height": 32
+            }
+          },
+          {
+            "text": "Revise",
+            "aria": "",
+            "title": "Desktop revise is not wired in v0. Re-open the proposal session with archloop tasks from-prd <ref> to refine it in the CLI.",
+            "disabled": true,
+            "rect": {
+              "x": 25,
+              "y": 3357,
+              "width": 257,
+              "height": 32
+            }
+          },
+          {
+            "text": "Preview",
+            "aria": "",
+            "title": "archloop tasks from-prd <ref>",
+            "disabled": false,
+            "rect": {
+              "x": 25,
+              "y": 3789,
+              "width": 79,
+              "height": 32
+            }
+          },
+          {
+            "text": "Confirm",
+            "aria": "",
+            "title": "archloop tasks from-prd <ref>",
+            "disabled": true,
+            "rect": {
+              "x": 112,
+              "y": 3789,
+              "width": 80,
+              "height": 32
+            }
+          }
+        ],
+        "disabledButtonCount": 7,
+        "buttonCount": 17,
+        "headings": [
+          "1",
+          "Proposal Session",
+          "Source document",
+          "Extracted requirement",
+          "Agent rationale",
+          "Proposed tasks",
+          "Build proposal session slice",
+          "Confirm Stitch alignment with maintainer",
+          "Worktree lease",
+          "Prepared context",
+          "Transcript",
+          "Final proposal",
+          "Apply result",
+          "Proposal events",
+          "Note",
+          "Proposal state",
+          "Approve & Apply to Beads"
+        ],
+        "overflowElements": []
+      }
+    }
+  ],
+  "consoleMessages": [
+    {
+      "viewport": "desktop",
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    }
+  ],
+  "pageErrors": [],
+  "requestsFailed": []
+}

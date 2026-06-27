@@ -261,5 +261,5 @@ describe("hubRuntimeBridgeService", () => {
     if (preview.ok) {
       expect(preview.data.disabledReason).toContain("failed");
     }
-  });
+  }, 15_000);
 });

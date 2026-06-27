@@ -102,6 +102,9 @@ describe("hub desktop launch", () => {
       "dist-fixtures",
     );
     expect(packageJson.scripts.build).toContain("vite build");
+    expect(packageJson.scripts["build:electron"]).toContain(
+      "rm -rf dist-electron",
+    );
     expect(HUB_RUNTIME_BRIDGE_CHANNELS.invoke).toBe("hub-runtime:invoke");
   });
 
@@ -131,6 +134,29 @@ describe("hub desktop launch", () => {
   it("can initialize the runtime bridge service used by the desktop main process", () => {
     const bridge = createHubRuntimeBridgeService({ useFixtures: true });
     expect(typeof bridge.invoke).toBe("function");
+  });
+
+  it("uses a CommonJS preload for the sandboxed Electron renderer", () => {
+    const mainSource = readFileSync(
+      join(hubDesktopDir, "electron", "main.ts"),
+      "utf8",
+    );
+    const preloadSource = readFileSync(
+      join(hubDesktopDir, "electron", "preload.cts"),
+      "utf8",
+    );
+
+    expect(existsSync(join(hubDesktopDir, "electron", "preload.cts"))).toBe(
+      true,
+    );
+    expect(existsSync(join(hubDesktopDir, "electron", "preload.ts"))).toBe(
+      false,
+    );
+    expect(mainSource).toContain('preload: join(__dirname, "preload.cjs")');
+    expect(mainSource).toContain("sandbox: true");
+    expect(mainSource).toContain("contextIsolation: true");
+    expect(preloadSource).toContain('require("electron")');
+    expect(preloadSource).not.toContain('require("@yibeibankaishui/archloop');
   });
 
   it("passes hub-desktop typecheck against the runtime contract exports", () => {

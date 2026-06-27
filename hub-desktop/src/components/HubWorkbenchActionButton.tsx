@@ -18,6 +18,7 @@ export interface HubWorkbenchActionShape {
 export interface HubWorkbenchActionButtonProps {
   readonly action: HubWorkbenchActionShape;
   readonly variant: "task-board" | "inspector";
+  readonly layout?: "default" | "compact";
   readonly onPreviewAction?: (
     action: HubRuntimePreviewAction,
     params: Record<string, unknown>,
@@ -44,6 +45,7 @@ const VARIANT_CLASSES = {
 export const HubWorkbenchActionButton = ({
   action,
   variant,
+  layout = "default",
   onPreviewAction,
   onConfirmAction,
 }: HubWorkbenchActionButtonProps) => {
@@ -55,6 +57,7 @@ export const HubWorkbenchActionButton = ({
   const [resultMessage, setResultMessage] = useState<string | undefined>();
   const disabled = action.disabledReason !== undefined;
   const classes = VARIANT_CLASSES[variant];
+  const compactNote = action.disabledReason ?? action.description;
 
   const handlePreview = async () => {
     if (
@@ -80,7 +83,12 @@ export const HubWorkbenchActionButton = ({
   };
 
   const handleConfirm = async () => {
-    if (!preview || !previewParams || !onConfirmAction || preview.disabledReason) {
+    if (
+      !preview ||
+      !previewParams ||
+      !onConfirmAction ||
+      preview.disabledReason
+    ) {
       return;
     }
     setPending(true);
@@ -94,30 +102,50 @@ export const HubWorkbenchActionButton = ({
     }
   };
 
-  const body = (
-    <>
-      <strong>{action.label}</strong>
-      <p className="hub-muted">{action.description}</p>
-      {action.disabledReason ? (
-        <p className="hub-muted">{action.disabledReason}</p>
-      ) : null}
-      <p className="hub-muted">
-        CLI: <code>{action.cliFallback}</code>
-      </p>
-      {resultMessage ? <p className="hub-muted">{resultMessage}</p> : null}
-      {preview ? (
-        <div className="hub-panel">
-          <p>{preview.summary}</p>
-          {preview.disabledReason ? (
-            <p className="hub-muted">{preview.disabledReason}</p>
-          ) : null}
-        </div>
-      ) : null}
-    </>
-  );
+  const body =
+    layout === "compact" ? (
+      <>
+        <strong>{action.label}</strong>
+        <p className="hub-muted hub-action-compact-note" title={compactNote}>
+          {compactNote}
+        </p>
+        {resultMessage ? <p className="hub-muted">{resultMessage}</p> : null}
+        {preview ? (
+          <div className="hub-panel">
+            <p>{preview.summary}</p>
+            {preview.disabledReason ? (
+              <p className="hub-muted">{preview.disabledReason}</p>
+            ) : null}
+          </div>
+        ) : null}
+      </>
+    ) : (
+      <>
+        <strong>{action.label}</strong>
+        <p className="hub-muted">{action.description}</p>
+        {action.disabledReason ? (
+          <p className="hub-muted">{action.disabledReason}</p>
+        ) : null}
+        <p className="hub-muted">
+          CLI: <code>{action.cliFallback}</code>
+        </p>
+        {resultMessage ? <p className="hub-muted">{resultMessage}</p> : null}
+        {preview ? (
+          <div className="hub-panel">
+            <p>{preview.summary}</p>
+            {preview.disabledReason ? (
+              <p className="hub-muted">{preview.disabledReason}</p>
+            ) : null}
+          </div>
+        ) : null}
+      </>
+    );
 
   return (
-    <div className={classes.root}>
+    <div
+      className={`${classes.root} ${layout === "compact" ? "is-compact" : ""}`}
+      title={layout === "compact" ? action.cliFallback : undefined}
+    >
       {classes.copy ? <div className={classes.copy}>{body}</div> : body}
       <div className={classes.controls}>
         {action.kind === "bridge_preview" ? (
@@ -126,6 +154,7 @@ export const HubWorkbenchActionButton = ({
               type="button"
               className="hub-button hub-focus-ring"
               disabled={disabled || pending}
+              title={disabled ? action.disabledReason : action.cliFallback}
               onClick={() => void handlePreview()}
             >
               Preview
@@ -134,6 +163,7 @@ export const HubWorkbenchActionButton = ({
               type="button"
               className="hub-button hub-focus-ring"
               disabled={!preview || pending || Boolean(preview.disabledReason)}
+              title={preview?.disabledReason ?? action.cliFallback}
               onClick={() => void handleConfirm()}
             >
               Confirm
