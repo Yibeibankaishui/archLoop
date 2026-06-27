@@ -38,7 +38,6 @@ export const HUB_BATCH_FALLBACK_REASONS = [
   "invalid_task_ids",
   "duplicate_task_ids",
   "over_max_tasks",
-  "empty_selection",
 ] as const;
 export type HubBatchFallbackReason =
   (typeof HUB_BATCH_FALLBACK_REASONS)[number];
@@ -311,10 +310,6 @@ export const validateHubBatchPlannerOutput = (input: {
     uniqueSelected.add(taskId);
   }
 
-  if (input.output.selectedTaskIds.length === 0) {
-    return "empty_selection";
-  }
-
   if (input.output.selectedTaskIds.length > input.maxTasks) {
     return "over_max_tasks";
   }
@@ -383,7 +378,9 @@ const shouldRecoverExplicitBlockerDeferral = (input: {
   readonly candidate?: HubBatchPlannerCandidate;
   readonly selectedDependencyBlockerIds: ReadonlySet<string>;
 }): input is {
-  readonly deferred: HubBatchDeferredTask & { readonly reason: "explicit_blocker" };
+  readonly deferred: HubBatchDeferredTask & {
+    readonly reason: "explicit_blocker";
+  };
   readonly candidate: HubBatchPlannerCandidate;
   readonly selectedDependencyBlockerIds: ReadonlySet<string>;
 } =>
@@ -546,6 +543,17 @@ const planPlannedHubFlowBatch = async (
       rationale: parsed.rationale,
       deferredTasks: parsed.deferred,
     });
+  }
+
+  if (parsed.selectedTaskIds.length === 0) {
+    return {
+      selectedTasks: [],
+      deferredTasks: parsed.deferred,
+      batchStrategyRequested: "planned",
+      batchStrategyUsed: "planned",
+      maxTasks: input.maxTasks,
+      rationale: parsed.rationale,
+    };
   }
 
   const plannedSelection = resolvePlannedBatchSelection({
