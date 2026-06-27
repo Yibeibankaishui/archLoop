@@ -80,6 +80,7 @@ import {
 } from "./projectStatus.js";
 import {
   configureHubProjectDevelopmentContract,
+  formatHubProjectDevelopmentContractFactsSummary,
   resolveHubProjectDevelopmentContractPath,
 } from "./hubProjectDevelopmentContract.js";
 import {
@@ -1614,6 +1615,36 @@ const projectConfigureProjectProfileOption = Options.text(
   Options.optional,
 );
 
+const describeProjectConfigureEditOutcome = (contract: {
+  readonly preservedUserEdits: boolean;
+  readonly projectProfileChanged: boolean;
+}): string => {
+  if (contract.preservedUserEdits) {
+    return "preserved";
+  }
+
+  if (contract.projectProfileChanged) {
+    return "replaced for the new project profile";
+  }
+
+  return "new contract";
+};
+
+const describeProjectConfigureStatus = (contract: {
+  readonly backupPath?: string;
+  readonly preservedUserEdits: boolean;
+}): string => {
+  if (contract.backupPath) {
+    return `Backed up the previous contract to ${contract.backupPath}.`;
+  }
+
+  if (contract.preservedUserEdits) {
+    return "Preserved user-edited setup, verify, and context while refreshing project facts.";
+  }
+
+  return "Refreshed project facts and wrote a new Hub project development contract.";
+};
+
 const taskIdArg = Args.text({ name: "id" });
 const taskTitleArg = Args.text({ name: "title" });
 const taskOriginOption = Options.text("origin").pipe(
@@ -2518,11 +2549,16 @@ const projectConfigureCommand = Command.make(
         "Hub project dir": status.hubProjectDir,
         "Hub project profile": contract.contract.projectProfile,
         "Hub project development contract": contract.contractPath,
+        "Project facts refreshed":
+          formatHubProjectDevelopmentContractFactsSummary(
+            contract.contract.projectFacts,
+          ),
+        "User-edited setup/verify/context":
+          describeProjectConfigureEditOutcome(contract),
+        "Previous contract backup": contract.backupPath ?? "none",
       });
 
-      if (contract.persisted) {
-        yield* d.status("Hub project development contract written.", "success");
-      }
+      yield* d.status(describeProjectConfigureStatus(contract), "success");
     }),
 );
 

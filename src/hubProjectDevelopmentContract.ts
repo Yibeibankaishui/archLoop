@@ -30,6 +30,7 @@ const PROJECT_FACT_SIGNAL_FILES = [
 
 export interface HubProjectDevelopmentContractFacts {
   readonly observedFiles: readonly string[];
+  readonly configuredScripts: readonly string[];
 }
 
 export interface HubProjectDevelopmentContractTimestamps {
@@ -53,6 +54,13 @@ export interface HubProjectDevelopmentContractState {
   readonly persisted: boolean;
 }
 
+export interface ConfigureHubProjectDevelopmentContractResult extends HubProjectDevelopmentContractState {
+  readonly backupPath?: string;
+  readonly projectProfileChanged: boolean;
+  readonly preservedUserEdits: boolean;
+  readonly refreshedProjectFacts: boolean;
+}
+
 export interface ResolveHubProjectDevelopmentContractStateInput {
   readonly repoRoot: string;
   readonly hubProjectDir: string;
@@ -69,26 +77,83 @@ export interface ConfigureHubProjectDevelopmentContractInput {
 const contractPathFor = (hubProjectDir: string): string =>
   join(hubProjectDir, HUB_PROJECT_DEVELOPMENT_CONTRACT_FILE_NAME);
 
+const contractBackupPathFor = (
+  hubProjectDir: string,
+  profileName: string,
+  now: string,
+): string =>
+  join(
+    hubProjectDir,
+    `development-contract.backup-${profileName}-${now
+      .replace(/:/g, "-")
+      .replace(/\./g, "-")}.json`,
+  );
+
+const readPackageJsonConfiguredScripts = (
+  repoRoot: string,
+): readonly string[] => {
+  const packageJsonPath = join(repoRoot, "package.json");
+  if (!existsSync(packageJsonPath)) {
+    return [];
+  }
+
+  try {
+    const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as
+      | { scripts?: Record<string, unknown> }
+      | undefined;
+    const scripts = packageJson?.scripts;
+    if (!scripts || typeof scripts !== "object" || Array.isArray(scripts)) {
+      return [];
+    }
+
+    return Object.entries(scripts)
+      .filter(
+        ([, value]) => typeof value === "string" && value.trim().length > 0,
+      )
+      .map(([name]) => name)
+      .sort();
+  } catch {
+    return [];
+  }
+};
+
 const scanHubProjectFacts = (
   repoRoot: string,
 ): HubProjectDevelopmentContractFacts => ({
   observedFiles: PROJECT_FACT_SIGNAL_FILES.filter((fileName) =>
     existsSync(join(repoRoot, fileName)),
   ),
+  configuredScripts: readPackageJsonConfiguredScripts(repoRoot),
 });
 
-const formatObservedRepoSignals = (
+const hasProjectFactSummary = (
   facts: HubProjectDevelopmentContractFacts,
-): string =>
-  facts.observedFiles.length > 0
-    ? facts.observedFiles.join(", ")
-    : "no obvious stack signals";
+): boolean =>
+  facts.observedFiles.length > 0 || facts.configuredScripts.length > 0;
+
+export const formatHubProjectDevelopmentContractFactsSummary = (
+  facts: HubProjectDevelopmentContractFacts,
+): string => {
+  if (facts.observedFiles.length > 0 && facts.configuredScripts.length > 0) {
+    return `${facts.observedFiles.join(", ")}; scripts: ${facts.configuredScripts.join(", ")}`;
+  }
+
+  if (facts.observedFiles.length > 0) {
+    return facts.observedFiles.join(", ");
+  }
+
+  if (facts.configuredScripts.length > 0) {
+    return `scripts: ${facts.configuredScripts.join(", ")}`;
+  }
+
+  return "no obvious stack signals";
+};
 
 const buildSetupLines = (
   profile: ProjectProfileEntry,
   facts: HubProjectDevelopmentContractFacts,
 ): readonly string[] => {
-  const observedFiles = formatObservedRepoSignals(facts);
+  const observedFiles = formatHubProjectDevelopmentContractFactsSummary(facts);
 
   switch (profile.name) {
     case "node":
@@ -122,10 +187,9 @@ const buildContextLines = (
   profile: ProjectProfileEntry,
   facts: HubProjectDevelopmentContractFacts,
 ): readonly string[] => {
-  const observed =
-    facts.observedFiles.length > 0
-      ? `Observed repo facts: ${facts.observedFiles.join(", ")}.`
-      : "No obvious stack signals were observed in the repository root.";
+  const observed = hasProjectFactSummary(facts)
+    ? `Observed repo facts: ${formatHubProjectDevelopmentContractFactsSummary(facts)}.`
+    : "No obvious stack signals were observed in the repository root.";
 
   const profileNote =
     profile.name === DEFAULT_PROJECT_PROFILE_NAME
@@ -230,6 +294,10 @@ const normalizeContract = (
         projectFacts.observedFiles,
         `${contractPath}.projectFacts.observedFiles`,
       ),
+      configuredScripts: readOptionalStringArray(
+        projectFacts.configuredScripts,
+        `${contractPath}.projectFacts.configuredScripts`,
+      ),
     },
     setup: readStringArray(record.setup, `${contractPath}.setup`),
     verify: readStringArray(record.verify, `${contractPath}.verify`),
@@ -239,6 +307,16 @@ const normalizeContract = (
       updatedAt: updatedAt.trim(),
     },
   };
+};
+
+const readOptionalStringArray = (
+  value: unknown,
+  path: string,
+): readonly string[] => {
+  if (value === undefined) {
+    return [];
+  }
+  return readStringArray(value, path);
 };
 
 const readHubProjectDevelopmentContractFile = (
@@ -270,10 +348,7 @@ const buildConfiguredHubProjectDevelopmentContract = (input: {
   readonly now: string;
 }): HubProjectDevelopmentContract => {
   const { existing, profile, facts, now } = input;
-  if (
-    existing.persisted &&
-    existing.contract.projectProfile === profile.name
-  ) {
+  if (existing.persisted && existing.contract.projectProfile === profile.name) {
     return {
       ...existing.contract,
       projectFacts: facts,
@@ -287,7 +362,9 @@ const buildConfiguredHubProjectDevelopmentContract = (input: {
   return buildHubProjectDevelopmentContract({
     profile,
     facts,
-    createdAt: existing.persisted ? existing.contract.timestamps.createdAt : now,
+    createdAt: existing.persisted
+      ? existing.contract.timestamps.createdAt
+      : now,
     updatedAt: now,
   });
 };
@@ -330,7 +407,7 @@ export const resolveHubProjectDevelopmentContractState = (
 
 export const configureHubProjectDevelopmentContract = (
   input: ConfigureHubProjectDevelopmentContractInput,
-): HubProjectDevelopmentContractState => {
+): ConfigureHubProjectDevelopmentContractResult => {
   const profile = getProjectProfile(input.projectProfileName);
   if (!profile) {
     throw new Error(
@@ -346,12 +423,24 @@ export const configureHubProjectDevelopmentContract = (
   });
   const now = (input.now ?? new Date()).toISOString();
   const facts = scanHubProjectFacts(input.repoRoot);
+  const projectProfileChanged =
+    existing.persisted && existing.contract.projectProfile !== profile.name;
   const contract = buildConfiguredHubProjectDevelopmentContract({
     existing,
     profile,
     facts,
     now,
   });
+  let backupPath: string | undefined;
+
+  if (projectProfileChanged) {
+    backupPath = contractBackupPathFor(
+      input.hubProjectDir,
+      existing.contract.projectProfile,
+      now,
+    );
+    writeHubProjectDevelopmentContractFile(backupPath, existing.contract);
+  }
 
   writeHubProjectDevelopmentContractFile(contractPath, contract);
 
@@ -359,5 +448,9 @@ export const configureHubProjectDevelopmentContract = (
     contractPath,
     contract,
     persisted: true,
+    backupPath,
+    projectProfileChanged,
+    preservedUserEdits: existing.persisted && !projectProfileChanged,
+    refreshedProjectFacts: true,
   };
 };
