@@ -185,6 +185,25 @@ interface ResumableHubFlowBatch {
   readonly createdAt: string | undefined;
 }
 
+interface HubFlowBatchPlannedMetadata {
+  readonly batchStrategyRequested?: HubBatchStrategy;
+  readonly batchStrategyUsed?: HubBatchStrategy;
+  readonly maxTasks?: number;
+  readonly deferredTasks?: HubBatchPlannerResult["deferredTasks"];
+  readonly fallbackReason?: string;
+  readonly diagnosticReason?: string;
+  readonly rationale?: string;
+}
+
+interface HubFlowBatchExecution {
+  readonly selectedTaskIds: readonly string[];
+  readonly results: readonly HubFlowTaskResult[];
+  readonly batchSelection?: HubBatchPlannerResult;
+  readonly fallbackReason?: string;
+  readonly mergeResult?: RunHubBatchMergeResult;
+  readonly batchResult?: HubFlowBatchResult;
+}
+
 const createHubFlowLifecycleMutationQueue = (): HubFlowLifecycleMutation => {
   let previous: Promise<void> = Promise.resolve();
 
@@ -337,6 +356,33 @@ const resolveHubFlowBatchResult = (input: {
     selectedTaskIds: resolveHubFlowBatchTaskIds(input),
     completedTaskCount: resolveHubFlowCompletedTaskCount(input),
     batchStatus: resolveHubFlowBatchStatus(input),
+  };
+};
+
+const buildHubFlowBatchPlannedMetadata = (input: {
+  readonly batchSelection?: HubBatchPlannerResult;
+  readonly fallbackReason?: string;
+}): HubFlowBatchPlannedMetadata => {
+  if (!input.batchSelection) {
+    return input.fallbackReason
+      ? { fallbackReason: input.fallbackReason }
+      : {};
+  }
+
+  return {
+    batchStrategyRequested: input.batchSelection.batchStrategyRequested,
+    batchStrategyUsed: input.batchSelection.batchStrategyUsed,
+    maxTasks: input.batchSelection.maxTasks,
+    deferredTasks: input.batchSelection.deferredTasks,
+    ...(input.batchSelection.fallbackReason
+      ? { fallbackReason: input.batchSelection.fallbackReason }
+      : {}),
+    ...(input.batchSelection.diagnosticReason
+      ? { diagnosticReason: input.batchSelection.diagnosticReason }
+      : {}),
+    ...(input.batchSelection.rationale
+      ? { rationale: input.batchSelection.rationale }
+      : {}),
   };
 };
 
@@ -872,6 +918,11 @@ export const runHubFlow = async (
   let stopReason: HubFlowStopReason = "no_ready_tasks";
   const mutateLifecycle = createHubFlowLifecycleMutationQueue();
   const runMergePhase = input.runMergePhase ?? true;
+  const merger =
+    input.merger ??
+    createHubFlowRunMerger({ cwd: repoRoot, env: input.env });
+  const verifier =
+    input.verifier ?? createHubFlowRunVerifier({ cwd: repoRoot });
   let currentBatchId = resumedBatchId ?? context.batchId;
   let batchStartedAt = startedAt;
 
@@ -885,16 +936,34 @@ export const runHubFlow = async (
     });
   };
 
+  const startNextBatch = (): void => {
+    currentBatchId = createHubRunIdentifiers().batchId;
+    batchStartedAt = new Date();
+    appendBatchStarted(currentBatchId, batchStartedAt);
+  };
+
+  const runBatchMergePhase = (
+    batchId: string,
+  ): Promise<RunHubBatchMergeResult | undefined> => {
+    if (!runMergePhase) {
+      return Promise.resolve(undefined);
+    }
+
+    return runHubBatchMerge({
+      flowId: input.flowId,
+      cwd: repoRoot,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env: input.env,
+      merger,
+      verifier,
+    });
+  };
+
   const executeSelectedBatch = async (
     batchId: string,
-  ): Promise<{
-    readonly selectedTaskIds: readonly string[];
-    readonly results: readonly HubFlowTaskResult[];
-    readonly batchSelection?: HubBatchPlannerResult;
-    readonly fallbackReason?: string;
-    readonly mergeResult?: RunHubBatchMergeResult;
-    readonly batchResult?: HubFlowBatchResult;
-  }> => {
+  ): Promise<HubFlowBatchExecution> => {
     const readyBoard = loadHubReadyQueue(repoRoot, input.env);
     const effectiveBatchSelection = resolveEffectiveHubBatchSelection({
       flowKind: flowDefinition.kind,
@@ -930,37 +999,10 @@ export const runHubFlow = async (
     const selectedIds = selectedTasks.map((task) => task.id);
     const batchSelectionResult = freshValidation.batchSelection;
     const batchFallbackReason = freshValidation.fallbackReason;
-
-    const batchPlannedMetadata: {
-      batchStrategyRequested?: HubBatchStrategy;
-      batchStrategyUsed?: HubBatchStrategy;
-      maxTasks?: number;
-      deferredTasks?: HubBatchPlannerResult["deferredTasks"];
-      fallbackReason?: string;
-      diagnosticReason?: string;
-      rationale?: string;
-    } = {};
-    if (batchSelectionResult) {
-      batchPlannedMetadata.batchStrategyRequested =
-        batchSelectionResult.batchStrategyRequested;
-      batchPlannedMetadata.batchStrategyUsed =
-        batchSelectionResult.batchStrategyUsed;
-      batchPlannedMetadata.maxTasks = batchSelectionResult.maxTasks;
-      batchPlannedMetadata.deferredTasks = batchSelectionResult.deferredTasks;
-      if (batchSelectionResult.fallbackReason) {
-        batchPlannedMetadata.fallbackReason =
-          batchSelectionResult.fallbackReason;
-      }
-      if (batchSelectionResult.diagnosticReason) {
-        batchPlannedMetadata.diagnosticReason =
-          batchSelectionResult.diagnosticReason;
-      }
-      if (batchSelectionResult.rationale) {
-        batchPlannedMetadata.rationale = batchSelectionResult.rationale;
-      }
-    } else if (batchFallbackReason) {
-      batchPlannedMetadata.fallbackReason = batchFallbackReason;
-    }
+    const batchPlannedMetadata = buildHubFlowBatchPlannedMetadata({
+      batchSelection: batchSelectionResult,
+      fallbackReason: batchFallbackReason,
+    });
 
     appendHubBatchEvent(context.runDir, {
       type: "batch_planned",
@@ -972,21 +1014,7 @@ export const runHubFlow = async (
       ...batchPlannedMetadata,
     });
 
-    let batchMergeResult: RunHubBatchMergeResult | undefined;
-    if (runMergePhase) {
-      batchMergeResult = await runHubBatchMerge({
-        flowId: input.flowId,
-        cwd: repoRoot,
-        runDir: context.runDir,
-        runId: context.runId,
-        batchId,
-        env: input.env,
-        merger:
-          input.merger ??
-          createHubFlowRunMerger({ cwd: repoRoot, env: input.env }),
-        verifier: input.verifier ?? createHubFlowRunVerifier({ cwd: repoRoot }),
-      });
-    }
+    const batchMergeResult = await runBatchMergePhase(batchId);
 
     if (selectedTasks.length === 0) {
       return {
@@ -1035,18 +1063,7 @@ export const runHubFlow = async (
   };
 
   if (isResumingMergeBatch && resumedBatchId) {
-    const resumedMergeResult = await runHubBatchMerge({
-      flowId: input.flowId,
-      cwd: repoRoot,
-      runDir: context.runDir,
-      runId: context.runId,
-      batchId: resumedBatchId,
-      env: input.env,
-      merger:
-        input.merger ??
-        createHubFlowRunMerger({ cwd: repoRoot, env: input.env }),
-      verifier: input.verifier ?? createHubFlowRunVerifier({ cwd: repoRoot }),
-    });
+    const resumedMergeResult = await runBatchMergePhase(resumedBatchId);
 
     mergeResult = resumedMergeResult;
     const resumedBatchResult = resolveHubFlowBatchResult({
@@ -1063,9 +1080,7 @@ export const runHubFlow = async (
     } else if (batchResults.length >= maxBatches) {
       stopReason = "max_batches_reached";
     } else {
-      currentBatchId = createHubRunIdentifiers().batchId;
-      batchStartedAt = new Date();
-      appendBatchStarted(currentBatchId, batchStartedAt);
+      startNextBatch();
     }
   }
 
@@ -1106,9 +1121,7 @@ export const runHubFlow = async (
       break;
     }
 
-    currentBatchId = createHubRunIdentifiers().batchId;
-    batchStartedAt = new Date();
-    appendBatchStarted(currentBatchId, batchStartedAt);
+    startNextBatch();
   }
 
   const completedBatchCount = batchResults.filter(

@@ -3063,10 +3063,11 @@ const runCommand = Command.make(
           }),
         catch: toHubFlowError,
       });
+      const maxBatchesValue = optionalTextValue(maxBatches);
       const flowMaxBatches = yield* Effect.try({
         try: () =>
-          optionalTextValue(maxBatches) !== undefined
-            ? parseHubFlowMaxBatches(optionalTextValue(maxBatches)!)
+          maxBatchesValue !== undefined
+            ? parseHubFlowMaxBatches(maxBatchesValue)
             : undefined,
         catch: toHubFlowError,
       });
