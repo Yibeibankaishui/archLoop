@@ -1012,12 +1012,22 @@ export const runHubFlow = async (
     });
 
     const batchMergeResult = await runBatchMergePhase(batchId);
+    const batchResult =
+      batchMergeResult?.batchStatus === "skipped"
+        ? undefined
+        : resolveHubFlowBatchResult({
+            batchId,
+            selectedTaskIds: selectedIds,
+            taskResults: [],
+            mergeResult: batchMergeResult,
+          });
 
     if (selectedTasks.length === 0) {
       return {
         selectedTaskIds: [],
         results: [],
         ...(batchMergeResult ? { mergeResult: batchMergeResult } : {}),
+        ...(batchResult ? { batchResult } : {}),
         ...(batchSelectionResult
           ? { batchSelection: batchSelectionResult }
           : {}),
@@ -1042,7 +1052,7 @@ export const runHubFlow = async (
       ),
     );
 
-    const batchResult = resolveHubFlowBatchResult({
+    const taskBatchResult = resolveHubFlowBatchResult({
       batchId,
       selectedTaskIds: selectedIds,
       taskResults,
@@ -1055,7 +1065,7 @@ export const runHubFlow = async (
       ...(batchSelectionResult ? { batchSelection: batchSelectionResult } : {}),
       ...(batchFallbackReason ? { fallbackReason: batchFallbackReason } : {}),
       ...(batchMergeResult ? { mergeResult: batchMergeResult } : {}),
-      ...(batchResult ? { batchResult } : {}),
+      ...(taskBatchResult ? { batchResult: taskBatchResult } : {}),
     };
   };
 
@@ -1063,16 +1073,27 @@ export const runHubFlow = async (
     const resumedMergeResult = await runBatchMergePhase(resumedBatchId);
 
     mergeResult = resumedMergeResult;
-    const resumedBatchResult = resolveHubFlowBatchResult({
-      batchId: resumedBatchId,
-      selectedTaskIds: [],
-      taskResults: [],
-      mergeResult: resumedMergeResult,
-    });
+    const resumedBatchResult =
+      resumedMergeResult?.batchStatus === "skipped"
+        ? {
+            batchId: resumedBatchId,
+            selectedTaskIds: resumedMergeResult.selectedTaskIds,
+            completedTaskCount: 0,
+            batchStatus: "failed" as const,
+          }
+        : resolveHubFlowBatchResult({
+            batchId: resumedBatchId,
+            selectedTaskIds: [],
+            taskResults: [],
+            mergeResult: resumedMergeResult,
+          });
     if (resumedBatchResult) {
       batchResults.push(resumedBatchResult);
     }
-    if (resumedBatchResult?.batchStatus === "failed") {
+    if (
+      resumedMergeResult?.batchStatus === "skipped" ||
+      resumedBatchResult?.batchStatus === "failed"
+    ) {
       stopReason = "batch_failed";
     } else if (batchResults.length >= maxBatches) {
       stopReason = "max_batches_reached";
@@ -1092,25 +1113,26 @@ export const runHubFlow = async (
     if (fallbackReason === undefined && batchExecution.fallbackReason) {
       fallbackReason = batchExecution.fallbackReason;
     }
-    if (batchExecution.selectedTaskIds.length === 0) {
-      if (batchExecution.mergeResult) {
-        mergeResult = batchExecution.mergeResult;
-      }
-      stopReason = "no_ready_tasks";
-      break;
-    }
-
-    selectedTaskIds.push(...batchExecution.selectedTaskIds);
-    results.push(...batchExecution.results);
     if (batchExecution.mergeResult) {
       mergeResult = batchExecution.mergeResult;
     }
+
+    if (batchExecution.selectedTaskIds.length > 0) {
+      selectedTaskIds.push(...batchExecution.selectedTaskIds);
+      results.push(...batchExecution.results);
+    }
+
     if (batchExecution.batchResult) {
       batchResults.push(batchExecution.batchResult);
       if (batchExecution.batchResult.batchStatus === "failed") {
         stopReason = "batch_failed";
         break;
       }
+    }
+
+    if (batchExecution.selectedTaskIds.length === 0) {
+      stopReason = "no_ready_tasks";
+      break;
     }
 
     if (batchResults.length >= maxBatches) {
