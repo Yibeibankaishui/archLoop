@@ -3010,10 +3010,12 @@ const runCommand = Command.make(
       if (result.stopReason === "no_ready_tasks") {
         yield* d.status("Hub flow found no ready tasks to run.", "info");
       } else if (result.stopReason === "batch_failed") {
-        yield* d.status(
+        const failureMessage =
           failures.length > 0
             ? `Hub flow completed with ${failures.length} failed task(s).`
-            : "Hub flow stopped after a failed batch.",
+            : "Hub flow stopped after a failed batch.";
+        yield* d.status(
+          failureMessage,
           "warn",
         );
       } else {
