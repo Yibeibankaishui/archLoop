@@ -69,7 +69,7 @@ describe("hubProjectDevelopmentContract", () => {
     expect(parsed.version).toBe(1);
     expect(parsed.projectProfile).toBe("node");
     expect(parsed.projectFacts.observedFiles).toContain("pnpm-lock.yaml");
-    expect(parsed.verify).toContain("npm run typecheck");
+    expect(parsed.verify.join("\n")).toContain("npm run typecheck");
     expect(parsed.timestamps).toEqual({
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),

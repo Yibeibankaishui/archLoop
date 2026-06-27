@@ -2463,16 +2463,18 @@ const projectConfigureCommand = Command.make(
           }),
       });
 
-      let selectedProjectProfile =
-        optionalTextValue(projectProfile) ?? DEFAULT_PROJECT_PROFILE_NAME;
+      const availableProjectProfiles = formatProjectProfileNames();
+      let selectedProjectProfile: string;
 
-      if (projectProfile._tag === "None") {
+      if (projectProfile._tag === "Some") {
+        selectedProjectProfile = projectProfile.value;
+      } else {
         if (!process.stdin.isTTY) {
           yield* Effect.fail(
             new ProjectStatusError({
               message:
                 "Project configure requires --project-profile in non-interactive mode. Available: " +
-                formatProjectProfileNames(),
+                availableProjectProfiles,
             }),
           );
         }

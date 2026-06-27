@@ -77,14 +77,18 @@ const scanHubProjectFacts = (
   ),
 });
 
+const formatObservedRepoSignals = (
+  facts: HubProjectDevelopmentContractFacts,
+): string =>
+  facts.observedFiles.length > 0
+    ? facts.observedFiles.join(", ")
+    : "no obvious stack signals";
+
 const buildSetupLines = (
   profile: ProjectProfileEntry,
   facts: HubProjectDevelopmentContractFacts,
 ): readonly string[] => {
-  const observedFiles =
-    facts.observedFiles.length > 0
-      ? facts.observedFiles.join(", ")
-      : "no obvious stack signals";
+  const observedFiles = formatObservedRepoSignals(facts);
 
   switch (profile.name) {
     case "node":
@@ -159,19 +163,25 @@ const readStringArray = (value: unknown, path: string): readonly string[] => {
   return value;
 };
 
+const readRecord = (
+  value: unknown,
+  errorMessage: string,
+): Readonly<Record<string, unknown>> => {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+
+  throw new Error(errorMessage);
+};
+
 const normalizeContract = (
   value: unknown,
   contractPath: string,
 ): HubProjectDevelopmentContract => {
-  const record =
-    value && typeof value === "object" && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : undefined;
-  if (!record) {
-    throw new Error(
-      `Hub project development contract at ${contractPath} must be a JSON object.`,
-    );
-  }
+  const record = readRecord(
+    value,
+    `Hub project development contract at ${contractPath} must be a JSON object.`,
+  );
 
   if (record.version !== HUB_PROJECT_DEVELOPMENT_CONTRACT_VERSION) {
     throw new Error(
@@ -189,29 +199,15 @@ const normalizeContract = (
     );
   }
 
-  const projectFacts =
-    record.projectFacts &&
-    typeof record.projectFacts === "object" &&
-    !Array.isArray(record.projectFacts)
-      ? (record.projectFacts as Record<string, unknown>)
-      : undefined;
-  if (!projectFacts) {
-    throw new Error(
-      `Hub project development contract at ${contractPath} must include a projectFacts object.`,
-    );
-  }
+  const projectFacts = readRecord(
+    record.projectFacts,
+    `Hub project development contract at ${contractPath} must include a projectFacts object.`,
+  );
 
-  const timestamps =
-    record.timestamps &&
-    typeof record.timestamps === "object" &&
-    !Array.isArray(record.timestamps)
-      ? (record.timestamps as Record<string, unknown>)
-      : undefined;
-  if (!timestamps) {
-    throw new Error(
-      `Hub project development contract at ${contractPath} must include a timestamps object.`,
-    );
-  }
+  const timestamps = readRecord(
+    record.timestamps,
+    `Hub project development contract at ${contractPath} must include a timestamps object.`,
+  );
 
   const createdAt = timestamps.createdAt;
   const updatedAt = timestamps.updatedAt;
@@ -267,6 +263,35 @@ export const resolveHubProjectDevelopmentContractPath = (
 export const listHubProjectDevelopmentContractSupportedProfiles = (): string =>
   formatProjectProfileNames();
 
+const buildConfiguredHubProjectDevelopmentContract = (input: {
+  readonly existing: HubProjectDevelopmentContractState;
+  readonly profile: ProjectProfileEntry;
+  readonly facts: HubProjectDevelopmentContractFacts;
+  readonly now: string;
+}): HubProjectDevelopmentContract => {
+  const { existing, profile, facts, now } = input;
+  if (
+    existing.persisted &&
+    existing.contract.projectProfile === profile.name
+  ) {
+    return {
+      ...existing.contract,
+      projectFacts: facts,
+      timestamps: {
+        createdAt: existing.contract.timestamps.createdAt,
+        updatedAt: now,
+      },
+    };
+  }
+
+  return buildHubProjectDevelopmentContract({
+    profile,
+    facts,
+    createdAt: existing.persisted ? existing.contract.timestamps.createdAt : now,
+    updatedAt: now,
+  });
+};
+
 export const resolveHubProjectDevelopmentContractState = (
   input: ResolveHubProjectDevelopmentContractStateInput,
 ): HubProjectDevelopmentContractState => {
@@ -309,7 +334,7 @@ export const configureHubProjectDevelopmentContract = (
   const profile = getProjectProfile(input.projectProfileName);
   if (!profile) {
     throw new Error(
-      `Unknown project profile "${input.projectProfileName}". Available: ${formatProjectProfileNames()}`,
+      `Unknown project profile "${input.projectProfileName}". Available: ${listHubProjectDevelopmentContractSupportedProfiles()}`,
     );
   }
 
@@ -321,25 +346,12 @@ export const configureHubProjectDevelopmentContract = (
   });
   const now = (input.now ?? new Date()).toISOString();
   const facts = scanHubProjectFacts(input.repoRoot);
-
-  const contract =
-    existing.persisted && existing.contract.projectProfile === profile.name
-      ? {
-          ...existing.contract,
-          projectFacts: facts,
-          timestamps: {
-            createdAt: existing.contract.timestamps.createdAt,
-            updatedAt: now,
-          },
-        }
-      : buildHubProjectDevelopmentContract({
-          profile,
-          facts,
-          createdAt: existing.persisted
-            ? existing.contract.timestamps.createdAt
-            : now,
-          updatedAt: now,
-        });
+  const contract = buildConfiguredHubProjectDevelopmentContract({
+    existing,
+    profile,
+    facts,
+    now,
+  });
 
   writeHubProjectDevelopmentContractFile(contractPath, contract);
 
