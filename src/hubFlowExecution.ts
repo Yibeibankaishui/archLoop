@@ -32,6 +32,12 @@ import {
   resolveArchloopUserDataDir,
 } from "./projectStatus.js";
 import {
+  buildHubProjectDevelopmentContractPromptArgs,
+  ensureHubProjectDevelopmentContractState,
+  type EnsureHubProjectDevelopmentContractStateResult,
+  type HubProjectDevelopmentContractState,
+} from "./hubProjectDevelopmentContract.js";
+import {
   claimHubTaskForImplementation,
   recordImplementationFailure,
   recordImplementationStarted,
@@ -79,6 +85,7 @@ export interface HubImplementTaskInput {
   readonly promptFile: string;
   readonly cwd: string;
   readonly runDir: string;
+  readonly projectDevelopmentContract: HubProjectDevelopmentContractState;
   readonly retryContext?: string;
   readonly preservedWorktreePath?: string;
 }
@@ -124,6 +131,7 @@ export interface RunHubFlowInput {
   readonly hubProjectDir?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly startedAt?: Date;
+  readonly projectDevelopmentContract?: EnsureHubProjectDevelopmentContractStateResult;
   readonly implementer: HubFlowImplementer;
   readonly reviewer?: HubFlowReviewer;
   readonly merger?: HubFlowMerger;
@@ -173,6 +181,8 @@ export interface RunHubFlowResult {
   readonly unfinishedBatchIds: readonly string[];
   readonly batchSelection?: HubBatchPlannerResult;
   readonly fallbackReason?: string;
+  readonly projectDevelopmentContractPath: string;
+  readonly projectDevelopmentContractCreatedGenericFallback: boolean;
 }
 
 type HubFlowLifecycleMutation = <T>(
@@ -557,12 +567,18 @@ const buildHubAgentPromptArgs = (
     HubImplementTaskInput,
     "taskId" | "title" | "branch" | "retryContext"
   >,
+  projectDevelopmentContract?: HubProjectDevelopmentContractState,
 ): Readonly<Record<string, string>> => ({
   TASK_ID: input.taskId,
   TASK_TITLE: input.title,
   BRANCH: input.branch,
   VIEW_TASK_COMMAND: `bd show ${input.taskId}`,
   RETRY_CONTEXT: input.retryContext ?? "",
+  ...(projectDevelopmentContract
+    ? buildHubProjectDevelopmentContractPromptArgs({
+        contract: projectDevelopmentContract,
+      })
+    : {}),
 });
 
 const runHubAgent = async (input: {
@@ -579,6 +595,7 @@ const runHubAgent = async (input: {
   readonly logFileName: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly retryContext?: string;
+  readonly projectDevelopmentContract?: HubProjectDevelopmentContractState;
 }) => {
   await assertAgentCredentialsConfigured({
     providerName: input.agent.name,
@@ -594,7 +611,10 @@ const runHubAgent = async (input: {
     sandbox: noSandbox(),
     cwd: input.cwd,
     promptFile: input.promptFile,
-    promptArgs: buildHubAgentPromptArgs(input),
+    promptArgs: buildHubAgentPromptArgs(
+      input,
+      input.projectDevelopmentContract,
+    ),
     branchStrategy: { type: "branch", branch: input.branch },
     name: input.name,
     worktreeLeaseOwner: {
@@ -820,6 +840,7 @@ const implementSelectedTask = async (
       promptFile,
       cwd,
       runDir: context.runDir,
+      projectDevelopmentContract: input.projectDevelopmentContract!,
       retryContext,
       preservedWorktreePath: retryPreparation.preservedWorktreePath,
     });
@@ -942,6 +963,17 @@ export const runHubFlow = async (
     input.hubProjectDir ??
     resolveHubProjectDir(resolveArchloopUserDataDir(input.env), repoRoot);
   const startedAt = input.startedAt ?? new Date();
+  const projectDevelopmentContract =
+    input.projectDevelopmentContract ??
+    ensureHubProjectDevelopmentContractState({
+      repoRoot,
+      hubProjectDir,
+      now: startedAt,
+    });
+  const resolvedInput = {
+    ...input,
+    projectDevelopmentContract,
+  };
   const maxBatches = resolveHubFlowMaxBatches({
     maxBatches: input.maxBatches,
   });
@@ -1080,7 +1112,7 @@ export const runHubFlow = async (
     const taskResults = await Promise.all(
       selectedTasks.map((task) =>
         implementSelectedTask(
-          { ...input, cwd: repoRoot },
+          { ...resolvedInput, cwd: repoRoot },
           {
             ...context,
             batchId,
@@ -1220,6 +1252,9 @@ export const runHubFlow = async (
     unfinishedBatchIds,
     batchSelection,
     ...(fallbackReason ? { fallbackReason } : {}),
+    projectDevelopmentContractPath: projectDevelopmentContract.contractPath,
+    projectDevelopmentContractCreatedGenericFallback:
+      projectDevelopmentContract.createdGenericFallback,
   };
 };
 
@@ -1267,6 +1302,11 @@ export const formatHubFlowResultLines = (
     }
   } else if (result.fallbackReason) {
     lines.push(`Batch fallback: ${result.fallbackReason}`);
+  }
+  if (result.projectDevelopmentContractCreatedGenericFallback) {
+    lines.push(
+      `Project development contract: created generic fallback at ${result.projectDevelopmentContractPath}. Re-run \`archloop project configure --project-profile <generic|node|python|cpp>\` to specialize it.`,
+    );
   }
   if (result.resumedBatchId) {
     lines.push(`Resumed batch id: ${result.resumedBatchId}`);
@@ -1321,20 +1361,49 @@ const hasBranchUnmergedWork = async (
   }
 };
 
+const resolveHubFlowRunnerAgent = (
+  role: HubAgentRole,
+  options: {
+    readonly env?: NodeJS.ProcessEnv;
+    readonly homeDir?: string;
+    readonly roleEntry?: HubAgentRoleEntry;
+  },
+): AgentProvider =>
+  resolveHubAgentProvider(
+    resolveHubFlowRoleEntry({
+      role,
+      roleEntry: options.roleEntry,
+      env: options.env,
+      homeDir: options.homeDir,
+    }),
+  );
+
+const buildHubFlowRunnerFailure = (
+  error: unknown,
+): Pick<HubImplementTaskResult, "outcome" | "commits" | "message"> => {
+  const message = error instanceof Error ? error.message : String(error);
+  if (isSandboxFailureTag(getErrorTag(error))) {
+    return {
+      outcome: "sandbox_failed",
+      commits: [],
+      message,
+    };
+  }
+
+  return {
+    outcome: "agent_failed",
+    commits: [],
+    message,
+  };
+};
+
 export const createHubFlowRunImplementer = (options: {
   readonly cwd: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly homeDir?: string;
   readonly roleEntry?: HubAgentRoleEntry;
 }): HubFlowImplementer => {
-  const agent = resolveHubAgentProvider(
-    resolveHubFlowRoleEntry({
-      role: "implementation",
-      roleEntry: options.roleEntry,
-      env: options.env,
-      homeDir: options.homeDir,
-    }),
-  );
+  const agent = resolveHubFlowRunnerAgent("implementation", options);
 
   return async (input) => {
     try {
@@ -1350,7 +1419,9 @@ export const createHubFlowRunImplementer = (options: {
         runDir: input.runDir,
         name: `implement-${input.taskId}`,
         logFileName: `${input.taskId}.log`,
+        env: options.env,
         retryContext: input.retryContext,
+        projectDevelopmentContract: input.projectDevelopmentContract,
       });
 
       if (!result.completionSignal) {
@@ -1382,20 +1453,7 @@ export const createHubFlowRunImplementer = (options: {
         branchHasUnmergedWork,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (isSandboxFailureTag(getErrorTag(error))) {
-        return {
-          outcome: "sandbox_failed",
-          commits: [],
-          message,
-        };
-      }
-
-      return {
-        outcome: "agent_failed",
-        commits: [],
-        message,
-      };
+      return buildHubFlowRunnerFailure(error);
     }
   };
 };
@@ -1406,14 +1464,7 @@ export const createHubFlowRunReviewer = (options: {
   readonly homeDir?: string;
   readonly roleEntry?: HubAgentRoleEntry;
 }): HubFlowReviewer => {
-  const agent = resolveHubAgentProvider(
-    resolveHubFlowRoleEntry({
-      role: "review",
-      roleEntry: options.roleEntry,
-      env: options.env,
-      homeDir: options.homeDir,
-    }),
-  );
+  const agent = resolveHubFlowRunnerAgent("review", options);
 
   return async (input) => {
     try {
@@ -1429,6 +1480,7 @@ export const createHubFlowRunReviewer = (options: {
         runDir: input.runDir,
         name: `review-${input.taskId}`,
         logFileName: `${input.taskId}-review.log`,
+        env: options.env,
       });
 
       if (!result.completionSignal) {
@@ -1445,20 +1497,7 @@ export const createHubFlowRunReviewer = (options: {
         completionSignal: result.completionSignal,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (isSandboxFailureTag(getErrorTag(error))) {
-        return {
-          outcome: "sandbox_failed",
-          commits: [],
-          message,
-        };
-      }
-
-      return {
-        outcome: "agent_failed",
-        commits: [],
-        message,
-      };
+      return buildHubFlowRunnerFailure(error);
     }
   };
 };

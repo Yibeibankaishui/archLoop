@@ -24,6 +24,11 @@ import {
   validateHubFlowRegistries,
 } from "./hubFlows.js";
 import {
+  configureHubProjectDevelopmentContract,
+  resolveHubProjectDevelopmentContractState,
+} from "./hubProjectDevelopmentContract.js";
+import * as runModule from "./run.js";
+import {
   loadHubReadyQueue,
   resolveHubTaskBranch,
   selectHubFlowTasks,
@@ -247,6 +252,23 @@ describe("Hub flow registry", () => {
       "hub-flows/with-review/review-prompt.md",
     );
   });
+
+  it.each(["no-review", "with-review"] as const)(
+    "implement prompt for %s injects contract guidance instead of hardcoded Node verification text",
+    async (flowId) => {
+      const prompt = await readFile(
+        resolveHubFlowPromptPath(flowId, "implement"),
+        "utf-8",
+      );
+
+      expect(prompt).toContain("{{PROJECT_PROFILE}}");
+      expect(prompt).toContain("{{PROJECT_DEVELOPMENT_CONTRACT_SETUP}}");
+      expect(prompt).toContain("{{PROJECT_DEVELOPMENT_CONTRACT_VERIFY}}");
+      expect(prompt).toContain("{{PROJECT_DEVELOPMENT_CONTRACT_CONTEXT}}");
+      expect(prompt).not.toContain("npm run typecheck");
+      expect(prompt).not.toContain("npm run test");
+    },
+  );
 
   it.each(["no-review", "with-review"] as const)(
     "batch planner prompt for %s treats empty live blockers as unblocked",
@@ -1517,6 +1539,134 @@ describe("no-review Hub flow execution", () => {
     );
   });
 
+  it.each([
+    {
+      title: "creates and passes a generic fallback contract when none exists",
+      configureContract: undefined as
+        | ((input: {
+            readonly repoDir: string;
+            readonly hubProjectDir: string;
+          }) => void)
+        | undefined,
+      expectedProfile: "generic",
+      expectedFallback: true,
+      expectedVerifySnippet: "customize this prompt section",
+    },
+    {
+      title: "passes a configured Node contract through to the implementer",
+      configureContract: async ({
+        repoDir,
+        hubProjectDir,
+      }: {
+        readonly repoDir: string;
+        readonly hubProjectDir: string;
+      }) => {
+        await writeFile(
+          join(repoDir, "package.json"),
+          JSON.stringify(
+            { scripts: { test: "vitest", typecheck: "tsc -p ." } },
+            null,
+            2,
+          ),
+        );
+        return configureHubProjectDevelopmentContract({
+          repoRoot: repoDir,
+          hubProjectDir,
+          projectProfileName: "node",
+          now: new Date("2026-06-27T10:00:00.000Z"),
+        });
+      },
+      expectedProfile: "node",
+      expectedFallback: false,
+      expectedVerifySnippet: "npm run typecheck",
+    },
+  ] as const)(
+    "$title",
+    async ({
+      configureContract,
+      expectedProfile,
+      expectedFallback,
+      expectedVerifySnippet,
+    }) => {
+      const repoDir = await mkdtemp(
+        join(tmpdir(), "hub-flow-contract-prompt-"),
+      );
+      await initRepo(repoDir);
+      await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+      const hubProjectDir = join(
+        repoDir,
+        "data",
+        "archloop",
+        "hub",
+        "projects",
+        "contract-prompt",
+      );
+      await configureContract?.({ repoDir, hubProjectDir });
+
+      const stateFile = join(repoDir, "bd-state.json");
+      const { env } = await writeMockBd(repoDir, stateFile, [
+        {
+          id: "bd-contract",
+          title: "Contract guided task",
+          status: "open",
+          labels: ["ready-for-agent"],
+          metadata: {},
+        },
+      ]);
+
+      const invocations: HubImplementTaskInput[] = [];
+      const result = await runHubFlow({
+        flowId: "no-review",
+        cwd: repoDir,
+        hubProjectDir,
+        env,
+        implementer: async (input) => {
+          invocations.push(input);
+          return {
+            outcome: "success",
+            commits: [{ sha: "abc123" }],
+            completionSignal: "<promise>COMPLETE</promise>",
+          };
+        },
+        runMergePhase: false,
+      });
+
+      expect(result.projectDevelopmentContractCreatedGenericFallback).toBe(
+        expectedFallback,
+      );
+      expect(invocations).toHaveLength(1);
+      expect(
+        invocations[0]?.projectDevelopmentContract.contract.projectProfile,
+      ).toBe(expectedProfile);
+      expect(
+        invocations[0]?.projectDevelopmentContract.contract.verify.join("\n"),
+      ).toContain(expectedVerifySnippet);
+      expect(
+        invocations[0]?.projectDevelopmentContract.contract.setup.join("\n"),
+      ).toContain(
+        expectedProfile === "generic"
+          ? "no-op baseline"
+          : "Node bootstrap guidance",
+      );
+      expect(
+        invocations[0]?.projectDevelopmentContract.contract.context.join("\n"),
+      ).toContain(
+        expectedProfile === "generic"
+          ? "Generic profile selected"
+          : "Selected project profile remains authoritative",
+      );
+      if (expectedFallback) {
+        expect(formatHubFlowResultLines(result).join("\n")).toContain(
+          "created generic fallback",
+        );
+        expect(formatHubFlowResultLines(result).join("\n")).toContain(
+          "archloop project configure --project-profile <generic|node|python|cpp>",
+        );
+      }
+    },
+  );
+
   it("treats completion with existing unmerged branch work as implemented even when the rerun creates no new commits", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-rerun-work-"));
     await initRepo(repoDir);
@@ -2429,6 +2579,12 @@ describe("with-review Hub flow execution", () => {
       cwd,
       roleEntry: { provider: "codex", model: "gpt-5.4-mini" },
     });
+    const projectDevelopmentContract =
+      resolveHubProjectDevelopmentContractState({
+        repoRoot: cwd,
+        hubProjectDir: join(cwd, "hub-project"),
+        now: new Date("2026-06-27T10:00:00.000Z"),
+      });
 
     vi.stubEnv("OPENAI_KEY", "");
     vi.stubEnv("CODEX_HOME", "");
@@ -2443,6 +2599,7 @@ describe("with-review Hub flow execution", () => {
         promptFile: "/tmp/prompt.md",
         cwd,
         runDir: cwd,
+        projectDevelopmentContract,
       });
 
       expect(result.outcome).toBe("agent_failed");
@@ -2450,6 +2607,60 @@ describe("with-review Hub flow execution", () => {
       expect(result.message).toContain("OPENAI_KEY");
       expect(result.message).not.toContain("Cursor agent credentials");
     } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("createHubFlowRunImplementer forwards the supplied env and development contract to the run invocation", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "hub-flow-implementer-run-"));
+    await initRepo(cwd);
+    const projectDevelopmentContract =
+      resolveHubProjectDevelopmentContractState({
+        repoRoot: cwd,
+        hubProjectDir: join(cwd, "hub-project"),
+        now: new Date("2026-06-27T10:00:00.000Z"),
+      });
+    const runSpy = vi.spyOn(runModule, "run").mockResolvedValue({
+      completionSignal: "<promise>COMPLETE</promise>",
+      commits: [{ sha: "abc123" }],
+      branch: "archloop/bd-1-test-task",
+      iterations: [],
+      stdout: "",
+    });
+    const implementer = createHubFlowRunImplementer({
+      cwd,
+      env: { OPENAI_KEY: "test-openai-key" },
+      roleEntry: { provider: "codex", model: "gpt-5.4-mini" },
+    });
+
+    vi.stubEnv("OPENAI_KEY", "");
+    vi.stubEnv("CODEX_HOME", "");
+    try {
+      const result = await implementer({
+        flowId: "no-review",
+        batchId: "batch-test",
+        taskId: "bd-1",
+        title: "Test task",
+        branch: "archloop/bd-1-test-task",
+        promptFile: "/tmp/prompt.md",
+        cwd,
+        runDir: cwd,
+        projectDevelopmentContract,
+      });
+
+      expect(result.outcome).toBe("success");
+      expect(runSpy).toHaveBeenCalledTimes(1);
+      expect(runSpy.mock.calls[0]?.[0].promptArgs).toMatchObject({
+        TASK_ID: "bd-1",
+        PROJECT_PROFILE: "generic",
+        PROJECT_DEVELOPMENT_CONTRACT_PATH:
+          projectDevelopmentContract.contractPath,
+      });
+      expect(
+        runSpy.mock.calls[0]?.[0].promptArgs?.PROJECT_DEVELOPMENT_CONTRACT_SETUP,
+      ).toContain("no-op baseline");
+    } finally {
+      runSpy.mockRestore();
       vi.unstubAllEnvs();
     }
   });
@@ -2483,6 +2694,46 @@ describe("with-review Hub flow execution", () => {
       expect(result.message).not.toContain("Cursor agent credentials");
       expect(result.message).toContain("archloop env init");
     } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("createHubFlowRunReviewer forwards the supplied env to the run invocation", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "hub-flow-review-run-"));
+    await initRepo(cwd);
+    const runSpy = vi.spyOn(runModule, "run").mockResolvedValue({
+      completionSignal: "<promise>COMPLETE</promise>",
+      commits: [{ sha: "abc123" }],
+      branch: "archloop/bd-1-test-task",
+      iterations: [],
+      stdout: "",
+    });
+    const reviewer = createHubFlowRunReviewer({
+      cwd,
+      env: { OPENAI_KEY: "test-openai-key" },
+      roleEntry: { provider: "codex", model: "gpt-5.4" },
+    });
+
+    vi.stubEnv("OPENAI_KEY", "");
+    vi.stubEnv("CODEX_HOME", "");
+    try {
+      const result = await reviewer({
+        flowId: "with-review",
+        batchId: "batch-test",
+        taskId: "bd-1",
+        title: "Test task",
+        branch: "archloop/bd-1-test-task",
+        promptFile: "/tmp/prompt.md",
+        cwd,
+        runDir: cwd,
+        implementCommitCount: 1,
+      });
+
+      expect(result.outcome).toBe("success");
+      expect(runSpy).toHaveBeenCalledTimes(1);
+      expect(runSpy.mock.calls[0]?.[0].agent.name).toBe("codex");
+    } finally {
+      runSpy.mockRestore();
       vi.unstubAllEnvs();
     }
   });
