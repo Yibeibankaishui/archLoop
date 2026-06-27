@@ -667,7 +667,7 @@ describe("hubBatchPlanner", () => {
     expect(result.selectedTasks.map((task) => task.id)).toEqual(["bd-first"]);
   });
 
-  it("falls back to conservative when planned selection is empty", async () => {
+  it("honors an empty planned selection as no safe batch", async () => {
     const result = await planHubFlowBatch({
       flowId: "no-review",
       cwd: "/tmp/repo",
@@ -678,10 +678,19 @@ describe("hubBatchPlanner", () => {
       batchPlanner: async () =>
         plannerStdout({
           selectedTaskIds: [],
+          deferred: [{ taskId: "bd-first", reason: "explicit_blocker" }],
+          rationale: "No candidates are safe to run on this base.",
         }),
     });
 
-    expect(result.fallbackReason).toBe("empty_selection");
-    expect(result.selectedTasks.map((task) => task.id)).toEqual(["bd-first"]);
+    expect(result.batchStrategyUsed).toBe("planned");
+    expect(result.fallbackReason).toBeUndefined();
+    expect(result.selectedTasks).toEqual([]);
+    expect(result.deferredTasks).toEqual([
+      { taskId: "bd-first", reason: "explicit_blocker" },
+    ]);
+    expect(result.rationale).toBe(
+      "No candidates are safe to run on this base.",
+    );
   });
 });

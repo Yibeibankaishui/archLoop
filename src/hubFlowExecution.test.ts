@@ -485,7 +485,7 @@ describe("Hub flow planner", () => {
     expect(output).toContain("Batch strategy: conservative (max 3)");
     expect(output).toContain("Batch strategy requested: planned");
     expect(output).toContain("Batch fallback: planner_unavailable");
-  });
+  }, 20000);
 
   it("fresh-validates conservative selection before claim and falls back when the first task gains an active claim", async () => {
     const repoDir = await mkdtemp(
@@ -787,6 +787,110 @@ describe("Hub flow planner", () => {
     expect(formatHubFlowResultLines(result).join("\n")).toContain(
       "Batch strategy: planned (max 2)",
     );
+  }, 20000);
+
+  it("does not claim when the planned batch planner returns no safe tasks", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-planned-empty-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-blocked",
+        title: "Blocked task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+      {
+        id: "bd-dependent",
+        title: "Dependent task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    const result = await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir: join(
+        repoDir,
+        "data",
+        "archloop",
+        "hub",
+        "projects",
+        "planned-empty",
+      ),
+      env,
+      batchStrategy: "planned",
+      maxTasks: 2,
+      batchPlanner: async () =>
+        `<batch-plan>${JSON.stringify({
+          selectedTaskIds: [],
+          deferred: [
+            { taskId: "bd-blocked", reason: "explicit_blocker" },
+            { taskId: "bd-dependent", reason: "design_decision_dependency" },
+          ],
+          rationale: "All candidates depend on unresolved base behavior.",
+        })}</batch-plan>`,
+      implementer: async () => {
+        throw new Error("implementer should not run for an empty safe batch");
+      },
+    });
+
+    expect(result.selectedTaskIds).toEqual([]);
+    expect(result.stopReason).toBe("no_ready_tasks");
+    expect(result.completedBatchCount).toBe(0);
+    expect(result.completedTaskCount).toBe(0);
+    expect(result.mergeResult).toBeUndefined();
+    expect(result.batchSelection).toMatchObject({
+      batchStrategyRequested: "planned",
+      batchStrategyUsed: "planned",
+      maxTasks: 2,
+      deferredTasks: [
+        { taskId: "bd-blocked", reason: "explicit_blocker" },
+        { taskId: "bd-dependent", reason: "design_decision_dependency" },
+      ],
+      rationale: "All candidates depend on unresolved base behavior.",
+    });
+    expect(result.batchSelection?.fallbackReason).toBeUndefined();
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(finalState.map((task) => task.labels)).toEqual([
+      ["ready-for-agent"],
+      ["ready-for-agent"],
+    ]);
+    expect(finalState.map((task) => task.metadata.hubStatus)).toEqual([
+      undefined,
+      undefined,
+    ]);
+
+    const batchEvents = await readJsonl(
+      join(result.runDir, "events", "batch.jsonl"),
+    );
+    expect(batchEvents).toContainEqual(
+      expect.objectContaining({
+        type: "batch_planned",
+        taskIds: [],
+        batchStrategyUsed: "planned",
+        maxTasks: 2,
+        deferredTasks: [
+          { taskId: "bd-blocked", reason: "explicit_blocker" },
+          { taskId: "bd-dependent", reason: "design_decision_dependency" },
+        ],
+        rationale: "All candidates depend on unresolved base behavior.",
+      }),
+    );
+    expect(
+      batchEvents.some(
+        (event) =>
+          (event as { type?: string }).type === "batch_merge_selection",
+      ),
+    ).toBe(false);
   }, 20000);
 
   it("records invalid explicit blocker deferrals and recovers stale ready tasks up to max-tasks", async () => {
@@ -1619,11 +1723,7 @@ describe("with-review Hub flow execution", () => {
     expect(result.completedTaskCount).toBe(0);
     expect(result.stopReason).toBe("no_ready_tasks");
     expect(result.batchResults).toEqual([]);
-    expect(result.mergeResult).toMatchObject({
-      batchId: result.batchId,
-      selectedTaskIds: [],
-      batchStatus: "skipped",
-    });
+    expect(result.mergeResult).toBeUndefined();
     expect(implementCalls).toBe(0);
     expect(reviewCalls).toBe(0);
 
@@ -1734,8 +1834,8 @@ describe("with-review Hub flow execution", () => {
       batchStatus: "completed",
     });
     expect(result.mergeResult).toMatchObject({
-      selectedTaskIds: [],
-      batchStatus: "skipped",
+      selectedTaskIds: ["bd-resume"],
+      batchStatus: "done",
     });
     expect(mergedTaskIds).toEqual(["bd-resume"]);
     expect(result.runDir).not.toBe(oldContext.runDir);
@@ -1851,17 +1951,26 @@ describe("with-review Hub flow execution", () => {
       env,
       implementer: async (input) => {
         implementCalls += 1;
+        await execAsync(`git checkout -B "${input.branch}" main`, {
+          cwd: repoDir,
+        });
+        await writeFile(join(repoDir, `${input.taskId}.txt`), input.taskId);
+        await execAsync(`git add "${input.taskId}.txt"`, { cwd: repoDir });
+        await execAsync(`git commit -m "implement ${input.taskId}"`, {
+          cwd: repoDir,
+        });
+        await execAsync("git checkout main", { cwd: repoDir });
         return {
           outcome: "success",
           commits: [{ sha: `commit-${input.taskId}` }],
           completionSignal: "<promise>COMPLETE</promise>",
         };
       },
-      reviewer: async (input) => {
+      reviewer: async () => {
         reviewCalls += 1;
         return {
           outcome: "success",
-          commits: [{ sha: `review-${input.taskId}` }],
+          commits: [],
           completionSignal: "<promise>COMPLETE</promise>",
         };
       },
@@ -1883,12 +1992,12 @@ describe("with-review Hub flow execution", () => {
       batchStatus: "completed",
     });
     expect(result.mergeResult).toMatchObject({
-      selectedTaskIds: [],
-      batchStatus: "skipped",
+      selectedTaskIds: ["bd-ready"],
+      batchStatus: "done",
     });
     expect(result.completedBatchCount).toBe(2);
     expect(result.completedTaskCount).toBe(2);
-    expect(mergedTaskIds).toEqual(["bd-old-conflict"]);
+    expect(mergedTaskIds).toEqual(["bd-old-conflict", "bd-ready"]);
     expect(implementCalls).toBe(1);
     expect(reviewCalls).toBe(1);
 
@@ -1898,6 +2007,37 @@ describe("with-review Hub flow execution", () => {
     expect(
       finalState.find((task) => task.id === "bd-old-conflict")?.status,
     ).toBe("closed");
+    expect(finalState.find((task) => task.id === "bd-ready")?.status).toBe(
+      "closed",
+    );
+
+    const batchEvents = await readJsonl(
+      join(result.runDir, "events", "batch.jsonl"),
+    );
+    const taskEvents = await readJsonl(
+      join(result.runDir, "events", "task.jsonl"),
+    );
+    const readyBatchId = result.batchResults[1]!.batchId;
+    const readyReviewSucceededAt = taskEvents.find(
+      (event) =>
+        (event as { type?: string; taskId?: string }).type ===
+          "task_review_succeeded" &&
+        (event as { type?: string; taskId?: string }).taskId === "bd-ready",
+    ) as { createdAt?: string } | undefined;
+    const readyMergeSelectionAt = batchEvents.find(
+      (event) =>
+        (event as { type?: string; batchId?: string }).type ===
+          "batch_merge_selection" &&
+        (event as { type?: string; batchId?: string }).batchId === readyBatchId,
+    ) as
+      | { createdAt?: string; selectedTaskIds?: readonly string[] }
+      | undefined;
+    expect(readyMergeSelectionAt?.selectedTaskIds).toEqual(["bd-ready"]);
+    expect(readyReviewSucceededAt?.createdAt).toBeDefined();
+    expect(readyMergeSelectionAt?.createdAt).toBeDefined();
+    expect(
+      readyReviewSucceededAt!.createdAt! <= readyMergeSelectionAt!.createdAt!,
+    ).toBe(true);
 
     const summary = formatHubFlowResultLines(result).join("\n");
     expect(summary).toContain(`Mode: resumed_batch`);

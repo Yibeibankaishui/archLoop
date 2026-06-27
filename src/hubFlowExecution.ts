@@ -314,14 +314,34 @@ const resolveHubFlowCompletedTaskCount = (input: {
   return countSuccessfulMergeResults(input.mergeResult);
 };
 
+const hasSameTaskIds = (
+  left: readonly string[],
+  right: readonly string[],
+): boolean => {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  const rightIds = new Set(right);
+  return left.every((taskId) => rightIds.has(taskId));
+};
+
 const resolveHubFlowBatchStatus = (input: {
+  readonly selectedTaskIds: readonly string[];
   readonly taskResults: readonly HubFlowTaskResult[];
   readonly mergeResult?: RunHubBatchMergeResult;
 }): HubFlowBatchResult["batchStatus"] => {
   if (input.taskResults.some((result) => !isSuccessfulHubTaskResult(result))) {
     return "failed";
   }
-  if (input.mergeResult?.batchStatus === "partial_failed") {
+  if (input.mergeResult && input.mergeResult.batchStatus !== "done") {
+    return "failed";
+  }
+  if (
+    input.mergeResult &&
+    input.selectedTaskIds.length > 0 &&
+    !hasSameTaskIds(input.selectedTaskIds, input.mergeResult.selectedTaskIds)
+  ) {
     return "failed";
   }
   return "completed";
@@ -355,7 +375,11 @@ const resolveHubFlowBatchResult = (input: {
     batchId: input.batchId,
     selectedTaskIds: resolveHubFlowBatchTaskIds(input),
     completedTaskCount: resolveHubFlowCompletedTaskCount(input),
-    batchStatus: resolveHubFlowBatchStatus(input),
+    batchStatus: resolveHubFlowBatchStatus({
+      selectedTaskIds: input.selectedTaskIds,
+      taskResults: input.taskResults,
+      mergeResult: input.mergeResult,
+    }),
   };
 };
 
@@ -1011,13 +1035,10 @@ export const runHubFlow = async (
       ...batchPlannedMetadata,
     });
 
-    const batchMergeResult = await runBatchMergePhase(batchId);
-
     if (selectedTasks.length === 0) {
       return {
         selectedTaskIds: [],
         results: [],
-        ...(batchMergeResult ? { mergeResult: batchMergeResult } : {}),
         ...(batchSelectionResult
           ? { batchSelection: batchSelectionResult }
           : {}),
@@ -1042,6 +1063,12 @@ export const runHubFlow = async (
       ),
     );
 
+    const allSelectedTasksSucceeded = taskResults.every(
+      isSuccessfulHubTaskResult,
+    );
+    const batchMergeResult = allSelectedTasksSucceeded
+      ? await runBatchMergePhase(batchId)
+      : undefined;
     const batchResult = resolveHubFlowBatchResult({
       batchId,
       selectedTaskIds: selectedIds,
