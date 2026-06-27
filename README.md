@@ -865,6 +865,8 @@ Creates or updates the Hub project development contract for the current reposito
 
 `project configure` reports the Hub project directory, the selected project profile, the refreshed fact summary, whether user-edited sections were preserved, and any backup path after writing. `project status` shows the same path and profile when the contract already exists, and the generic profile is the fallback when no profile-specific contract has been created yet.
 
+If `archloop run --flow` reaches a repository without a development contract, Hub creates the generic contract first, reports that fallback in the run output, and keeps going. Use `project configure` afterward to write the project-specific contract you actually want Hub flows to consume.
+
 ### `archloop agent-config path`
 
 Prints the Hub-wide agent role config file path under the archLoop user data directory. Hub agent roles configure reusable stage providers and models for planning, triage, implementation, review, merge, and recovery. Credentials and login state stay in Hub env files and auth directories, not in role config.
@@ -1001,7 +1003,7 @@ The `no-review` flow reads the Beads ready queue, selects a batch of eligible `r
 
 The `with-review` flow adds a reviewer stage after implementation: successful work moves to `reviewing`, the reviewer receives the task branch and diff/commit context from orchestration, and completed review advances the task to `waiting_for_merge`. Selected task pipelines run in parallel within each batch; each task's reviewer starts after that task's implementation succeeds. After each successful batch, Hub reloads the ready queue and continues with the next batch until the queue is empty or `--max-batches` is reached. Review failures move tasks to `failed` with a failure reason.
 
-Hub flow runs now also write a run-level completion event and the CLI summary reports aggregate completed batches, completed tasks, and the stop reason for the execution slice.
+Hub flow runs now also write a run-level completion event and the CLI summary reports aggregate completed batches, completed tasks, and the stop reason for the execution slice. The stop reason is one of `no_ready_tasks`, `max_batches_reached`, or `batch_failed`: the first two are successful exits, and `batch_failed` means the flow stopped for recovery.
 
 Task-board flows treat `ready_for_agent` as the **candidate pool**, not the automatic execution set. The **selected flow batch** is the subset chosen by the configured batch strategy before claim. Selected batch tasks run concurrently through implementation and any per-branch review; the merge phase waits for them and remains serialized. After each successful batch, Hub refreshes the ready queue and can start another batch until the flow exhausts the queue or hits `--max-batches`. By default, `no-review` and `with-review` use the `planned` strategy with a maximum of **3** tasks per batch. Override with `--batch-strategy`, `--max-tasks`, and `--max-batches`:
 
