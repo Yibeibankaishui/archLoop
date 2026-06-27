@@ -53,6 +53,11 @@ export interface HubRunCompletedBatchResult {
   readonly batchStatus: "completed" | "failed";
 }
 
+export type HubRunStopReason =
+  | "no_ready_tasks"
+  | "single_batch_completed"
+  | "batch_failed";
+
 export interface HubRunCompletedEvent {
   readonly type: "run_completed";
   readonly runId: string;
@@ -60,7 +65,7 @@ export interface HubRunCompletedEvent {
   readonly createdAt: string;
   readonly completedBatchCount: number;
   readonly completedTaskCount: number;
-  readonly stopReason: string;
+  readonly stopReason: HubRunStopReason;
   readonly batchResults: readonly HubRunCompletedBatchResult[];
 }
 
