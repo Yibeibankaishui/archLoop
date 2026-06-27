@@ -79,6 +79,10 @@ import {
   resolveHubProjectStatus,
 } from "./projectStatus.js";
 import {
+  configureHubProjectDevelopmentContract,
+  resolveHubProjectDevelopmentContractPath,
+} from "./hubProjectDevelopmentContract.js";
+import {
   createHubFlowRunImplementer,
   createHubFlowRunReviewer,
   formatHubFlowResultLines,
@@ -1590,12 +1594,25 @@ const formatHubProjectStatusRows = (
   "Repository root": status.repoRoot,
   "archLoop user data dir": status.archloopUserDataDir,
   "Hub project dir": status.hubProjectDir,
+  "Hub project profile": status.projectProfile ?? DEFAULT_PROJECT_PROFILE_NAME,
+  "Hub project development contract": status.projectDevelopmentContractPath
+    ? status.projectDevelopmentContractPath
+    : resolveHubProjectDevelopmentContractPath(status.hubProjectDir),
   "Hub project registration": status.projectRegistered ? "existing" : "created",
   "Beads available": status.beadsAvailable ? "yes" : "no",
   "Task store initialized": status.taskStoreInitialized ? "yes" : "no",
   "Task board ready": String(status.taskCounts.ready),
   "Task board total": String(status.taskCounts.total),
 });
+
+const projectConfigureProjectProfileOption = Options.text(
+  "project-profile",
+).pipe(
+  Options.withDescription(
+    "Project profile for the Hub project development contract (e.g. generic, node). Defaults to a prompt in TTYs.",
+  ),
+  Options.optional,
+);
 
 const taskIdArg = Args.text({ name: "id" });
 const taskTitleArg = Args.text({ name: "title" });
@@ -2429,6 +2446,86 @@ const projectStatusCommand = Command.make("status", {}, () =>
   }),
 );
 
+const projectConfigureCommand = Command.make(
+  "configure",
+  {
+    projectProfile: projectConfigureProjectProfileOption,
+  },
+  ({ projectProfile }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      const status = yield* Effect.try({
+        try: () => resolveHubProjectStatus({ cwd }),
+        catch: (error) =>
+          new ProjectStatusError({
+            message: error instanceof Error ? error.message : String(error),
+          }),
+      });
+
+      const availableProjectProfiles = formatProjectProfileNames();
+      let selectedProjectProfile: string;
+
+      if (projectProfile._tag === "Some") {
+        selectedProjectProfile = projectProfile.value;
+      } else {
+        if (!process.stdin.isTTY) {
+          yield* Effect.fail(
+            new ProjectStatusError({
+              message:
+                "Project configure requires --project-profile in non-interactive mode. Available: " +
+                availableProjectProfiles,
+            }),
+          );
+        }
+
+        const selected = yield* Effect.promise(() =>
+          clack.select({
+            message: "Select a project profile:",
+            initialValue: DEFAULT_PROJECT_PROFILE_NAME,
+            options: listProjectProfiles().map((profile) => ({
+              value: profile.name,
+              label: profile.label,
+              hint: profile.description,
+            })),
+          }),
+        );
+        if (clack.isCancel(selected)) {
+          yield* Effect.fail(
+            new ProjectStatusError({
+              message: "Project profile selection cancelled.",
+            }),
+          );
+        }
+        selectedProjectProfile = selected as string;
+      }
+
+      const contract = yield* Effect.try({
+        try: () =>
+          configureHubProjectDevelopmentContract({
+            repoRoot: status.repoRoot,
+            hubProjectDir: status.hubProjectDir,
+            projectProfileName: selectedProjectProfile,
+          }),
+        catch: (error) =>
+          new ProjectStatusError({
+            message: error instanceof Error ? error.message : String(error),
+          }),
+      });
+
+      yield* d.summary("Hub project development contract", {
+        "Repository root": status.repoRoot,
+        "Hub project dir": status.hubProjectDir,
+        "Hub project profile": contract.contract.projectProfile,
+        "Hub project development contract": contract.contractPath,
+      });
+
+      if (contract.persisted) {
+        yield* d.status("Hub project development contract written.", "success");
+      }
+    }),
+);
+
 const projectCommand = Command.make("project", {}, () =>
   Effect.gen(function* () {
     const d = yield* Display;
@@ -2437,7 +2534,9 @@ const projectCommand = Command.make("project", {}, () =>
       "info",
     );
   }),
-).pipe(Command.withSubcommands([projectStatusCommand]));
+).pipe(
+  Command.withSubcommands([projectStatusCommand, projectConfigureCommand]),
+);
 
 const getHubFlowIds = (): string =>
   listHubFlows()

@@ -14,6 +14,7 @@ import {
   collectHubWorktreeLeaseDiagnosticsForTasks,
   type HubWorktreeLeaseDiagnostic,
 } from "./hubWorktreeLeaseDiagnostics.js";
+import { resolveHubProjectDevelopmentContractState } from "./hubProjectDevelopmentContract.js";
 import {
   loadHubTaskBoard,
   type HubFailureReason,
@@ -69,6 +70,9 @@ export interface HubProjectStatus {
   readonly repoRoot: string;
   readonly archloopUserDataDir: string;
   readonly hubProjectDir: string;
+  readonly projectProfile?: string;
+  readonly projectDevelopmentContractPath?: string;
+  readonly projectDevelopmentContractPersisted?: boolean;
   readonly projectRegistered: boolean;
   readonly beadsAvailable: boolean;
   readonly taskStoreInitialized: boolean;
@@ -766,6 +770,10 @@ export const resolveHubProjectStatus = (
   const repoRoot = resolveRepoRoot(cwd, options.resolveRepoRoot);
   const archloopUserDataDir = resolveUserDataDir(options.archloopUserDataDir);
   const hubProjectDir = resolveHubProjectDir(archloopUserDataDir, repoRoot);
+  const projectDevelopmentContract = resolveHubProjectDevelopmentContractState({
+    repoRoot,
+    hubProjectDir,
+  });
   const projectRegistered = resolveProjectRegistration(
     hubProjectDir,
     options.ensureHubProjectDir,
@@ -814,6 +822,9 @@ export const resolveHubProjectStatus = (
     repoRoot,
     archloopUserDataDir,
     hubProjectDir,
+    projectProfile: projectDevelopmentContract.contract.projectProfile,
+    projectDevelopmentContractPath: projectDevelopmentContract.contractPath,
+    projectDevelopmentContractPersisted: projectDevelopmentContract.persisted,
     projectRegistered,
     beadsAvailable,
     taskStoreInitialized,
