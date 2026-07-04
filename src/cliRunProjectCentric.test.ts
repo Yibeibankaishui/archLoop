@@ -88,6 +88,28 @@ const runCli = async (args: string[], cwd = process.cwd()) => {
   }
 };
 
+const setTerminalTtyState = (
+  stdinIsTTY: boolean | undefined,
+  stdoutIsTTY = stdinIsTTY,
+) => {
+  Object.defineProperty(process.stdin, "isTTY", {
+    configurable: true,
+    value: stdinIsTTY,
+  });
+  Object.defineProperty(process.stdout, "isTTY", {
+    configurable: true,
+    value: stdoutIsTTY,
+  });
+};
+
+const restoreXdgDataHome = (value: string | undefined) => {
+  if (value === undefined) {
+    delete process.env.XDG_DATA_HOME;
+    return;
+  }
+  process.env.XDG_DATA_HOME = value;
+};
+
 describe("archloop run project targeting", () => {
   let hostDir: string;
   let otherDir: string;
@@ -118,14 +140,7 @@ describe("archloop run project targeting", () => {
 
     process.env.XDG_DATA_HOME = join(hostDir, "xdg-data");
     process.chdir(otherDir);
-    Object.defineProperty(process.stdin, "isTTY", {
-      configurable: true,
-      value: false,
-    });
-    Object.defineProperty(process.stdout, "isTTY", {
-      configurable: true,
-      value: false,
-    });
+    setTerminalTtyState(false);
 
     const repoAlphaRoot = resolveGitRepoRoot(repoAlpha);
     const repoBetaRoot = resolveGitRepoRoot(repoBeta);
@@ -151,25 +166,18 @@ describe("archloop run project targeting", () => {
     });
 
     for (const role of HUB_AGENT_ROLES) {
-      setHubAgentRole(role, { provider: "cursor", model: "auto" }, { env: process.env });
+      setHubAgentRole(
+        role,
+        { provider: "cursor", model: "auto" },
+        { env: process.env },
+      );
     }
   });
 
   afterEach(() => {
     process.chdir(originalCwd);
-    Object.defineProperty(process.stdin, "isTTY", {
-      configurable: true,
-      value: originalStdinTTY,
-    });
-    Object.defineProperty(process.stdout, "isTTY", {
-      configurable: true,
-      value: originalStdoutTTY,
-    });
-    if (originalXdgDataHome === undefined) {
-      delete process.env.XDG_DATA_HOME;
-    } else {
-      process.env.XDG_DATA_HOME = originalXdgDataHome;
-    }
+    setTerminalTtyState(originalStdinTTY, originalStdoutTTY);
+    restoreXdgDataHome(originalXdgDataHome);
     vi.clearAllMocks();
     mockSelect.mockReset();
     mockConfirm.mockReset();
@@ -226,6 +234,23 @@ describe("archloop run project targeting", () => {
     );
   });
 
+  it("accepts a positional Hub project override", async () => {
+    const betaRoot = resolveGitRepoRoot(repoBeta);
+    const entries = await runCli(["run", "beta", "--flow", "no-review"]);
+
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "summary",
+        title: "Hub run plan",
+        rows: expect.objectContaining({
+          "Hub project": "beta",
+          "Hub flow": "no-review",
+          "Repository root": betaRoot,
+        }),
+      }),
+    );
+  });
+
   it("keeps legacy path targets working with guidance", async () => {
     const alphaRoot = resolveGitRepoRoot(repoAlpha);
     const entries = await runCli(["run", ".", "--flow", "with-review"], repoAlpha);
@@ -260,105 +285,89 @@ describe("archloop run project targeting", () => {
     const originalCwd = process.cwd();
     const originalXdgDataHome = process.env.XDG_DATA_HOME;
     process.env.XDG_DATA_HOME = wizardDataDir;
-    Object.defineProperty(process.stdin, "isTTY", {
-      configurable: true,
-      value: true,
-    });
-    Object.defineProperty(process.stdout, "isTTY", {
-      configurable: true,
-      value: true,
-    });
+    setTerminalTtyState(true);
     process.chdir(otherDir);
 
-    mockSelect.mockImplementation(async (opts: { message: string }) => {
-      if (opts.message === "Select a Hub project:") {
-        return "beta";
-      }
-      if (opts.message === "Select a Hub flow:") {
-        return "prd-decomposition";
-      }
-      throw new Error(`Unexpected select prompt: ${opts.message}`);
-    });
-    mockText.mockImplementation(async (opts: { message: string }) => {
-      if (opts.message === "PRD file path") {
-        return "docs/prd/example.md";
-      }
-      throw new Error(`Unexpected text prompt: ${opts.message}`);
-    });
-    mockConfirm.mockImplementation(async (opts: { message: string }) => {
-      if (opts.message === "Run this Hub flow now?") {
-        return true;
-      }
-      throw new Error(`Unexpected confirm prompt: ${opts.message}`);
-    });
-    mockRunHubProposalFlowFromCli.mockResolvedValue({
-      flowId: "prd-decomposition",
-      result: { outcome: "cancelled", phase: "approval" },
-    });
-    mockHandlePrdDecompositionFlowDisplay.mockReturnValue(Effect.void);
-    mockHandleTriageProposalFlowDisplay.mockReturnValue(Effect.void);
+    try {
+      mockSelect.mockImplementation(async (opts: { message: string }) => {
+        if (opts.message === "Select a Hub project:") {
+          return "beta";
+        }
+        if (opts.message === "Select a Hub flow:") {
+          return "prd-decomposition";
+        }
+        throw new Error(`Unexpected select prompt: ${opts.message}`);
+      });
+      mockText.mockImplementation(async (opts: { message: string }) => {
+        if (opts.message === "PRD file path") {
+          return "docs/prd/example.md";
+        }
+        throw new Error(`Unexpected text prompt: ${opts.message}`);
+      });
+      mockConfirm.mockImplementation(async (opts: { message: string }) => {
+        if (opts.message === "Run this Hub flow now?") {
+          return true;
+        }
+        throw new Error(`Unexpected confirm prompt: ${opts.message}`);
+      });
+      mockRunHubProposalFlowFromCli.mockResolvedValue({
+        flowId: "prd-decomposition",
+        result: { outcome: "cancelled", phase: "approval" },
+      });
+      mockHandlePrdDecompositionFlowDisplay.mockReturnValue(Effect.void);
+      mockHandleTriageProposalFlowDisplay.mockReturnValue(Effect.void);
 
-    const repoAlphaRoot = resolveGitRepoRoot(repoAlpha);
-    const repoBetaRoot = resolveGitRepoRoot(repoBeta);
-    await mkdir(join(repoBeta, "docs", "prd"), { recursive: true });
-    await writeFile(
-      join(repoBeta, "docs", "prd", "example.md"),
-      "# Example PRD\n",
-    );
-    registerHubProject({
-      repoPath: repoAlphaRoot,
-      projectName: "alpha",
-      env: process.env,
-      now: new Date("2026-07-04T12:03:00.000Z"),
-    });
-    registerHubProject({
-      repoPath: repoBetaRoot,
-      projectName: "beta",
-      env: process.env,
-      now: new Date("2026-07-04T12:04:00.000Z"),
-    });
-    await unlink(resolveHubProjectSelectionPath({ env: process.env }));
+      const repoAlphaRoot = resolveGitRepoRoot(repoAlpha);
+      const repoBetaRoot = resolveGitRepoRoot(repoBeta);
+      await mkdir(join(repoBeta, "docs", "prd"), { recursive: true });
+      await writeFile(
+        join(repoBeta, "docs", "prd", "example.md"),
+        "# Example PRD\n",
+      );
+      registerHubProject({
+        repoPath: repoAlphaRoot,
+        projectName: "alpha",
+        env: process.env,
+        now: new Date("2026-07-04T12:03:00.000Z"),
+      });
+      registerHubProject({
+        repoPath: repoBetaRoot,
+        projectName: "beta",
+        env: process.env,
+        now: new Date("2026-07-04T12:04:00.000Z"),
+      });
+      await unlink(resolveHubProjectSelectionPath({ env: process.env }));
 
-    const entries = await runCli(["run"]);
+      const entries = await runCli(["run"]);
 
-    expect(mockSelect).toHaveBeenCalledWith(
-      expect.objectContaining({ message: "Select a Hub project:" }),
-    );
-    expect(mockSelect).toHaveBeenCalledWith(
-      expect.objectContaining({ message: "Select a Hub flow:" }),
-    );
-    expect(mockText).toHaveBeenCalledWith(
-      expect.objectContaining({ message: "PRD file path" }),
-    );
-    expect(mockConfirm).toHaveBeenCalledWith(
-      expect.objectContaining({ message: "Run this Hub flow now?" }),
-    );
-    expect(entries).toContainEqual(
-      expect.objectContaining({
-        _tag: "summary",
-        title: "Hub run plan",
-        rows: expect.objectContaining({
-          "Hub project": "beta",
-          "Hub flow": "prd-decomposition",
-          "Repository root": repoBetaRoot,
-          "Flow input": expect.stringContaining("docs/prd/example.md"),
+      expect(mockSelect).toHaveBeenCalledWith(
+        expect.objectContaining({ message: "Select a Hub project:" }),
+      );
+      expect(mockSelect).toHaveBeenCalledWith(
+        expect.objectContaining({ message: "Select a Hub flow:" }),
+      );
+      expect(mockText).toHaveBeenCalledWith(
+        expect.objectContaining({ message: "PRD file path" }),
+      );
+      expect(mockConfirm).toHaveBeenCalledWith(
+        expect.objectContaining({ message: "Run this Hub flow now?" }),
+      );
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          _tag: "summary",
+          title: "Hub run plan",
+          rows: expect.objectContaining({
+            "Hub project": "beta",
+            "Hub flow": "prd-decomposition",
+            "Repository root": repoBetaRoot,
+            "Flow input": expect.stringContaining("docs/prd/example.md"),
+          }),
         }),
-      }),
-    );
-
-    process.chdir(originalCwd);
-    Object.defineProperty(process.stdin, "isTTY", {
-      configurable: true,
-      value: originalTty.stdin,
-    });
-    Object.defineProperty(process.stdout, "isTTY", {
-      configurable: true,
-      value: originalTty.stdout,
-    });
-    if (originalXdgDataHome === undefined) {
-      delete process.env.XDG_DATA_HOME;
-    } else {
-      process.env.XDG_DATA_HOME = originalXdgDataHome;
+      );
+    } finally {
+      process.chdir(originalCwd);
+      setTerminalTtyState(originalTty.stdin, originalTty.stdout);
+      restoreXdgDataHome(originalXdgDataHome);
     }
   });
 

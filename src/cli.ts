@@ -116,10 +116,16 @@ import {
 } from "./hubFlowExecution.js";
 import { createHubBatchPlannerInvoker } from "./hubBatchPlannerAgent.js";
 import { resolveHubBatchSelectionOptions } from "./hubBatchPlanner.js";
-import { getHubFlowDefinition, listHubFlows } from "./hubFlows.js";
+import {
+  getHubFlowDefinition,
+  listHubFlows,
+  type HubFlowDefinition,
+  type HubFlowInputSchema,
+} from "./hubFlows.js";
 import {
   formatValidatedHubFlowInputSummary,
   validateHubFlowInput,
+  type ValidatedHubFlowInput,
 } from "./hubFlowInput.js";
 import {
   handlePrdDecompositionFlowDisplay,
@@ -219,6 +225,11 @@ const resolveImageName = (cliFlag: OptionalTextFlag, cwd: string): string =>
 
 const optionalTextValue = (flag: OptionalTextFlag): string | undefined =>
   flag._tag === "Some" ? flag.value : undefined;
+
+const trimOptionalText = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+};
 
 const hasInteractiveTerminal = (): boolean =>
   process.stdin.isTTY && process.stdout.isTTY;
@@ -3430,6 +3441,205 @@ const resolveInteractiveRunFlowSelection = async (
   return String(result);
 };
 
+const resolveRunFlowDefinition = async (
+  flowId: string | undefined,
+  isInteractive: boolean,
+): Promise<HubFlowDefinition> => {
+  const requireFlowDefinition = (value: string): HubFlowDefinition => {
+    const flowDefinition = getHubFlowDefinition(value);
+    if (!flowDefinition) {
+      throw new HubFlowError({
+        message: `Unknown Hub flow "${value}". Available flows: ${getHubFlowIds()}`,
+      });
+    }
+    return flowDefinition;
+  };
+
+  if (flowId) {
+    return requireFlowDefinition(flowId);
+  }
+
+  if (!isInteractive) {
+    throw new HubFlowError({
+      message:
+        "No Hub flow was provided. Run `archloop run --flow <id>`, `archloop run <project-name> --flow <id>`, or `archloop run --project <name> --flow <id>`.",
+    });
+  }
+
+  return requireFlowDefinition(
+    await resolveInteractiveRunFlowSelection(listHubFlows()),
+  );
+};
+
+const promptRequiredRunFlowInput = async (
+  flowInput: HubFlowInputSchema,
+): Promise<string> => {
+  const promptedInput = await clack.text({
+    message: flowInput.label,
+    validate: (value) => {
+      const trimmed = value?.trim() ?? "";
+      return trimmed.length === 0 ? `${flowInput.label} is required` : undefined;
+    },
+  });
+  if (clack.isCancel(promptedInput)) {
+    throw new HubFlowError({
+      message: "Flow input selection cancelled.",
+    });
+  }
+
+  return String(promptedInput).trim();
+};
+
+const resolveRunFlowInput = async ({
+  flowDefinition,
+  cwd,
+  rawInput,
+  isInteractive,
+}: {
+  readonly flowDefinition: HubFlowDefinition;
+  readonly cwd: string;
+  readonly rawInput: string | undefined;
+  readonly isInteractive: boolean;
+}): Promise<ValidatedHubFlowInput | undefined> => {
+  if (rawInput && !flowDefinition.input) {
+    throw new HubFlowError({
+      message: `Hub flow "${flowDefinition.id}" does not accept --input.`,
+    });
+  }
+
+  const flowInput = flowDefinition.input;
+  if (!flowInput) {
+    return undefined;
+  }
+
+  let resolvedInput = rawInput;
+  if (resolvedInput === undefined && flowInput.required && isInteractive) {
+    resolvedInput = await promptRequiredRunFlowInput(flowInput);
+  }
+
+  return validateHubFlowInput(flowDefinition.id, {
+    cwd,
+    rawInput: resolvedInput,
+  });
+};
+
+type RunProjectResolution = {
+  readonly repoRoot: string;
+  readonly targetProjectName?: string;
+  readonly legacyProjectTarget?: string;
+};
+
+const resolveRunProjectTarget = ({
+  projectFlag,
+  positionalProject,
+  isInteractive,
+  display,
+}: {
+  readonly projectFlag: string | undefined;
+  readonly positionalProject: string | undefined;
+  readonly isInteractive: boolean;
+  readonly display: DisplayService;
+}): Effect.Effect<RunProjectResolution, HubFlowError> =>
+  Effect.gen(function* () {
+    const legacyProjectTarget =
+      projectFlag === undefined &&
+      positionalProject !== undefined &&
+      isLegacyRunProjectTarget(positionalProject)
+        ? positionalProject
+        : undefined;
+
+    if (legacyProjectTarget) {
+      const repoRoot = yield* Effect.try({
+        try: () => resolveGitRepoRoot(legacyProjectTarget),
+        catch: toHubFlowError,
+      });
+      yield* display.status(
+        "Legacy path target detected. Run `archloop project add` and `archloop project select <name>` to target this repo by Hub project name next time.",
+        "warn",
+      );
+      return {
+        repoRoot,
+        legacyProjectTarget,
+      };
+    }
+
+    const target = yield* Effect.tryPromise({
+      try: () =>
+        resolveHubProjectTarget({
+          projectSelector: projectFlag ?? positionalProject,
+          isTTY: isInteractive,
+          selectProject: resolveInteractiveProjectSelection,
+        }),
+      catch: toHubFlowError,
+    });
+
+    return {
+      repoRoot: target.project.repoRoot,
+      targetProjectName: target.project.name,
+    };
+  });
+
+const buildRunPlanSummaryRows = ({
+  repoRoot,
+  flowDefinition,
+  targetProjectName,
+  legacyProjectTarget,
+  validatedInput,
+}: {
+  readonly repoRoot: string;
+  readonly flowDefinition: HubFlowDefinition;
+  readonly targetProjectName?: string;
+  readonly legacyProjectTarget?: string;
+  readonly validatedInput?: ValidatedHubFlowInput;
+}): Record<string, string> => {
+  const rows: Record<string, string> = {
+    "Repository root": repoRoot,
+    "Hub flow": flowDefinition.id,
+  };
+  if (targetProjectName) {
+    rows["Hub project"] = targetProjectName;
+  }
+  if (legacyProjectTarget) {
+    rows["Legacy path target"] = legacyProjectTarget;
+  }
+  if (validatedInput) {
+    rows["Flow input"] = formatValidatedHubFlowInputSummary(validatedInput);
+  }
+  return rows;
+};
+
+const confirmRunPlan = (): Effect.Effect<void, HubFlowError> =>
+  Effect.gen(function* () {
+    const confirmed = yield* Effect.tryPromise({
+      try: () =>
+        clack.confirm({
+          message: "Run this Hub flow now?",
+          initialValue: true,
+        }),
+      catch: toHubFlowError,
+    });
+    if (clack.isCancel(confirmed) || confirmed !== true) {
+      return yield* Effect.fail(
+        new HubFlowError({
+          message: "Run cancelled.",
+        }),
+      );
+    }
+  });
+
+const requireProposalRunInput = (
+  flowDefinition: HubFlowDefinition,
+  validatedInput: ValidatedHubFlowInput | undefined,
+): ValidatedHubFlowInput => {
+  if (validatedInput) {
+    return validatedInput;
+  }
+
+  throw new HubFlowError({
+    message: `Hub flow "${flowDefinition.id}" requires flow input.`,
+  });
+};
+
 const toHubAgentConfigError = (error: unknown): HubAgentConfigError =>
   error instanceof HubAgentConfigError
     ? error
@@ -3861,86 +4071,24 @@ const runCommand = Command.make(
   }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const projectFlag = optionalTextValue(project)?.trim();
-      const positionalProject = optionalTextValue(projectPath)?.trim();
-      const hasProjectFlag = projectFlag !== undefined && projectFlag.length > 0;
-      const hasPositionalProject =
-        positionalProject !== undefined && positionalProject.length > 0;
-      const legacyProjectTarget =
-        !hasProjectFlag &&
-        hasPositionalProject &&
-        isLegacyRunProjectTarget(positionalProject)
-          ? positionalProject
-          : undefined;
-
-      let repoRoot: string;
-      let targetProjectName: string | undefined;
-
-      if (legacyProjectTarget) {
-        repoRoot = yield* Effect.try({
-          try: () => resolveGitRepoRoot(legacyProjectTarget),
-          catch: toHubFlowError,
+      const isInteractive = hasInteractiveTerminal();
+      const projectFlag = trimOptionalText(optionalTextValue(project));
+      const positionalProject = trimOptionalText(optionalTextValue(projectPath));
+      const { repoRoot, targetProjectName, legacyProjectTarget } =
+        yield* resolveRunProjectTarget({
+          projectFlag,
+          positionalProject,
+          isInteractive,
+          display: d,
         });
-        yield* d.status(
-          "Legacy path target detected. Run `archloop project add` and `archloop project select <name>` to target this repo by Hub project name next time.",
-          "warn",
-        );
-      } else {
-        const projectSelector = hasProjectFlag
-          ? projectFlag
-          : hasPositionalProject
-            ? positionalProject
-            : undefined;
-        const target = yield* Effect.tryPromise({
-          try: () =>
-            resolveHubProjectTarget({
-              projectSelector,
-              isTTY: hasInteractiveTerminal(),
-              selectProject: resolveInteractiveProjectSelection,
-            }),
-          catch: toHubFlowError,
-        });
-        repoRoot = target.project.repoRoot;
-        targetProjectName = target.project.name;
-      }
-
-      const flowValue = optionalTextValue(flow)?.trim();
-      let flowDefinition =
-        flowValue && flowValue.length > 0
-          ? getHubFlowDefinition(flowValue)
-          : undefined;
-
-      if (!flowDefinition) {
-        if (flowValue) {
-          return yield* Effect.fail(
-            new HubFlowError({
-              message: `Unknown Hub flow "${flowValue}". Available flows: ${getHubFlowIds()}`,
-            }),
-          );
-        }
-
-        if (!hasInteractiveTerminal()) {
-          return yield* Effect.fail(
-            new HubFlowError({
-              message:
-                "No Hub flow was provided. Run `archloop run --flow <id>`, `archloop run <project-name> --flow <id>`, or `archloop run --project <name> --flow <id>`.",
-            }),
-          );
-        }
-
-        const selectedFlowId = yield* Effect.tryPromise({
-          try: () => resolveInteractiveRunFlowSelection(listHubFlows()),
-          catch: toHubFlowError,
-        });
-        flowDefinition = getHubFlowDefinition(selectedFlowId);
-        if (!flowDefinition) {
-          return yield* Effect.fail(
-            new HubFlowError({
-              message: `Unknown Hub flow "${selectedFlowId}". Available flows: ${getHubFlowIds()}`,
-            }),
-          );
-        }
-      }
+      const flowDefinition = yield* Effect.tryPromise({
+        try: () =>
+          resolveRunFlowDefinition(
+            trimOptionalText(optionalTextValue(flow)),
+            isInteractive,
+          ),
+        catch: toHubFlowError,
+      });
 
       const batchSelectionOptions = yield* Effect.try({
         try: () =>
@@ -3968,94 +4116,36 @@ const runCommand = Command.make(
       }
 
       const rawInput = optionalTextValue(input);
-      if (rawInput && !flowDefinition.input) {
-        return yield* Effect.fail(
-          new HubFlowError({
-            message: `Hub flow "${flowDefinition.id}" does not accept --input.`,
+      const validatedInput = yield* Effect.tryPromise({
+        try: () =>
+          resolveRunFlowInput({
+            flowDefinition,
+            cwd: repoRoot,
+            rawInput,
+            isInteractive,
           }),
-        );
-      }
-
-      let validatedInput: ReturnType<typeof validateHubFlowInput> | undefined;
-      const flowInput = flowDefinition.input;
-      if (flowInput) {
-        let resolvedInput = rawInput;
-        if (
-          resolvedInput === undefined &&
-          flowInput.required &&
-          hasInteractiveTerminal()
-        ) {
-          const promptedInput = yield* Effect.tryPromise({
-            try: () =>
-              clack.text({
-                message: flowInput.label,
-                validate: (value) => {
-                  const trimmed = value?.trim() ?? "";
-                  return trimmed.length === 0
-                    ? `${flowInput.label} is required`
-                    : undefined;
-                },
-              }),
-            catch: toHubFlowError,
-          });
-          if (clack.isCancel(promptedInput)) {
-            return yield* Effect.fail(
-              new HubFlowError({
-                message: "Flow input selection cancelled.",
-              }),
-            );
-          }
-          resolvedInput = String(promptedInput).trim();
-        }
-
-        validatedInput = yield* Effect.try({
-          try: () =>
-            validateHubFlowInput(flowDefinition.id, {
-              cwd: repoRoot,
-              rawInput: resolvedInput,
-            }),
-          catch: toHubFlowError,
-        });
+        catch: toHubFlowError,
+      });
+      if (validatedInput) {
         yield* d.status(
           formatValidatedHubFlowInputSummary(validatedInput),
           "info",
         );
       }
 
-      const runSummaryRows: Record<string, string> = {
-        "Repository root": repoRoot,
-        "Hub flow": flowDefinition.id,
-      };
-      if (targetProjectName) {
-        runSummaryRows["Hub project"] = targetProjectName;
-      }
-      if (legacyProjectTarget) {
-        runSummaryRows["Legacy path target"] = legacyProjectTarget;
-      }
-      if (validatedInput) {
-        runSummaryRows["Flow input"] = formatValidatedHubFlowInputSummary(
+      yield* d.summary(
+        "Hub run plan",
+        buildRunPlanSummaryRows({
+          repoRoot,
+          flowDefinition,
+          targetProjectName,
+          legacyProjectTarget,
           validatedInput,
-        );
-      }
+        }),
+      );
 
-      yield* d.summary("Hub run plan", runSummaryRows);
-
-      if (hasInteractiveTerminal()) {
-        const confirmed = yield* Effect.tryPromise({
-          try: () =>
-            clack.confirm({
-              message: "Run this Hub flow now?",
-              initialValue: true,
-            }),
-          catch: toHubFlowError,
-        });
-        if (clack.isCancel(confirmed) || confirmed !== true) {
-          return yield* Effect.fail(
-            new HubFlowError({
-              message: "Run cancelled.",
-            }),
-          );
-        }
+      if (isInteractive) {
+        yield* confirmRunPlan();
       }
 
       if (flowDefinition.kind === "proposal") {
@@ -4063,7 +4153,10 @@ const runCommand = Command.make(
           try: () =>
             runHubProposalFlowFromCli({
               cwd: repoRoot,
-              validatedInput: validatedInput!,
+              validatedInput: requireProposalRunInput(
+                flowDefinition,
+                validatedInput,
+              ),
               yes,
               isTTY: process.stdin.isTTY,
             }),
