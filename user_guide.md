@@ -54,6 +54,8 @@ archloop check --hub
 
 `project list` 则提供更轻量的多项目概览：它按 Hub registry 列出项目，标记 selected 项，显示 repo path、project profile、path validity、local task store readiness 标签、ready/failed/total 数量（可用时）以及 active run 概览，适合快速决定接下来切换到哪个项目。
 
+如果只是需要改名或迁移仓库路径，可以用 `archloop project rename <project> <new-name>` 和 `archloop project relink <project> --path <repo-path>`。这两个命令都会保持 Hub project id 不变，因此任务、运行和历史记录仍然挂在同一个 Hub project 上。
+
 ### 3.2 配置 agent roles
 
 Hub flow 使用统一的 role 配置，配置对所有项目生效。
