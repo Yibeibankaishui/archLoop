@@ -475,7 +475,7 @@ describe("doctorHubTaskState", () => {
         reason: "dirty_worktree",
         repairable: false,
         nextAction:
-          "Commit, stash, or revert dirty source files, then rerun the flow.",
+          "Commit, stash, or discard dirty source files, then rerun the flow.",
       }),
     );
 

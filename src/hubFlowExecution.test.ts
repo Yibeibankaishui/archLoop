@@ -1900,6 +1900,56 @@ describe("with-review Hub flow execution", () => {
     );
   });
 
+  it("warns when the host worktree is dirty at flow start", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-dirty-warning-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, ".beads", "issues.jsonl");
+    const { env } = await writeMockBd(
+      repoDir,
+      stateFile,
+      [
+        {
+          id: "bd-human",
+          title: "Needs a human",
+          status: "open",
+          labels: ["ready-for-human"],
+          metadata: { hubStatus: "ready_for_human" },
+        },
+      ],
+      { argsFile: join(repoDir, ".beads", "bd-args.txt") },
+    );
+    await execAsync("git add bin .beads", { cwd: repoDir });
+    await execAsync('git commit -m "add mock task store"', { cwd: repoDir });
+    await writeFile(join(repoDir, "wip.txt"), "local notes\n");
+
+    const result = await runHubFlow({
+      flowId: "with-review",
+      cwd: repoDir,
+      hubProjectDir: await mkdtemp(join(tmpdir(), "hub-flow-dirty-data-")),
+      env,
+      implementer: async () => {
+        throw new Error("implementer should not run without ready tasks");
+      },
+      reviewer: async () => {
+        throw new Error("reviewer should not run without ready tasks");
+      },
+      merger: async () => ({ outcome: "success" }),
+      verifier: async () => ({ outcome: "success" }),
+    });
+
+    expect(result.worktreeWarning).toMatchObject({
+      dirtySourceFiles: ["wip.txt"],
+    });
+    const summary = formatHubFlowResultLines(result).join("\n");
+    expect(summary).toContain(
+      "Worktree warning: dirty source files detected before flow start: wip.txt",
+    );
+    expect(summary).toContain("commit, stash, or discard");
+    expect(summary).toContain("rerun the same flow");
+  });
+
   it("resumes an unfinished waiting_for_merge batch when no ready tasks are selected", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-resume-"));
     await initRepo(repoDir);
@@ -2304,8 +2354,14 @@ describe("with-review Hub flow execution", () => {
       batchStatus: "failed",
     });
     expect(result.mergeResult).toMatchObject({
-      selectedTaskIds: [],
-      batchStatus: "skipped",
+      selectedTaskIds: ["bd-old-conflict"],
+      batchStatus: "partial_failed",
+      results: [
+        expect.objectContaining({
+          taskId: "bd-old-conflict",
+          outcome: "merge_failed",
+        }),
+      ],
     });
     expect(implementCalled).toBe(false);
     expect(reviewCalled).toBe(false);

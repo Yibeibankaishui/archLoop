@@ -20,9 +20,11 @@ import {
   createHubFlowRunMerger,
   createHubFlowRunVerifier,
   formatHubBatchMergeResultLines,
+  inspectHubMergeWorktreeState,
   runHubBatchMerge,
   type HubFlowMerger,
   type HubFlowVerifier,
+  type HubMergeWorktreeState,
   type RunHubBatchMergeResult,
 } from "./hubBatchMerge.js";
 import { getHubFlowDefinition, resolveHubFlowPromptPath } from "./hubFlows.js";
@@ -164,6 +166,11 @@ export type HubFlowStopReason = HubRunStopReason;
 
 export type HubFlowBatchResult = HubRunCompletedBatchResult;
 
+export interface HubFlowWorktreeWarning {
+  readonly dirtySourceFiles: readonly string[];
+  readonly dirtyTaskStoreFiles: readonly string[];
+}
+
 export interface RunHubFlowResult {
   readonly flowId: string;
   readonly runId: string;
@@ -181,6 +188,7 @@ export interface RunHubFlowResult {
   readonly unfinishedBatchIds: readonly string[];
   readonly batchSelection?: HubBatchPlannerResult;
   readonly fallbackReason?: string;
+  readonly worktreeWarning?: HubFlowWorktreeWarning;
   readonly projectDevelopmentContractPath: string;
   readonly projectDevelopmentContractCreatedGenericFallback: boolean;
 }
@@ -323,6 +331,16 @@ const resolveHubFlowCompletedTaskCount = (input: {
   }
   return countSuccessfulMergeResults(input.mergeResult);
 };
+
+const resolveHubFlowWorktreeWarning = (
+  state: HubMergeWorktreeState,
+): HubFlowWorktreeWarning | undefined =>
+  state.dirtySourceFiles.length > 0
+    ? {
+        dirtySourceFiles: state.dirtySourceFiles,
+        dirtyTaskStoreFiles: state.dirtyTaskStoreFiles,
+      }
+    : undefined;
 
 const hasSameTaskIds = (
   left: readonly string[],
@@ -977,6 +995,8 @@ export const runHubFlow = async (
   const maxBatches = resolveHubFlowMaxBatches({
     maxBatches: input.maxBatches,
   });
+  const initialWorktreeState = await inspectHubMergeWorktreeState(repoRoot);
+  const worktreeWarning = resolveHubFlowWorktreeWarning(initialWorktreeState);
   const unfinishedBatches = findResumableHubFlowBatches({
     hubProjectDir,
     flowId: input.flowId,
@@ -1252,6 +1272,7 @@ export const runHubFlow = async (
     unfinishedBatchIds,
     batchSelection,
     ...(fallbackReason ? { fallbackReason } : {}),
+    ...(worktreeWarning ? { worktreeWarning } : {}),
     projectDevelopmentContractPath: projectDevelopmentContract.contractPath,
     projectDevelopmentContractCreatedGenericFallback:
       projectDevelopmentContract.createdGenericFallback,
@@ -1272,6 +1293,17 @@ export const formatHubFlowResultLines = (
     `Stop reason: ${result.stopReason}`,
     `Selected tasks: ${selectedTaskCount}`,
   ];
+  if (result.worktreeWarning) {
+    lines.push(
+      `Worktree warning: dirty source files detected before flow start: ${result.worktreeWarning.dirtySourceFiles.join(", ")}`,
+    );
+    lines.push(
+      "Dirty source files only block Hub merge when a selected task branch would overwrite or conflict with those paths.",
+    );
+    lines.push(
+      "If merge selection blocks, commit, stash, or discard the listed files, then rerun the same flow so waiting_for_merge tasks resume.",
+    );
+  }
   if (result.batchSelection) {
     lines.push(
       `Batch strategy: ${result.batchSelection.batchStrategyUsed} (max ${result.batchSelection.maxTasks})`,

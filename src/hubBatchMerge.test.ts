@@ -953,11 +953,16 @@ describe("runHubBatchMerge", () => {
     );
   });
 
-  it("blocks merge preflight when the source worktree has dirty source files", async () => {
+  it("blocks merge preflight when dirty source files overlap the task branch", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-merge-dirty-"));
     await initRepo(repoDir);
-    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
-    await writeFile(join(repoDir, "dirty-source.txt"), "uncommitted");
+    await commitFile(repoDir, "shared.txt", "base\n", "initial commit");
+
+    const branch = "archloop/bd-dirty-overlap";
+    await execAsync(`git checkout -b "${branch}"`, { cwd: repoDir });
+    await commitFile(repoDir, "shared.txt", "branch\n", "branch edit");
+    await execAsync("git checkout main", { cwd: repoDir });
+    await writeFile(join(repoDir, "shared.txt"), "local uncommitted\n");
 
     const batchId = "batch-dirty";
     const stateFile = join(repoDir, "bd-state.json");
@@ -972,7 +977,7 @@ describe("runHubBatchMerge", () => {
           claim: {
             runId: "run-merge-test",
             batchId,
-            branch: "branch-dirty",
+            branch,
             claimedAt: "2026-06-12T10:00:00Z",
           },
         },
@@ -998,7 +1003,6 @@ describe("runHubBatchMerge", () => {
         return { outcome: "success" };
       },
       verifier: successVerifier,
-      branchInspector: branchReadyInspector,
     });
 
     expect(mergeCalls).toBe(0);
@@ -1009,14 +1013,16 @@ describe("runHubBatchMerge", () => {
         taskId: "bd-dirty",
         decision: "blocked",
         reason: "dirty_worktree",
-        message: expect.stringContaining("dirty-source.txt"),
+        branch,
+        message: expect.stringContaining("shared.txt"),
       }),
     );
     const summary = formatHubBatchMergeResultLines(result).join("\n");
     expect(summary).toContain(
-      "Git safety gate: commit, stash, or revert dirty source files",
+      `Git safety gate: dirty source files would be overwritten or conflict with ${branch}`,
     );
-    expect(summary).toContain("dirty-source.txt");
+    expect(summary).toContain("shared.txt");
+    expect(summary).toContain("commit, stash, or discard dirty source files");
     expect(summary).toContain("then rerun the same flow so the batch resumes.");
   });
 
@@ -1091,6 +1097,98 @@ describe("runHubBatchMerge", () => {
     expect(formatHubBatchMergeResultLines(result).join("\n")).toContain(
       "task-store dirty: .beads/issues.jsonl, .beads/interactions.jsonl",
     );
+  });
+
+  it("merges through a clean integration worktree when dirty source files do not overlap the task branch", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-batch-merge-dirty-compatible-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "base.txt", "base\n", "initial commit");
+
+    const branch = "archloop/bd-dirty-compatible";
+    await execAsync(`git checkout -b "${branch}"`, { cwd: repoDir });
+    await commitFile(repoDir, "feature.txt", "feature\n", "feature commit");
+    await execAsync("git checkout main", { cwd: repoDir });
+    await writeFile(join(repoDir, "notes.txt"), "local notes\n");
+    await mkdir(join(repoDir, ".archloop"), { recursive: true });
+    const verifyCwdPath = join(repoDir, "verify-cwd.txt");
+    await writeFile(
+      join(repoDir, ".archloop", "verify.sh"),
+      `#!/bin/sh
+{
+  pwd
+  cat feature.txt
+  if [ -e notes.txt ]; then echo notes-present; else echo notes-absent; fi
+} > ${JSON.stringify(verifyCwdPath)}
+test -f feature.txt
+test ! -f notes.txt
+`,
+    );
+    await chmod(join(repoDir, ".archloop", "verify.sh"), 0o755);
+
+    const batchId = "batch-dirty-compatible";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-dirty-compatible",
+        title: "Dirty compatible task",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch,
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "archloop", "hub"),
+    );
+    const result = await runHubBatchMerge({
+      flowId: "no-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger: createHubFlowRunMerger({ cwd: repoDir }),
+      verifier: createHubFlowRunVerifier({ cwd: repoDir }),
+    });
+
+    expect(result.batchStatus).toBe("done");
+    expect(result.selectedTaskIds).toEqual(["bd-dirty-compatible"]);
+    expect(result.selectionDiagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-dirty-compatible",
+        decision: "selected",
+        reason: "selected",
+      }),
+    );
+    const [verificationCwd, verifiedFeature, verifiedNotes] = (
+      await readFile(verifyCwdPath, "utf-8")
+    )
+      .trim()
+      .split(/\r?\n/);
+    expect(verificationCwd).not.toBe(repoDir);
+    expect(verifiedFeature).toBe("feature");
+    expect(verifiedNotes).toBe("notes-absent");
+    await expect(readFile(join(repoDir, "feature.txt"), "utf-8")).resolves.toBe(
+      "feature\n",
+    );
+    await expect(readFile(join(repoDir, "notes.txt"), "utf-8")).resolves.toBe(
+      "local notes\n",
+    );
+    await expect(
+      execAsync("git status --short -- notes.txt", { cwd: repoDir }),
+    ).resolves.toMatchObject({ stdout: "?? notes.txt\n" });
   });
 
   it("blocks task branches that include Beads runtime/export files in their diff", async () => {

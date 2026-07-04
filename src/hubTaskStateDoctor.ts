@@ -371,7 +371,7 @@ const buildDirtyWorktreeDiagnostic = (
   currentStatus: task.hubStatus,
   branch: task.claim?.branch,
   nextAction:
-    "Commit, stash, or revert dirty source files, then rerun the flow.",
+    "Commit, stash, or discard dirty source files, then rerun the flow.",
   message: `Git safety gate: dirty source files (${dirtySourceFiles.join(", ")}) block merge selection. This is not repairable Beads task-state pollution.`,
 });
 
