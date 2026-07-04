@@ -245,6 +245,14 @@ archLoop 使用常规容器将宿主 worktree 挂载进沙箱，agent 在容器�
 3. **沙箱环境**：容器内能否执行项目关键命令（测试、构建、启动）；不足则改 `Dockerfile` 与 `bootstrap.sh`。
 4. **凭据**：`.archloop/.env` 是否在 init 提示的变量均已填写。
 
+## Hub flow 脏工作区诊断
+
+`archloop run . --flow no-review` 和 `archloop run . --flow with-review` 启动时会提前提醒宿主仓库里的 dirty source files。若同一个 flow 已有未完成的 `waiting_for_merge` 批次，archLoop 会先恢复该批次，并在领取新任务前检查待合并分支是否会改到这些脏文件。
+
+非重叠脏文件不会阻塞 merge：archLoop 会在干净的 integration worktree/branch 中验证结果，并只在不会覆盖宿主脏文件时落回当前分支。若存在重叠，CLI 会列出具体 blocking files；先 commit、stash 或 discard 这些文件，再重新运行同一个 flow，archLoop 会继续恢复 `waiting_for_merge` 任务。
+
+`.beads/issues.jsonl`、`.beads/interactions.jsonl` 等 Beads runtime/export 文件会单独报告，通常不要提交；通过 `archloop tasks pull` / `push` / `sync` 交换远端任务状态。
+
 ---
 
 ## 最小 API 示例

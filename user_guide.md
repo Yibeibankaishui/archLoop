@@ -250,7 +250,7 @@ archloop tasks doctor
 
 `tasks doctor` 只读检查本地 Beads task board、Hub run events、git 分支和工作区状态，不会修改 Beads、git 或远端 GitHub Issues。它会报告多重 archLoop 状态标签、过期的 `metadata.hubStatus`、缺失的 execution claim、failed 任务上仍存在的分支工作、已 review 但无法被 merge 选择的任务、terminal 任务里残留的 execution metadata、dirty worktree gate，以及需要 `tasks push` 的同步状态。
 
-每条输出都会说明下一步：重新运行 flow、执行 `archloop tasks recover <selector>`、执行 `archloop tasks repair-state <selector>`，或推送 task sync。`dirty_worktree` 不是可修复的 Beads 状态污染；先 commit、stash 或 revert 脏文件，再重新运行同一个 flow 让批次恢复。
+每条输出都会说明下一步：重新运行 flow、执行 `archloop tasks recover <selector>`、执行 `archloop tasks repair-state <selector>`，或推送 task sync。dirty source files 是 Git 安全提示，不是可修复的 Beads 状态污染。后续 `run --flow` 只有在待合并分支会改到同一路径时才会阻塞；按输出列出的 blocking files 先 commit、stash 或 discard，再重新运行同一个 flow，archLoop 会优先恢复 `waiting_for_merge` 批次。
 
 ```bash
 archloop tasks repair-state <selector>
@@ -277,7 +277,7 @@ archloop run . --flow with-review
 
 适合需要实现后审核的流程：实现成功后进入 `reviewing`，review 完成后进入 `waiting_for_merge`，再进入 merge 阶段。
 
-Merge 阶段会在真正合并前输出 selected / skipped / blocked 诊断。若 Hub 事件显示任务已实现或审核完成、分支仍有未合并工作，但 Beads 投影状态或 claim 元数据已经过期，诊断会显示 `state_inconsistent` 并提示运行 `archloop tasks repair-state <selector>`；若任务处于 failed 或 stale execution 状态，`archloop tasks recover <selector>` 也可能适用。若被 `dirty_worktree` 阻塞，这是 Git 安全门而不是任务状态不一致；提交、stash 或 revert 列出的脏文件后，重新运行同一个 flow 即可恢复批次。
+Merge 阶段会在真正合并前输出 selected / skipped / blocked 诊断。若 Hub 事件显示任务已实现或审核完成、分支仍有未合并工作，但 Beads 投影状态或 claim 元数据已经过期，诊断会显示 `state_inconsistent` 并提示运行 `archloop tasks repair-state <selector>`；若任务处于 failed 或 stale execution 状态，`archloop tasks recover <selector>` 也可能适用。`run --flow` 启动时会提前提醒宿主仓库存在 dirty source files；若已有 `waiting_for_merge` 批次，会先做 overlap 检查。非重叠脏文件不会阻塞：archLoop 会在干净的 integration worktree/branch 中验证 merge，并在落回宿主前再次确认不会覆盖脏文件。若输出显示 dirty 文件会被覆盖或冲突，任务会留在 `waiting_for_merge`，按列出的 blocking files 先 commit、stash 或 discard，再重新运行同一个 flow 即可恢复批次。
 
 ### 7.3 Flow 状态
 
