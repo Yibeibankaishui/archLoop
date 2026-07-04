@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>archLoop Hub - Run Workbench</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=JetBrains+Mono:wght@450&family=Geist:wght@600;700&family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Inter:wght@100..900&display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 2px;
+        }
+        .timeline-line::before {
+            content: '';
+            position: absolute;
+            left: 7px;
+            top: 24px;
+            bottom: -8px;
+            width: 1px;
+            background-color: #e2e8f0;
+        }
+        .timeline-item:last-child .timeline-line::before {
+            display: none;
+        }
+        @keyframes pulse-soft {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .animate-pulse-soft {
+            animation: pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-primary-fixed": "#131b2e",
+                        "secondary": "#0058be",
+                        "on-primary-fixed-variant": "#3f465c",
+                        "surface-bright": "#f8f9ff",
+                        "on-tertiary-fixed-variant": "#574425",
+                        "tertiary-container": "#271901",
+                        "primary": "#000000",
+                        "inverse-surface": "#213145",
+                        "secondary-fixed": "#d8e2ff",
+                        "on-secondary-fixed": "#001a42",
+                        "on-secondary-container": "#fefcff",
+                        "surface": "#f8f9ff",
+                        "on-secondary": "#ffffff",
+                        "surface-container-high": "#dce9ff",
+                        "surface-container-lowest": "#ffffff",
+                        "surface-container-low": "#eff4ff",
+                        "tertiary-fixed": "#fcdeb5",
+                        "surface-container": "#e5eeff",
+                        "primary-fixed": "#dae2fd",
+                        "outline": "#76777d",
+                        "inverse-on-surface": "#eaf1ff",
+                        "surface-variant": "#d3e4fe",
+                        "error": "#ba1a1a",
+                        "tertiary-fixed-dim": "#dec29a",
+                        "background": "#f8f9ff",
+                        "secondary-container": "#2170e4",
+                        "inverse-primary": "#bec6e0",
+                        "on-tertiary-container": "#98805d",
+                        "secondary-fixed-dim": "#adc6ff",
+                        "on-tertiary-fixed": "#271901",
+                        "surface-dim": "#cbdbf5",
+                        "primary-fixed-dim": "#bec6e0",
+                        "primary-container": "#131b2e",
+                        "on-background": "#0b1c30",
+                        "error-container": "#ffdad6",
+                        "surface-container-highest": "#d3e4fe",
+                        "on-error-container": "#93000a",
+                        "on-primary-container": "#7c839b",
+                        "outline-variant": "#c6c6cd",
+                        "on-surface-variant": "#45464d",
+                        "on-secondary-fixed-variant": "#004395",
+                        "on-primary": "#ffffff",
+                        "on-tertiary": "#ffffff",
+                        "tertiary": "#000000",
+                        "surface-tint": "#565e74",
+                        "on-error": "#ffffff",
+                        "on-surface": "#0b1c30"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "base": "4px",
+                        "stack-xs": "4px",
+                        "gutter": "1px",
+                        "panel-padding": "12px",
+                        "stack-md": "16px",
+                        "container-max": "100%",
+                        "stack-sm": "8px"
+                    },
+                    "fontFamily": {
+                        "mono-sm": ["JetBrains Mono"],
+                        "label-caps": ["Geist"],
+                        "mono-md": ["JetBrains Mono"],
+                        "body-md": ["Inter"],
+                        "body-sm": ["Inter"],
+                        "display-sm": ["Geist"],
+                        "headline-sm": ["Geist"]
+                    },
+                    "fontSize": {
+                        "mono-sm": ["11px", {"lineHeight": "14px", "fontWeight": "450"}],
+                        "label-caps": ["10px", {"lineHeight": "12px", "letterSpacing": "0.05em", "fontWeight": "700"}],
+                        "mono-md": ["13px", {"lineHeight": "18px", "fontWeight": "450"}],
+                        "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "body-sm": ["12px", {"lineHeight": "16px", "fontWeight": "400"}],
+                        "display-sm": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                        "headline-sm": ["18px", {"lineHeight": "24px", "fontWeight": "600"}]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-background text-on-surface font-body-md text-body-md overflow-hidden h-screen flex">
+<!-- SideNavBar (Predicted Rail) -->
+<aside class="fixed left-0 top-0 h-full z-50 h-screen w-16 flex flex-col items-center border-r border-outline-variant bg-surface-container-lowest dark:bg-on-primary-container">
+<div class="py-4 mb-4">
+<span class="font-display-sm text-display-sm font-bold text-primary dark:text-primary-fixed-dim">aL</span>
+</div>
+<nav class="flex flex-col gap-2 w-full items-center">
+<button class="p-3 rounded transition-colors text-on-surface-variant dark:text-on-primary-container hover:bg-surface-container">
+<span class="material-symbols-outlined">dashboard</span>
+</button>
+<button class="p-3 rounded transition-colors text-on-surface-variant dark:text-on-primary-container hover:bg-surface-container">
+<span class="material-symbols-outlined">view_kanban</span>
+</button>
+<button class="p-3 rounded transition-colors border-l-2 border-secondary bg-surface-container-high dark:bg-secondary-container text-secondary dark:text-on-secondary-container">
+<span class="material-symbols-outlined">play_circle</span>
+</button>
+<button class="p-3 rounded transition-colors text-on-surface-variant dark:text-on-primary-container hover:bg-surface-container">
+<span class="material-symbols-outlined">description</span>
+</button>
+<button class="p-3 rounded transition-colors text-on-surface-variant dark:text-on-primary-container hover:bg-surface-container">
+<span class="material-symbols-outlined">sync</span>
+</button>
+<button class="p-3 rounded transition-colors text-on-surface-variant dark:text-on-primary-container hover:bg-surface-container">
+<span class="material-symbols-outlined">settings</span>
+</button>
+<button class="p-3 rounded transition-colors text-on-surface-variant dark:text-on-primary-container hover:bg-surface-container">
+<span class="material-symbols-outlined">biotech</span>
+</button>
+</nav>
+</aside>
+<!-- Main Workspace Container -->
+<main class="flex-1 ml-16 flex flex-col h-screen overflow-hidden">
+<!-- TopAppBar (Predicted) -->
+<header class="flex justify-between items-center w-full px-panel-padding h-12 border-b border-outline-variant dark:border-outline bg-surface dark:bg-on-primary-container">
+<div class="flex items-center gap-6">
+<h1 class="font-headline-sm text-headline-sm font-bold text-primary dark:text-primary-fixed-dim uppercase tracking-tight">archLoop Hub</h1>
+<div class="flex gap-4 items-center">
+<span class="text-secondary dark:text-secondary-fixed-dim font-bold border-b-2 border-secondary h-12 flex items-center px-1">Run</span>
+<span class="text-on-surface-variant dark:text-outline-variant hover:text-secondary transition-all cursor-pointer">Project</span>
+<span class="text-on-surface-variant dark:text-outline-variant hover:text-secondary transition-all cursor-pointer">Batch</span>
+</div>
+</div>
+<div class="flex items-center gap-stack-md">
+<div class="flex items-center gap-2 bg-surface-container px-3 py-1 rounded-lg">
+<span class="material-symbols-outlined text-sm">terminal</span>
+<span class="font-mono-sm text-mono-sm">archloop run --flow with-review</span>
+</div>
+<div class="flex items-center gap-2">
+<button class="h-8 px-3 border border-outline-variant rounded hover:bg-surface-container transition-colors font-body-sm text-body-sm">Sync</button>
+<button class="h-8 px-3 bg-primary text-on-primary rounded hover:opacity-90 transition-opacity font-body-sm text-body-sm">Run Flow</button>
+</div>
+<div class="flex gap-2">
+<span class="material-symbols-outlined p-1 text-on-surface-variant cursor-pointer">notifications</span>
+<span class="material-symbols-outlined p-1 text-on-surface-variant cursor-pointer">help_outline</span>
+</div>
+<div class="w-8 h-8 bg-surface-container-high rounded-full flex items-center justify-center overflow-hidden border border-outline-variant">
+<img class="w-full h-full object-cover" data-alt="A professional headshot of a software engineer in a minimal, bright studio environment. The lighting is crisp and modern, matching a high-end corporate developer tool aesthetic. Deep navy and clean white tones predominate." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBeIrGzi5kXxKXDSd-KWr-xgZtlWFbgtpNavvdIOWFUxRi1v7-ilhSujxjaNjJC8auOtFThl9ZiaZlFE_FFabmX5o9NIIZo8Pgu12ntOsWFrEdl3fVmw3tqrE8BhgIKcO_pA5KHKwN7qiLxOxjOZIChFXtdwq5vbOf1rUtc4OyyUolWwyPp68Q5Gcd_mGZcQsRMrZJNQ_q50iXP0VVJltMx2nWobtQOzAAdy7V6Y3t2NvG6xQMTOiAbjgvN2g0f2nTRwJNmBSiqWbM"/>
+</div>
+</div>
+</header>
+<!-- Workbench Body -->
+<section class="flex-1 flex overflow-hidden">
+<!-- Main Content: Event Timeline -->
+<div class="flex-1 flex flex-col border-r border-outline-variant bg-surface-container-lowest">
+<!-- Header Stats -->
+<div class="p-4 border-b border-outline-variant flex justify-between items-center bg-white">
+<div class="flex gap-6">
+<div class="flex flex-col">
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase">Run ID</span>
+<span class="font-mono-md text-mono-md">RUN-2023-X982</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase">Flow ID</span>
+<span class="font-mono-md text-mono-md text-secondary">with-review</span>
+</div>
+<div class="flex flex-col">
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase">Branch</span>
+<span class="font-mono-md text-mono-md">feat/infra-audit</span>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<span class="flex items-center gap-1.5 px-2 py-1 rounded bg-emerald-50 text-emerald-700 font-mono-sm text-mono-sm">
+<span class="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                            RUNNING
+                        </span>
+</div>
+</div>
+<!-- Timeline Area -->
+<div class="flex-1 overflow-y-auto p-8 max-w-3xl mx-auto w-full">
+<div class="space-y-8 relative">
+<!-- Timeline Item 1 -->
+<div class="timeline-item flex gap-4 relative">
+<div class="timeline-line absolute"></div>
+<div class="z-10 w-4 h-4 rounded-full bg-surface-container-highest border-2 border-outline-variant mt-1"></div>
+<div class="flex-1 pb-4">
+<div class="flex justify-between">
+<h3 class="font-semibold text-body-md">Run started</h3>
+<span class="font-mono-sm text-mono-sm text-on-surface-variant">14:20:05</span>
+</div>
+<p class="text-on-surface-variant text-body-sm mt-1">Initialization complete. Worktree lease acquired for node-7.</p>
+</div>
+</div>
+<!-- Timeline Item 2 -->
+<div class="timeline-item flex gap-4 relative">
+<div class="timeline-line absolute"></div>
+<div class="z-10 w-4 h-4 rounded-full bg-surface-container-highest border-2 border-outline-variant mt-1"></div>
+<div class="flex-1 pb-4">
+<div class="flex justify-between">
+<h3 class="font-semibold text-body-md">Task claimed</h3>
+<span class="font-mono-sm text-mono-sm text-on-surface-variant">14:20:12</span>
+</div>
+<div class="mt-2 p-3 bg-surface-container rounded-lg border border-outline-variant">
+<div class="flex items-center justify-between mb-2">
+<span class="font-mono-md text-mono-md">TASK-0042: Sync DB Schemas</span>
+<span class="text-label-caps font-label-caps text-secondary">READY</span>
+</div>
+<div class="flex gap-2">
+<span class="px-1.5 py-0.5 bg-white border border-outline-variant rounded font-mono-sm text-mono-sm">main.tf</span>
+<span class="px-1.5 py-0.5 bg-white border border-outline-variant rounded font-mono-sm text-mono-sm">variables.tf</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Timeline Item 3 -->
+<div class="timeline-item flex gap-4 relative">
+<div class="timeline-line absolute"></div>
+<div class="z-10 w-4 h-4 rounded-full bg-surface-container-highest border-2 border-outline-variant mt-1"></div>
+<div class="flex-1 pb-4">
+<div class="flex justify-between">
+<h3 class="font-semibold text-body-md">Agent planning</h3>
+<span class="font-mono-sm text-mono-sm text-on-surface-variant">14:21:40</span>
+</div>
+<p class="text-on-surface-variant text-body-sm mt-1">Analyzing repository context. Strategy: <span class="text-primary font-medium italic">Incremental delta synchronization</span>.</p>
+</div>
+</div>
+<!-- Timeline Item 4 (Active) -->
+<div class="timeline-item flex gap-4 relative">
+<div class="timeline-line absolute"></div>
+<div class="z-10 w-4 h-4 rounded-full bg-secondary border-2 border-white ring-2 ring-secondary-container mt-1 animate-pulse-soft"></div>
+<div class="flex-1 pb-4">
+<div class="flex justify-between">
+<h3 class="font-semibold text-body-md text-secondary">Implementation: 4 files changed</h3>
+<span class="font-mono-sm text-mono-sm text-secondary">ACTIVE</span>
+</div>
+<div class="mt-2 space-y-2">
+<div class="flex items-center gap-2 font-mono-sm text-mono-sm text-on-surface-variant">
+<span class="material-symbols-outlined text-xs text-emerald-600">check_circle</span>
+<span>update: db/migration_01.sql</span>
+</div>
+<div class="flex items-center gap-2 font-mono-sm text-mono-sm text-on-surface-variant">
+<span class="material-symbols-outlined text-xs text-emerald-600">check_circle</span>
+<span>create: tests/db_sync_test.py</span>
+</div>
+<div class="flex items-center gap-2 font-mono-sm text-mono-sm">
+<span class="w-3 h-3 border-2 border-secondary border-t-transparent rounded-full animate-spin"></span>
+<span class="text-secondary">patching: terraform/outputs.tf</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Timeline Item 5 (Pending) -->
+<div class="timeline-item flex gap-4 relative opacity-50">
+<div class="timeline-line absolute"></div>
+<div class="z-10 w-4 h-4 rounded-full bg-surface-container-highest border-2 border-outline-variant mt-1"></div>
+<div class="flex-1 pb-4">
+<div class="flex justify-between">
+<h3 class="font-semibold text-body-md">Verification: Passed</h3>
+<span class="font-mono-sm text-mono-sm">PENDING</span>
+</div>
+</div>
+</div>
+<!-- Timeline Item 6 (Pending) -->
+<div class="timeline-item flex gap-4 relative opacity-50">
+<div class="z-10 w-4 h-4 rounded-full bg-surface-container-highest border-2 border-outline-variant mt-1"></div>
+<div class="flex-1 pb-4">
+<div class="flex justify-between">
+<h3 class="font-semibold text-body-md">Merge: Pending</h3>
+<span class="font-mono-sm text-mono-sm">PENDING</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Footer Actions -->
+<div class="p-4 border-t border-outline-variant bg-white flex justify-end gap-3">
+<button class="h-8 px-4 border border-error text-error rounded hover:bg-error-container transition-colors font-body-sm text-body-sm flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">cancel</span>
+                        Cancel Run
+                    </button>
+<button class="h-8 px-4 border border-outline-variant rounded hover:bg-surface-container transition-colors font-body-sm text-body-sm flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">history</span>
+                        Recover Task
+                    </button>
+<button class="h-8 px-4 bg-secondary text-white rounded hover:opacity-90 transition-opacity font-body-sm text-body-sm flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">merge</span>
+                        Resume Merge
+                    </button>
+</div>
+</div>
+<!-- Right Pane: Inspector -->
+<aside class="w-80 flex flex-col bg-surface border-l border-outline-variant overflow-y-auto">
+<div class="p-4 border-b border-outline-variant">
+<h2 class="font-headline-sm text-headline-sm uppercase tracking-wider text-on-surface-variant flex items-center gap-2">
+<span class="material-symbols-outlined">info</span>
+                        Inspector
+                    </h2>
+</div>
+<div class="p-panel-padding space-y-6">
+<!-- Batch Info -->
+<div class="space-y-stack-md">
+<div>
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase">Batch ID</span>
+<p class="font-mono-md text-mono-md mt-1">B-99-CONSOL</p>
+</div>
+<div>
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase">Strategy</span>
+<div class="flex items-center gap-2 mt-1">
+<span class="px-2 py-0.5 bg-secondary-container text-on-secondary-container rounded font-mono-sm text-mono-sm">infra-consolidate</span>
+</div>
+</div>
+</div>
+<div class="h-px bg-outline-variant w-full"></div>
+<!-- Selected Tasks -->
+<div>
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase mb-2 block">Tasks in Batch</span>
+<div class="space-y-2">
+<div class="p-2 border border-outline-variant rounded flex justify-between items-center bg-white">
+<span class="font-mono-sm text-mono-sm">TASK-0042</span>
+<span class="w-2 h-2 rounded-full bg-secondary"></span>
+</div>
+<div class="p-2 border border-outline-variant rounded flex justify-between items-center bg-white">
+<span class="font-mono-sm text-mono-sm">TASK-0045</span>
+<span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+</div>
+<div class="p-2 border border-outline-variant rounded flex justify-between items-center bg-white opacity-50">
+<span class="font-mono-sm text-mono-sm">TASK-0048</span>
+<span class="w-2 h-2 rounded-full bg-outline"></span>
+</div>
+</div>
+</div>
+<!-- Rationale -->
+<div>
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase mb-2 block">Rationale</span>
+<p class="text-body-sm text-on-surface-variant leading-relaxed">
+                            Consolidating database migration scripts into a single provisioning flow to prevent state locks during concurrent CI runs. Prioritizing Terraform module updates to ensure correct variable propagation.
+                        </p>
+</div>
+<!-- Commits -->
+<div>
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase mb-2 block">Related Commits</span>
+<div class="space-y-1">
+<a class="flex items-center gap-2 text-secondary font-mono-sm text-mono-sm hover:underline" href="#">
+<span class="material-symbols-outlined text-xs">link</span>
+                                sha-8d2f1a
+                            </a>
+<a class="flex items-center gap-2 text-secondary font-mono-sm text-mono-sm hover:underline" href="#">
+<span class="material-symbols-outlined text-xs">link</span>
+                                sha-9e4c2b
+                            </a>
+</div>
+</div>
+</div>
+<div class="mt-auto p-4 border-t border-outline-variant">
+<div class="p-3 bg-surface-container-high rounded border border-outline">
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase block mb-2">Worktree Lease</span>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">lock</span>
+<span class="font-mono-sm text-mono-sm">node-7 (Expires 15:45)</span>
+</div>
+</div>
+</div>
+</aside>
+</section>
+<!-- Bottom: Terminal -->
+<section class="h-48 border-t border-outline-variant bg-on-primary-fixed text-surface-bright flex flex-col">
+<div class="px-4 py-2 bg-on-primary-fixed border-b border-on-primary-fixed-variant flex justify-between items-center">
+<div class="flex gap-4">
+<span class="font-label-caps text-label-caps text-on-primary-container uppercase">Terminal Output</span>
+<span class="font-label-caps text-label-caps text-secondary-fixed uppercase cursor-pointer">JSONL Stream</span>
+</div>
+<div class="flex gap-2">
+<span class="material-symbols-outlined text-sm text-on-primary-container cursor-pointer">content_copy</span>
+<span class="material-symbols-outlined text-sm text-on-primary-container cursor-pointer">close_fullscreen</span>
+</div>
+</div>
+<div class="flex-1 p-4 font-mono-sm text-mono-sm overflow-y-auto leading-relaxed selection:bg-secondary selection:text-white">
+<div class="text-on-primary-container">{"timestamp":"2023-10-24T14:20:05Z","event":"run_start","run_id":"RUN-2023-X982"}</div>
+<div class="text-on-primary-container">{"timestamp":"2023-10-24T14:20:12Z","event":"task_claim","task_id":"TASK-0042"}</div>
+<div class="text-surface-bright">[archloop] planning strategy for feat/infra-audit...</div>
+<div class="text-surface-bright">[archloop] 4 files detected for change propagation</div>
+<div class="text-surface-bright text-secondary-fixed-dim">[INFO] modifying db/migration_01.sql [DONE]</div>
+<div class="text-surface-bright text-secondary-fixed-dim">[INFO] creating tests/db_sync_test.py [DONE]</div>
+<div class="text-surface-bright flex items-center gap-2">
+<span class="w-1 h-3 bg-secondary-fixed animate-pulse"></span>
+                    [archloop] patching terraform/outputs.tf ... 45% complete
+                </div>
+<div class="text-error mt-1">{"error":"null","status":"processing"}</div>
+<div class="text-on-primary-container">{"timestamp":"2023-10-24T14:22:15Z","event":"file_patch_start","target":"terraform/outputs.tf"}</div>
+</div>
+</section>
+</main>
+<script>
+        // Micro-interaction: Simulate terminal streaming or status updates
+        document.addEventListener('DOMContentLoaded', () => {
+            const terminal = document.querySelector('section.h-48 .flex-1');
+            const newLog = () => {
+                const div = document.createElement('div');
+                div.className = 'text-on-primary-container';
+                const now = new Date().toISOString();
+                div.innerText = `{"timestamp":"${now}","event":"heartbeat","status":"healthy"}`;
+                terminal.appendChild(div);
+                terminal.scrollTop = terminal.scrollHeight;
+            };
+            
+            // Random heartbeat logs
+            setInterval(() => {
+                if(Math.random() > 0.7) newLog();
+            }, 3000);
+        });
+    </script>
+</body></html>

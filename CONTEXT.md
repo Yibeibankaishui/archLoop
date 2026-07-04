@@ -27,12 +27,52 @@ The user-facing control plane that manages multiple **host** repos, shared crede
 _Avoid_: "workspace" (conflicts with sandbox/worktree language), "GUI" (too narrow), "dashboard" (display-only)
 
 **Hub project**:
-A named **archLoop Hub** entry that points to one **host** repo and stores user preferences for running archLoop there.
+A user-named **archLoop Hub** entry that points to one **host** repo path and stores user preferences for running archLoop there.
 _Avoid_: "project profile" (already means repo type), "workspace", "repo" (too narrow)
+
+**Hub project id**:
+The stable internal identity of a **Hub project**, used by Hub state, runs, tasks, and flow execution records even when the project name or repo path changes.
+_Avoid_: "project name", "repo path", "directory hash"
+
+**Hub project name**:
+The user-facing unique name of a **Hub project**, used for display, command arguments, and interactive selection; it can be renamed without changing the **Hub project id**.
+_Avoid_: "project id", "repo folder name", "package name"
+
+**Selected Hub project**:
+The **Hub project** the user has explicitly chosen, or just registered through CLI **Hub project onboarding**, as the default target for Hub commands when no project name is provided; it is not inferred from the current working directory.
+_Avoid_: "current repo", "current working directory", "active workspace", "cwd fallback"
+
+**Active Hub project context**:
+The **Hub project** currently targeted by one archLoop client, such as the CLI or **archLoop Hub** GUI. Each client owns its own active context while sharing the same **Hub project** registry, and Hub commands target that context unless a project is specified explicitly.
+_Avoid_: "current working directory", "global active project", "workspace"
 
 **Hub project config**:
 The **archLoop Hub**-owned settings for a **Hub project**, separate from the repo's **config directory**.
 _Avoid_: "config directory", ".archloop config", "init config"
+
+**Hub initialization**:
+The idempotent **archLoop Hub**-wide setup for shared preferences, credentials, and readiness. It does not create, register, or select a **Hub project**; it only points users to **Hub project onboarding** as the next step.
+_Avoid_: "project init", "repo init", "scaffold init"
+
+**Hub readiness check**:
+A Hub-wide validation, exposed through `archloop check`, that shared agent role, provider, model, credential, auth session, and required-tool settings are complete enough for **flow** execution. The check is user-visible while it runs, with progress output for each validation step.
+_Avoid_: "project status", "task doctor", "repo validation"
+
+**Hub project onboarding**:
+The process of creating or selecting a **Hub project** for a **host** repo, including the project's user-facing identity, project-specific preferences, **Hub project assets**, and default-ready local task setup.
+_Avoid_: "Hub initialization", "legacy init", "scaffold init"
+
+**Hub project registration**:
+Creating a **Hub project** entry for an existing **host** repo.
+_Avoid_: "code project creation", "repo scaffold", "legacy init"
+
+**Hub project registry**:
+The **archLoop Hub**-owned index of **Hub projects**, where each registered **host** repo path belongs to at most one **Hub project**.
+_Avoid_: "project directory list", "workspace list", "recent repos"
+
+**Code project creation**:
+Creating a new **host** repo or application project that can later be registered as a **Hub project**.
+_Avoid_: "Hub project registration", "Hub initialization", "project selection"
 
 **Hub project assets**:
 Editable files owned by **archLoop Hub** for one **Hub project**, such as Hub-managed bootstrap, verification, and context files.

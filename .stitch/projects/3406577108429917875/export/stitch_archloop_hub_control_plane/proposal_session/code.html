@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Proposal Session | archLoop Hub</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@450;500&amp;family=Geist:wght@600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-primary-fixed": "#131b2e",
+                        "secondary": "#0058be",
+                        "on-primary-fixed-variant": "#3f465c",
+                        "surface-bright": "#f8f9ff",
+                        "on-tertiary-fixed-variant": "#574425",
+                        "tertiary-container": "#271901",
+                        "primary": "#000000",
+                        "inverse-surface": "#213145",
+                        "secondary-fixed": "#d8e2ff",
+                        "on-secondary-fixed": "#001a42",
+                        "on-secondary-container": "#fefcff",
+                        "surface": "#f8f9ff",
+                        "on-secondary": "#ffffff",
+                        "surface-container-high": "#dce9ff",
+                        "surface-container-lowest": "#ffffff",
+                        "surface-container-low": "#eff4ff",
+                        "tertiary-fixed": "#fcdeb5",
+                        "surface-container": "#e5eeff",
+                        "primary-fixed": "#dae2fd",
+                        "outline": "#76777d",
+                        "inverse-on-surface": "#eaf1ff",
+                        "surface-variant": "#d3e4fe",
+                        "error": "#ba1a1a",
+                        "tertiary-fixed-dim": "#dec29a",
+                        "background": "#f8f9ff",
+                        "secondary-container": "#2170e4",
+                        "inverse-primary": "#bec6e0",
+                        "on-tertiary-container": "#98805d",
+                        "secondary-fixed-dim": "#adc6ff",
+                        "on-tertiary-fixed": "#271901",
+                        "surface-dim": "#cbdbf5",
+                        "primary-fixed-dim": "#bec6e0",
+                        "primary-container": "#131b2e",
+                        "on-background": "#0b1c30",
+                        "error-container": "#ffdad6",
+                        "surface-container-highest": "#d3e4fe",
+                        "on-error-container": "#93000a",
+                        "on-primary-container": "#7c839b",
+                        "outline-variant": "#c6c6cd",
+                        "on-surface-variant": "#45464d",
+                        "on-secondary-fixed-variant": "#004395",
+                        "on-primary": "#ffffff",
+                        "on-tertiary": "#ffffff",
+                        "tertiary": "#000000",
+                        "surface-tint": "#565e74",
+                        "on-error": "#ffffff",
+                        "on-surface": "#0b1c30"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "base": "4px",
+                        "stack-xs": "4px",
+                        "gutter": "1px",
+                        "panel-padding": "12px",
+                        "stack-md": "16px",
+                        "container-max": "100%",
+                        "stack-sm": "8px"
+                    },
+                    "fontFamily": {
+                        "mono-sm": ["JetBrains Mono"],
+                        "label-caps": ["Geist"],
+                        "mono-md": ["JetBrains Mono"],
+                        "body-md": ["Inter"],
+                        "body-sm": ["Inter"],
+                        "display-sm": ["Geist"],
+                        "headline-sm": ["Geist"]
+                    },
+                    "fontSize": {
+                        "mono-sm": ["11px", {"lineHeight": "14px", "fontWeight": "450"}],
+                        "label-caps": ["10px", {"lineHeight": "12px", "letterSpacing": "0.05em", "fontWeight": "700"}],
+                        "mono-md": ["13px", {"lineHeight": "18px", "fontWeight": "450"}],
+                        "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "body-sm": ["12px", {"lineHeight": "16px", "fontWeight": "400"}],
+                        "display-sm": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                        "headline-sm": ["18px", {"lineHeight": "24px", "fontWeight": "600"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .scroll-hide::-webkit-scrollbar { display: none; }
+        .scroll-hide { -ms-overflow-style: none; scrollbar-width: none; }
+        .token-highlight { background: rgba(0, 88, 190, 0.1); border-bottom: 2px solid #0058be; }
+        .dependency-line { position: absolute; border-left: 1px solid #76777d; margin-left: 10px; z-index: -1; }
+    </style>
+</head>
+<body class="bg-background text-on-surface font-body-md selection:bg-surface-variant h-screen overflow-hidden flex">
+<!-- SideNavBar (Shared Component) -->
+<aside class="fixed left-0 top-0 h-full z-50 h-screen w-16 flex flex-col items-center border-r border-outline-variant bg-surface-container-lowest dark:bg-on-primary-container">
+<div class="py-stack-md">
+<span class="font-display-sm text-display-sm font-bold text-primary dark:text-primary-fixed-dim">aL</span>
+</div>
+<nav class="flex-1 flex flex-col items-center gap-stack-sm mt-4 w-full px-2">
+<!-- Proposals is active -->
+<div class="w-full h-10 flex items-center justify-center rounded-lg border-l-2 border-secondary bg-surface-container-high dark:bg-secondary-container text-secondary dark:text-on-secondary-container cursor-pointer transition-colors" title="Proposals">
+<span class="material-symbols-outlined">description</span>
+</div>
+<div class="w-full h-10 flex items-center justify-center rounded-lg text-on-surface-variant dark:text-on-primary-container hover:bg-surface-container transition-colors cursor-pointer" title="Overview">
+<span class="material-symbols-outlined">dashboard</span>
+</div>
+<div class="w-full h-10 flex items-center justify-center rounded-lg text-on-surface-variant dark:text-on-primary-container hover:bg-surface-container transition-colors cursor-pointer" title="Board">
+<span class="material-symbols-outlined">view_kanban</span>
+</div>
+<div class="w-full h-10 flex items-center justify-center rounded-lg text-on-surface-variant dark:text-on-primary-container hover:bg-surface-container transition-colors cursor-pointer" title="Runs">
+<span class="material-symbols-outlined">play_circle</span>
+</div>
+<div class="w-full h-10 flex items-center justify-center rounded-lg text-on-surface-variant dark:text-on-primary-container hover:bg-surface-container transition-colors cursor-pointer" title="Sync">
+<span class="material-symbols-outlined">sync</span>
+</div>
+<div class="w-full h-10 flex items-center justify-center rounded-lg text-on-surface-variant dark:text-on-primary-container hover:bg-surface-container transition-colors cursor-pointer" title="Config">
+<span class="material-symbols-outlined">settings</span>
+</div>
+</nav>
+<div class="pb-stack-md flex flex-col items-center gap-stack-sm">
+<div class="w-full h-10 flex items-center justify-center rounded-lg text-on-surface-variant hover:bg-surface-container cursor-pointer">
+<span class="material-symbols-outlined">biotech</span>
+</div>
+</div>
+</aside>
+<div class="flex-1 ml-16 flex flex-col">
+<!-- TopAppBar (Shared Component) -->
+<header class="h-12 flex justify-between items-center w-full px-panel-padding bg-surface dark:bg-on-primary-container border-b border-outline-variant">
+<div class="flex items-center gap-stack-md">
+<span class="font-headline-sm text-headline-sm font-bold text-primary dark:text-primary-fixed-dim">archLoop Hub</span>
+<nav class="hidden md:flex gap-stack-md ml-8">
+<a class="text-on-surface-variant font-body-md hover:text-secondary transition-all" href="#">Project</a>
+<a class="text-on-surface-variant font-body-md hover:text-secondary transition-all" href="#">Run</a>
+<a class="text-secondary dark:text-secondary-fixed-dim font-bold border-b-2 border-secondary font-body-md" href="#">Batch</a>
+</nav>
+</div>
+<div class="flex items-center gap-stack-md">
+<button class="h-[28px] px-3 bg-primary text-on-primary rounded text-body-sm font-medium hover:opacity-90 transition-opacity">Run Flow</button>
+<div class="flex items-center gap-2 px-2 text-on-surface-variant">
+<span class="material-symbols-outlined text-[20px] cursor-pointer hover:text-primary transition-colors">notifications</span>
+<span class="material-symbols-outlined text-[20px] cursor-pointer hover:text-primary transition-colors">help_outline</span>
+</div>
+<div class="w-8 h-8 rounded-full bg-surface-container-high border border-outline-variant overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="A professional headshot of a software engineer in a high-tech minimalist office, soft cinematic lighting, neutral gray tones, focus on eyes, blurred code screens in the background, sharp details." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBom4KfN59qqFkECATYiAAJAkCifoUDnhdH08Em8mmoAhYI-VArwNYWeMdA_PtjKcbVznNgwXjZh8HxPRyxWjk2oPvnntAhKOixL8fRBCjfnK9a8Kyb1WQjMpR9EYRYJxU3ac6ZeBnymY2lEWj5OWJemA4TncgtQLPT4ZKKmonbrSKd7k_vgk6yxhLDXw0QkB4MsTP6RY3nUxf8xTqyPz0FIk13P-Wy3ye_94jimNneRTg9l7yL6tr5m2Kagg7jKYzUydixqZUjhmE"/>
+</div>
+</div>
+</header>
+<!-- Main Content Area -->
+<main class="flex-1 flex overflow-hidden">
+<!-- Left Pane: Input PRD -->
+<section class="w-[40%] border-r border-outline-variant bg-surface flex flex-col">
+<div class="p-panel-padding border-b border-outline-variant bg-surface-container-low flex items-center justify-between">
+<div class="flex flex-col">
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-widest">Source Document</span>
+<h2 class="font-headline-sm text-headline-sm text-primary">auth-migration.prd</h2>
+</div>
+<span class="px-2 py-0.5 rounded bg-surface-container-high text-mono-sm font-mono-sm text-secondary border border-secondary/20">READY_FOR_EXTRACTION</span>
+</div>
+<div class="flex-1 overflow-y-auto p-panel-padding bg-surface-container-lowest">
+<div class="prose max-w-none text-body-md leading-relaxed text-on-surface-variant">
+<p class="mb-4">The objective is to <span class="token-highlight">migrate our legacy JWT-based authentication system to a unified OAuth2 flow</span> using the internal identity provider.</p>
+<h3 class="text-primary font-bold mb-2">Functional Requirements</h3>
+<ul class="space-y-3 list-none pl-0">
+<li class="flex gap-2">
+<span class="text-secondary font-mono-sm">01.</span>
+<span>Must implement <span class="token-highlight">PKCE flow for all mobile clients</span> to ensure high security during the token exchange phase.</span>
+</li>
+<li class="flex gap-2">
+<span class="text-secondary font-mono-sm">02.</span>
+<span>The backend middleware should be updated to <span class="token-highlight">validate tokens against the /introspection endpoint</span> instead of local public keys.</span>
+</li>
+<li class="flex gap-2">
+<span class="text-secondary font-mono-sm">03.</span>
+<span>All <span class="token-highlight">existing user sessions must remain valid</span> during the 24-hour transition window to avoid downtime.</span>
+</li>
+</ul>
+<div class="mt-8 p-stack-md bg-secondary/5 rounded border border-secondary/20">
+<div class="flex items-center gap-2 mb-2 text-secondary">
+<span class="material-symbols-outlined text-[18px]">psychology</span>
+<span class="font-label-caps text-label-caps">AGENT RATIONALE</span>
+</div>
+<p class="text-body-sm italic">"Identified three primary workstreams: security hardening (PKCE), backend refactoring (introspection), and session management (migration). Confidence score for task extraction is high (94%) based on explicit PRD phrasing."</p>
+<div class="mt-4 flex items-center justify-between">
+<span class="text-mono-sm font-mono-sm text-on-surface-variant">Confidence Index</span>
+<div class="w-32 h-1.5 bg-outline-variant rounded-full overflow-hidden">
+<div class="h-full bg-secondary" style="width: 94%;"></div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Right Pane: Proposed Tasks -->
+<section class="flex-1 bg-surface-container-low flex flex-col relative">
+<!-- Floating Local Indicator -->
+<div class="absolute top-4 right-4 z-10 flex items-center gap-2 px-3 py-1.5 bg-surface rounded-full border border-outline-variant shadow-sm">
+<span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></span>
+<span class="font-mono-sm text-mono-sm text-on-surface-variant">LOCAL DRAFT (NO REMOTE WRITES)</span>
+</div>
+<div class="p-panel-padding border-b border-outline-variant bg-surface-container flex items-center justify-between">
+<div class="flex flex-col">
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase tracking-widest">Proposed Task Decomposition</span>
+<h2 class="font-headline-sm text-headline-sm text-primary">from-prd Flow (v0.8-alpha)</h2>
+</div>
+<div class="flex gap-stack-sm">
+<button class="h-[28px] px-3 bg-white border border-outline-variant text-on-surface font-body-sm rounded hover:bg-surface-container-lowest transition-colors flex items-center gap-1">
+<span class="material-symbols-outlined text-[16px]">edit</span>
+                            Revise with feedback
+                        </button>
+</div>
+</div>
+<div class="flex-1 overflow-y-auto p-panel-padding space-y-stack-md relative">
+<!-- Task Item 1 -->
+<div class="bg-white border border-outline-variant rounded-lg p-stack-md shadow-sm relative group">
+<div class="flex items-start justify-between">
+<div class="flex gap-stack-sm items-center">
+<span class="font-mono-md text-mono-md text-secondary">TASK-001</span>
+<span class="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-mono-sm border border-emerald-200">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                    READY_FOR_AGENT
+                                </span>
+</div>
+<button class="text-on-surface-variant opacity-0 group-hover:opacity-100 transition-opacity">
+<span class="material-symbols-outlined text-[20px]">more_vert</span>
+</button>
+</div>
+<h4 class="font-bold text-body-md mt-2">Implement PKCE Flow for Mobile App</h4>
+<p class="text-body-sm text-on-surface-variant mt-1">Configure the auth service to require code_challenge for mobile client IDs and validate code_verifier during token exchange.</p>
+<div class="mt-3 flex items-center gap-stack-md text-on-surface-variant text-mono-sm">
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">lock</span> security</span>
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">link</span> blocks TASK-002</span>
+</div>
+</div>
+<!-- Dependency Line -->
+<div class="dependency-line h-12"></div>
+<!-- Task Item 2 -->
+<div class="bg-white border-l-2 border-l-secondary border border-outline-variant rounded-lg p-stack-md shadow-sm relative group">
+<div class="flex items-start justify-between">
+<div class="flex gap-stack-sm items-center">
+<span class="font-mono-md text-mono-md text-secondary">TASK-002</span>
+<span class="flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 text-mono-sm border border-amber-200">
+<span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                                    BLOCKED
+                                </span>
+</div>
+<button class="text-on-surface-variant opacity-0 group-hover:opacity-100 transition-opacity">
+<span class="material-symbols-outlined text-[20px]">more_vert</span>
+</button>
+</div>
+<h4 class="font-bold text-body-md mt-2">Update Introspection Middleware</h4>
+<p class="text-body-sm text-on-surface-variant mt-1">Replace local JWT verification with a call to the new internal identity provider's introspection endpoint for real-time validation.</p>
+<div class="mt-3 flex items-center gap-stack-md text-on-surface-variant text-mono-sm">
+<span class="flex items-center gap-1"><span class="material-symbols-outlined text-[16px]">storage</span> backend</span>
+<span class="flex items-center gap-1 text-amber-600"><span class="material-symbols-outlined text-[16px]">warning</span> Waiting for TASK-001</span>
+</div>
+</div>
+<!-- Task Item 3 -->
+<div class="bg-white border border-outline-variant rounded-lg p-stack-md shadow-sm relative group">
+<div class="flex items-start justify-between">
+<div class="flex gap-stack-sm items-center">
+<span class="font-mono-md text-mono-md text-secondary">TASK-003</span>
+<span class="flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-mono-sm border border-emerald-200">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                    READY_FOR_AGENT
+                                </span>
+</div>
+<button class="text-on-surface-variant opacity-0 group-hover:opacity-100 transition-opacity">
+<span class="material-symbols-outlined text-[20px]">more_vert</span>
+</button>
+</div>
+<h4 class="font-bold text-body-md mt-2">Hybrid Session Transition Logic</h4>
+<p class="text-body-sm text-on-surface-variant mt-1">Implement a grace period where both old JWTs and new OAuth2 tokens are accepted during the rolling deployment phase.</p>
+</div>
+<!-- Validation Area -->
+<div class="mt-8 border border-error/20 bg-error-container/20 rounded-lg p-stack-md">
+<div class="flex items-center gap-2 mb-3 text-error">
+<span class="material-symbols-outlined text-[20px]">report_problem</span>
+<span class="font-bold text-body-sm">VALIDATION ERRORS (1)</span>
+</div>
+<div class="flex gap-3 items-start">
+<div class="mt-1 w-1.5 h-1.5 rounded-full bg-error"></div>
+<div class="flex-1">
+<p class="text-body-sm font-medium text-error">Ambiguous scope definition in TASK-003</p>
+<p class="text-body-sm text-on-surface-variant">The PRD mentions "24-hour transition window" but task does not specify cleanup automation after expiry. Consider adding a sub-task for automated session purge.</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Action Bar -->
+<div class="p-panel-padding bg-surface border-t border-outline-variant flex items-center justify-between">
+<div class="flex items-center gap-stack-md">
+<div class="flex items-center gap-2 text-on-surface-variant">
+<span class="material-symbols-outlined text-[18px]">verified_user</span>
+<span class="text-body-sm">Proposal state: <strong>Pending Approval</strong></span>
+</div>
+</div>
+<div class="flex gap-stack-sm">
+<button class="h-[32px] px-4 bg-white border border-error text-error font-medium rounded hover:bg-error-container/20 transition-colors">Reject</button>
+<button class="h-[32px] px-6 bg-secondary text-white font-medium rounded shadow-sm hover:opacity-90 transition-opacity flex items-center gap-2">
+<span>Approve &amp; Apply to Beads</span>
+<span class="material-symbols-outlined text-[18px]">rocket_launch</span>
+</button>
+</div>
+</div>
+</section>
+</main>
+</div>
+<!-- Right Inspector Drawer (Collapsible) -->
+<aside class="w-80 h-full bg-surface border-l border-outline-variant flex flex-col hidden lg:flex">
+<div class="p-panel-padding border-b border-outline-variant flex items-center justify-between">
+<span class="font-label-caps text-label-caps text-on-surface-variant uppercase">Inspector</span>
+<span class="font-mono-sm text-mono-sm text-secondary">ID: WL-4492-AX</span>
+</div>
+<div class="flex-1 overflow-y-auto p-panel-padding space-y-stack-md">
+<div>
+<h5 class="text-mono-sm text-on-surface-variant uppercase mb-2">Worktree Lease</h5>
+<div class="p-stack-sm bg-surface-container-low rounded border border-outline-variant">
+<div class="flex items-center justify-between text-body-sm">
+<span class="text-on-surface-variant">Branch</span>
+<span class="font-mono-sm">feat/auth-migration</span>
+</div>
+<div class="flex items-center justify-between text-body-sm mt-1">
+<span class="text-on-surface-variant">Status</span>
+<span class="text-emerald-600 font-medium">CLEAN</span>
+</div>
+</div>
+</div>
+<div>
+<h5 class="text-mono-sm text-on-surface-variant uppercase mb-2">Local Writes</h5>
+<div class="space-y-1">
+<div class="flex items-center gap-2 p-1 text-mono-sm hover:bg-surface-container rounded cursor-default">
+<span class="material-symbols-outlined text-secondary text-[16px]">add_circle</span>
+<span>.archloop/proposals/PR-202.json</span>
+</div>
+<div class="flex items-center gap-2 p-1 text-mono-sm hover:bg-surface-container rounded cursor-default">
+<span class="material-symbols-outlined text-amber-500 text-[16px]">pending_actions</span>
+<span>src/auth/middleware.ts (draft)</span>
+</div>
+</div>
+</div>
+<div class="pt-stack-md border-t border-outline-variant">
+<div class="flex items-center justify-between mb-2">
+<span class="font-label-caps text-label-caps">AGENT LOG</span>
+<span class="w-2 h-2 rounded-full bg-emerald-500"></span>
+</div>
+<div class="text-mono-sm text-on-surface-variant space-y-2 leading-tight">
+<div class="flex gap-2">
+<span class="text-outline">14:02</span>
+<span>[system] PRD parsing complete.</span>
+</div>
+<div class="flex gap-2">
+<span class="text-outline">14:02</span>
+<span>[agent] Linking mobile clients to security hardening.</span>
+</div>
+<div class="flex gap-2">
+<span class="text-outline">14:03</span>
+<span>[agent] Resolved dependency: 001 blocks 002.</span>
+</div>
+<div class="flex gap-2">
+<span class="text-outline">14:05</span>
+<span>[system] Proposal draft generated. Waiting for user.</span>
+</div>
+</div>
+</div>
+</div>
+<div class="p-panel-padding bg-surface-container-low border-t border-outline-variant">
+<div class="flex items-center gap-2 text-on-surface-variant mb-4">
+<span class="material-symbols-outlined text-[20px]">info</span>
+<p class="text-[11px] leading-tight">Applying these proposals will create a local branch and generate "Beads" in the worktree. No remote pushes occur until manual sync.</p>
+</div>
+</div>
+</aside>
+<script>
+        // Micro-interactions
+        document.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('mousedown', () => {
+                btn.classList.add('scale-95');
+            });
+            btn.addEventListener('mouseup', () => {
+                btn.classList.remove('scale-95');
+            });
+            btn.addEventListener('mouseleave', () => {
+                btn.classList.remove('scale-95');
+            });
+        });
+
+        // Simple Pane Resizer Mock Simulation
+        console.log('Hub UI Initialized - Operational Control Center Active');
+    </script>
+</body></html>

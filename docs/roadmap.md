@@ -321,6 +321,6 @@ Goal: 提供 CLI-first 的 archLoop Hub 控制面，并在同一状态模型上�
 - [x] 将 `archloop run --flow prd-decomposition/triage` 与 task shortcut 统一到 proposal flow 主路径，并将 deterministic PRD/triage helper 保留为测试或显式 fallback（见 [#85](https://github.com/yibeibankaishui/archloop/issues/85)、parent [#78](https://github.com/yibeibankaishui/archloop/issues/78)）。
 - [x] 完成 agent-driven task proposal flows 的文档与人工 QA 收尾：README、bundled usage skill、Hub task board PRD、QA 指标和 roadmap 均明确 proposal sessions、Hub-wide `agent-config`、`run --flow --input`、local-only Beads writes、task sync 边界、guarded `--yes` 行为和需要真实 agent 人工验收的场景（见 [#86](https://github.com/yibeibankaishui/archloop/issues/86)、parent [#78](https://github.com/yibeibankaishui/archloop/issues/78)）。
 - [ ] 定义 archLoop Hub 控制面的核心用户路径。
-- [ ] 设计 Hub project onboarding、credentials 和 flow run CLI。
+- [ ] 设计 Hub project onboarding、credentials、`archloop check` readiness 验证和 flow run CLI；v1 聚焦注册已有 git repo，后续再支持从 archLoop 创建全新代码项目（见 [hub-project-onboarding-and-check](./prd/hub-project-onboarding-and-check.md)、[#186](https://github.com/Yibeibankaishui/archLoop/issues/186)、[ADR-0029](./adr/0029-hub-project-registry-and-active-context.md)）。
 - [ ] 设计 run / sandbox / branch / logs / agent stream 的可视化模型。
 - [ ] 明确 GUI 与 Hub CLI / JS API 的关系。
