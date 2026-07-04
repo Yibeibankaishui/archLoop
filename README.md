@@ -859,9 +859,7 @@ archLoop resolves the user data directory from `XDG_DATA_HOME` when it is set an
 
 ### `archloop check [--hub]`
 
-Runs the Hub-wide readiness slice from any directory. The current slice checks Hub agent role completeness, Hub env/auth presence, configured provider references, and provider CLI availability, while rendering visible progress for each step. Blocking errors return a non-zero exit code; warnings stay visible and still exit successfully.
-
-This first slice does not yet make provider/model smoke calls. Instead, it emits a visible warning that the smoke-check stage is deferred until the next slice lands.
+Runs the Hub-wide readiness slice from any directory. The check validates Hub agent role completeness, Hub env/auth presence, configured provider references, provider CLI availability, and grouped provider/model smoke checks through the same provider path used by Hub flow execution. It renders visible progress while it runs, deduplicates smoke checks by provider, model, and options, and lists the roles covered by each smoke check. Blocking errors return a non-zero exit code; warnings stay visible and still exit successfully.
 
 ### `archloop project configure`
 

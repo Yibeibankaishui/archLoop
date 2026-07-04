@@ -2638,9 +2638,11 @@ const checkCommand = Command.make(
   () =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const report = yield* Effect.sync(() =>
-        collectHubReadinessChecks({ env: process.env }),
-      );
+      const report = yield* Effect.tryPromise({
+        try: () => collectHubReadinessChecks({ env: process.env }),
+        catch: (error) =>
+          error instanceof Error ? error : new Error(String(error)),
+      });
 
       for (const section of report.sections) {
         yield* d.spinner(section.title, Effect.void);

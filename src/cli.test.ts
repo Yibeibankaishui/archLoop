@@ -153,6 +153,20 @@ const setAllHubAgentRoles = (env: NodeJS.ProcessEnv) => {
   }
 };
 
+const setAllCodexAgentRoles = (env: NodeJS.ProcessEnv) => {
+  for (const role of HUB_AGENT_ROLES) {
+    const options =
+      role === "planning" || role === "triage"
+        ? { effort: "medium" }
+        : { effort: "high" };
+    setHubAgentRole(
+      role,
+      { provider: "codex", model: "gpt-5.4-mini", options },
+      { env },
+    );
+  }
+};
+
 const setupManagedBranchCleanupRepo = async (hostDir: string) => {
   await initRepo(hostDir);
   await commitFile(hostDir, "hello.txt", "hello", "initial commit");
@@ -867,19 +881,28 @@ exit 1
     expect(stdout).toContain("Task board total");
   });
 
-  it("check runs from any directory, shows progress, and warns about deferred smoke checks", async () => {
+  it("check runs from any directory, shows progress, and runs provider smoke checks", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "cli-check-data-"));
+    await mkdir(join(dataDir, "archloop"), { recursive: true });
+    await writeFile(
+      join(dataDir, "archloop", ".env"),
+      "OPENAI_KEY=openai-test-key\n",
+    );
     const env = {
       ...process.env,
       XDG_DATA_HOME: dataDir,
-      CURSOR_API_KEY: "cursor-test-key",
+      OPENAI_KEY: "openai-test-key",
     };
 
     const binDir = join(dataDir, "bin");
-    await createMockTool(binDir, "agent");
+    await createMockTool(
+      binDir,
+      "codex",
+      '#!/bin/sh\ncat >/dev/null\nprintf \'%s\\n\' \'{"type":"item.completed","item":{"type":"agent_message","text":"<smoke>ARCHLOOP_SMOKE_OK</smoke>"}}\'\n',
+    );
 
     const storeEnv = { ...env, PATH: `${binDir}:${process.env.PATH ?? ""}` };
-    setAllHubAgentRoles(storeEnv);
+    setAllCodexAgentRoles(storeEnv);
 
     const otherDir = await mkdtemp(join(tmpdir(), "cli-check-cwd-"));
     const { stdout } = await runCli("check --hub", otherDir, storeEnv);
@@ -889,8 +912,13 @@ exit 1
     expect(stdout).toContain("Checking configured provider references");
     expect(stdout).toContain("Checking Hub env and auth");
     expect(stdout).toContain("Checking required tools");
-    expect(stdout).toContain("Provider/model smoke checks are deferred");
-    expect(stdout).toContain("Hub readiness check completed with warnings");
+    expect(stdout).toContain("Checking provider/model smoke");
+    expect(stdout).toContain(
+      "Roles covered: implementation, merge, recovery, review.",
+    );
+    expect(stdout).toContain("Roles covered: planning, triage.");
+    expect(stdout).toContain("Smoke response token: ARCHLOOP_SMOKE_OK.");
+    expect(stdout).toContain("Hub readiness check passed");
   });
 
   it("check reports missing credential guidance and exits non-zero", async () => {
@@ -898,14 +926,19 @@ exit 1
     const env = {
       ...process.env,
       XDG_DATA_HOME: dataDir,
-      CURSOR_API_KEY: "",
+      OPENAI_KEY: "",
+      CODEX_HOME: "",
     };
 
     const binDir = join(dataDir, "bin");
-    await createMockTool(binDir, "agent");
+    await createMockTool(
+      binDir,
+      "codex",
+      '#!/bin/sh\ncat >/dev/null\nprintf \'%s\\n\' \'{"type":"item.completed","item":{"type":"agent_message","text":"<smoke>ARCHLOOP_SMOKE_OK</smoke>"}}\'\n',
+    );
 
     const storeEnv = { ...env, PATH: `${binDir}:${process.env.PATH ?? ""}` };
-    setAllHubAgentRoles(storeEnv);
+    setAllCodexAgentRoles(storeEnv);
 
     const otherDir = await mkdtemp(
       join(tmpdir(), "cli-check-missing-cred-cwd-"),
@@ -916,8 +949,11 @@ exit 1
     } catch (err: unknown) {
       const output = cliFailureOutput(err);
       expect(output).toContain("Hub readiness check failed.");
-      expect(output).toContain("archloop env set CURSOR_API_KEY <value>");
-      expect(output).toContain("archloop env init");
+      expect(output).toContain("archloop env set OPENAI_KEY <value>");
+      expect(output).toContain("archloop auth login codex");
+      expect(output).toContain(
+        "credential or tool validation failed earlier in the check",
+      );
     }
   });
 
