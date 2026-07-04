@@ -22,7 +22,7 @@ import {
   createHubRunContext,
   createHubTaskClaimMetadata,
 } from "./hubExecution.js";
-import { setHubAgentRole } from "./hubAgentConfig.js";
+import { HUB_AGENT_ROLES, setHubAgentRole } from "./hubAgentConfig.js";
 import { resolveGitRepoRoot, resolveHubProjectDir } from "./projectStatus.js";
 import { resolveHubProjectDevelopmentContractPath } from "./hubProjectDevelopmentContract.js";
 import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
@@ -133,6 +133,24 @@ const withBdEnv = (
     PATH: `${dirname(bdPath)}:${mergedEnv.PATH ?? process.env.PATH ?? ""}`,
     ARCHLOOP_BD_PATH: bdPath,
   };
+};
+
+const createMockTool = async (
+  binDir: string,
+  name: string,
+  script = "#!/bin/sh\nexit 0\n",
+) => {
+  await mkdir(binDir, { recursive: true });
+  const toolPath = join(binDir, name);
+  await writeFile(toolPath, script);
+  await chmod(toolPath, 0o755);
+  return toolPath;
+};
+
+const setAllHubAgentRoles = (env: NodeJS.ProcessEnv) => {
+  for (const role of HUB_AGENT_ROLES) {
+    setHubAgentRole(role, { provider: "cursor", model: "auto" }, { env });
+  }
 };
 
 const setupManagedBranchCleanupRepo = async (hostDir: string) => {
@@ -858,47 +876,10 @@ exit 1
     };
 
     const binDir = join(dataDir, "bin");
-    await mkdir(binDir, { recursive: true });
-    const agentPath = join(binDir, "agent");
-    await writeFile(
-      agentPath,
-      `#!/bin/sh
-exit 0
-`,
-    );
-    await chmod(agentPath, 0o755);
+    await createMockTool(binDir, "agent");
 
     const storeEnv = { ...env, PATH: `${binDir}:${process.env.PATH ?? ""}` };
-    setHubAgentRole(
-      "planning",
-      { provider: "cursor", model: "auto" },
-      { env: storeEnv },
-    );
-    setHubAgentRole(
-      "triage",
-      { provider: "cursor", model: "auto" },
-      { env: storeEnv },
-    );
-    setHubAgentRole(
-      "implementation",
-      { provider: "cursor", model: "auto" },
-      { env: storeEnv },
-    );
-    setHubAgentRole(
-      "review",
-      { provider: "cursor", model: "auto" },
-      { env: storeEnv },
-    );
-    setHubAgentRole(
-      "merge",
-      { provider: "cursor", model: "auto" },
-      { env: storeEnv },
-    );
-    setHubAgentRole(
-      "recovery",
-      { provider: "cursor", model: "auto" },
-      { env: storeEnv },
-    );
+    setAllHubAgentRoles(storeEnv);
 
     const otherDir = await mkdtemp(join(tmpdir(), "cli-check-cwd-"));
     const { stdout } = await runCli("check --hub", otherDir, storeEnv);
@@ -921,47 +902,10 @@ exit 0
     };
 
     const binDir = join(dataDir, "bin");
-    await mkdir(binDir, { recursive: true });
-    const agentPath = join(binDir, "agent");
-    await writeFile(
-      agentPath,
-      `#!/bin/sh
-exit 0
-`,
-    );
-    await chmod(agentPath, 0o755);
+    await createMockTool(binDir, "agent");
 
     const storeEnv = { ...env, PATH: `${binDir}:${process.env.PATH ?? ""}` };
-    setHubAgentRole(
-      "planning",
-      { provider: "cursor", model: "auto" },
-      { env: storeEnv },
-    );
-    setHubAgentRole(
-      "triage",
-      { provider: "cursor", model: "auto" },
-      { env: storeEnv },
-    );
-    setHubAgentRole(
-      "implementation",
-      { provider: "cursor", model: "auto" },
-      { env: storeEnv },
-    );
-    setHubAgentRole(
-      "review",
-      { provider: "cursor", model: "auto" },
-      { env: storeEnv },
-    );
-    setHubAgentRole(
-      "merge",
-      { provider: "cursor", model: "auto" },
-      { env: storeEnv },
-    );
-    setHubAgentRole(
-      "recovery",
-      { provider: "cursor", model: "auto" },
-      { env: storeEnv },
-    );
+    setAllHubAgentRoles(storeEnv);
 
     const otherDir = await mkdtemp(join(tmpdir(), "cli-check-missing-cred-cwd-"));
     try {

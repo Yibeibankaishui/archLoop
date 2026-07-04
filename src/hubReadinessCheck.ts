@@ -42,12 +42,37 @@ interface ProviderReference {
   readonly roles: readonly string[];
 }
 
-const providerToolCommands: Readonly<Record<string, string | undefined>> = {
-  "claude-code": "claude",
-  codex: "codex",
-  cursor: "agent",
-  opencode: "opencode",
-  pi: "pi",
+interface ProviderRequirements {
+  readonly credentialEnvKeys?: readonly string[];
+  readonly authEnvKey?: string;
+  readonly toolCommand?: string;
+}
+
+const providerRequirements: Readonly<Record<string, ProviderRequirements>> = {
+  "claude-code": {
+    credentialEnvKeys: ["ANTHROPIC_API_KEY"],
+    toolCommand: "claude",
+  },
+  codex: {
+    credentialEnvKeys: ["OPENAI_KEY"],
+    authEnvKey: "CODEX_HOME",
+    toolCommand: "codex",
+  },
+  cursor: {
+    credentialEnvKeys: ["CURSOR_API_KEY"],
+    toolCommand: "agent",
+  },
+  github: {
+    authEnvKey: "GH_CONFIG_DIR",
+  },
+  opencode: {
+    credentialEnvKeys: ["OPENCODE_API_KEY"],
+    toolCommand: "opencode",
+  },
+  pi: {
+    credentialEnvKeys: ["ANTHROPIC_API_KEY"],
+    toolCommand: "pi",
+  },
 };
 
 const normalizeOptionsKey = (
@@ -89,6 +114,9 @@ const commandExists = (command: string, env: NodeJS.ProcessEnv): boolean => {
   }
 };
 
+const getProviderRequirements = (provider: string): ProviderRequirements =>
+  providerRequirements[provider] ?? {};
+
 const readRoleEntries = (config: ReturnType<typeof readHubAgentConfig>) => {
   const missingRoles = listMissingHubAgentRoles(config);
   const validEntries: Array<{ role: string; entry: HubAgentRoleEntry }> = [];
@@ -122,7 +150,7 @@ const readRoleEntries = (config: ReturnType<typeof readHubAgentConfig>) => {
     });
   }
 
-  return { missingRoles, validEntries, errors };
+  return { validEntries, errors };
 };
 
 const collectProviderReferences = (
@@ -171,26 +199,9 @@ const collectCredentialFindings = (
   const findings: HubReadinessFinding[] = [];
   for (const reference of references) {
     const providerLabel = resolveProviderLabel(reference.provider);
-
-    const envKeys =
-      reference.provider === "claude-code"
-        ? ["ANTHROPIC_API_KEY"]
-        : reference.provider === "codex"
-          ? ["OPENAI_KEY"]
-          : reference.provider === "cursor"
-            ? ["CURSOR_API_KEY"]
-            : reference.provider === "opencode"
-              ? ["OPENCODE_API_KEY"]
-              : reference.provider === "pi"
-                ? ["ANTHROPIC_API_KEY"]
-                : [];
-
-    const authEnvKey =
-      reference.provider === "codex"
-        ? "CODEX_HOME"
-        : reference.provider === "github"
-          ? "GH_CONFIG_DIR"
-          : undefined;
+    const requirements = getProviderRequirements(reference.provider);
+    const envKeys = requirements.credentialEnvKeys ?? [];
+    const authEnvKey = requirements.authEnvKey;
 
     const envSatisfied = envKeys.some((key) => {
       const value = hubEnv[key] ?? runtimeEnv[key] ?? "";
@@ -211,17 +222,18 @@ const collectCredentialFindings = (
     }
 
     const missingEnvKey = envKeys[0];
+    const message =
+      missingEnvKey === undefined
+        ? `Hub agent provider "${reference.provider}" does not expose a credential key.`
+        : formatMissingAgentCredentialsMessage({
+            providerName: reference.provider,
+            envKey: missingEnvKey,
+            label: providerLabel,
+          });
     findings.push({
       severity: "error",
       title: `${providerLabel} credentials`,
-      message:
-        missingEnvKey !== undefined
-          ? formatMissingAgentCredentialsMessage({
-              providerName: reference.provider,
-              envKey: missingEnvKey,
-              label: providerLabel,
-            })
-          : `Hub agent provider "${reference.provider}" does not expose a credential key.`,
+      message,
     });
   }
 
@@ -236,7 +248,7 @@ const collectToolFindings = (
   const findings: HubReadinessFinding[] = [];
 
   for (const reference of references) {
-    const command = providerToolCommands[reference.provider];
+    const command = getProviderRequirements(reference.provider).toolCommand;
     const providerLabel = resolveProviderLabel(reference.provider);
 
     if (!command) {
@@ -279,6 +291,26 @@ const buildSmokeWarningSection = (): HubReadinessSection => ({
   ],
 });
 
+const buildRoleSuccessFindings = (): readonly HubReadinessFinding[] => [
+  {
+    severity: "success",
+    title: "Hub agent roles",
+    message: "All required Hub agent roles are configured and validated.",
+  },
+];
+
+const summarizeReport = (report: HubReadinessCheckReport): string => {
+  if (report.hasErrors) {
+    return "Hub readiness check failed.";
+  }
+
+  if (report.hasWarnings) {
+    return "Hub readiness check completed with warnings.";
+  }
+
+  return "Hub readiness check passed.";
+};
+
 export const collectHubReadinessChecks = (
   options: HubReadinessCheckOptions = {},
 ): HubReadinessCheckReport => {
@@ -299,28 +331,10 @@ export const collectHubReadinessChecks = (
   }
 
   const references = collectProviderReferences(roleCheck.validEntries);
-  const roleSuccessFindings =
-    references.length > 0
-      ? [
-          {
-            severity: "success" as const,
-            title: "Hub agent roles",
-            message:
-              "All required Hub agent roles are configured and validated.",
-          },
-        ]
-      : [
-          {
-            severity: "success" as const,
-            title: "Hub agent roles",
-            message: "No Hub agent roles are configured.",
-          },
-        ];
-
   const sections: HubReadinessSection[] = [
     {
       title: "Checking Hub agent roles",
-      findings: roleSuccessFindings,
+      findings: buildRoleSuccessFindings(),
     },
   ];
 
@@ -378,12 +392,6 @@ export const formatHubReadinessCheckLines = (
     }
   }
   lines.push("");
-  lines.push(
-    report.hasErrors
-      ? "Hub readiness check failed."
-      : report.hasWarnings
-        ? "Hub readiness check completed with warnings."
-        : "Hub readiness check passed.",
-  );
+  lines.push(summarizeReport(report));
   return lines;
 };
