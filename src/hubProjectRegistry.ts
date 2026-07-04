@@ -111,6 +111,9 @@ const normalizeName = (value: string): string => value.trim().toLowerCase();
 
 const nowIso = (now?: Date): string => (now ?? new Date()).toISOString();
 
+const formatProjectNotFoundMessage = (projectSelector: string): string =>
+  `No Hub project named "${projectSelector}". Run \`archloop project list\` to see registered projects.`;
+
 const readProjectRegistryEntry = (
   value: unknown,
 ): HubProjectRegistryEntry | undefined => {
@@ -266,6 +269,26 @@ const findProjectBySelector = (
   return projects.find((project) => normalizeName(project.name) === normalized);
 };
 
+const resolveProjectSelection = (
+  projects: readonly HubProjectRegistryEntry[],
+  projectSelector: string,
+): {
+  readonly project: HubProjectRegistryEntry;
+  readonly projectIndex: number;
+} => {
+  const project = findProjectBySelector(projects, projectSelector);
+  if (!project) {
+    throw new HubProjectRegistryError({
+      message: formatProjectNotFoundMessage(projectSelector),
+    });
+  }
+
+  return {
+    project,
+    projectIndex: projects.findIndex((entry) => entry.id === project.id),
+  };
+};
+
 const ensureUniqueProjectName = (
   projects: readonly HubProjectRegistryEntry[],
   projectName: string,
@@ -302,13 +325,24 @@ const ensureUniqueRepoRoot = (
   }
 };
 
-const findProjectIndexBySelector = (
-  projects: readonly HubProjectRegistryEntry[],
-  projectSelector: string,
-): number => projects.findIndex((project) => {
-  const selected = findProjectBySelector([project], projectSelector);
-  return selected?.id === project.id;
-});
+const writeUpdatedProject = (
+  registry: HubProjectRegistryState,
+  projectIndex: number,
+  updatedProject: HubProjectRegistryEntry,
+  options: HubProjectRegistryOptions = {},
+): HubProjectRegistryEntry => {
+  writeRegistryState(
+    {
+      version: 1,
+      projects: registry.projects.map((entry, index) =>
+        index === projectIndex ? updatedProject : entry,
+      ),
+    },
+    options,
+  );
+
+  return updatedProject;
+};
 
 export const readHubProjectRegistry = (
   options: HubProjectRegistryOptions = {},
@@ -346,14 +380,7 @@ export const resolveHubProjectBySelector = (
   projectSelector: string,
 ): HubProjectRegistryEntry => {
   const registry = readRegistryState(options).projects;
-  const project = findProjectBySelector(registry, projectSelector);
-  if (!project) {
-    throw new HubProjectRegistryError({
-      message: `No Hub project named "${projectSelector}". Run \`archloop project list\` to see registered projects.`,
-    });
-  }
-
-  return project;
+  return resolveProjectSelection(registry, projectSelector).project;
 };
 
 export const registerHubProject = (
@@ -421,17 +448,10 @@ export const renameHubProject = (
 ): RenameHubProjectResult => {
   const now = nowIso(input.now);
   const registry = readRegistryState(input);
-  const project = resolveHubProjectBySelector(input, input.projectSelector);
-  const projectIndex = findProjectIndexBySelector(
+  const { project, projectIndex } = resolveProjectSelection(
     registry.projects,
     input.projectSelector,
   );
-
-  if (projectIndex < 0) {
-    throw new HubProjectRegistryError({
-      message: `No Hub project named "${input.projectSelector}". Run \`archloop project list\` to see registered projects.`,
-    });
-  }
 
   const newProjectName = input.newProjectName.trim();
   if (newProjectName.length === 0) {
@@ -448,16 +468,8 @@ export const renameHubProject = (
     updatedAt: now,
   };
 
-  const nextRegistry: HubProjectRegistryState = {
-    version: 1,
-    projects: registry.projects.map((entry, index) =>
-      index === projectIndex ? updatedProject : entry,
-    ),
-  };
-  writeRegistryState(nextRegistry, input);
-
   return {
-    project: updatedProject,
+    project: writeUpdatedProject(registry, projectIndex, updatedProject, input),
     previousProjectName: project.name,
   };
 };
@@ -468,17 +480,10 @@ export const relinkHubProject = (
   const now = nowIso(input.now);
   const repoRoot = resolveHubProjectRegistrationRepoRoot(input.repoPath);
   const registry = readRegistryState(input);
-  const project = resolveHubProjectBySelector(input, input.projectSelector);
-  const projectIndex = findProjectIndexBySelector(
+  const { project, projectIndex } = resolveProjectSelection(
     registry.projects,
     input.projectSelector,
   );
-
-  if (projectIndex < 0) {
-    throw new HubProjectRegistryError({
-      message: `No Hub project named "${input.projectSelector}". Run \`archloop project list\` to see registered projects.`,
-    });
-  }
 
   ensureUniqueRepoRoot(registry.projects, repoRoot, project.id);
 
@@ -488,16 +493,8 @@ export const relinkHubProject = (
     updatedAt: now,
   };
 
-  const nextRegistry: HubProjectRegistryState = {
-    version: 1,
-    projects: registry.projects.map((entry, index) =>
-      index === projectIndex ? updatedProject : entry,
-    ),
-  };
-  writeRegistryState(nextRegistry, input);
-
   return {
-    project: updatedProject,
+    project: writeUpdatedProject(registry, projectIndex, updatedProject, input),
     previousRepoRoot: project.repoRoot,
   };
 };

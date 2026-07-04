@@ -26,6 +26,16 @@ const initRepo = async (dir: string) => {
   await execAsync('git config user.name "Test"', { cwd: dir });
 };
 
+const createCommittedRepo = async (prefix: string): Promise<string> => {
+  const repoDir = await mkdtemp(join(tmpdir(), prefix));
+  await initRepo(repoDir);
+  await writeFile(join(repoDir, "package.json"), "{}\n");
+  await execAsync("git add package.json && git commit -m 'initial'", {
+    cwd: repoDir,
+  });
+  return repoDir;
+};
+
 describe("hubProjectRegistry", () => {
   it("registers a project from an explicit path and persists the selected Hub project", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-project-registry-"));
@@ -88,19 +98,8 @@ describe("hubProjectRegistry", () => {
     const dataDir = await mkdtemp(join(tmpdir(), "hub-project-registry-data-"));
     const env = { ...process.env, XDG_DATA_HOME: dataDir };
 
-    const repoA = await mkdtemp(join(tmpdir(), "hub-project-registry-a-"));
-    await initRepo(repoA);
-    await writeFile(join(repoA, "package.json"), "{}\n");
-    await execAsync("git add package.json && git commit -m 'initial'", {
-      cwd: repoA,
-    });
-
-    const repoB = await mkdtemp(join(tmpdir(), "hub-project-registry-b-"));
-    await initRepo(repoB);
-    await writeFile(join(repoB, "package.json"), "{}\n");
-    await execAsync("git add package.json && git commit -m 'initial'", {
-      cwd: repoB,
-    });
+    const repoA = await createCommittedRepo("hub-project-registry-a-");
+    const repoB = await createCommittedRepo("hub-project-registry-b-");
 
     registerHubProject({
       repoPath: repoA,
@@ -132,19 +131,8 @@ describe("hubProjectRegistry", () => {
     const dataDir = await mkdtemp(join(tmpdir(), "hub-project-registry-data-"));
     const env = { ...process.env, XDG_DATA_HOME: dataDir };
 
-    const repoA = await mkdtemp(join(tmpdir(), "hub-project-registry-a-"));
-    await initRepo(repoA);
-    await writeFile(join(repoA, "package.json"), "{}\n");
-    await execAsync("git add package.json && git commit -m 'initial'", {
-      cwd: repoA,
-    });
-
-    const repoB = await mkdtemp(join(tmpdir(), "hub-project-registry-b-"));
-    await initRepo(repoB);
-    await writeFile(join(repoB, "package.json"), "{}\n");
-    await execAsync("git add package.json && git commit -m 'initial'", {
-      cwd: repoB,
-    });
+    const repoA = await createCommittedRepo("hub-project-registry-a-");
+    const repoB = await createCommittedRepo("hub-project-registry-b-");
 
     const registered = registerHubProject({
       repoPath: repoA,
@@ -203,19 +191,8 @@ describe("hubProjectRegistry", () => {
     const dataDir = await mkdtemp(join(tmpdir(), "hub-project-registry-data-"));
     const env = { ...process.env, XDG_DATA_HOME: dataDir };
 
-    const repoA = await mkdtemp(join(tmpdir(), "hub-project-registry-a-"));
-    await initRepo(repoA);
-    await writeFile(join(repoA, "package.json"), "{}\n");
-    await execAsync("git add package.json && git commit -m 'initial'", {
-      cwd: repoA,
-    });
-
-    const repoB = await mkdtemp(join(tmpdir(), "hub-project-registry-b-"));
-    await initRepo(repoB);
-    await writeFile(join(repoB, "package.json"), "{}\n");
-    await execAsync("git add package.json && git commit -m 'initial'", {
-      cwd: repoB,
-    });
+    const repoA = await createCommittedRepo("hub-project-registry-a-");
+    const repoB = await createCommittedRepo("hub-project-registry-b-");
 
     const nonRepoDir = await mkdtemp(join(tmpdir(), "hub-project-registry-nonrepo-"));
 
