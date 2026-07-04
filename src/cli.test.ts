@@ -23,8 +23,12 @@ import {
   createHubTaskClaimMetadata,
 } from "./hubExecution.js";
 import { HUB_AGENT_ROLES, setHubAgentRole } from "./hubAgentConfig.js";
-import { resolveGitRepoRoot, resolveHubProjectDir } from "./projectStatus.js";
+import {
+  resolveGitRepoRoot,
+  resolveHubProjectDir,
+} from "./projectStatus.js";
 import { resolveHubProjectDevelopmentContractPath } from "./hubProjectDevelopmentContract.js";
+import { resolveSelectedHubProject } from "./hubProjectRegistry.js";
 import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
 
 const execAsync = promisify(exec);
@@ -107,6 +111,9 @@ const cliFailureOutput = (err: unknown): string => {
 
   throw err;
 };
+
+const flattenCliOutput = (output: string): string =>
+  output.replace(/[│\s]+/g, "");
 
 const withBdEnv = (
   bdPath: string,
@@ -840,24 +847,34 @@ exit 1
     }
   });
 
-  it("project status works from a git repo that has not run init", async () => {
+  it("project status targets the selected project from another directory", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
     const dataDir = join(hostDir, "xdg-data");
-    const binDir = join(hostDir, "bin");
-    await mkdir(binDir, { recursive: true });
-    const gitPath = (await execAsync("command -v git")).stdout.trim();
-    await symlink(gitPath, join(binDir, "git"));
-    const { stdout } = await runCli("project status", hostDir, {
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+
+    await runCli(`project add --name alpha --path "${hostDir}"`, otherDir, {
       ...process.env,
       XDG_DATA_HOME: dataDir,
-      PATH: binDir,
+    });
+    const selectedProject = resolveSelectedHubProject({
+      env: {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      },
+    });
+
+    const { stdout } = await runCli("project status", otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
     });
 
     expect(stdout).toContain("Hub project status");
-    expect(stdout).toContain(hostDir);
+    expect(flattenCliOutput(stdout)).toContain(
+      flattenCliOutput(selectedProject!.repoRoot),
+    );
     expect(stdout).toContain("xdg-data/archloop");
     expect(stdout).toContain("Hub project profile");
     expect(stdout).toContain("Hub project development contract");
@@ -865,6 +882,39 @@ exit 1
     expect(stdout).toContain("Task store initialized");
     expect(stdout).toContain("Task board ready");
     expect(stdout).toContain("Task board total");
+  });
+
+  it("project status honors an explicit project override", async () => {
+    const repoA = await mkdtemp(join(tmpdir(), "cli-project-a-"));
+    await initRepo(repoA);
+    await commitFile(repoA, "hello.txt", "hello", "initial commit");
+
+    const repoB = await mkdtemp(join(tmpdir(), "cli-project-b-"));
+    await initRepo(repoB);
+    await commitFile(repoB, "hello.txt", "hello", "initial commit");
+
+    const dataDir = join(repoA, "xdg-data");
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+
+    await runCli(`project add --name alpha --path "${repoA}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    await runCli(`project add --name beta --path "${repoB}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+
+    const explicitRepoRoot = resolveGitRepoRoot(repoB);
+    const selectedRepoRoot = resolveGitRepoRoot(repoA);
+    const { stdout } = await runCli("project status --project beta", otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+
+    const flattenedOutput = flattenCliOutput(stdout);
+    expect(flattenedOutput).toContain(flattenCliOutput(explicitRepoRoot));
+    expect(flattenedOutput).not.toContain(flattenCliOutput(selectedRepoRoot));
   });
 
   it("check runs from any directory, shows progress, and warns about deferred smoke checks", async () => {
@@ -936,22 +986,29 @@ exit 1
     );
 
     const dataDir = join(hostDir, "xdg-data");
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+    await runCli(`project add --name alpha --path "${hostDir}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    const selectedProject = resolveSelectedHubProject({
+      env: {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      },
+    });
     const { stdout } = await runCli(
       "project configure --project-profile node",
-      hostDir,
+      otherDir,
       {
         ...process.env,
         XDG_DATA_HOME: dataDir,
       },
     );
 
-    const repoRoot = resolveGitRepoRoot(hostDir);
-    const hubProjectDir = resolveHubProjectDir(
-      join(dataDir, "archloop"),
-      repoRoot,
+    const contractPath = resolveHubProjectDevelopmentContractPath(
+      selectedProject!.hubProjectDir,
     );
-    const contractPath =
-      resolveHubProjectDevelopmentContractPath(hubProjectDir);
     const contract = JSON.parse(await readFile(contractPath, "utf8")) as {
       projectProfile: string;
       projectFacts: { observedFiles: string[]; configuredScripts: string[] };
@@ -980,15 +1037,23 @@ exit 1
     await commitFile(hostDir, "package.json", "{}", "initial commit");
 
     const dataDir = join(hostDir, "xdg-data");
-    const repoRoot = resolveGitRepoRoot(hostDir);
-    const hubProjectDir = resolveHubProjectDir(
-      join(dataDir, "archloop"),
-      repoRoot,
-    );
-    const initialContractPath =
-      resolveHubProjectDevelopmentContractPath(hubProjectDir);
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
 
-    await runCli("project configure --project-profile node", hostDir, {
+    await runCli(`project add --name alpha --path "${hostDir}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    const selectedProject = resolveSelectedHubProject({
+      env: {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      },
+    });
+    const initialContractPath = resolveHubProjectDevelopmentContractPath(
+      selectedProject!.hubProjectDir,
+    );
+
+    await runCli("project configure --project-profile node", otherDir, {
       ...process.env,
       XDG_DATA_HOME: dataDir,
     });
@@ -1013,7 +1078,7 @@ exit 1
 
     const { stdout } = await runCli(
       "project configure --project-profile python",
-      hostDir,
+      otherDir,
       {
         ...process.env,
         XDG_DATA_HOME: dataDir,
@@ -1038,8 +1103,8 @@ exit 1
     expect(changedContract.context).not.toContain("custom node context");
 
     const backupPath = join(
-      hubProjectDir,
-      (await readdir(hubProjectDir)).find((entry) =>
+      selectedProject!.hubProjectDir,
+      (await readdir(selectedProject!.hubProjectDir)).find((entry) =>
         entry.startsWith("development-contract.backup-node-"),
       )!,
     );
@@ -1057,11 +1122,18 @@ exit 1
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+    const dataDir = join(hostDir, "xdg-data");
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+
+    await runCli(`project add --name alpha --path "${hostDir}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
 
     try {
-      await runCli("project configure", hostDir, {
+      await runCli("project configure", otherDir, {
         ...process.env,
-        XDG_DATA_HOME: join(hostDir, "xdg-data"),
+        XDG_DATA_HOME: dataDir,
       });
       expect.fail("Expected command to fail");
     } catch (err: unknown) {

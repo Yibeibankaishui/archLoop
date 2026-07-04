@@ -306,6 +306,21 @@ export const readSelectedHubProject = (
 
 export const resolveSelectedHubProject = readSelectedHubProject;
 
+export const resolveHubProjectBySelector = (
+  options: HubProjectRegistryOptions = {},
+  projectSelector: string,
+): HubProjectRegistryEntry => {
+  const registry = readRegistryState(options).projects;
+  const project = findProjectBySelector(registry, projectSelector);
+  if (!project) {
+    throw new HubProjectRegistryError({
+      message: `No Hub project named "${projectSelector}". Run \`archloop project list\` to see registered projects.`,
+    });
+  }
+
+  return project;
+};
+
 export const registerHubProject = (
   input: RegisterHubProjectInput,
 ): RegisterHubProjectResult => {
@@ -369,13 +384,7 @@ export const registerHubProject = (
 export const selectHubProject = (
   input: SelectHubProjectInput,
 ): HubProjectRegistryEntry => {
-  const registry = readRegistryState(input).projects;
-  const project = findProjectBySelector(registry, input.projectSelector);
-  if (!project) {
-    throw new HubProjectRegistryError({
-      message: `No Hub project named "${input.projectSelector}". Run \`archloop project list\` to see registered projects.`,
-    });
-  }
+  const project = resolveHubProjectBySelector(input, input.projectSelector);
 
   writeSelectionState(
     {

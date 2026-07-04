@@ -89,6 +89,7 @@ import {
   selectHubProject,
   type HubProjectListEntry,
 } from "./hubProjectRegistry.js";
+import { resolveHubProjectTarget } from "./hubProjectTargetResolver.js";
 import {
   formatHubProjectProfileRecommendation,
   recommendHubProjectProfile,
@@ -1631,6 +1632,11 @@ const formatHubProjectStatusRows = (
   "Task board total": String(status.taskCounts.total),
 });
 
+const projectTargetOption = Options.text("project").pipe(
+  Options.withDescription("Hub project name"),
+  Options.optional,
+);
+
 const projectConfigureProjectProfileOption = Options.text(
   "project-profile",
 ).pipe(
@@ -2604,23 +2610,43 @@ const tasksCommand = Command.make("tasks", {}, () =>
   ]),
 );
 
-const projectStatusCommand = Command.make("status", {}, () =>
-  Effect.gen(function* () {
-    const d = yield* Display;
-    const cwd = process.cwd();
-    const status = yield* Effect.try({
-      try: () => resolveHubProjectStatus({ cwd }),
-      catch: (error) =>
-        new ProjectStatusError({
-          message: error instanceof Error ? error.message : String(error),
-        }),
-    });
+const projectStatusCommand = Command.make(
+  "status",
+  {
+    project: projectTargetOption,
+  },
+  ({ project }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const target = yield* Effect.tryPromise({
+        try: () =>
+          resolveHubProjectTarget({
+            projectSelector: optionalTextValue(project),
+            isTTY: process.stdin.isTTY === true,
+            selectProject: resolveInteractiveProjectSelection,
+          }),
+        catch: (error) =>
+          new ProjectStatusError({
+            message: error instanceof Error ? error.message : String(error),
+          }),
+      });
+      const status = yield* Effect.try({
+        try: () =>
+          resolveHubProjectStatus({
+            cwd: target.project.repoRoot,
+            hubProjectDir: target.project.hubProjectDir,
+          }),
+        catch: (error) =>
+          new ProjectStatusError({
+            message: error instanceof Error ? error.message : String(error),
+          }),
+      });
 
-    yield* d.summary("Hub project status", formatHubProjectStatusRows(status));
-    for (const line of formatHubProjectStatusLines(status)) {
-      yield* d.text(line);
-    }
-  }),
+      yield* d.summary("Hub project status", formatHubProjectStatusRows(status));
+      for (const line of formatHubProjectStatusLines(status)) {
+        yield* d.text(line);
+      }
+    }),
 );
 
 const checkHubOption = Options.boolean("hub").pipe(
@@ -3013,14 +3039,30 @@ const projectSelectCommand = Command.make(
 const projectConfigureCommand = Command.make(
   "configure",
   {
+    project: projectTargetOption,
     projectProfile: projectConfigureProjectProfileOption,
   },
-  ({ projectProfile }) =>
+  ({ project, projectProfile }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = process.cwd();
+      const target = yield* Effect.tryPromise({
+        try: () =>
+          resolveHubProjectTarget({
+            projectSelector: optionalTextValue(project),
+            isTTY: process.stdin.isTTY === true,
+            selectProject: resolveInteractiveProjectSelection,
+          }),
+        catch: (error) =>
+          new ProjectStatusError({
+            message: error instanceof Error ? error.message : String(error),
+          }),
+      });
       const status = yield* Effect.try({
-        try: () => resolveHubProjectStatus({ cwd }),
+        try: () =>
+          resolveHubProjectStatus({
+            cwd: target.project.repoRoot,
+            hubProjectDir: target.project.hubProjectDir,
+          }),
         catch: (error) =>
           new ProjectStatusError({
             message: error instanceof Error ? error.message : String(error),

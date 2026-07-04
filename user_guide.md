@@ -30,18 +30,18 @@ Hub flow 使用 archLoop 自带的 flow prompt，不读取目标项目里的 `.a
 
 ### 3.1 检查项目状态
 
-在目标项目根目录运行：
+在任意目录运行；如果已经选中了 Hub project，或者显式传入 `--project <name>`，命令会针对该项目：
 
 ```bash
 archloop project status
 archloop check --hub
 ```
 
-`project status` 用于确认：
+`project status` 用于确认当前选中的或显式指定的 Hub project：
 
 | 输出项                       | 用途                                         |
 | ---------------------------- | -------------------------------------------- |
-| Repo root                    | archLoop 识别到的目标项目根目录              |
+| Repo root                    | 当前 Hub project 对应的目标项目根目录        |
 | archLoop user data directory | Hub 状态、共享凭据、运行记录所在位置         |
 | Hub project directory        | 当前项目的 Hub 运行状态目录                  |
 | Beads availability           | Beads 是否可用                               |
@@ -377,7 +377,7 @@ archloop run . --flow no-review
 
 建议按下面顺序做首轮 QA：
 
-1. 在目标 Git 项目中运行 `archloop project status`，确认不需要 `.archloop/`。
+1. 先在 Hub 中选中或显式指定目标项目，再运行 `archloop project status`，确认不需要 `.archloop/`。
 2. 运行 `archloop agent-config init`，配置 `planning`、`triage`、`implementation`、`review`、`merge`、`recovery`。
 3. 运行 `archloop env init`，配置 agent 和 GitHub 所需凭据。
 4. 运行 `archloop tasks init`，再用 `archloop tasks create` 创建 2 到 3 个测试任务。
