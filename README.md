@@ -869,9 +869,9 @@ If `archloop run --flow` reaches a repository without a development contract, Hu
 
 ### `archloop project add`
 
-Registers an existing git repo as a Hub project from any directory. Pass `--name <name>` and `--path <repo-path>` in scripts; in a TTY, archLoop prompts for any missing values. `--project-profile` defaults to `generic` for the first Hub project contract and can be changed later with `project configure`.
+Registers an existing git repo as a Hub project from any directory. Pass `--name <name>` and `--path <repo-path>` in scripts; in a TTY, archLoop prompts for a repo path and Hub project name when they are missing, suggests a repo-derived project name, recommends a project profile from repo signals, and defaults the local task-store prompt to yes.
 
-Successful registration writes the Hub project registry entry, creates the project Hub assets directory, refreshes the Hub project development contract, and records the new project as the CLI selected Hub project.
+Successful registration writes the Hub project registry entry, creates the project Hub assets directory, refreshes the Hub project development contract, reports its path, and records the new project as the CLI selected Hub project. If task-store initialization is accepted, archLoop runs `archloop tasks init` for that repo after registration; declining it still leaves the project registered and selected.
 
 ### `archloop project list`
 

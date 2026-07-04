@@ -1026,6 +1026,53 @@ exit 1
     expect(listResult.stdout).toContain(hostDir);
   });
 
+  it("project add rejects a path that is not a git repo with exact guidance", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const nonRepoDir = await mkdtemp(join(tmpdir(), "cli-not-a-repo-"));
+
+    try {
+      await runCli(`project add --name alpha --path "${nonRepoDir}"`, hostDir, {
+        ...process.env,
+        XDG_DATA_HOME: join(hostDir, "xdg-data"),
+      });
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain(
+        "existing git repository with at least one commit",
+      );
+      expect(output).toContain("git init");
+      expect(output).toContain('git commit -m "Initial commit"');
+    }
+  });
+
+  it("project add rejects a git repo without an initial commit with exact guidance", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const emptyRepo = await mkdtemp(join(tmpdir(), "cli-empty-repo-"));
+    await initRepo(emptyRepo);
+
+    try {
+      await runCli(`project add --name alpha --path "${emptyRepo}"`, hostDir, {
+        ...process.env,
+        XDG_DATA_HOME: join(hostDir, "xdg-data"),
+      });
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain(
+        "existing git repository with at least one commit",
+      );
+      expect(output).toContain("git init");
+      expect(output).toContain('git commit -m "Initial commit"');
+    }
+  });
+
   it("project select switches the CLI selected project by name from another directory", async () => {
     const repoA = await mkdtemp(join(tmpdir(), "cli-project-a-"));
     await initRepo(repoA);
