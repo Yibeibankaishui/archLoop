@@ -184,6 +184,24 @@ describe("archloop initialize", () => {
     });
   });
 
+  it("requires an interactive terminal", async () => {
+    Object.defineProperty(process.stdin, "isTTY", {
+      configurable: true,
+      value: false,
+    });
+    Object.defineProperty(process.stdout, "isTTY", {
+      configurable: true,
+      value: false,
+    });
+
+    await expect(runInitialize("initialize")).rejects.toThrow(
+      /Interactive Hub initialization requires a TTY/,
+    );
+    expect(mockPromptInitializeHubAgentConfig).not.toHaveBeenCalled();
+    expect(mockPromptInitializeHubEnv).not.toHaveBeenCalled();
+    expect(mockCollectHubReadinessChecks).not.toHaveBeenCalled();
+  });
+
   it("surfaces quick check failures before the project add next step", async () => {
     mockCollectHubReadinessChecks.mockResolvedValueOnce({
       sections: [{ title: "Checking Hub agent roles", findings: [] }],

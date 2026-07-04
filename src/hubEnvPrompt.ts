@@ -40,6 +40,15 @@ const promptHubEnvValue = async (
 
 export const promptInitHubEnv = async (
   options: HubEnvStoreOptions = {},
+): Promise<Record<string, string>> =>
+  promptHubEnvSetup(({ keys }) => keys, options);
+
+const promptHubEnvSetup = async (
+  selectKeys: (input: {
+    readonly keys: readonly HubEnvKnownKey[];
+    readonly existing: Readonly<Record<string, string>>;
+  }) => readonly HubEnvKnownKey[],
+  options: HubEnvStoreOptions,
 ): Promise<Record<string, string>> => {
   clack.intro("Configure Hub environment variables");
   clack.log.info(HUB_ENV_BLANK_INPUT_NOTE);
@@ -49,8 +58,11 @@ export const promptInitHubEnv = async (
     clack.log.info("Created Hub env file with placeholders.");
   }
 
-  const keys = collectHubEnvKeysForSetup(options);
   const existing = readHubEnvFile(options);
+  const keys = selectKeys({
+    keys: collectHubEnvKeysForSetup(options),
+    existing,
+  });
   const updates: Record<string, string> = {};
 
   for (const key of keys) {
@@ -73,36 +85,9 @@ export const promptInitHubEnv = async (
 
 export const promptInitializeHubEnv = async (
   options: HubEnvStoreOptions = {},
-): Promise<Record<string, string>> => {
-  clack.intro("Configure Hub environment variables");
-  clack.log.info(HUB_ENV_BLANK_INPUT_NOTE);
-
-  const { created } = ensureHubEnvFile(options);
-  if (created) {
-    clack.log.info("Created Hub env file with placeholders.");
-  }
-
-  const keys = collectHubEnvKeysForSetup(options);
-  const existing = readHubEnvFile(options);
-  const missingKeys = keys.filter(
-    (key) => (existing[key] ?? "").trim().length === 0,
+): Promise<Record<string, string>> =>
+  promptHubEnvSetup(
+    ({ keys, existing }) =>
+      keys.filter((key) => (existing[key] ?? "").trim().length === 0),
+    options,
   );
-  const updates: Record<string, string> = {};
-
-  for (const key of missingKeys) {
-    const nextValue = await promptHubEnvValue(key, existing[key] ?? "");
-    if (nextValue) {
-      updates[key] = nextValue;
-    }
-  }
-
-  if (Object.keys(updates).length === 0) {
-    clack.outro("No Hub env changes saved.");
-    return existing;
-  }
-
-  const saved = { ...existing, ...updates };
-  writeHubEnvFile(saved, options);
-  clack.outro("Hub environment variables saved.");
-  return saved;
-};
