@@ -386,11 +386,13 @@ Required event types include:
 - `task_close_started`
 - `task_closed`
 - `task_close_failed`
+- `task_branch_cleanup`
 
 V1 verification policy:
 
 - Run verification after each task merge.
 - A task reaches `done` only after merge success, verification pass, and local Beads close success.
+- After a task reaches `done`, Hub may attempt best-effort cleanup of a safe managed branch candidate with non-force Git deletion; cleanup failures remain warnings and do not change the task out of `done`.
 - Verification failure stops batch merge by default.
 - Unresolved merge conflict stops batch merge by default.
 - Local task close failure stops batch merge by default.
