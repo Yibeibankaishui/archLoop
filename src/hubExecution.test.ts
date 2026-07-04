@@ -83,6 +83,9 @@ describe("task claims", () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-claim-"));
     await initRepo(repoDir);
     await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+    const { stdout: baseHead } = await execAsync("git rev-parse HEAD", {
+      cwd: repoDir,
+    });
     seedHubTaskStoreMetadata(repoDir);
 
     const binDir = join(repoDir, "bin");
@@ -189,7 +192,10 @@ process.exit(1);
     expect(result.task.claim).toMatchObject({
       runId: result.runId,
       batchId: result.batchId,
+      taskId: "bd-69",
       branch: "feature/issue-69",
+      baseHead: baseHead.trim(),
+      branchExistedBeforeClaim: false,
     });
 
     const taskEvents = await readJsonl(
@@ -200,6 +206,133 @@ process.exit(1);
       taskId: "bd-69",
       runId: result.runId,
       batchId: result.batchId,
+      claim: {
+        taskId: "bd-69",
+        runId: result.runId,
+        batchId: result.batchId,
+        branch: "feature/issue-69",
+        baseHead: baseHead.trim(),
+        branchExistedBeforeClaim: false,
+      },
+    });
+  });
+
+  it("records when the branch already existed before claim", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-claim-existing-branch-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+    const { stdout: baseHead } = await execAsync("git rev-parse HEAD", {
+      cwd: repoDir,
+    });
+    await execAsync("git branch feature/existing-branch", { cwd: repoDir });
+    seedHubTaskStoreMetadata(repoDir);
+
+    const binDir = join(repoDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await execAsync(`ln -sf "${gitPath}" "${join(binDir, "git")}"`);
+
+    const stateFile = join(repoDir, "bd-state.json");
+    await writeFile(
+      stateFile,
+      JSON.stringify(
+        [
+          {
+            id: "bd-71",
+            title: "Claim existing branch",
+            status: "open",
+            labels: ["ready-for-agent"],
+            metadata: {},
+          },
+        ],
+        null,
+        2,
+      ),
+    );
+
+    const argsFile = join(repoDir, "bd-args-existing.txt");
+    await writeFile(argsFile, "");
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = process.env.BD_STATE_FILE;
+const args = process.argv.slice(2);
+const [command, id] = args;
+if (command === "show" && id === "bd-71") {
+  process.stdout.write(fs.readFileSync(stateFile, "utf8"));
+  process.exit(0);
+}
+if (command === "update" && id === "bd-71") {
+  const metadataIndex = args.indexOf("--metadata");
+  const statusIndex = args.indexOf("--status");
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  state[0].status = args[statusIndex + 1];
+  state[0].metadata = {
+    ...state[0].metadata,
+    ...JSON.parse(args[metadataIndex + 1]),
+  };
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      state[0].labels = [];
+    }
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      const label = args[index + 1];
+      if (!state[0].labels.includes(label)) state[0].labels.push(label);
+    }
+    if (args[index] === "--unset-metadata") {
+      delete state[0].metadata[args[index + 1]];
+    }
+  }
+  fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+  process.exit(0);
+}
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "abc",
+    );
+    const result = await claimHubTask({
+      cwd: repoDir,
+      taskId: "bd-71",
+      branch: "feature/existing-branch",
+      hubProjectDir,
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH ?? ""}`,
+        ARCHLOOP_BD_PATH: bdPath,
+        BD_STATE_FILE: stateFile,
+      },
+    });
+
+    expect(result.outcome).toBe("claimed");
+    expect(result.task.claim).toMatchObject({
+      taskId: "bd-71",
+      baseHead: baseHead.trim(),
+      branchExistedBeforeClaim: true,
+    });
+    const taskEvents = await readJsonl(
+      join(result.runDir, "events", "task.jsonl"),
+    );
+    expect(taskEvents[0]).toMatchObject({
+      type: "task_claimed",
+      taskId: "bd-71",
+      claim: {
+        taskId: "bd-71",
+        baseHead: baseHead.trim(),
+        branchExistedBeforeClaim: true,
+      },
     });
   });
 
