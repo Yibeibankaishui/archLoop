@@ -867,6 +867,20 @@ Creates or updates the Hub project development contract for the current reposito
 
 If `archloop run --flow` reaches a repository without a development contract, Hub creates the generic contract first, reports that fallback in the run output, and keeps going. Use `project configure` afterward to write the project-specific contract you actually want Hub flows to consume.
 
+### `archloop project add`
+
+Registers an existing git repo as a Hub project from any directory. Pass `--name <name>` and `--path <repo-path>` in scripts; in a TTY, archLoop prompts for any missing values. `--project-profile` defaults to `generic` for the first Hub project contract and can be changed later with `project configure`.
+
+Successful registration writes the Hub project registry entry, creates the project Hub assets directory, refreshes the Hub project development contract, and records the new project as the CLI selected Hub project.
+
+### `archloop project list`
+
+Lists registered Hub projects from the shared registry, marks the selected project, and shows each project's repo path, project profile, task counts, and active run count. The command works from any directory because it reads the shared registry rather than inferring a project from `cwd`.
+
+### `archloop project select [<name>]`
+
+Sets the CLI selected Hub project by name. If no name is provided in a TTY, archLoop opens an interactive picker; in non-interactive mode the name is required. Selection is stored outside the target repo, so it remains available from any directory and does not depend on the current working directory.
+
 ### `archloop agent-config path`
 
 Prints the Hub-wide agent role config file path under the archLoop user data directory. Hub agent roles configure reusable stage providers and models for planning, triage, implementation, review, merge, and recovery. Credentials and login state stay in Hub env files and auth directories, not in role config.

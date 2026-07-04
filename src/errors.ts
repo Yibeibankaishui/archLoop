@@ -90,6 +90,13 @@ export class ProjectStatusError extends Data.TaggedError("ProjectStatusError")<{
   readonly message: string;
 }> {}
 
+/** Hub project registry or selection operation failed */
+export class HubProjectRegistryError extends Data.TaggedError(
+  "HubProjectRegistryError",
+)<{
+  readonly message: string;
+}> {}
+
 /** Hub task board operation failed */
 export class TaskBoardError extends Data.TaggedError("TaskBoardError")<{
   readonly message: string;
