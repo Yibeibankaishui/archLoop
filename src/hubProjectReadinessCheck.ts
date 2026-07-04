@@ -158,121 +158,163 @@ const initialCommitSection = (
 const buildDevelopmentContractSection = (
   project: HubProjectRegistryEntry,
   status: HubProjectStatus,
-): HubReadinessSection =>
-  createSection("Checking development contract", [
+): HubReadinessSection => {
+  if (status.projectDevelopmentContractPersisted) {
+    return createSection("Checking development contract", [
+      createFinding(
+        "success",
+        "Development contract persisted",
+        `Hub project development contract is persisted at ${status.projectDevelopmentContractPath}.`,
+      ),
+    ]);
+  }
+
+  return createSection("Checking development contract", [
     createFinding(
-      status.projectDevelopmentContractPersisted ? "success" : "warn",
-      status.projectDevelopmentContractPersisted
-        ? "Development contract persisted"
-        : "Using fallback development contract",
-      status.projectDevelopmentContractPersisted
-        ? `Hub project development contract is persisted at ${status.projectDevelopmentContractPath}.`
-        : `Hub project development contract is using the fallback generic contract at ${status.projectDevelopmentContractPath}. Run \`archloop project configure --project ${project.name} --project-profile ${status.projectProfile ?? "generic"}\` to specialize it.`,
+      "warn",
+      "Using fallback development contract",
+      `Hub project development contract is using the fallback generic contract at ${status.projectDevelopmentContractPath}. Run \`archloop project configure --project ${project.name} --project-profile ${status.projectProfile ?? "generic"}\` to specialize it.`,
     ),
   ]);
+};
 
 const buildTaskStoreSection = (
   status: HubProjectStatus,
-): HubReadinessSection =>
-  createSection("Checking local task store", [
+): HubReadinessSection => {
+  if (!status.beadsAvailable) {
+    return createSection("Checking local task store", [
+      createFinding(
+        "warn",
+        "Task runtime unavailable",
+        "archLoop task runtime unavailable. Install dependencies, set ARCHLOOP_BD_PATH, or ensure the bundled Beads runtime is available.",
+      ),
+    ]);
+  }
+
+  if (status.taskStoreInitialized) {
+    return createSection("Checking local task store", [
+      createFinding(
+        "success",
+        "Local task store is initialized",
+        "Local task store is initialized.",
+      ),
+    ]);
+  }
+
+  return createSection("Checking local task store", [
     createFinding(
-      status.beadsAvailable && status.taskStoreInitialized ? "success" : "warn",
-      status.beadsAvailable
-        ? status.taskStoreInitialized
-          ? "Local task store is initialized"
-          : "Local task store is missing"
-        : "Task runtime unavailable",
-      status.beadsAvailable
-        ? status.taskStoreInitialized
-          ? "Local task store is initialized."
-          : "Local task store not initialized. Run `archloop tasks init` in this repository first."
-        : "archLoop task runtime unavailable. Install dependencies, set ARCHLOOP_BD_PATH, or ensure the bundled Beads runtime is available.",
+      "warn",
+      "Local task store is missing",
+      "Local task store not initialized. Run `archloop tasks init` in this repository first.",
     ),
   ]);
+};
 
 const buildTaskSummarySection = (
   status: HubProjectStatus,
-): HubReadinessSection =>
-  createSection("Checking task summary", [
-    createFinding(
-      status.beadsAvailable && status.taskStoreInitialized ? "success" : "warn",
-      "Task summary",
-      status.beadsAvailable && status.taskStoreInitialized
-        ? `Ready tasks: ${status.taskCounts.ready}. Failed tasks: ${status.failedTasks.length}. Total: ${status.taskCounts.total}.`
-        : "Task summary is unavailable until the local task store is initialized.",
-    ),
+): HubReadinessSection => {
+  const taskStoreReady = status.beadsAvailable && status.taskStoreInitialized;
+  const message = taskStoreReady
+    ? `Ready tasks: ${status.taskCounts.ready}. Failed tasks: ${status.failedTasks.length}. Total: ${status.taskCounts.total}.`
+    : "Task summary is unavailable until the local task store is initialized.";
+
+  return createSection("Checking task summary", [
+    createFinding(taskStoreReady ? "success" : "warn", "Task summary", message),
   ]);
+};
 
 const buildFailedTaskSection = (
   status: HubProjectStatus,
-): HubReadinessSection =>
-  createSection(
-    "Checking failed task summary",
-    status.failedTasks.length === 0
-      ? [
-          createFinding("success", "Failed tasks", "No failed tasks."),
-        ]
-      : [
-          createFinding(
-            "warn",
-            "Failed tasks detected",
-            status.failedTasks
-              .map(
-                (task) =>
-                  `  ${task.id}: ${task.failureReason ?? "unknown"} - ${task.nextAction}`,
-              )
-              .join("\n"),
-          ),
-        ],
-  );
+): HubReadinessSection => {
+  if (status.failedTasks.length === 0) {
+    return createSection("Checking failed task summary", [
+      createFinding("success", "Failed tasks", "No failed tasks."),
+    ]);
+  }
+
+  return createSection("Checking failed task summary", [
+    createFinding(
+      "warn",
+      "Failed tasks detected",
+      status.failedTasks
+        .map(
+          (task) =>
+            `  ${task.id}: ${task.failureReason ?? "unknown"} - ${task.nextAction}`,
+        )
+        .join("\n"),
+    ),
+  ]);
+};
+
+const formatActiveRunLine = (
+  batch: HubProjectStatus["activeBatches"][number],
+): string => {
+  const details: string[] = [];
+  if (batch.flowId) {
+    details.push(`flow ${batch.flowId}`);
+  }
+  if (batch.taskCount !== undefined) {
+    details.push(`${batch.taskCount} tasks`);
+  }
+
+  const detailSuffix = details.length === 0 ? "" : ` (${details.join(", ")})`;
+  return `  ${batch.runId} / ${batch.batchId}: ${batch.status}${detailSuffix}\n    Run directory: ${batch.runDir}`;
+};
 
 const buildActiveRunsSection = (
   status: HubProjectStatus,
-): HubReadinessSection =>
-  createSection("Checking active runs", [
+): HubReadinessSection => {
+  if (status.activeBatches.length === 0) {
+    return createSection("Checking active runs", [
+      createFinding("success", "Active runs", "No active Hub runs."),
+    ]);
+  }
+
+  return createSection("Checking active runs", [
     createFinding(
       "success",
       "Active runs",
-      status.activeBatches.length === 0
-        ? "No active Hub runs."
-        : [
-            `Active runs: ${status.activeBatches.length}.`,
-            ...status.activeBatches.map((batch) => {
-              const details = [
-                batch.flowId ? `flow ${batch.flowId}` : undefined,
-                batch.taskCount !== undefined ? `${batch.taskCount} tasks` : undefined,
-              ]
-                .filter((detail) => detail !== undefined)
-                .join(", ");
-              return `  ${batch.runId} / ${batch.batchId}: ${batch.status}${details ? ` (${details})` : ""}\n    Run directory: ${batch.runDir}`;
-            }),
-          ].join("\n"),
+      [
+        `Active runs: ${status.activeBatches.length}.`,
+        ...status.activeBatches.map((batch) => formatActiveRunLine(batch)),
+      ].join("\n"),
     ),
   ]);
+};
 
 const buildFlowReadinessSection = (
   status: HubProjectStatus,
   repoRoot: string,
   gitRepoRoot: string,
 ): HubReadinessSection => {
+  const repoPathExists = existsSync(repoRoot);
+  const gitRepoValid = gitRepoRoot.length > 0;
   const flowReady =
-    existsSync(repoRoot) &&
-    gitRepoRoot.length > 0 &&
+    repoPathExists &&
+    gitRepoValid &&
     status.projectDevelopmentContractPersisted &&
     status.taskStoreInitialized;
 
+  if (flowReady) {
+    return createSection("Checking flow readiness signals", [
+      createFinding(
+        "success",
+        "Project ready for flows",
+        "Project is ready for flow execution.",
+      ),
+    ]);
+  }
+
   return createSection("Checking flow readiness signals", [
     createFinding(
-      flowReady ? "success" : "warn",
-      flowReady ? "Project ready for flows" : "Project not fully ready for flows",
-      flowReady
-        ? "Project is ready for flow execution."
-        : [
-            `Repo path: ${existsSync(repoRoot) ? "exists" : "missing"}.`,
-            `Git repo: ${gitRepoRoot.length > 0 ? "valid" : "invalid"}.`,
-            `Development contract: ${status.projectDevelopmentContractPersisted ? "persisted" : "fallback"}.`,
-            `Local task store: ${status.taskStoreInitialized ? "initialized" : "missing"}.`,
-          ].join("\n"),
+      "warn",
+      "Project not fully ready for flows",
+      [
+        `Repo path: ${repoPathExists ? "exists" : "missing"}.`,
+        `Git repo: ${gitRepoValid ? "valid" : "invalid"}.`,
+        `Development contract: ${status.projectDevelopmentContractPersisted ? "persisted" : "fallback"}.`,
+        `Local task store: ${status.taskStoreInitialized ? "initialized" : "missing"}.`,
+      ].join("\n"),
     ),
   ]);
 };
@@ -296,39 +338,32 @@ export const collectHubProjectReadinessCheck = async (
   project: HubProjectRegistryEntry,
   options: HubProjectReadinessCheckOptions = {},
 ): Promise<HubProjectReadinessCheckReport> => {
+  const createEarlyExitReport = (
+    sections: readonly HubReadinessSection[],
+  ): HubProjectReadinessCheckReport => ({
+    project,
+    sections,
+    hasWarnings: false,
+    hasErrors: true,
+  });
+
   const repoPath = repoPathSection(project);
   const sections: HubReadinessSection[] = [repoPath.section];
 
   if (repoPath.blocked || !repoPath.repoRoot) {
-    const hasErrors = true;
-    return {
-      project,
-      sections,
-      hasWarnings: false,
-      hasErrors,
-    };
+    return createEarlyExitReport(sections);
   }
 
   const gitRepo = gitRepoSection(project, repoPath.repoRoot);
   sections.push(gitRepo.section);
   if (gitRepo.blocked || !gitRepo.gitRepoRoot) {
-    return {
-      project,
-      sections,
-      hasWarnings: false,
-      hasErrors: true,
-    };
+    return createEarlyExitReport(sections);
   }
 
   const initialCommit = initialCommitSection(project, gitRepo.gitRepoRoot);
   sections.push(initialCommit.section);
   if (initialCommit.blocked) {
-    return {
-      project,
-      sections,
-      hasWarnings: false,
-      hasErrors: true,
-    };
+    return createEarlyExitReport(sections);
   }
 
   const status =
@@ -339,7 +374,9 @@ export const collectHubProjectReadinessCheck = async (
   sections.push(buildTaskSummarySection(status));
   sections.push(buildFailedTaskSection(status));
   sections.push(buildActiveRunsSection(status));
-  sections.push(buildFlowReadinessSection(status, repoPath.repoRoot, gitRepo.gitRepoRoot));
+  sections.push(
+    buildFlowReadinessSection(status, repoPath.repoRoot, gitRepo.gitRepoRoot),
+  );
 
   const hasWarnings = sections.some((section) =>
     section.findings.some((finding) => finding.severity === "warn"),
