@@ -83,6 +83,7 @@ import {
   listHubProjects,
   registerHubProject,
   selectHubProject,
+  type HubProjectListEntry,
 } from "./hubProjectRegistry.js";
 import {
   configureHubProjectDevelopmentContract,
@@ -195,6 +196,9 @@ const resolveImageName = (cliFlag: OptionalTextFlag, cwd: string): string =>
 
 const optionalTextValue = (flag: OptionalTextFlag): string | undefined =>
   flag._tag === "Some" ? flag.value : undefined;
+
+const hasInteractiveTerminal = (): boolean =>
+  process.stdin.isTTY && process.stdout.isTTY;
 
 const toTaskBoardError = (error: unknown): TaskBoardError =>
   new TaskBoardError({
@@ -2548,6 +2552,25 @@ const resolveInteractiveProjectPath = async (): Promise<string> => {
   return String(prompted).trim();
 };
 
+const resolveInteractiveProjectSelection = async (
+  projects: readonly HubProjectListEntry[],
+): Promise<string> => {
+  const result = await clack.select({
+    message: "Select a Hub project:",
+    options: projects.map((project) => ({
+      value: project.name,
+      label: project.name,
+      hint: project.repoRoot,
+    })),
+  });
+  if (clack.isCancel(result)) {
+    throw new HubProjectRegistryError({
+      message: "Project selection cancelled.",
+    });
+  }
+  return String(result);
+};
+
 const projectAddCommand = Command.make(
   "add",
   {
@@ -2564,7 +2587,7 @@ const projectAddCommand = Command.make(
       let selectedProjectProfile = optionalTextValue(projectProfile)?.trim();
 
       if (projectName.length === 0 || repoPath.length === 0) {
-        if (!process.stdin.isTTY || !process.stdout.isTTY) {
+        if (!hasInteractiveTerminal()) {
           return yield* Effect.fail(
             new HubProjectRegistryError({
               message:
@@ -2669,7 +2692,7 @@ const projectSelectCommand = Command.make(
   ({ name }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const projectName = optionalTextValue(name)?.trim();
+      let projectName = optionalTextValue(name)?.trim();
 
       if (!projectName) {
         const projects = yield* Effect.try({
@@ -2684,7 +2707,7 @@ const projectSelectCommand = Command.make(
             }),
           );
         }
-        if (!process.stdin.isTTY || !process.stdout.isTTY) {
+        if (!hasInteractiveTerminal()) {
           return yield* Effect.fail(
             new HubProjectRegistryError({
               message:
@@ -2693,32 +2716,10 @@ const projectSelectCommand = Command.make(
           );
         }
 
-        const selected = yield* Effect.tryPromise({
-          try: async () => {
-            const result = await clack.select({
-              message: "Select a Hub project:",
-              options: projects.map((project) => ({
-                value: project.name,
-                label: project.name,
-                hint: project.repoRoot,
-              })),
-            });
-            if (clack.isCancel(result)) {
-              throw new HubProjectRegistryError({
-                message: "Project selection cancelled.",
-              });
-            }
-            return String(result);
-          },
+        projectName = yield* Effect.tryPromise({
+          try: () => resolveInteractiveProjectSelection(projects),
           catch: toHubProjectRegistryError,
         });
-
-        const project = yield* Effect.try({
-          try: () => selectHubProject({ projectSelector: selected }),
-          catch: toHubProjectRegistryError,
-        });
-        yield* d.status(`Selected Hub project ${project.name}.`, "success");
-        return;
       }
 
       const project = yield* Effect.try({

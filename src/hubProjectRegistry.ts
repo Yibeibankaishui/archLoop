@@ -4,14 +4,16 @@ import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import { HubProjectRegistryError } from "./errors.js";
-import { resolveArchloopUserDataDir } from "./projectStatus.js";
+import {
+  resolveArchloopUserDataDir,
+  resolveGitRepoRoot,
+} from "./projectStatus.js";
 import {
   configureHubProjectDevelopmentContract,
   resolveHubProjectDevelopmentContractPath,
 } from "./hubProjectDevelopmentContract.js";
 import { DEFAULT_PROJECT_PROFILE_NAME } from "./InitService.js";
 import { initHubTaskStore } from "./hubTaskStore.js";
-import { resolveGitRepoRoot } from "./projectStatus.js";
 
 export interface HubProjectRegistryEntry {
   readonly id: string;
@@ -66,6 +68,10 @@ export interface SelectHubProjectInput extends HubProjectRegistryOptions {
 
 const REGISTRY_FILE_NAME = "project-registry.json";
 const SELECTION_FILE_NAME = "selected-project.json";
+const EMPTY_REGISTRY_STATE: HubProjectRegistryState = {
+  version: 1,
+  projects: [],
+};
 
 const readObject = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -84,8 +90,42 @@ const readString = (
 
 const normalizeName = (value: string): string => value.trim().toLowerCase();
 
-const nowIso = (now?: Date): string =>
-  (now ?? new Date()).toISOString();
+const nowIso = (now?: Date): string => (now ?? new Date()).toISOString();
+
+const readProjectRegistryEntry = (
+  value: unknown,
+): HubProjectRegistryEntry | undefined => {
+  const projectRecord = readObject(value);
+  const id = readString(projectRecord, "id");
+  const name = readString(projectRecord, "name");
+  const repoRoot = readString(projectRecord, "repoRoot");
+  const hubProjectDir = readString(projectRecord, "hubProjectDir");
+  const projectProfile = readString(projectRecord, "projectProfile");
+  const createdAt = readString(projectRecord, "createdAt");
+  const updatedAt = readString(projectRecord, "updatedAt");
+
+  if (
+    !id ||
+    !name ||
+    !repoRoot ||
+    !hubProjectDir ||
+    !projectProfile ||
+    !createdAt ||
+    !updatedAt
+  ) {
+    return undefined;
+  }
+
+  return {
+    id,
+    name,
+    repoRoot,
+    hubProjectDir,
+    projectProfile,
+    createdAt,
+    updatedAt,
+  };
+};
 
 const readJson = <T>(path: string, fallback: T): T => {
   try {
@@ -103,7 +143,11 @@ const writeJson = (path: string, value: unknown): void => {
 export const resolveHubProjectRegistryPath = (
   options: HubProjectRegistryOptions = {},
 ): string =>
-  join(resolveArchloopUserDataDir(options.env, options.homeDir), "hub", REGISTRY_FILE_NAME);
+  join(
+    resolveArchloopUserDataDir(options.env, options.homeDir),
+    "hub",
+    REGISTRY_FILE_NAME,
+  );
 
 export const resolveHubProjectSelectionPath = (
   options: HubProjectRegistryOptions = {},
@@ -123,43 +167,12 @@ const readRegistryState = (
   options: HubProjectRegistryOptions = {},
 ): HubProjectRegistryState => {
   const registryPath = resolveHubProjectRegistryPath(options);
-  const raw = readJson<unknown>(registryPath, {
-    version: 1,
-    projects: [],
-  });
+  const raw = readJson<unknown>(registryPath, EMPTY_REGISTRY_STATE);
   const record = readObject(raw);
   const projects = Array.isArray(record.projects)
     ? record.projects.flatMap((project) => {
-        const projectRecord = readObject(project);
-        const id = readString(projectRecord, "id");
-        const name = readString(projectRecord, "name");
-        const repoRoot = readString(projectRecord, "repoRoot");
-        const hubProjectDir = readString(projectRecord, "hubProjectDir");
-        const projectProfile = readString(projectRecord, "projectProfile");
-        const createdAt = readString(projectRecord, "createdAt");
-        const updatedAt = readString(projectRecord, "updatedAt");
-        if (
-          !id ||
-          !name ||
-          !repoRoot ||
-          !hubProjectDir ||
-          !projectProfile ||
-          !createdAt ||
-          !updatedAt
-        ) {
-          return [];
-        }
-        return [
-          {
-            id,
-            name,
-            repoRoot,
-            hubProjectDir,
-            projectProfile,
-            createdAt,
-            updatedAt,
-          },
-        ];
+        const entry = readProjectRegistryEntry(project);
+        return entry ? [entry] : [];
       })
     : [];
 
@@ -204,7 +217,11 @@ const writeSelectionState = (
 const resolveProjectDir = (
   options: HubProjectRegistryOptions,
   projectId: string,
-): string => resolveRegisteredHubProjectDir(resolveArchloopUserDataDir(options.env, options.homeDir), projectId);
+): string =>
+  resolveRegisteredHubProjectDir(
+    resolveArchloopUserDataDir(options.env, options.homeDir),
+    projectId,
+  );
 
 const assertRepoHasInitialCommit = (repoRoot: string): void => {
   try {
@@ -221,9 +238,6 @@ const assertRepoHasInitialCommit = (repoRoot: string): void => {
     });
   }
 };
-
-const resolveCanonicalRepoRoot = (repoPath: string): string =>
-  resolveGitRepoRoot(repoPath);
 
 const findProjectById = (
   projects: readonly HubProjectRegistryEntry[],
@@ -313,7 +327,7 @@ export const registerHubProject = (
   input: RegisterHubProjectInput,
 ): RegisterHubProjectResult => {
   const now = nowIso(input.now);
-  const repoRoot = resolveCanonicalRepoRoot(input.repoPath);
+  const repoRoot = resolveGitRepoRoot(input.repoPath);
   assertRepoHasInitialCommit(repoRoot);
 
   const registry = readRegistryState(input);
