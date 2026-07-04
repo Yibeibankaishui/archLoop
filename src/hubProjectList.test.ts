@@ -109,18 +109,11 @@ describe("hubProjectList", () => {
       state: "ready",
       counts: { ready: 2, failed: 1, total: 7 },
     });
-    expect(formatHubProjectListProjectionLines(alpha).join("\n")).toContain(
-      "alpha [generic] (selected)",
-    );
-    expect(formatHubProjectListProjectionLines(alpha).join("\n")).toContain(
-      "path: valid",
-    );
-    expect(formatHubProjectListProjectionLines(alpha).join("\n")).toContain(
-      "tasks: ready 2 / failed 1 / total 7",
-    );
-    expect(formatHubProjectListProjectionLines(alpha).join("\n")).toContain(
-      "runs: active (2)",
-    );
+    const alphaLines = formatHubProjectListProjectionLines(alpha).join("\n");
+    expect(alphaLines).toContain("alpha [generic] (selected)");
+    expect(alphaLines).toContain("path: valid");
+    expect(alphaLines).toContain("tasks: ready 2 / failed 1 / total 7");
+    expect(alphaLines).toContain("runs: active (2)");
 
     expect(beta).toMatchObject({
       name: "beta",
@@ -133,18 +126,11 @@ describe("hubProjectList", () => {
     expect(beta.taskStatus).toMatchObject({
       state: "missing_repo_path",
     });
-    expect(formatHubProjectListProjectionLines(beta).join("\n")).toContain(
-      "beta [python]",
-    );
-    expect(formatHubProjectListProjectionLines(beta).join("\n")).toContain(
-      "path: missing",
-    );
-    expect(formatHubProjectListProjectionLines(beta).join("\n")).toContain(
-      "tasks: repo path missing",
-    );
-    expect(formatHubProjectListProjectionLines(beta).join("\n")).toContain(
-      "runs: none",
-    );
+    const betaLines = formatHubProjectListProjectionLines(beta).join("\n");
+    expect(betaLines).toContain("beta [python]");
+    expect(betaLines).toContain("path: missing");
+    expect(betaLines).toContain("tasks: repo path missing");
+    expect(betaLines).toContain("runs: none");
   });
 
   it("labels missing task stores and unavailable runtimes separately", () => {
@@ -185,12 +171,9 @@ describe("hubProjectList", () => {
       },
     );
 
-    expect(formatHubProjectListLines(projections).join("\n")).toContain(
-      "tasks: local task store missing",
-    );
-    expect(formatHubProjectListLines(projections).join("\n")).toContain(
-      "tasks: archLoop task runtime unavailable",
-    );
+    const output = formatHubProjectListLines(projections).join("\n");
+    expect(output).toContain("tasks: local task store missing");
+    expect(output).toContain("tasks: archLoop task runtime unavailable");
   });
 
   it("returns a concise empty-registry summary", () => {

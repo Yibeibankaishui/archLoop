@@ -51,6 +51,31 @@ const resolveDefaultProjectStatus = (
     ensureHubProjectDir: () => false,
   });
 
+const createMissingRepoTaskStatus = (): HubProjectListTaskStatus => ({
+  state: "missing_repo_path",
+});
+
+const createTaskStatusFromProjectStatus = (
+  status: HubProjectStatus,
+): HubProjectListTaskStatus => {
+  if (!status.beadsAvailable) {
+    return { state: "runtime_unavailable" };
+  }
+
+  if (!status.taskStoreInitialized) {
+    return { state: "missing_task_store" };
+  }
+
+  return {
+    state: "ready",
+    counts: {
+      ready: status.taskCounts.ready,
+      failed: status.statusCounts.failed ?? 0,
+      total: status.taskCounts.total,
+    },
+  };
+};
+
 const formatTaskStatusLabel = (taskStatus: HubProjectListTaskStatus): string => {
   switch (taskStatus.state) {
     case "ready":
@@ -63,6 +88,12 @@ const formatTaskStatusLabel = (taskStatus: HubProjectListTaskStatus): string => 
       return "archLoop task runtime unavailable";
   }
 };
+
+const formatProjectHeading = (project: HubProjectListProjection): string =>
+  `${project.selected ? "*" : " "} ${project.name} [${project.projectProfile}]${project.selected ? " (selected)" : ""}`;
+
+const formatActiveRunsLabel = (activeRunCount: number): string =>
+  activeRunCount > 0 ? `active (${activeRunCount})` : "none";
 
 export const resolveHubProjectListProjections = (
   projects: readonly HubProjectListEntry[],
@@ -78,35 +109,17 @@ export const resolveHubProjectListProjections = (
       return {
         ...project,
         pathStatus,
-        taskStatus: {
-          state: "missing_repo_path",
-        },
+        taskStatus: createMissingRepoTaskStatus(),
         activeRunCount: 0,
       };
     }
 
     const status = resolveProjectStatus(project);
-    const taskStatus = !status.beadsAvailable
-      ? {
-          state: "runtime_unavailable" as const,
-        }
-      : !status.taskStoreInitialized
-        ? {
-            state: "missing_task_store" as const,
-          }
-        : {
-            state: "ready" as const,
-            counts: {
-              ready: status.taskCounts.ready,
-              failed: status.statusCounts.failed ?? 0,
-              total: status.taskCounts.total,
-            },
-          };
 
     return {
       ...project,
       pathStatus,
-      taskStatus,
+      taskStatus: createTaskStatusFromProjectStatus(status),
       activeRunCount: status.activeBatches.length,
     };
   });
@@ -115,13 +128,12 @@ export const resolveHubProjectListProjections = (
 export const formatHubProjectListProjectionLines = (
   project: HubProjectListProjection,
 ): readonly string[] => {
-  const marker = project.selected ? "*" : " ";
   const lines = [
-    `${marker} ${project.name} [${project.projectProfile}]${project.selected ? " (selected)" : ""}`,
+    formatProjectHeading(project),
     `  repo: ${project.repoRoot}`,
     `  path: ${project.pathStatus}`,
     `  tasks: ${formatTaskStatusLabel(project.taskStatus)}`,
-    `  runs: ${project.activeRunCount > 0 ? `active (${project.activeRunCount})` : "none"}`,
+    `  runs: ${formatActiveRunsLabel(project.activeRunCount)}`,
   ];
 
   return lines;
@@ -129,7 +141,10 @@ export const formatHubProjectListProjectionLines = (
 
 export const formatHubProjectListLines = (
   projects: readonly HubProjectListProjection[],
-): readonly string[] =>
-  projects.length === 0
-    ? [formatHubProjectRegistrySummary([])]
-    : projects.flatMap((project) => formatHubProjectListProjectionLines(project));
+): readonly string[] => {
+  if (projects.length === 0) {
+    return [formatHubProjectRegistrySummary([])];
+  }
+
+  return projects.flatMap((project) => formatHubProjectListProjectionLines(project));
+};
