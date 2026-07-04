@@ -228,6 +228,10 @@ export interface RunHubBatchMergeResult {
   readonly results: readonly HubBatchMergeTaskResult[];
 }
 
+type HubManagedBranchCleanupEvaluation = Awaited<
+  ReturnType<typeof evaluateHubManagedBranchCleanup>
+>;
+
 const resolveBranch = (task: HubTaskProjection): string =>
   task.claim?.branch ?? resolveHubTaskBranch(task.id, task.title);
 
@@ -321,44 +325,46 @@ const cleanupReasonCodes = (
 ): readonly string[] => reasons.map((reason) => reason.reason);
 
 const cleanupCandidateForBranch = (
-  evaluation: Awaited<ReturnType<typeof evaluateHubManagedBranchCleanup>>,
+  evaluation: HubManagedBranchCleanupEvaluation,
   branch: string,
-): HubManagedBranchCleanupCandidate | undefined =>
-  [
-    ...evaluation.managedSafeCandidates,
-    ...evaluation.managedBlockedBranches,
-    ...evaluation.unownedCandidates,
-  ].find((candidate) => candidate.branch === branch);
-
-const defaultHubTaskBranchCleanup: HubTaskBranchCleanup = async (input) => {
-  const hubProjectDir = join(input.runDir, "..", "..");
-  const evaluation = await evaluateHubManagedBranchCleanup({
-    cwd: input.cwd,
-    env: input.env,
-    hubProjectDir,
-  });
-  const safeCandidate = evaluation.managedSafeCandidates.find(
-    (candidate) => candidate.branch === input.branch,
-  );
-  if (!safeCandidate) {
-    const candidate = cleanupCandidateForBranch(evaluation, input.branch);
-    return {
-      outcome: "skipped",
-      reasonCodes: candidate
-        ? cleanupReasonCodes(candidate.skipReasons)
-        : ["branch_not_tracked"],
-    };
+): HubManagedBranchCleanupCandidate | undefined => {
+  for (const candidates of [
+    evaluation.managedSafeCandidates,
+    evaluation.managedBlockedBranches,
+    evaluation.unownedCandidates,
+  ]) {
+    const candidate = candidates.find((entry) => entry.branch === branch);
+    if (candidate) {
+      return candidate;
+    }
   }
 
+  return undefined;
+};
+
+const skippedCleanupResult = (
+  evaluation: HubManagedBranchCleanupEvaluation,
+  branch: string,
+): HubBranchCleanupResult => {
+  const candidate = cleanupCandidateForBranch(evaluation, branch);
+  return {
+    outcome: "skipped",
+    reasonCodes: candidate
+      ? cleanupReasonCodes(candidate.skipReasons)
+      : ["branch_not_tracked"],
+  };
+};
+
+const deleteTaskBranch = async (input: {
+  readonly cwd: string;
+  readonly branch: string;
+  readonly env?: NodeJS.ProcessEnv;
+}): Promise<HubBranchCleanupResult> => {
   try {
-    await execFileAsync(
-      "git",
-      ["branch", "-d", input.branch],
-      {
-        cwd: input.cwd,
-        ...(input.env ? { env: input.env } : {}),
-      },
-    );
+    await execFileAsync("git", ["branch", "-d", input.branch], {
+      cwd: input.cwd,
+      ...(input.env ? { env: input.env } : {}),
+    });
     return { outcome: "deleted" };
   } catch (error) {
     const diagnostics = compactDiagnostics(extractErrorDiagnostics(error));
@@ -372,6 +378,23 @@ const defaultHubTaskBranchCleanup: HubTaskBranchCleanup = async (input) => {
       ...(diagnostics ? { diagnostics } : {}),
     };
   }
+};
+
+const defaultHubTaskBranchCleanup: HubTaskBranchCleanup = async (input) => {
+  const hubProjectDir = join(input.runDir, "..", "..");
+  const evaluation = await evaluateHubManagedBranchCleanup({
+    cwd: input.cwd,
+    env: input.env,
+    hubProjectDir,
+  });
+  const safeCandidate = evaluation.managedSafeCandidates.find(
+    (candidate) => candidate.branch === input.branch,
+  );
+  if (!safeCandidate) {
+    return skippedCleanupResult(evaluation, input.branch);
+  }
+
+  return deleteTaskBranch(input);
 };
 
 const errorMessage = (error: unknown): string => {
@@ -464,6 +487,27 @@ const recordTaskBranchCleanup = (
         : { diagnostics: cleanup.diagnostics }),
     },
   });
+};
+
+const runTaskBranchCleanup = async (
+  input: RunHubBatchMergeInput,
+  branch: string,
+): Promise<HubBranchCleanupResult> => {
+  try {
+    return await (input.branchCleanup ?? defaultHubTaskBranchCleanup)({
+      cwd: input.cwd,
+      runDir: input.runDir,
+      branch,
+      env: input.env,
+    });
+  } catch (error) {
+    return {
+      outcome: "failed",
+      reasonCodes: ["cleanup_executor_threw"],
+      diagnosticSummary: errorMessage(error),
+      diagnostics: compactDiagnostics(extractErrorDiagnostics(error)),
+    };
+  }
 };
 
 const firstDiagnosticLine = (value: string | undefined): string | undefined =>
@@ -1140,25 +1184,7 @@ const processMergeTask = async (
       createdAt: verifyFinishedAt,
       closer: input.closer,
     });
-    const cleanupResult = await (
-      async (): Promise<HubBranchCleanupResult> => {
-        try {
-          return await (input.branchCleanup ?? defaultHubTaskBranchCleanup)({
-            cwd: input.cwd,
-            runDir: input.runDir,
-            branch,
-            env: input.env,
-          });
-        } catch (error) {
-          return {
-            outcome: "failed",
-            reasonCodes: ["cleanup_executor_threw"],
-            diagnosticSummary: errorMessage(error),
-            diagnostics: compactDiagnostics(extractErrorDiagnostics(error)),
-          };
-        }
-      }
-    )();
+    const cleanupResult = await runTaskBranchCleanup(input, branch);
     recordTaskBranchCleanup(
       input,
       task,
@@ -1767,6 +1793,31 @@ export const createHubFlowRunVerifier = (options: {
   };
 };
 
+const formatCleanupResultSuffix = (
+  cleanup: HubBranchCleanupResult | undefined,
+): string => {
+  if (!cleanup) {
+    return "";
+  }
+
+  if (cleanup.outcome === "deleted") {
+    return "; cleanup deleted";
+  }
+
+  if (cleanup.outcome === "skipped") {
+    const reasons =
+      cleanup.reasonCodes && cleanup.reasonCodes.length > 0
+        ? ` (${cleanup.reasonCodes.join(", ")})`
+        : "";
+    return `; cleanup skipped${reasons}`;
+  }
+
+  const summary = cleanup.diagnosticSummary
+    ? `: ${cleanup.diagnosticSummary}`
+    : "";
+  return `; cleanup failed${summary}`;
+};
+
 export const formatHubBatchMergeResultLines = (
   result: RunHubBatchMergeResult,
 ): readonly string[] => {
@@ -1798,13 +1849,7 @@ export const formatHubBatchMergeResultLines = (
     const diagnosticSuffix = taskResult.diagnosticSummary
       ? `; ${taskResult.diagnosticSummary}`
       : "";
-    const cleanupSuffix = taskResult.cleanup
-      ? taskResult.cleanup.outcome === "deleted"
-        ? "; cleanup deleted"
-        : taskResult.cleanup.outcome === "skipped"
-          ? `; cleanup skipped${taskResult.cleanup.reasonCodes?.length ? ` (${taskResult.cleanup.reasonCodes.join(", ")})` : ""}`
-          : `; cleanup failed${taskResult.cleanup.diagnosticSummary ? `: ${taskResult.cleanup.diagnosticSummary}` : ""}`
-      : "";
+    const cleanupSuffix = formatCleanupResultSuffix(taskResult.cleanup);
     lines.push(
       `  ${taskResult.taskId}: ${taskResult.outcome} -> ${taskResult.hubStatus}${diagnosticSuffix}${cleanupSuffix}`,
     );
