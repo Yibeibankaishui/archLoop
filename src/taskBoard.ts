@@ -16,6 +16,7 @@ import {
   resolveHubTaskClaimState,
   type HubTaskClaimMetadata,
 } from "./hubExecution.js";
+import { inspectHubManagedBranchClaimContext } from "./hubManagedBranchOwnership.js";
 import {
   appendBdMetadataArg,
   appendBdSetLabelsArgs,
@@ -1298,11 +1299,18 @@ export const claimHubTask = (input: ClaimHubTaskInput): ClaimHubTaskResult => {
     };
   }
 
+  const claimContext = inspectHubManagedBranchClaimContext(
+    input.cwd,
+    input.branch,
+  );
   const claim = createHubTaskClaimMetadata({
     runId: context.runId,
     batchId: context.batchId,
+    taskId: input.taskId,
     branch: input.branch,
     claimedAt,
+    baseHead: claimContext.baseHead,
+    branchExistedBeforeClaim: claimContext.branchExistedBeforeClaim,
   });
   const updatedTask = updateHubTaskStatus({
     cwd: input.cwd,

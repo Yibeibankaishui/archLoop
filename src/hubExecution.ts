@@ -32,8 +32,11 @@ export interface CreateHubRunContextOptions {
 export interface HubTaskClaimMetadata {
   readonly runId: string | undefined;
   readonly batchId: string | undefined;
+  readonly taskId?: string;
   readonly branch: string | undefined;
   readonly claimedAt: string | undefined;
+  readonly baseHead?: string;
+  readonly branchExistedBeforeClaim?: boolean;
   readonly raw: Readonly<Record<string, unknown>>;
 }
 
@@ -185,6 +188,27 @@ const readFirstString = (
   return undefined;
 };
 
+const readBoolean = (
+  record: Readonly<Record<string, unknown>>,
+  keys: readonly string[],
+): boolean | undefined => {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "string") {
+      if (value === "true") {
+        return true;
+      }
+      if (value === "false") {
+        return false;
+      }
+    }
+  }
+  return undefined;
+};
+
 const readClaimRecord = (
   metadata: Readonly<Record<string, unknown>>,
 ): Record<string, unknown> | undefined => {
@@ -255,20 +279,33 @@ export const resolveHubRunEventsPaths = (
 
 export const createHubTaskClaimMetadata = (
   input: Pick<HubTaskClaimMetadata, "runId" | "batchId" | "branch"> & {
+    readonly taskId?: string;
     readonly claimedAt?: string;
+    readonly baseHead?: string;
+    readonly branchExistedBeforeClaim?: boolean;
   },
 ): HubTaskClaimMetadata => {
   const claimedAt = input.claimedAt ?? new Date().toISOString();
   return {
     runId: input.runId,
     batchId: input.batchId,
+    taskId: input.taskId,
     branch: input.branch,
     claimedAt,
+    baseHead: input.baseHead,
+    branchExistedBeforeClaim: input.branchExistedBeforeClaim,
     raw: {
       runId: input.runId,
       batchId: input.batchId,
+      ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
       branch: input.branch,
       claimedAt,
+      ...(input.baseHead === undefined ? {} : { baseHead: input.baseHead }),
+      ...(input.branchExistedBeforeClaim === undefined
+        ? {}
+        : {
+            branchExistedBeforeClaim: input.branchExistedBeforeClaim,
+          }),
     },
   };
 };
@@ -410,13 +447,22 @@ export const readHubTaskClaim = (
   const claimedAt = readFirstString(claimRecord, ["claimedAt", "claimed_at"]);
   const runId = readFirstString(claimRecord, ["runId", "run_id"]);
   const batchId = readFirstString(claimRecord, ["batchId", "batch_id"]);
+  const taskId = readFirstString(claimRecord, ["taskId", "task_id"]);
   const branch = readFirstString(claimRecord, ["branch"]);
+  const baseHead = readFirstString(claimRecord, ["baseHead", "base_head"]);
+  const branchExistedBeforeClaim = readBoolean(claimRecord, [
+    "branchExistedBeforeClaim",
+    "branch_existed_before_claim",
+  ]);
 
   return {
     runId,
     batchId,
+    taskId,
     branch,
     claimedAt,
+    baseHead,
+    branchExistedBeforeClaim,
     raw: claimRecord,
   };
 };
