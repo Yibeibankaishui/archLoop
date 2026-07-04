@@ -17,7 +17,11 @@ import { Effect, Ref } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 import { SilentDisplay, type DisplayEntry } from "./Display.js";
-import { createHubRunContext } from "./hubExecution.js";
+import {
+  appendHubTaskEvent,
+  createHubRunContext,
+  createHubTaskClaimMetadata,
+} from "./hubExecution.js";
 import { resolveGitRepoRoot, resolveHubProjectDir } from "./projectStatus.js";
 import { resolveHubProjectDevelopmentContractPath } from "./hubProjectDevelopmentContract.js";
 import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
@@ -40,6 +44,12 @@ const commitFile = async (
   await writeFile(join(dir, name), content);
   await execAsync(`git add "${name}"`, { cwd: dir });
   await execAsync(`git commit -m "${message}"`, { cwd: dir });
+};
+
+const mergeBranch = async (dir: string, branch: string, message: string) => {
+  await execAsync(`git merge --no-ff "${branch}" -m "${message}"`, {
+    cwd: dir,
+  });
 };
 
 const seedArchloopPackage = async (dir: string) => {
@@ -121,6 +131,94 @@ const withBdEnv = (
     ...mergedEnv,
     PATH: `${dirname(bdPath)}:${mergedEnv.PATH ?? process.env.PATH ?? ""}`,
     ARCHLOOP_BD_PATH: bdPath,
+  };
+};
+
+const setupManagedBranchCleanupRepo = async (hostDir: string) => {
+  await initRepo(hostDir);
+  await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+  const xdgDataHome = join(hostDir, "xdg-data");
+  const env = { ...process.env, XDG_DATA_HOME: xdgDataHome };
+  const repoRoot = resolveGitRepoRoot(hostDir);
+  const hubProjectDir = resolveHubProjectDir(
+    join(xdgDataHome, "archloop"),
+    repoRoot,
+  );
+
+  const safeBranch = "archloop/bd-safe-safe-branch";
+  await execAsync(`git checkout -b "${safeBranch}"`, { cwd: hostDir });
+  await commitFile(hostDir, "safe.txt", "safe", "safe branch work");
+  await execAsync("git checkout main", { cwd: hostDir });
+  await mergeBranch(hostDir, safeBranch, "merge safe branch");
+
+  const blockedBranch = "archloop/bd-blocked-blocked-branch";
+  await execAsync(`git checkout -b "${blockedBranch}"`, { cwd: hostDir });
+  await commitFile(hostDir, "blocked.txt", "blocked", "blocked branch work");
+  await execAsync("git checkout main", { cwd: hostDir });
+
+  const historicalBranch = "archloop/unowned-history";
+  await execAsync(`git checkout -b "${historicalBranch}"`, { cwd: hostDir });
+  await commitFile(hostDir, "historical.txt", "historical", "historical work");
+  await execAsync("git checkout main", { cwd: hostDir });
+  await mergeBranch(hostDir, historicalBranch, "merge historical branch");
+
+  const safeBaseHead = (
+    await execAsync("git rev-parse HEAD", { cwd: hostDir })
+  ).stdout.trim();
+  const runContext = createHubRunContext({
+    cwd: hostDir,
+    env,
+    branch: "main",
+    runId: "run-cleanup",
+    batchId: "batch-cleanup",
+    hubProjectDir,
+  });
+  const safeClaim = createHubTaskClaimMetadata({
+    runId: runContext.runId,
+    batchId: runContext.batchId,
+    taskId: "bd-safe",
+    branch: safeBranch,
+    claimedAt: "2026-07-04T12:00:00.000Z",
+    baseHead: safeBaseHead,
+    branchExistedBeforeClaim: false,
+  });
+  appendHubTaskEvent(runContext.runDir, {
+    type: "task_claimed",
+    runId: runContext.runId,
+    batchId: runContext.batchId,
+    taskId: "bd-safe",
+    branch: safeBranch,
+    createdAt: safeClaim.claimedAt ?? "2026-07-04T12:00:00.000Z",
+    status: "implementing",
+    claim: safeClaim,
+  });
+
+  const blockedClaim = createHubTaskClaimMetadata({
+    runId: runContext.runId,
+    batchId: runContext.batchId,
+    taskId: "bd-blocked",
+    branch: blockedBranch,
+    claimedAt: "2026-07-04T12:05:00.000Z",
+    baseHead: safeBaseHead,
+    branchExistedBeforeClaim: true,
+  });
+  appendHubTaskEvent(runContext.runDir, {
+    type: "task_claimed",
+    runId: runContext.runId,
+    batchId: runContext.batchId,
+    taskId: "bd-blocked",
+    branch: blockedBranch,
+    createdAt: blockedClaim.claimedAt ?? "2026-07-04T12:05:00.000Z",
+    status: "implementing",
+    claim: blockedClaim,
+  });
+
+  return {
+    env,
+    historicalBranch,
+    blockedBranch,
+    safeBranch,
   };
 };
 
@@ -672,6 +770,7 @@ exit 1
     expect(stdout).toContain("comment");
     expect(stdout).toContain("doctor");
     expect(stdout).toContain("repair-state");
+    expect(stdout).toContain("cleanup");
     expect(stdout).toContain("delete");
   });
 
@@ -2867,6 +2966,72 @@ process.exit(1);
     } catch (err: unknown) {
       expect(cliFailureOutput(err)).toContain("dependents not in deletion set");
     }
+  });
+
+  it("tasks cleanup --dry-run previews safe managed, blocked managed, and historical unowned branches", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    const { blockedBranch, historicalBranch, env, safeBranch } =
+      await setupManagedBranchCleanupRepo(hostDir);
+
+    const { stdout } = await runCli("tasks cleanup --dry-run", hostDir, env);
+
+    expect(stdout).toContain("Hub managed branch cleanup");
+    expect(stdout).toContain("Safe managed branches (1)");
+    expect(stdout).toContain(safeBranch);
+    expect(stdout).toContain("Blocked managed branches (1)");
+    expect(stdout).toContain(blockedBranch);
+    expect(stdout).toContain(
+      "existed before Hub claimed task bd-blocked; keep it out of automatic cleanup",
+    );
+    expect(stdout).toContain("Unowned historical candidates (1)");
+    expect(stdout).toContain(historicalBranch);
+    expect(stdout).toContain("--include-unowned");
+
+    const branches = (await execAsync("git branch --list", { cwd: hostDir }))
+      .stdout;
+    expect(branches).toContain(safeBranch);
+    expect(branches).toContain(blockedBranch);
+    expect(branches).toContain(historicalBranch);
+  });
+
+  it("tasks cleanup --yes deletes safe managed branches by default and leaves historical unowned branches untouched", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    const { blockedBranch, historicalBranch, env, safeBranch } =
+      await setupManagedBranchCleanupRepo(hostDir);
+
+    const { stdout } = await runCli("tasks cleanup --yes", hostDir, env);
+
+    expect(stdout).toContain(`Deleted managed branches: ${safeBranch}`);
+    expect(stdout).toContain(blockedBranch);
+    expect(stdout).toContain("Use --include-unowned to delete");
+
+    const branches = (await execAsync("git branch --list", { cwd: hostDir }))
+      .stdout;
+    expect(branches).not.toContain(safeBranch);
+    expect(branches).toContain(blockedBranch);
+    expect(branches).toContain(historicalBranch);
+  });
+
+  it("tasks cleanup --yes --include-unowned deletes safe historical candidates when explicitly opted in", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    const { blockedBranch, historicalBranch, env, safeBranch } =
+      await setupManagedBranchCleanupRepo(hostDir);
+
+    const { stdout } = await runCli(
+      "tasks cleanup --yes --include-unowned",
+      hostDir,
+      env,
+    );
+
+    expect(stdout).toContain(`Deleted managed branches: ${safeBranch}`);
+    expect(stdout).toContain(`Deleted historical branches: ${historicalBranch}`);
+    expect(stdout).toContain(blockedBranch);
+
+    const branches = (await execAsync("git branch --list", { cwd: hostDir }))
+      .stdout;
+    expect(branches).not.toContain(safeBranch);
+    expect(branches).not.toContain(historicalBranch);
+    expect(branches).toContain(blockedBranch);
   });
 
   it("--help shows podman namespace", async () => {

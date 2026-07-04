@@ -985,6 +985,10 @@ Previews local Beads mutations that would repair task-state pollution for one ta
 
 Repair uses the same canonical task transition path as normal Hub lifecycle changes, preserving user custom labels while rewriting only archLoop-managed status labels and metadata. It can restore the QA incident shape where Hub events show `task_review_succeeded`, branch work is still unmerged, but Beads labels/metadata or claim fields are stale, moving the task back to `waiting_for_merge` with the correct claim. Failed agent attempts with `commitCount=0` and no branch work are not promoted by repair-state; use normal recovery policy for failed tasks.
 
+### `archloop tasks cleanup`
+
+Previews and confirms cleanup of Hub-managed task branches. By default, archLoop only deletes safe managed branches that are already merged and proven to be Hub-owned. Historical unowned `archloop/...` branches remain listed as candidates but are never deleted unless you pass `--include-unowned`. Use `--dry-run` to preview without deleting any git refs.
+
 ### `archloop tasks delete <task-selector> [task-selector...]`
 
 Permanently deletes one or more local Beads tasks. This is destructive removal, not lifecycle close: Hub merge/triage/recovery use close to mark work done locally while keeping the Beads record. Delete removes the task from Beads and does not delete remote GitHub issues.

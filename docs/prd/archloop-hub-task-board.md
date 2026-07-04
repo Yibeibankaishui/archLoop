@@ -455,6 +455,7 @@ archloop tasks push
 archloop tasks sync
 archloop tasks comment <task-selector>
 archloop tasks recover <task-selector>
+archloop tasks cleanup
 archloop project status
 ```
 
@@ -470,6 +471,7 @@ Command responsibilities:
 - `tasks sync`: preview and confirm a bidirectional pull/push reconcile plan.
 - `tasks comment`: append a Beads comment.
 - `tasks recover`: repair failed or stale execution states and write a recovery comment.
+- `tasks cleanup`: preview and confirm Hub-managed branch cleanup; safe managed branches delete by default, and historical unowned `archloop/...` branches require explicit `--include-unowned`.
 - `project status`: show project summary, credentials, active runs, and task board counts.
 
 `<task-selector>` resolves to one local Beads task by exact Beads id, exact task title, or the 1-based number shown by `tasks list`. Ambiguous titles must fail with candidate ids instead of guessing.
