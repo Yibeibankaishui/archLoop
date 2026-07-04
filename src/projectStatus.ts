@@ -88,6 +88,7 @@ export interface HubProjectStatus {
 export interface HubProjectStatusOptions {
   readonly cwd?: string;
   readonly archloopUserDataDir?: string;
+  readonly hubProjectDir?: string;
   readonly resolveRepoRoot?: (cwd: string) => string;
   readonly detectBeadsAvailable?: () => boolean;
   readonly detectTaskStoreInitialized?: (repoRoot: string) => boolean;
@@ -788,7 +789,8 @@ export const resolveHubProjectStatus = (
   const cwd = options.cwd ?? process.cwd();
   const repoRoot = resolveRepoRoot(cwd, options.resolveRepoRoot);
   const archloopUserDataDir = resolveUserDataDir(options.archloopUserDataDir);
-  const hubProjectDir = resolveHubProjectDir(archloopUserDataDir, repoRoot);
+  const hubProjectDir =
+    options.hubProjectDir ?? resolveHubProjectDir(archloopUserDataDir, repoRoot);
   const projectDevelopmentContract = resolveHubProjectDevelopmentContractState({
     repoRoot,
     hubProjectDir,

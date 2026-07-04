@@ -199,6 +199,9 @@ describe("archloop CLI", () => {
   it("root help exposes the project namespace", async () => {
     const { stdout } = await runCli("--help", process.cwd());
     expect(stdout).toContain("project");
+    expect(stdout).toContain("project add");
+    expect(stdout).toContain("project list");
+    expect(stdout).toContain("project select");
     expect(stdout).toContain("project status");
   });
 
@@ -654,6 +657,9 @@ exit 1
 
   it("project --help shows the status subcommand", async () => {
     const { stdout } = await runCli("project --help", process.cwd());
+    expect(stdout).toContain("add");
+    expect(stdout).toContain("list");
+    expect(stdout).toContain("select");
     expect(stdout).toContain("status");
     expect(stdout).toContain("configure");
   });
@@ -891,6 +897,72 @@ exit 1
       expect(output).toContain("--project-profile");
       expect(output).toContain("Available: generic, node, python, cpp");
     }
+  });
+
+  it("project add registers a project from an explicit path and project list marks it selected from another directory", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const dataDir = join(hostDir, "xdg-data");
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+
+    const addResult = await runCli(
+      `project add --name alpha --path "${hostDir}"`,
+      otherDir,
+      {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      },
+    );
+    expect(addResult.stdout).toContain("alpha");
+    expect(addResult.stdout).toContain("Hub project");
+
+    const listResult = await runCli("project list", otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    expect(listResult.stdout).toContain("alpha");
+    expect(listResult.stdout).toContain("(selected)");
+    expect(listResult.stdout).toContain(hostDir);
+  });
+
+  it("project select switches the CLI selected project by name from another directory", async () => {
+    const repoA = await mkdtemp(join(tmpdir(), "cli-project-a-"));
+    await initRepo(repoA);
+    await commitFile(repoA, "hello.txt", "hello", "initial commit");
+
+    const repoB = await mkdtemp(join(tmpdir(), "cli-project-b-"));
+    await initRepo(repoB);
+    await commitFile(repoB, "hello.txt", "hello", "initial commit");
+
+    const dataDir = join(repoA, "xdg-data");
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+
+    await runCli(`project add --name alpha --path "${repoA}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    await runCli(`project add --name beta --path "${repoB}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+
+    const selectResult = await runCli("project select alpha", otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    expect(selectResult.stdout).toContain("Selected Hub project alpha");
+
+    const listResult = await runCli("project list", otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    expect(listResult.stdout).toContain("alpha");
+    expect(listResult.stdout).toContain("(selected)");
+    expect(listResult.stdout).toContain("beta");
+    expect(listResult.stdout).toContain(repoA);
+    expect(listResult.stdout).toContain(repoB);
   });
 
   it("tasks list points to archloop tasks init when the task store is missing", async () => {

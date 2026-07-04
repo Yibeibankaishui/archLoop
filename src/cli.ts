@@ -53,6 +53,7 @@ import {
   HubAgentConfigError,
   HubAuthError,
   HubEnvError,
+  HubProjectRegistryError,
   InitError,
   ProjectStatusError,
   TaskBoardError,
@@ -78,6 +79,12 @@ import {
   formatHubProjectStatusLines,
   resolveHubProjectStatus,
 } from "./projectStatus.js";
+import {
+  listHubProjects,
+  registerHubProject,
+  selectHubProject,
+  type HubProjectListEntry,
+} from "./hubProjectRegistry.js";
 import {
   configureHubProjectDevelopmentContract,
   formatHubProjectDevelopmentContractFactsSummary,
@@ -189,6 +196,9 @@ const resolveImageName = (cliFlag: OptionalTextFlag, cwd: string): string =>
 
 const optionalTextValue = (flag: OptionalTextFlag): string | undefined =>
   flag._tag === "Some" ? flag.value : undefined;
+
+const hasInteractiveTerminal = (): boolean =>
+  process.stdin.isTTY && process.stdout.isTTY;
 
 const toTaskBoardError = (error: unknown): TaskBoardError =>
   new TaskBoardError({
@@ -2478,6 +2488,248 @@ const projectStatusCommand = Command.make("status", {}, () =>
   }),
 );
 
+const toHubProjectRegistryError = (error: unknown): HubProjectRegistryError =>
+  error instanceof HubProjectRegistryError
+    ? error
+    : new HubProjectRegistryError({
+        message: error instanceof Error ? error.message : String(error),
+      });
+
+const projectAddNameOption = Options.text("name").pipe(
+  Options.withDescription("User-facing Hub project name"),
+  Options.optional,
+);
+
+const projectAddPathOption = Options.text("path").pipe(
+  Options.withDescription("Path to an existing git repository"),
+  Options.optional,
+);
+
+const projectAddProfileOption = Options.text("project-profile").pipe(
+  Options.withDescription(
+    "Project profile to use for the Hub project development contract",
+  ),
+  Options.optional,
+);
+
+const projectSelectNameArg = Args.text({ name: "name" }).pipe(
+  Args.withDescription("Hub project name"),
+  Args.optional,
+);
+
+const resolveInteractiveProjectName = async (
+  initialValue: string,
+): Promise<string> => {
+  const prompted = await clack.text({
+    message: "Hub project name",
+    initialValue,
+    validate: (input) => {
+      const trimmed = input?.trim() ?? "";
+      return trimmed.length === 0 ? "Project name is required" : undefined;
+    },
+  });
+  if (clack.isCancel(prompted)) {
+    throw new HubProjectRegistryError({
+      message: "Project registration cancelled.",
+    });
+  }
+  return String(prompted).trim();
+};
+
+const resolveInteractiveProjectPath = async (): Promise<string> => {
+  const prompted = await clack.text({
+    message: "Repo path",
+    validate: (input) => {
+      const trimmed = input?.trim() ?? "";
+      return trimmed.length === 0 ? "Repo path is required" : undefined;
+    },
+  });
+  if (clack.isCancel(prompted)) {
+    throw new HubProjectRegistryError({
+      message: "Project registration cancelled.",
+    });
+  }
+  return String(prompted).trim();
+};
+
+const resolveInteractiveProjectSelection = async (
+  projects: readonly HubProjectListEntry[],
+): Promise<string> => {
+  const result = await clack.select({
+    message: "Select a Hub project:",
+    options: projects.map((project) => ({
+      value: project.name,
+      label: project.name,
+      hint: project.repoRoot,
+    })),
+  });
+  if (clack.isCancel(result)) {
+    throw new HubProjectRegistryError({
+      message: "Project selection cancelled.",
+    });
+  }
+  return String(result);
+};
+
+const projectAddCommand = Command.make(
+  "add",
+  {
+    name: projectAddNameOption,
+    path: projectAddPathOption,
+    projectProfile: projectAddProfileOption,
+  },
+  ({ name, path, projectProfile }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+
+      let projectName = optionalTextValue(name)?.trim() ?? "";
+      let repoPath = optionalTextValue(path)?.trim() ?? "";
+      let selectedProjectProfile = optionalTextValue(projectProfile)?.trim();
+
+      if (projectName.length === 0 || repoPath.length === 0) {
+        if (!hasInteractiveTerminal()) {
+          return yield* Effect.fail(
+            new HubProjectRegistryError({
+              message:
+                "archloop project add requires --name and --path in non-interactive mode.",
+            }),
+          );
+        }
+      }
+
+      if (projectName.length === 0) {
+        projectName = yield* Effect.tryPromise({
+          try: () => resolveInteractiveProjectName(""),
+          catch: toHubProjectRegistryError,
+        });
+      }
+
+      if (repoPath.length === 0) {
+        repoPath = yield* Effect.tryPromise({
+          try: () => resolveInteractiveProjectPath(),
+          catch: toHubProjectRegistryError,
+        });
+      }
+
+      if (!selectedProjectProfile || selectedProjectProfile.length === 0) {
+        selectedProjectProfile = DEFAULT_PROJECT_PROFILE_NAME;
+      }
+
+      const result = yield* Effect.try({
+        try: () =>
+          registerHubProject({
+            repoPath,
+            projectName,
+            projectProfileName: selectedProjectProfile,
+          }),
+        catch: toHubProjectRegistryError,
+      });
+
+      yield* d.summary("Hub project registered", {
+        Name: result.project.name,
+        "Project id": result.project.id,
+        "Repo root": result.project.repoRoot,
+        "Hub project dir": result.project.hubProjectDir,
+        "Project profile": result.project.projectProfile,
+        Selected: result.project.name,
+      });
+      yield* d.status(
+        `Registered Hub project ${result.project.name} and selected it for this CLI.`,
+        "success",
+      );
+    }),
+);
+
+const projectListCommand = Command.make("list", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const projects = yield* Effect.try({
+      try: () => listHubProjects(),
+      catch: toHubProjectRegistryError,
+    });
+
+    if (projects.length === 0) {
+      yield* d.status("No Hub projects registered yet.", "info");
+      yield* d.text("Run `archloop project add` to register an existing repo.");
+      return;
+    }
+
+    yield* d.summary("Registered Hub projects", {
+      Projects: String(projects.length),
+      Selected: projects.find((project) => project.selected)?.name ?? "none",
+    });
+
+    for (const project of projects) {
+      const status = yield* Effect.try({
+        try: () =>
+          resolveHubProjectStatus({
+            cwd: project.repoRoot,
+            hubProjectDir: project.hubProjectDir,
+          }),
+        catch: toHubProjectRegistryError,
+      });
+      const marker = project.selected ? "*" : " ";
+      yield* d.text(
+        `${marker} ${project.name} [${project.projectProfile}]${project.selected ? " (selected)" : ""}`,
+      );
+      yield* d.text(`  id: ${project.id}`);
+      yield* d.text(`  repo: ${project.repoRoot}`);
+      yield* d.text(
+        `  tasks: ${status.taskCounts.ready} ready / ${status.taskCounts.total} total`,
+      );
+      yield* d.text(
+        `  runs: ${status.activeBatches.length > 0 ? String(status.activeBatches.length) : "none"}`,
+      );
+    }
+  }),
+);
+
+const projectSelectCommand = Command.make(
+  "select",
+  {
+    name: projectSelectNameArg,
+  },
+  ({ name }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      let projectName = optionalTextValue(name)?.trim();
+
+      if (!projectName) {
+        const projects = yield* Effect.try({
+          try: () => listHubProjects(),
+          catch: toHubProjectRegistryError,
+        });
+        if (projects.length === 0) {
+          return yield* Effect.fail(
+            new HubProjectRegistryError({
+              message:
+                "No Hub projects are registered yet. Run `archloop project add` first.",
+            }),
+          );
+        }
+        if (!hasInteractiveTerminal()) {
+          return yield* Effect.fail(
+            new HubProjectRegistryError({
+              message:
+                "archloop project select requires a project name in non-interactive mode.",
+            }),
+          );
+        }
+
+        projectName = yield* Effect.tryPromise({
+          try: () => resolveInteractiveProjectSelection(projects),
+          catch: toHubProjectRegistryError,
+        });
+      }
+
+      const project = yield* Effect.try({
+        try: () => selectHubProject({ projectSelector: projectName }),
+        catch: toHubProjectRegistryError,
+      });
+      yield* d.status(`Selected Hub project ${project.name}.`, "success");
+    }),
+);
+
 const projectConfigureCommand = Command.make(
   "configure",
   {
@@ -2572,7 +2824,13 @@ const projectCommand = Command.make("project", {}, () =>
     );
   }),
 ).pipe(
-  Command.withSubcommands([projectStatusCommand, projectConfigureCommand]),
+  Command.withSubcommands([
+    projectAddCommand,
+    projectListCommand,
+    projectSelectCommand,
+    projectStatusCommand,
+    projectConfigureCommand,
+  ]),
 );
 
 const getHubFlowIds = (): string =>
