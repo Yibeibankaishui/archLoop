@@ -10,6 +10,12 @@ import {
   type HubProviderSmokeCheckRunner,
 } from "./hubReadinessCheck.js";
 
+const CODEX_SMOKE_OUTPUT =
+  '#!/bin/sh\ncat >/dev/null\nprintf \'%s\\n\' \'{"type":"item.completed","item":{"type":"agent_message","text":"<smoke>ARCHLOOP_SMOKE_OK</smoke>"}}\'\n';
+
+const CODEX_AUTH_ERROR_OUTPUT =
+  '#!/bin/sh\ncat >/dev/null\nprintf \'%s\\n\' \'{"type":"error","message":"codex authentication required"}\'\nexit 1\n';
+
 const makeStore = async () => {
   const homeDir = await mkdtemp(join(tmpdir(), "hub-readiness-check-"));
   const dataDir = join(homeDir, "xdg-data");
@@ -81,11 +87,7 @@ describe("hubReadinessCheck", () => {
   it("deduplicates smoke checks by provider, model, and options", async () => {
     const { env } = await makeStore();
     const binDir = join(env.XDG_DATA_HOME!, "bin");
-    await createMockTool(
-      binDir,
-      "codex",
-      '#!/bin/sh\ncat >/dev/null\nprintf \'%s\\n\' \'{"type":"item.completed","item":{"type":"agent_message","text":"<smoke>ARCHLOOP_SMOKE_OK</smoke>"}}\'\n',
-    );
+    await createMockTool(binDir, "codex", CODEX_SMOKE_OUTPUT);
 
     const storeEnv = {
       ...env,
@@ -127,11 +129,7 @@ describe("hubReadinessCheck", () => {
   it("skips unconfigured roles while still smoke checking configured groups", async () => {
     const { env } = await makeStore();
     const binDir = join(env.XDG_DATA_HOME!, "bin");
-    await createMockTool(
-      binDir,
-      "codex",
-      '#!/bin/sh\ncat >/dev/null\nprintf \'%s\\n\' \'{"type":"item.completed","item":{"type":"agent_message","text":"<smoke>ARCHLOOP_SMOKE_OK</smoke>"}}\'\n',
-    );
+    await createMockTool(binDir, "codex", CODEX_SMOKE_OUTPUT);
 
     const storeEnv = {
       ...env,
@@ -172,11 +170,7 @@ describe("hubReadinessCheck", () => {
   it("formats provider/auth smoke failures with repair guidance", async () => {
     const { env } = await makeStore();
     const binDir = join(env.XDG_DATA_HOME!, "bin");
-    await createMockTool(
-      binDir,
-      "codex",
-      '#!/bin/sh\ncat >/dev/null\nprintf \'%s\\n\' \'{"type":"error","message":"codex authentication required"}\'\nexit 1\n',
-    );
+    await createMockTool(binDir, "codex", CODEX_AUTH_ERROR_OUTPUT);
 
     const storeEnv = {
       ...env,

@@ -57,6 +57,12 @@ interface ProviderRequirements {
   readonly toolCommand?: string;
 }
 
+interface ProviderKeyInput {
+  readonly provider: string;
+  readonly model: string;
+  readonly options?: HubAgentRoleEntry["options"];
+}
+
 interface ProviderReadinessMap {
   readonly findings: readonly HubReadinessFinding[];
   readonly readyByKey: ReadonlyMap<string, boolean>;
@@ -100,30 +106,26 @@ const providerRequirements: Readonly<Record<string, ProviderRequirements>> = {
   },
 };
 
+const listOptionEntries = (
+  options: HubAgentRoleEntry["options"],
+): ReadonlyArray<readonly [string, string]> =>
+  options
+    ? Object.entries(options)
+        .filter(([, value]) => value.trim().length > 0)
+        .sort(([left], [right]) => left.localeCompare(right))
+    : [];
+
 const normalizeOptionsKey = (
   options: HubAgentRoleEntry["options"],
 ): string | undefined => {
-  if (!options) {
-    return undefined;
-  }
-
-  const entries = Object.entries(options)
-    .filter(([, value]) => value.trim().length > 0)
-    .sort(([left], [right]) => left.localeCompare(right));
+  const entries = listOptionEntries(options);
   return entries.length > 0 ? JSON.stringify(entries) : undefined;
 };
 
 const formatProviderOptions = (
   options: HubAgentRoleEntry["options"],
 ): string => {
-  if (!options) {
-    return "";
-  }
-
-  const entries = Object.entries(options)
-    .filter(([, value]) => value.trim().length > 0)
-    .sort(([left], [right]) => left.localeCompare(right));
-
+  const entries = listOptionEntries(options);
   if (entries.length === 0) {
     return "";
   }
@@ -196,11 +198,7 @@ const readRoleEntries = (config: ReturnType<typeof readHubAgentConfig>) => {
   return { validEntries, errors, missingRoles };
 };
 
-const referenceKey = (reference: {
-  readonly provider: string;
-  readonly model: string;
-  readonly options?: HubAgentRoleEntry["options"];
-}): string =>
+const referenceKey = (reference: ProviderKeyInput): string =>
   [
     reference.provider,
     reference.model,
@@ -388,6 +386,9 @@ const buildSmokeRepairCommands = (provider: string): string[] => {
   return commands;
 };
 
+const smokeFindingTitle = (provider: string): string =>
+  `${resolveProviderLabel(provider)} smoke`;
+
 const formatSmokeFailureMessage = (input: {
   readonly reference: ProviderReference;
   readonly error: unknown;
@@ -459,6 +460,18 @@ const collectSkippedRoleFindings = (
       ]
     : [];
 
+const buildSkippedRoleSection = (
+  missingRoles: readonly string[],
+): HubReadinessSection | undefined => {
+  const findings = collectSkippedRoleFindings(missingRoles);
+  return findings.length > 0
+    ? {
+        title: "Skipping unconfigured Hub agent roles",
+        findings,
+      }
+    : undefined;
+};
+
 const collectSmokeFindings = async (
   references: readonly ProviderReference[],
   readiness: {
@@ -477,7 +490,7 @@ const collectSmokeFindings = async (
     if (!credentialsReady || !toolReady) {
       findings.push({
         severity: "warn",
-        title: `${resolveProviderLabel(reference.provider)} smoke`,
+        title: smokeFindingTitle(reference.provider),
         message: `Skipped ${formatProviderReference(reference)} because credential or tool validation failed earlier in the check.`,
       });
       continue;
@@ -492,7 +505,7 @@ const collectSmokeFindings = async (
       });
       findings.push({
         severity: "success",
-        title: `${resolveProviderLabel(reference.provider)} smoke`,
+        title: smokeFindingTitle(reference.provider),
         message: [
           `Real provider smoke check passed for ${formatProviderReference(reference)}.`,
           `Roles covered: ${reference.roles.join(", ")}.`,
@@ -502,7 +515,7 @@ const collectSmokeFindings = async (
     } catch (error) {
       findings.push({
         severity: "error",
-        title: `${resolveProviderLabel(reference.provider)} smoke`,
+        title: smokeFindingTitle(reference.provider),
         message: formatSmokeFailureMessage({ reference, error }),
       });
     }
@@ -518,6 +531,14 @@ const buildRoleSuccessFindings = (): readonly HubReadinessFinding[] => [
     message: "All required Hub agent roles are configured and validated.",
   },
 ];
+
+const reportHasSeverity = (
+  report: HubReadinessSection[],
+  severity: HubReadinessSeverity,
+): boolean =>
+  report.some((section) =>
+    section.findings.some((finding) => finding.severity === severity),
+  );
 
 const summarizeReport = (report: HubReadinessCheckReport): string => {
   if (report.hasErrors) {
@@ -545,11 +566,11 @@ export const collectHubReadinessChecks = async (
           ? roleCheck.errors
           : buildRoleSuccessFindings(),
     },
-    ...collectSkippedRoleFindings(roleCheck.missingRoles).map((finding) => ({
-      title: "Skipping unconfigured Hub agent roles",
-      findings: [finding],
-    })),
   ];
+  const skippedRoleSection = buildSkippedRoleSection(roleCheck.missingRoles);
+  if (skippedRoleSection) {
+    sections.push(skippedRoleSection);
+  }
 
   if (references.length > 0) {
     sections.push({
@@ -589,12 +610,8 @@ export const collectHubReadinessChecks = async (
     }
   }
 
-  const hasWarnings = sections.some((section) =>
-    section.findings.some((finding) => finding.severity === "warn"),
-  );
-  const hasErrors = sections.some((section) =>
-    section.findings.some((finding) => finding.severity === "error"),
-  );
+  const hasWarnings = reportHasSeverity(sections, "warn");
+  const hasErrors = reportHasSeverity(sections, "error");
 
   return { sections, hasWarnings, hasErrors };
 };

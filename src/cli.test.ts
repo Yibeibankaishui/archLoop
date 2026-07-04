@@ -147,6 +147,9 @@ const createMockTool = async (
   return toolPath;
 };
 
+const CODEX_SMOKE_OUTPUT =
+  '#!/bin/sh\ncat >/dev/null\nprintf \'%s\\n\' \'{"type":"item.completed","item":{"type":"agent_message","text":"<smoke>ARCHLOOP_SMOKE_OK</smoke>"}}\'\n';
+
 const setAllHubAgentRoles = (env: NodeJS.ProcessEnv) => {
   for (const role of HUB_AGENT_ROLES) {
     setHubAgentRole(role, { provider: "cursor", model: "auto" }, { env });
@@ -895,11 +898,7 @@ exit 1
     };
 
     const binDir = join(dataDir, "bin");
-    await createMockTool(
-      binDir,
-      "codex",
-      '#!/bin/sh\ncat >/dev/null\nprintf \'%s\\n\' \'{"type":"item.completed","item":{"type":"agent_message","text":"<smoke>ARCHLOOP_SMOKE_OK</smoke>"}}\'\n',
-    );
+    await createMockTool(binDir, "codex", CODEX_SMOKE_OUTPUT);
 
     const storeEnv = { ...env, PATH: `${binDir}:${process.env.PATH ?? ""}` };
     setAllCodexAgentRoles(storeEnv);
@@ -931,11 +930,7 @@ exit 1
     };
 
     const binDir = join(dataDir, "bin");
-    await createMockTool(
-      binDir,
-      "codex",
-      '#!/bin/sh\ncat >/dev/null\nprintf \'%s\\n\' \'{"type":"item.completed","item":{"type":"agent_message","text":"<smoke>ARCHLOOP_SMOKE_OK</smoke>"}}\'\n',
-    );
+    await createMockTool(binDir, "codex", CODEX_SMOKE_OUTPUT);
 
     const storeEnv = { ...env, PATH: `${binDir}:${process.env.PATH ?? ""}` };
     setAllCodexAgentRoles(storeEnv);
