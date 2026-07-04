@@ -89,6 +89,7 @@ import {
   selectHubProject,
   type HubProjectListEntry,
 } from "./hubProjectRegistry.js";
+import { resolveHubProjectTarget } from "./hubProjectTargetResolver.js";
 import {
   formatHubProjectProfileRecommendation,
   recommendHubProjectProfile,
@@ -213,6 +214,11 @@ const optionalTextValue = (flag: OptionalTextFlag): string | undefined =>
 
 const hasInteractiveTerminal = (): boolean =>
   process.stdin.isTTY && process.stdout.isTTY;
+
+const toProjectStatusError = (error: unknown): ProjectStatusError =>
+  new ProjectStatusError({
+    message: error instanceof Error ? error.message : String(error),
+  });
 
 const toTaskBoardError = (error: unknown): TaskBoardError =>
   new TaskBoardError({
@@ -1631,6 +1637,11 @@ const formatHubProjectStatusRows = (
   "Task board total": String(status.taskCounts.total),
 });
 
+const projectTargetOption = Options.text("project").pipe(
+  Options.withDescription("Hub project name"),
+  Options.optional,
+);
+
 const projectConfigureProjectProfileOption = Options.text(
   "project-profile",
 ).pipe(
@@ -1669,6 +1680,33 @@ const describeProjectConfigureStatus = (contract: {
 
   return "Refreshed project facts and wrote a new Hub project development contract.";
 };
+
+const resolveProjectTargetStatus = (
+  project: OptionalTextFlag,
+): Effect.Effect<
+  Awaited<ReturnType<typeof resolveHubProjectStatus>>,
+  ProjectStatusError
+> =>
+  Effect.gen(function* () {
+    const target = yield* Effect.tryPromise({
+      try: () =>
+        resolveHubProjectTarget({
+          projectSelector: optionalTextValue(project),
+          isTTY: process.stdin.isTTY === true,
+          selectProject: resolveInteractiveProjectSelection,
+        }),
+      catch: toProjectStatusError,
+    });
+
+    return yield* Effect.try({
+      try: () =>
+        resolveHubProjectStatus({
+          cwd: target.project.repoRoot,
+          hubProjectDir: target.project.hubProjectDir,
+        }),
+      catch: toProjectStatusError,
+    });
+  });
 
 const taskIdArg = Args.text({ name: "id" });
 const taskTitleArg = Args.text({ name: "title" });
@@ -2604,23 +2642,21 @@ const tasksCommand = Command.make("tasks", {}, () =>
   ]),
 );
 
-const projectStatusCommand = Command.make("status", {}, () =>
-  Effect.gen(function* () {
-    const d = yield* Display;
-    const cwd = process.cwd();
-    const status = yield* Effect.try({
-      try: () => resolveHubProjectStatus({ cwd }),
-      catch: (error) =>
-        new ProjectStatusError({
-          message: error instanceof Error ? error.message : String(error),
-        }),
-    });
+const projectStatusCommand = Command.make(
+  "status",
+  {
+    project: projectTargetOption,
+  },
+  ({ project }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const status = yield* resolveProjectTargetStatus(project);
 
-    yield* d.summary("Hub project status", formatHubProjectStatusRows(status));
-    for (const line of formatHubProjectStatusLines(status)) {
-      yield* d.text(line);
-    }
-  }),
+      yield* d.summary("Hub project status", formatHubProjectStatusRows(status));
+      for (const line of formatHubProjectStatusLines(status)) {
+        yield* d.text(line);
+      }
+    }),
 );
 
 const checkHubOption = Options.boolean("hub").pipe(
@@ -3013,19 +3049,13 @@ const projectSelectCommand = Command.make(
 const projectConfigureCommand = Command.make(
   "configure",
   {
+    project: projectTargetOption,
     projectProfile: projectConfigureProjectProfileOption,
   },
-  ({ projectProfile }) =>
+  ({ project, projectProfile }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = process.cwd();
-      const status = yield* Effect.try({
-        try: () => resolveHubProjectStatus({ cwd }),
-        catch: (error) =>
-          new ProjectStatusError({
-            message: error instanceof Error ? error.message : String(error),
-          }),
-      });
+      const status = yield* resolveProjectTargetStatus(project);
 
       const availableProjectProfiles = formatProjectProfileNames();
       let selectedProjectProfile: string;
@@ -3043,25 +3073,11 @@ const projectConfigureCommand = Command.make(
           );
         }
 
-        const selected = yield* Effect.promise(() =>
-          clack.select({
-            message: "Select a project profile:",
-            initialValue: DEFAULT_PROJECT_PROFILE_NAME,
-            options: listProjectProfiles().map((profile) => ({
-              value: profile.name,
-              label: profile.label,
-              hint: profile.description,
-            })),
-          }),
-        );
-        if (clack.isCancel(selected)) {
-          yield* Effect.fail(
-            new ProjectStatusError({
-              message: "Project profile selection cancelled.",
-            }),
-          );
-        }
-        selectedProjectProfile = selected as string;
+        selectedProjectProfile = yield* Effect.tryPromise({
+          try: () =>
+            resolveInteractiveProjectProfile(DEFAULT_PROJECT_PROFILE_NAME),
+          catch: toProjectStatusError,
+        });
       }
 
       const contract = yield* Effect.try({
@@ -3071,10 +3087,7 @@ const projectConfigureCommand = Command.make(
             hubProjectDir: status.hubProjectDir,
             projectProfileName: selectedProjectProfile,
           }),
-        catch: (error) =>
-          new ProjectStatusError({
-            message: error instanceof Error ? error.message : String(error),
-          }),
+        catch: toProjectStatusError,
       });
 
       yield* d.summary("Hub project development contract", {

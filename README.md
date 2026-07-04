@@ -851,7 +851,9 @@ Existing single-runtime projects remain valid. `archloop init` does not automati
 
 ### `archloop project status`
 
-Reports the canonical git repo root, the archLoop user data directory, the Hub project directory, the selected Hub project profile, the Hub project development contract path, whether `bd` is available, and a CLI-first Hub task board summary. It works from any git repository, even if you have not run `archloop init` yet.
+Reports the selected Hub project by default, or an explicit `--project <name>` target when provided. In a TTY, if no project is selected yet, archLoop opens the Hub project picker; in non-interactive mode it requires a selected project or an explicit target.
+
+The summary includes the canonical git repo root, the archLoop user data directory, the Hub project directory, the selected Hub project profile, the Hub project development contract path, whether `bd` is available, and a CLI-first Hub task board summary. It still works from any directory once a Hub project has been selected or explicitly targeted, even if you have not run `archloop init` in the target repo.
 
 The summary includes task counts by Hub status, active runs and batch statuses, failed tasks with failure reason and suggested next action, sync state counts such as `push_pending` or `conflict`, recent Hub events, and paths to Hub run directories for full logs and artifacts. Output remains useful when Beads is unavailable, there are no tasks, no active runs, or GitHub sync is not configured.
 
@@ -865,7 +867,7 @@ This first slice does not yet make provider/model smoke calls. Instead, it emits
 
 ### `archloop project configure`
 
-Creates or updates the Hub project development contract for the current repository. Pass `--project-profile <profile>` to choose the profile explicitly; supported profiles reuse the init registry (`generic`, `node`, `python`, `cpp`). In an interactive terminal, omit the flag to pick a profile from a prompt. The contract is written as pretty-printed JSON to the Hub project assets directory under `development-contract.json`.
+Creates or updates the Hub project development contract for the selected Hub project. Pass `--project <name>` to target a specific project explicitly, and `--project-profile <profile>` to choose the profile explicitly; supported profiles reuse the init registry (`generic`, `node`, `python`, `cpp`). In an interactive terminal, omitting `--project` opens the Hub project picker when no project is selected, and omitting `--project-profile` picks a profile from a prompt. The contract is written as pretty-printed JSON to the Hub project assets directory under `development-contract.json`.
 
 `project configure` refreshes advisory project facts such as manifests, lockfiles, build files, and configured scripts on every run. Re-running with the same profile preserves any user-edited `setup`, `verify`, and `context` sections while updating the fact snapshot and timestamps. Changing the profile writes a timestamped backup of the previous contract before replacing it.
 
@@ -1019,7 +1021,7 @@ Task selectors match `tasks show` and `tasks comment` (Beads id, exact title, or
 
 Runs a Hub-owned flow against the Beads task board in the target git repository. Use `.` for the current repository. Hub flows use bundled prompts from archLoop itself, not repo-local `.archloop/` prompt files.
 
-The first available task-board flows are `no-review` and `with-review`. Proposal flows `prd-decomposition` and `triage` run through the shared proposal session runtime: `archloop run . --flow prd-decomposition --input <prd-ref>` and `archloop run . --flow triage --input <task-id|statuses>` execute end-to-end. Task-board flow implementers now read the Hub project development contract before prompting the agent; if no contract exists, `run --flow` creates a generic fallback contract, reports how to specialize it with `archloop project configure --project-profile <profile>`, and then continues. The matching `archloop tasks` shortcuts remain the recommended entry points.
+The first available task-board flows are `no-review` and `with-review`. Proposal flows `prd-decomposition` and `triage` run through the shared proposal session runtime: `archloop run . --flow prd-decomposition --input <prd-ref>` and `archloop run . --flow triage --input <task-id|statuses>` execute end-to-end. Task-board flow implementers now read the Hub project development contract before prompting the agent; if no contract exists, `run --flow` creates a generic fallback contract, reports how to specialize it with `archloop project configure [--project <name>] --project-profile <profile>`, and then continues. The matching `archloop tasks` shortcuts remain the recommended entry points.
 
 When `--flow` targets `prd-decomposition` or `triage`, archLoop runs the same agent-driven proposal path as the task shortcut: no-sandbox execution, Hub-wide role config, structured output validation, proposal artifacts in the Hub run directory, mutation detection before apply, and local-only Beads writes. Remote issue updates remain outside proposal flows and happen through explicit `archloop tasks pull`, `tasks push`, or confirmed `tasks sync`.
 
