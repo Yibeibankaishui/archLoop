@@ -120,6 +120,7 @@ import {
   formatHubTaskDetailsRows,
   loadHubTask,
   loadHubTaskBoard,
+  planHubManagedBranchCleanup,
   resolveHubTaskSelector,
   resolveHubTaskSelectors,
 } from "./taskBoard.js";
@@ -2299,14 +2300,11 @@ const tasksCleanupCommand = Command.make(
         try: () => evaluateHubManagedBranchCleanup({ cwd }),
         catch: toTaskBoardError,
       });
-      const managedDeletionCount = evaluation.managedSafeCandidates.length;
-      const historicalDeletionCount = includeUnowned
-        ? evaluation.unownedCandidates.filter(
-            (candidate) => candidate.skipReasons.length === 0,
-          ).length
-        : 0;
-      const plannedDeletionCount =
-        managedDeletionCount + historicalDeletionCount;
+      const cleanupPlan = planHubManagedBranchCleanup(evaluation, {
+        includeUnowned,
+      });
+      const managedDeletionCount = cleanupPlan.managedBranches.length;
+      const historicalDeletionCount = cleanupPlan.historicalBranches.length;
 
       for (const line of formatHubManagedBranchCleanupLines(evaluation, {
         dryRun,
@@ -2320,7 +2318,7 @@ const tasksCleanupCommand = Command.make(
         return;
       }
 
-      if (plannedDeletionCount === 0) {
+      if (cleanupPlan.totalBranches === 0) {
         yield* d.status(
           "No safe branches were eligible for managed branch cleanup.",
           "info",

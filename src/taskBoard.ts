@@ -1217,6 +1217,12 @@ export interface FormatHubManagedBranchCleanupLinesOptions {
   readonly deletedHistoricalBranches?: readonly string[];
 }
 
+export interface HubManagedBranchCleanupPlan {
+  readonly managedBranches: readonly string[];
+  readonly historicalBranches: readonly string[];
+  readonly totalBranches: number;
+}
+
 const GIT_EXEC_MAX_BUFFER = 10 * 1024 * 1024;
 
 const runGitText = (
@@ -1335,6 +1341,55 @@ const canDeleteHistoricalCandidate = (
 ): boolean =>
   candidate.skipReasons.every((detail) => detail.reason === "missing_ownership");
 
+const selectSafeHistoricalCleanupCandidates = (
+  evaluation: HubManagedBranchCleanupEvaluation,
+): readonly HubManagedBranchCleanupCandidate[] =>
+  evaluation.unownedCandidates.filter(canDeleteHistoricalCandidate);
+
+const formatHistoricalCleanupCandidateNote = (
+  candidate: HubManagedBranchCleanupCandidate,
+  includeUnowned: boolean,
+): string => {
+  const historicalSafe = canDeleteHistoricalCandidate(candidate);
+  const reasonSuffix = formatCleanupReasonSuffix(candidate.skipReasons);
+
+  if (includeUnowned && historicalSafe) {
+    return "safe historical branch included by --include-unowned";
+  }
+
+  if (historicalSafe) {
+    return "Use --include-unowned to delete safe historical branches";
+  }
+
+  if (includeUnowned) {
+    return reasonSuffix;
+  }
+
+  const prefix = "Use --include-unowned to delete safe historical branches";
+  return reasonSuffix.length > 0 ? `${prefix}; ${reasonSuffix}` : prefix;
+};
+
+export const planHubManagedBranchCleanup = (
+  evaluation: HubManagedBranchCleanupEvaluation,
+  options?: Pick<FormatHubManagedBranchCleanupLinesOptions, "includeUnowned">,
+): HubManagedBranchCleanupPlan => {
+  const managedBranches = evaluation.managedSafeCandidates.map(
+    (candidate) => candidate.branch,
+  );
+  const historicalBranches =
+    options?.includeUnowned === true
+      ? selectSafeHistoricalCleanupCandidates(evaluation).map(
+          (candidate) => candidate.branch,
+        )
+      : [];
+
+  return {
+    managedBranches,
+    historicalBranches,
+    totalBranches: managedBranches.length + historicalBranches.length,
+  };
+};
+
 export const formatHubManagedBranchCleanupLines = (
   evaluation: HubManagedBranchCleanupEvaluation,
   options?: FormatHubManagedBranchCleanupLinesOptions,
@@ -1403,17 +1458,10 @@ export const formatHubManagedBranchCleanupLines = (
     lines.push("  - none");
   } else {
     for (const candidate of evaluation.unownedCandidates) {
-      const historicalSafe = canDeleteHistoricalCandidate(candidate);
-      const allowDelete =
-        options?.includeUnowned === true && historicalSafe;
-      const reasonSuffix = formatCleanupReasonSuffix(candidate.skipReasons);
-      const note = allowDelete
-        ? "safe historical branch included by --include-unowned"
-        : historicalSafe
-          ? "Use --include-unowned to delete safe historical branches"
-          : options?.includeUnowned === true
-            ? reasonSuffix
-            : `Use --include-unowned to delete safe historical branches${reasonSuffix.length > 0 ? `; ${reasonSuffix}` : ""}`;
+      const note = formatHistoricalCleanupCandidateNote(
+        candidate,
+        options?.includeUnowned === true,
+      );
       lines.push(formatCleanupCandidateLine(candidate, note));
     }
   }
@@ -1428,23 +1476,21 @@ export const cleanupHubManagedBranches = async (
     cwd: input.cwd,
     env: input.env,
   });
+  const plan = planHubManagedBranchCleanup(evaluation, {
+    includeUnowned: input.includeUnowned,
+  });
 
   const deletedManagedBranches: string[] = [];
   const deletedHistoricalBranches: string[] = [];
 
-  for (const candidate of evaluation.managedSafeCandidates) {
-    deleteGitBranch(input.cwd, candidate.branch, input.env);
-    deletedManagedBranches.push(candidate.branch);
+  for (const branch of plan.managedBranches) {
+    deleteGitBranch(input.cwd, branch, input.env);
+    deletedManagedBranches.push(branch);
   }
 
-  if (input.includeUnowned === true) {
-    for (const candidate of evaluation.unownedCandidates) {
-      if (!canDeleteHistoricalCandidate(candidate)) {
-        continue;
-      }
-      deleteGitBranch(input.cwd, candidate.branch, input.env);
-      deletedHistoricalBranches.push(candidate.branch);
-    }
+  for (const branch of plan.historicalBranches) {
+    deleteGitBranch(input.cwd, branch, input.env);
+    deletedHistoricalBranches.push(branch);
   }
 
   return {

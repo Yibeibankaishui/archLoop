@@ -3034,6 +3034,31 @@ process.exit(1);
     expect(branches).toContain(blockedBranch);
   });
 
+  it("tasks cleanup --yes --include-unowned still deletes safe historical candidates when no managed deletions are available", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    const { blockedBranch, historicalBranch, env, safeBranch } =
+      await setupManagedBranchCleanupRepo(hostDir);
+    await execAsync(`git branch -D "${safeBranch}"`, { cwd: hostDir });
+
+    const { stdout } = await runCli(
+      "tasks cleanup --yes --include-unowned",
+      hostDir,
+      env,
+    );
+
+    expect(stdout).not.toContain("Deleted managed branches:");
+    expect(stdout).toContain(`Deleted historical branches: ${historicalBranch}`);
+    expect(stdout).toContain(blockedBranch);
+    expect(stdout).not.toContain(
+      "No safe branches were eligible for managed branch cleanup.",
+    );
+
+    const branches = (await execAsync("git branch --list", { cwd: hostDir }))
+      .stdout;
+    expect(branches).not.toContain(historicalBranch);
+    expect(branches).toContain(blockedBranch);
+  });
+
   it("--help shows podman namespace", async () => {
     const { stdout } = await runCli("--help", process.cwd());
     expect(stdout).toContain("podman");
