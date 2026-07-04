@@ -14,6 +14,7 @@ import {
 } from "./projectStatus.js";
 
 const execFileAsync = promisify(execFile);
+const MANAGED_BRANCH_PREFIX = "archloop/";
 
 export interface HubManagedBranchOwnershipRecord {
   readonly taskId: string;
@@ -71,6 +72,11 @@ interface BranchWorktreeState {
   readonly dirtyManagedPaths: readonly string[];
 }
 
+interface GitWorktreeEntry {
+  readonly path: string;
+  readonly branch?: string;
+}
+
 interface RawHubTaskClaimEvent {
   readonly type?: string;
   readonly taskId?: string;
@@ -113,6 +119,9 @@ const readBoolean = (value: unknown): boolean | undefined => {
   }
   return undefined;
 };
+
+const isManagedBranch = (branch: string): boolean =>
+  branch.startsWith(MANAGED_BRANCH_PREFIX);
 
 const execGit = async (
   args: readonly string[],
@@ -228,11 +237,17 @@ const collectOwnershipRecords = (
   );
 };
 
+const EMPTY_WORKTREE_STATE: BranchWorktreeState = {
+  paths: [],
+  checkedOut: false,
+  dirtyManagedPaths: [],
+};
+
 const parseWorktreeList = async (
   repoRoot: string,
-): Promise<readonly { readonly path: string; readonly branch?: string }[]> => {
+): Promise<readonly GitWorktreeEntry[]> => {
   const output = await execGit(["worktree", "list", "--porcelain"], repoRoot);
-  const entries: { readonly path: string; readonly branch?: string }[] = [];
+  const entries: GitWorktreeEntry[] = [];
   let currentPath: string | undefined;
   let currentBranch: string | undefined;
 
@@ -279,14 +294,18 @@ const listManagedBranchRefs = async (
   repoRoot: string,
 ): Promise<readonly string[]> => {
   const output = await execGit(
-    ["for-each-ref", "--format=%(refname:short)", "refs/heads/archloop/"],
+    [
+      "for-each-ref",
+      "--format=%(refname:short)",
+      `refs/heads/${MANAGED_BRANCH_PREFIX}`,
+    ],
     repoRoot,
   );
 
   return output
     .split(/\r?\n/)
     .map((line) => line.trim())
-    .filter((line) => line.startsWith("archloop/"));
+    .filter(isManagedBranch);
 };
 
 const hasDirtyWorktree = async (path: string): Promise<boolean> => {
@@ -297,10 +316,7 @@ const hasDirtyWorktree = async (path: string): Promise<boolean> => {
 const collectBranchWorktreeState = async (
   repoRoot: string,
   branch: string,
-  worktreeEntries: readonly {
-    readonly path: string;
-    readonly branch?: string;
-  }[],
+  worktreeEntries: readonly GitWorktreeEntry[],
 ): Promise<BranchWorktreeState> => {
   const paths = worktreeEntries
     .filter((entry) => entry.branch === branch)
@@ -338,14 +354,36 @@ const activeLeasesForBranch = (
 ): readonly WorktreeLeaseRecord[] =>
   leases.filter((lease) => lease.branch === branch && lease.state === "active");
 
+const mapOwnershipRecordsByBranch = (
+  records: readonly HubManagedBranchOwnershipRecord[],
+): ReadonlyMap<string, HubManagedBranchOwnershipRecord> =>
+  new Map(records.map((record) => [record.branch, record] as const));
+
+const collectCandidateBranches = (input: {
+  readonly ownershipRecords: readonly HubManagedBranchOwnershipRecord[];
+  readonly managedBranchRefs: readonly string[];
+  readonly worktreeEntries: readonly GitWorktreeEntry[];
+}): readonly string[] => {
+  const branches = new Set<string>();
+  for (const branch of input.managedBranchRefs) {
+    branches.add(branch);
+  }
+  for (const record of input.ownershipRecords) {
+    branches.add(record.branch);
+  }
+  for (const entry of input.worktreeEntries) {
+    if (entry.branch && isManagedBranch(entry.branch)) {
+      branches.add(entry.branch);
+    }
+  }
+  return [...branches].sort();
+};
+
 const evaluateCandidate = async (input: {
   readonly repoRoot: string;
   readonly branch: string;
   readonly ownership?: HubManagedBranchOwnershipRecord;
-  readonly worktreeEntries: readonly {
-    readonly path: string;
-    readonly branch?: string;
-  }[];
+  readonly worktreeEntries: readonly GitWorktreeEntry[];
   readonly leases: readonly WorktreeLeaseRecord[];
   readonly targetHead: string;
 }): Promise<HubManagedBranchCleanupCandidate> => {
@@ -367,7 +405,7 @@ const evaluateCandidate = async (input: {
         input.branch,
         input.worktreeEntries,
       )
-    : { paths: [], checkedOut: false, dirtyManagedPaths: [] };
+    : EMPTY_WORKTREE_STATE;
   const activeLeases = activeLeasesForBranch(input.branch, input.leases);
 
   const skipReasons: HubManagedBranchCleanupSkipDetail[] = [];
@@ -378,18 +416,13 @@ const evaluateCandidate = async (input: {
         `Branch ${input.branch} has no Hub-managed ownership record.`,
       ),
     );
-  } else {
-    if (!input.ownership.branchExistedBeforeClaim && !mergedIntoTarget) {
-      // fall through to the explicit unmerged-work reason below
-    }
-    if (input.ownership.branchExistedBeforeClaim) {
-      skipReasons.push(
-        buildSkipDetail(
-          "branch_existed_before_claim",
-          `Branch ${input.branch} existed before Hub claimed task ${input.ownership.taskId}; keep it out of automatic cleanup.`,
-        ),
-      );
-    }
+  } else if (input.ownership.branchExistedBeforeClaim) {
+    skipReasons.push(
+      buildSkipDetail(
+        "branch_existed_before_claim",
+        `Branch ${input.branch} existed before Hub claimed task ${input.ownership.taskId}; keep it out of automatic cleanup.`,
+      ),
+    );
   }
 
   if (!exists) {
@@ -463,32 +496,22 @@ export const evaluateHubManagedBranchCleanup = async (
   const targetBranch = await readCurrentBranch(repoRoot);
   const targetHead = await readCurrentHead(repoRoot);
   const ownershipRecords = collectOwnershipRecords(hubProjectDir);
+  const ownershipByBranch = mapOwnershipRecordsByBranch(ownershipRecords);
   const worktreeEntries = await parseWorktreeList(repoRoot);
   const leases = listWorktreeLeases(repoRoot);
-
-  const branches = new Set<string>();
-  for (const branch of await listManagedBranchRefs(repoRoot)) {
-    branches.add(branch);
-  }
-  for (const record of ownershipRecords) {
-    branches.add(record.branch);
-  }
-  for (const entry of worktreeEntries) {
-    if (entry.branch?.startsWith("archloop/")) {
-      branches.add(entry.branch);
-    }
-  }
+  const branches = collectCandidateBranches({
+    ownershipRecords,
+    managedBranchRefs: await listManagedBranchRefs(repoRoot),
+    worktreeEntries,
+  });
 
   const candidates: HubManagedBranchCleanupCandidate[] = [];
-  for (const branch of [...branches].sort()) {
-    const ownership = ownershipRecords.find(
-      (record) => record.branch === branch,
-    );
+  for (const branch of branches) {
     candidates.push(
       await evaluateCandidate({
         repoRoot,
         branch,
-        ownership,
+        ownership: ownershipByBranch.get(branch),
         worktreeEntries,
         leases,
         targetHead,
