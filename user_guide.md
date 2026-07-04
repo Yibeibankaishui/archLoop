@@ -47,7 +47,7 @@ archloop check --hub
 | Beads availability           | Beads 是否可用                               |
 | Task summary                 | 当前任务表、失败任务、运行批次、同步状态摘要 |
 
-`check --hub` 用于验证 Hub 级 readiness：agent role 是否完整、共享凭据和 auth 是否存在、provider 引用是否可用、以及 provider CLI 是否能从 PATH 找到。当前首个 slice 只做静态检查，会在输出里显示进度，并提醒 provider/model smoke check 还未接入。
+`check --hub` 用于验证 Hub 级 readiness：agent role 是否完整、共享凭据和 auth 是否存在、provider 引用是否可用、provider CLI 是否能从 PATH 找到，以及是否可以通过真实 provider 路径完成最小 smoke check。输出会显示进度、按 provider/model/options 去重，并列出每个 smoke check 覆盖的 role。
 
 ### 3.2 配置 agent roles
 
