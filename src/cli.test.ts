@@ -1198,6 +1198,19 @@ exit 1
     }
   });
 
+  it("project list reports an empty registry from any directory", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+
+    const result = await runCli("project list", otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: join(hostDir, "xdg-data"),
+    });
+
+    expect(result.stdout).toContain("No Hub projects registered yet.");
+    expect(result.stdout).toContain("archloop project add");
+  });
+
   it("project add registers a project from an explicit path and project list marks it selected from another directory", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
@@ -1224,6 +1237,9 @@ exit 1
     expect(listResult.stdout).toContain("alpha");
     expect(listResult.stdout).toContain("(selected)");
     expect(listResult.stdout).toContain(hostDir);
+    expect(listResult.stdout).toContain("path: valid");
+    expect(listResult.stdout).toContain("tasks: local task store missing");
+    expect(listResult.stdout).toContain("runs: none");
   });
 
   it("project add rejects a path that is not a git repo with exact guidance", async () => {
@@ -1309,6 +1325,9 @@ exit 1
     expect(listResult.stdout).toContain("beta");
     expect(listResult.stdout).toContain(repoA);
     expect(listResult.stdout).toContain(repoB);
+    expect(listResult.stdout).toContain("path: valid");
+    expect(listResult.stdout).toContain("tasks: local task store missing");
+    expect(listResult.stdout).toContain("runs: none");
   });
 
   it("tasks list points to archloop tasks init when the task store is missing", async () => {

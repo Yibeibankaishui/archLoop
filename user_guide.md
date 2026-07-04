@@ -50,6 +50,8 @@ archloop check --hub
 
 `check --hub` 用于验证 Hub 级 readiness：agent role 是否完整、共享凭据和 auth 是否存在、provider 引用是否可用、provider CLI 是否能从 PATH 找到，以及是否可以通过真实 provider 路径完成最小 smoke check。输出会显示进度、按 provider/model/options 去重，并列出每个 smoke check 覆盖的 role。
 
+`project list` 则提供更轻量的多项目概览：它按 Hub registry 列出项目，标记 selected 项，显示 repo path、project profile、path validity、local task store readiness 标签、ready/failed/total 数量（可用时）以及 active run 概览，适合快速决定接下来切换到哪个项目。
+
 ### 3.2 配置 agent roles
 
 Hub flow 使用统一的 role 配置，配置对所有项目生效。

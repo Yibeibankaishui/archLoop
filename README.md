@@ -881,7 +881,7 @@ Successful registration writes the Hub project registry entry, creates the proje
 
 ### `archloop project list`
 
-Lists registered Hub projects from the shared registry, marks the selected project, and shows each project's repo path, project profile, task counts, and active run count. The command works from any directory because it reads the shared registry rather than inferring a project from `cwd`.
+Lists registered Hub projects from the shared registry, marks the selected project, and shows each project's repo path, project profile, path validity, local task-store readiness labels, ready/failed/total counts when available, and active run count. The command works from any directory because it reads the shared registry rather than inferring a project from `cwd`.
 
 ### `archloop project select [<name>]`
 
