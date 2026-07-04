@@ -9,8 +9,11 @@ import { describe, expect, it } from "vitest";
 import { createHubRunContext } from "./hubExecution.js";
 import {
   doctorHubTaskState,
+  formatHubTaskStateDoctorLines,
   repairHubTaskState,
 } from "./hubTaskStateDoctor.js";
+import { formatHubManagedBranchCleanupDiagnosticsLines } from "./taskBoard.js";
+import type { HubManagedBranchCleanupEvaluation } from "./hubManagedBranchCleanup.js";
 
 const execAsync = promisify(exec);
 
@@ -871,5 +874,94 @@ describe("doctorHubTaskState", () => {
     expect(task.labels).toEqual(["done"]);
     expect(task.metadata.claim).toBeUndefined();
     expect(task.metadata.hubStatus).toBe("done");
+  });
+
+  it("renders managed branch cleanup diagnostics with next actions", () => {
+    const cleanupEvaluation = {
+      repoRoot: "/tmp/repo",
+      hubProjectDir: "/tmp/data/archloop/hub/projects/demo",
+      targetBranch: "main",
+      targetHead: "abc123",
+      managedSafeCandidates: [
+        {
+          branch: "archloop/bd-safe-cleanup",
+          ownership: {
+            taskId: "bd-safe",
+            runId: "run-safe",
+            batchId: "batch-safe",
+            branch: "archloop/bd-safe-cleanup",
+            claimedAt: "2026-07-05T10:00:00.000Z",
+            baseHead: "abc123",
+            branchExistedBeforeClaim: false,
+          },
+          exists: true,
+          mergedIntoTarget: true,
+          worktreePaths: [],
+          activeLeases: [],
+          skipReasons: [],
+        },
+      ],
+      managedBlockedBranches: [
+        {
+          branch: "archloop/bd-blocked-cleanup",
+          ownership: {
+            taskId: "bd-blocked",
+            runId: "run-blocked",
+            batchId: "batch-blocked",
+            branch: "archloop/bd-blocked-cleanup",
+            claimedAt: "2026-07-05T10:05:00.000Z",
+            baseHead: "abc123",
+            branchExistedBeforeClaim: true,
+          },
+          exists: true,
+          mergedIntoTarget: false,
+          worktreePaths: [],
+          activeLeases: [],
+          skipReasons: [
+            {
+              reason: "branch_existed_before_claim",
+              message:
+                "Branch archloop/bd-blocked-cleanup existed before Hub claimed task bd-blocked; keep it out of automatic cleanup.",
+            },
+          ],
+        },
+      ],
+      unownedCandidates: [
+        {
+          branch: "archloop/unowned-history",
+          exists: true,
+          mergedIntoTarget: true,
+          worktreePaths: [],
+          activeLeases: [],
+          skipReasons: [
+            {
+              reason: "missing_ownership",
+              message:
+                "Branch archloop/unowned-history has no Hub-managed ownership record.",
+            },
+          ],
+        },
+      ],
+    } satisfies HubManagedBranchCleanupEvaluation;
+
+    const lines = formatHubTaskStateDoctorLines({
+      diagnostics: [],
+      managedBranchCleanupDiagnostics:
+        formatHubManagedBranchCleanupDiagnosticsLines(cleanupEvaluation),
+    });
+
+    expect(lines.join("\n")).toContain("Managed branch cleanup diagnostics");
+    expect(lines.join("\n")).toContain("Safe managed candidates (1)");
+    expect(lines.join("\n")).toContain(
+      "Next action: Run `archloop tasks cleanup --yes` to delete this safe managed branch.",
+    );
+    expect(lines.join("\n")).toContain("Blocked managed candidates (1)");
+    expect(lines.join("\n")).toContain(
+      "Preserve this branch; it existed before Hub claimed the task.",
+    );
+    expect(lines.join("\n")).toContain("Historical unowned candidates (1)");
+    expect(lines.join("\n")).toContain(
+      "Use `archloop tasks cleanup --yes --include-unowned` to include this safe historical branch.",
+    );
   });
 });

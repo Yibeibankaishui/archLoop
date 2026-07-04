@@ -132,6 +132,7 @@ import {
   cleanupHubManagedBranches,
   createHubTask,
   deleteHubTasks,
+  formatHubManagedBranchCleanupDiagnosticsLines,
   formatHubManagedBranchCleanupLines,
   formatHubTaskCommentLines,
   formatHubTaskDetailsRows,
@@ -2615,9 +2616,16 @@ const projectStatusCommand = Command.make("status", {}, () =>
           message: error instanceof Error ? error.message : String(error),
         }),
     });
+    const cleanupEvaluation = yield* Effect.tryPromise({
+      try: () => evaluateHubManagedBranchCleanup({ cwd }),
+      catch: toTaskBoardError,
+    });
 
     yield* d.summary("Hub project status", formatHubProjectStatusRows(status));
-    for (const line of formatHubProjectStatusLines(status)) {
+    for (const line of formatHubProjectStatusLines(
+      status,
+      formatHubManagedBranchCleanupDiagnosticsLines(cleanupEvaluation),
+    )) {
       yield* d.text(line);
     }
   }),
