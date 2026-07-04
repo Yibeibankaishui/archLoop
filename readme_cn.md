@@ -13,6 +13,8 @@ archLoop（`@yibeibankaishui/archloop`）是一个 TypeScript 工具包，用于
 
 典型场景：并行 AFK agent、实现→评审流水线、从 GitHub Issues 自动领任务并提交。
 
+Hub onboarding 的推荐路径是 `archloop initialize` -> `archloop project add` / `select` / `list` -> `archloop check` -> selected-project `archloop run --flow ...`。`archloop init` 仍然保留，但只作为 legacy 的 repo-local scaffold 路径。
+
 如果想先浏览已注册的 Hub project，可以运行 `archloop project list`：它会显示项目名、repo path、Project profile、selected 标记、path/task readiness 标签，以及 active run 概览，方便先挑选再切换。需要改名或迁移仓库路径时，可以用 `archloop project rename <project> <new-name>` 和 `archloop project relink <project> --path <repo-path>`；这两个命令都会保持 Hub project id 不变，所以任务和运行历史不会被拆开。
 
 如果你要先完成 Hub 级共享设置，再注册第一个项目，先运行 `archloop initialize`。它会配置共享 agent roles、env 和 auth 指引，默认再跑一次轻量 Hub check，并在成功后把 `archloop project add` 作为下一步。需要跳过 quick check 时，使用 `archloop initialize --skip-check`。
@@ -53,7 +55,7 @@ npm install --save-dev @yibeibankaishui/archloop
 pnpm add -D @yibeibankaishui/archloop
 ```
 
-### 步骤 2：初始化（每个项目仅一次）
+### 步骤 2：初始化（legacy repo-local scaffold，每个项目仅一次）
 
 ```bash
 npx archloop init

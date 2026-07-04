@@ -10,7 +10,7 @@ archLoop unified interface 是 archLoop 的新主入口。它把项目管理、�
 https://github.com/Yibeibankaishui/archLoop.git
 ```
 
-旧的 `archloop init` 方式仍然保留。已经使用 `.archloop/main.ts` 或 `.archloop/main.mts` 的项目可以继续按原流程运行；新的主要使用方式推荐直接使用 Hub / task board / flow 命令。
+新的主要使用方式是先做 Hub onboarding: `archloop initialize` -> `archloop project add` / `select` / `list` -> `archloop check` -> selected-project `archloop run --flow ...`。`archloop init` 仍然保留，但只作为 legacy 的 repo-local scaffold 路径；已经使用 `.archloop/main.ts` 或 `.archloop/main.mts` 的项目可以继续按原流程运行。
 
 ## 2 使用边界
 
@@ -355,9 +355,9 @@ archloop tasks recover 1
 | verification failure | 修复验证问题后重新进入可恢复路径           |
 | close_failed         | 如果分支已合并且验证通过，重试关闭本地任务 |
 
-## 10 Legacy Init 兼容路径
+## 10 Legacy Repo-local Scaffold 兼容路径
 
-`archloop init` 继续存在，适用于需要项目内脚手架和自定义 TypeScript 编排的场景。
+`archloop init` 继续存在，适用于需要 repo-local 脚手架和自定义 TypeScript 编排的场景。Hub-wide setup 仍然请先使用 `archloop initialize`。
 
 ```bash
 archloop init
@@ -399,7 +399,7 @@ archloop run --flow no-review
 10. 再准备一轮任务，运行 `archloop run --flow with-review`。
 11. 运行 `archloop tasks sync`，验证 GitHub Issues pull / push 行为。
 12. 人工制造一个失败或 stale 状态，运行 `archloop tasks recover <selector>`。
-13. 运行 legacy `archloop init`，确认旧的 `.archloop/main.ts` 或 `.archloop/main.mts` 路径仍可用。
+13. 运行 legacy `archloop init`，确认旧的 `.archloop/main.ts` 或 `.archloop/main.mts` 路径仍可用，并再次确认 Hub onboarding 仍然以 `archloop initialize` 为入口。
 
 ## 12 验收指标
 
