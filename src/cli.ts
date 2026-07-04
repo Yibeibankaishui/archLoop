@@ -80,6 +80,10 @@ import {
   resolveHubProjectStatus,
 } from "./projectStatus.js";
 import {
+  formatHubProjectListLines,
+  resolveHubProjectListProjections,
+} from "./hubProjectList.js";
+import {
   collectHubReadinessChecks,
   formatHubReadinessCheckLines,
 } from "./hubReadinessCheck.js";
@@ -2983,32 +2987,18 @@ const projectListCommand = Command.make("list", {}, () =>
       return;
     }
 
+    const projections = yield* Effect.try({
+      try: () => resolveHubProjectListProjections(projects),
+      catch: toHubProjectRegistryError,
+    });
+
     yield* d.summary("Registered Hub projects", {
       Projects: String(projects.length),
       Selected: projects.find((project) => project.selected)?.name ?? "none",
     });
 
-    for (const project of projects) {
-      const status = yield* Effect.try({
-        try: () =>
-          resolveHubProjectStatus({
-            cwd: project.repoRoot,
-            hubProjectDir: project.hubProjectDir,
-          }),
-        catch: toHubProjectRegistryError,
-      });
-      const marker = project.selected ? "*" : " ";
-      yield* d.text(
-        `${marker} ${project.name} [${project.projectProfile}]${project.selected ? " (selected)" : ""}`,
-      );
-      yield* d.text(`  id: ${project.id}`);
-      yield* d.text(`  repo: ${project.repoRoot}`);
-      yield* d.text(
-        `  tasks: ${status.taskCounts.ready} ready / ${status.taskCounts.total} total`,
-      );
-      yield* d.text(
-        `  runs: ${status.activeBatches.length > 0 ? String(status.activeBatches.length) : "none"}`,
-      );
+    for (const line of formatHubProjectListLines(projections)) {
+      yield* d.text(line);
     }
   }),
 );
