@@ -32,7 +32,7 @@ Hub flow 使用 archLoop 自带的 flow prompt，不读取目标项目里的 `.a
 
 ### 3.1 检查项目状态
 
-在任意目录运行；如果已经选中了 Hub project，或者显式传入 `--project <name>`，命令会针对该项目：
+在任意目录运行；`archloop run` 默认针对已选中的 Hub project，TTY 中还会在需要时打开 Hub project / flow 选择器；如需覆盖，可以显式传入 `--project <name>`：
 
 ```bash
 archloop project status
@@ -216,7 +216,7 @@ archloop tasks from-prd docs/prd/example.md --yes
 等价 flow 入口：
 
 ```bash
-archloop run . --flow prd-decomposition --input docs/prd/example.md
+archloop run --flow prd-decomposition --input docs/prd/example.md
 ```
 
 ### 5.2 Triage inbox / needs_info 任务
@@ -250,7 +250,7 @@ archloop tasks triage --yes
 等价 flow 入口：
 
 ```bash
-archloop run . --flow triage --input inbox,needs_info
+archloop run --flow triage --input inbox,needs_info
 ```
 
 ## 6 诊断和修复任务状态
@@ -275,7 +275,7 @@ archloop tasks repair-state <selector> --yes
 ### 7.1 无 reviewer flow
 
 ```bash
-archloop run . --flow no-review
+archloop run --flow no-review
 ```
 
 适合先验证最短闭环：读取 `ready_for_agent` 队列，执行实现任务，成功后进入 `waiting_for_merge`，再按批次合并并关闭本地任务。
@@ -283,7 +283,7 @@ archloop run . --flow no-review
 ### 7.2 带 reviewer flow
 
 ```bash
-archloop run . --flow with-review
+archloop run --flow with-review
 ```
 
 适合需要实现后审核的流程：实现成功后进入 `reviewing`，review 完成后进入 `waiting_for_merge`，再进入 merge 阶段。
@@ -378,7 +378,7 @@ npx tsx ./.archloop/main.mts
 一旦使用：
 
 ```bash
-archloop run . --flow no-review
+archloop run --flow no-review
 ```
 
 就会使用 archLoop Hub 自带的 flow prompt，而不是项目 `.archloop/` 中生成的 main 脚本或 prompt。
@@ -395,8 +395,8 @@ archloop run . --flow no-review
 6. 用 `archloop tasks comment` 追加评论，再用 `tasks show` 验证评论可见。
 7. 准备一个 PRD 文件，运行 `archloop tasks from-prd <prd-file>`，人工调整 proposal 后确认写入。
 8. 运行 `archloop tasks triage`，确认 agent 能给出状态建议并写入本地 Beads。
-9. 将至少一个任务变为 `ready_for_agent`，运行 `archloop run . --flow no-review`。
-10. 再准备一轮任务，运行 `archloop run . --flow with-review`。
+9. 将至少一个任务变为 `ready_for_agent`，运行 `archloop run --flow no-review`。
+10. 再准备一轮任务，运行 `archloop run --flow with-review`。
 11. 运行 `archloop tasks sync`，验证 GitHub Issues pull / push 行为。
 12. 人工制造一个失败或 stale 状态，运行 `archloop tasks recover <selector>`。
 13. 运行 legacy `archloop init`，确认旧的 `.archloop/main.ts` 或 `.archloop/main.mts` 路径仍可用。
