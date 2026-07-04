@@ -1,7 +1,10 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { evaluateHubManagedBranchCleanup } from "./hubManagedBranchCleanup.js";
+import {
+  evaluateHubManagedBranchCleanup,
+  findHubManagedBranchCleanupCandidate,
+} from "./hubManagedBranchCleanup.js";
 import {
   createHubFlowRunVerifier,
   type HubFlowMerger,
@@ -161,6 +164,22 @@ const appendRecoveryComment = (
   );
 };
 
+const recordRecoveryResult = (
+  input: RecoverHubTaskInput,
+  result: RecoverHubTaskResult,
+  summary = result.summary,
+): RecoverHubTaskResult => {
+  appendRecoveryComment(input, summary);
+  if (summary === result.summary) {
+    return result;
+  }
+
+  return {
+    ...result,
+    summary,
+  };
+};
+
 export const isBranchMergedIntoHead = async (
   cwd: string,
   branch: string,
@@ -274,15 +293,13 @@ const recoverCloseFailedTask = async (
   });
 
   const summary = `Recovered close_failed task after confirming ${branch} is already merged, rerunning verification, and retrying local Beads close.`;
-  appendRecoveryComment(input, summary);
-
-  return {
+  return recordRecoveryResult(input, {
     outcome: "recovered_close_failed",
     priorStatus: task.hubStatus,
     hubStatus: closedTask.hubStatus,
     summary,
     task: closedTask,
-  };
+  });
 };
 
 const attemptRecoveryCleanup = async (
@@ -293,11 +310,7 @@ const attemptRecoveryCleanup = async (
     cwd: input.cwd,
     env: input.env,
   });
-  const candidate = [
-    ...evaluation.managedSafeCandidates,
-    ...evaluation.managedBlockedBranches,
-    ...evaluation.unownedCandidates,
-  ].find((entry) => entry.branch === branch);
+  const candidate = findHubManagedBranchCleanupCandidate(evaluation, branch);
 
   if (!candidate) {
     return `Cleanup skipped for ${branch}: branch is missing.`;
@@ -341,15 +354,13 @@ const recoverGenericFailedTask = async (
       metadata: { ...task.metadata },
       env: input.env,
     });
-    appendRecoveryComment(input, summary);
-
-    return {
+    return recordRecoveryResult(input, {
       outcome: "recovered_failed",
       priorStatus: task.hubStatus,
       hubStatus: updatedTask.hubStatus,
       summary,
       task: updatedTask,
-    };
+    });
   }
 
   const targetStatus = resolveFailedRecoveryTarget(task, failureReason);
@@ -363,13 +374,11 @@ const recoverGenericFailedTask = async (
     input,
     branch,
   );
-  const summary = `${recovered.summary} ${cleanupSummary}`;
-  appendRecoveryComment(input, summary);
-
-  return {
-    ...recovered,
-    summary,
-  };
+  return recordRecoveryResult(
+    input,
+    recovered,
+    `${recovered.summary} ${cleanupSummary}`,
+  );
 };
 
 const releaseStaleClaim = (
@@ -384,15 +393,13 @@ const releaseStaleClaim = (
     env: input.env,
   });
   const summary = `Released stale claim metadata while keeping hub status ${task.hubStatus}.`;
-  appendRecoveryComment(input, summary);
-
-  return {
+  return recordRecoveryResult(input, {
     outcome: "released_claim",
     priorStatus: task.hubStatus,
     hubStatus: updatedTask.hubStatus,
     summary,
     task: updatedTask,
-  };
+  });
 };
 
 const recoverStaleExecutionStatus = (
@@ -406,8 +413,7 @@ const recoverStaleExecutionStatus = (
     targetStatus,
     `Reset stale execution status ${task.hubStatus} to ${targetStatus} and released claim metadata.`,
   );
-  appendRecoveryComment(input, result.summary);
-  return result;
+  return recordRecoveryResult(input, result);
 };
 
 export const recoverHubTask = async (

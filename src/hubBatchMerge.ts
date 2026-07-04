@@ -16,6 +16,7 @@ import {
 import { readHubAgentConfig } from "./hubAgentConfig.js";
 import {
   evaluateHubManagedBranchCleanup,
+  findHubManagedBranchCleanupCandidate,
   type HubManagedBranchCleanupCandidate,
   type HubManagedBranchCleanupSkipDetail,
 } from "./hubManagedBranchCleanup.js";
@@ -324,29 +325,11 @@ const cleanupReasonCodes = (
   reasons: readonly HubManagedBranchCleanupSkipDetail[],
 ): readonly string[] => reasons.map((reason) => reason.reason);
 
-const cleanupCandidateForBranch = (
-  evaluation: HubManagedBranchCleanupEvaluation,
-  branch: string,
-): HubManagedBranchCleanupCandidate | undefined => {
-  for (const candidates of [
-    evaluation.managedSafeCandidates,
-    evaluation.managedBlockedBranches,
-    evaluation.unownedCandidates,
-  ]) {
-    const candidate = candidates.find((entry) => entry.branch === branch);
-    if (candidate) {
-      return candidate;
-    }
-  }
-
-  return undefined;
-};
-
 const skippedCleanupResult = (
   evaluation: HubManagedBranchCleanupEvaluation,
   branch: string,
 ): HubBranchCleanupResult => {
-  const candidate = cleanupCandidateForBranch(evaluation, branch);
+  const candidate = findHubManagedBranchCleanupCandidate(evaluation, branch);
   return {
     outcome: "skipped",
     reasonCodes: candidate
