@@ -39,13 +39,14 @@ archloop check --hub
 
 `project status` 用于确认当前选中的或显式指定的 Hub project：
 
-| 输出项                       | 用途                                         |
-| ---------------------------- | -------------------------------------------- |
-| Repo root                    | 当前 Hub project 对应的目标项目根目录        |
-| archLoop user data directory | Hub 状态、共享凭据、运行记录所在位置         |
-| Hub project directory        | 当前项目的 Hub 运行状态目录                  |
-| Beads availability           | Beads 是否可用                               |
-| Task summary                 | 当前任务表、失败任务、运行批次、同步状态摘要 |
+| 输出项                       | 用途                                                                             |
+| ---------------------------- | -------------------------------------------------------------------------------- |
+| Repo root                    | 当前 Hub project 对应的目标项目根目录                                            |
+| archLoop user data directory | Hub 状态、共享凭据、运行记录所在位置                                             |
+| Hub project directory        | 当前项目的 Hub 运行状态目录                                                      |
+| Beads availability           | Beads 是否可用                                                                   |
+| Task summary                 | 当前任务表、失败任务、运行批次、同步状态摘要                                     |
+| Cleanup diagnostics          | safe managed candidates、blocked reasons 和 historical unowned preservation 规则 |
 
 `check --hub` 用于验证 Hub 级 readiness：agent role 是否完整、共享凭据和 auth 是否存在、provider 引用是否可用、provider CLI 是否能从 PATH 找到，以及是否可以通过真实 provider 路径完成最小 smoke check。输出会显示进度、按 provider/model/options 去重，并列出每个 smoke check 覆盖的 role。
 
@@ -251,9 +252,9 @@ archloop run . --flow triage --input inbox,needs_info
 archloop tasks doctor
 ```
 
-`tasks doctor` 只读检查本地 Beads task board、Hub run events、git 分支和工作区状态，不会修改 Beads、git 或远端 GitHub Issues。它会报告多重 archLoop 状态标签、过期的 `metadata.hubStatus`、缺失的 execution claim、failed 任务上仍存在的分支工作、已 review 但无法被 merge 选择的任务、terminal 任务里残留的 execution metadata、dirty worktree gate，以及需要 `tasks push` 的同步状态。
+`tasks doctor` 只读检查本地 Beads task board、Hub run events、git 分支和工作区状态，不会修改 Beads、git 或远端 GitHub Issues。它会报告多重 archLoop 状态标签、过期的 `metadata.hubStatus`、缺失的 execution claim、failed 任务上仍存在的分支工作、已 review 但无法被 merge 选择的任务、terminal 任务里残留的 execution metadata、dirty worktree gate、需要 `tasks push` 的同步状态，以及 managed branch cleanup diagnostics。
 
-每条输出都会说明下一步：重新运行 flow、执行 `archloop tasks recover <selector>`、执行 `archloop tasks repair-state <selector>`，或推送 task sync。dirty source files 是 Git 安全提示，不是可修复的 Beads 状态污染。后续 `run --flow` 只有在待合并分支会改到同一路径时才会阻塞；按输出列出的 blocking files 先 commit、stash 或 discard，再重新运行同一个 flow，archLoop 会优先恢复 `waiting_for_merge` 批次。
+每条输出都会说明下一步：重新运行 flow、执行 `archloop tasks recover <selector>`、执行 `archloop tasks repair-state <selector>`、推送 task sync，或按需运行 `archloop tasks cleanup --yes` / `--include-unowned`。dirty source files 是 Git 安全提示，不是可修复的 Beads 状态污染。后续 `run --flow` 只有在待合并分支会改到同一路径时才会阻塞；按输出列出的 blocking files 先 commit、stash 或 discard，再重新运行同一个 flow，archLoop 会优先恢复 `waiting_for_merge` 批次。
 
 ```bash
 archloop tasks repair-state <selector>
@@ -301,6 +302,8 @@ Hub task board 使用这些状态：
 | `wontfix`           | 确认不处理                                  |
 | `failed`            | 执行、sandbox、merge、验证或关闭失败        |
 | `sync_conflict`     | 本地和远端同步语义冲突                      |
+
+`project status` 会给出 repo root、archLoop user data directory、Hub project directory、selected project profile、contract path、`bd` 可用性、task board ready/total、active runs、failed tasks、sync state、recent events、Hub run 目录、worktree lease diagnostics，以及 managed branch cleanup diagnostics。
 
 查看当前进度：
 

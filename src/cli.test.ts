@@ -931,6 +931,33 @@ exit 1
     expect(flattenedOutput).not.toContain(flattenCliOutput(selectedRepoRoot));
   });
 
+  it("project status surfaces managed branch cleanup diagnostics", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    const { env, blockedBranch, historicalBranch, safeBranch } =
+      await setupManagedBranchCleanupRepo(hostDir);
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+
+    await runCli(`project add --name alpha --path "${hostDir}"`, otherDir, env);
+    const { stdout } = await runCli("project status", otherDir, env);
+
+    expect(stdout).toContain("Managed branch cleanup diagnostics");
+    expect(stdout).toContain("Safe managed candidates (1)");
+    expect(stdout).toContain(safeBranch);
+    expect(stdout).toContain(
+      "Next action: Run `archloop tasks cleanup --yes` to delete this safe managed branch.",
+    );
+    expect(stdout).toContain("Blocked managed candidates (1)");
+    expect(stdout).toContain(blockedBranch);
+    expect(stdout).toContain(
+      "Preserve this branch; it existed before Hub claimed the task.",
+    );
+    expect(stdout).toContain("Historical unowned candidates (1)");
+    expect(stdout).toContain(historicalBranch);
+    expect(stdout).toContain(
+      "Use `archloop tasks cleanup --yes --include-unowned` to include this safe historical branch.",
+    );
+  });
+
   it("check runs from any directory, shows progress, and runs provider smoke checks", async () => {
     const dataDir = await mkdtemp(join(tmpdir(), "cli-check-data-"));
     await mkdir(join(dataDir, "archloop"), { recursive: true });

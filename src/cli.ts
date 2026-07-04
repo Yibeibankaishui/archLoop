@@ -133,6 +133,7 @@ import {
   cleanupHubManagedBranches,
   createHubTask,
   deleteHubTasks,
+  formatHubManagedBranchCleanupDiagnosticsLines,
   formatHubManagedBranchCleanupLines,
   formatHubTaskCommentLines,
   formatHubTaskDetailsRows,
@@ -2651,12 +2652,19 @@ const projectStatusCommand = Command.make(
     Effect.gen(function* () {
       const d = yield* Display;
       const status = yield* resolveProjectTargetStatus(project);
+      const cleanupEvaluation = yield* Effect.tryPromise({
+        try: () => evaluateHubManagedBranchCleanup({ cwd: status.repoRoot }),
+        catch: toTaskBoardError,
+      });
 
       yield* d.summary(
         "Hub project status",
         formatHubProjectStatusRows(status),
       );
-      for (const line of formatHubProjectStatusLines(status)) {
+      for (const line of formatHubProjectStatusLines(
+        status,
+        formatHubManagedBranchCleanupDiagnosticsLines(cleanupEvaluation),
+      )) {
         yield* d.text(line);
       }
     }),

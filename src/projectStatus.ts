@@ -611,6 +611,7 @@ const appendWorktreeLeaseLines = (
 
 export const formatHubProjectStatusLines = (
   status: HubProjectStatus,
+  cleanupDiagnosticsLines?: readonly string[],
 ): readonly string[] => {
   const lines: string[] = [];
   appendTaskCountLines(lines, status);
@@ -623,6 +624,11 @@ export const formatHubProjectStatusLines = (
   appendRecentEventLines(lines, status.recentEvents);
   appendRunDirectoryLines(lines, status.runDirectories);
   appendWorktreeLeaseLines(lines, status.worktreeLeaseDiagnostics);
+  if (cleanupDiagnosticsLines !== undefined) {
+    for (const line of cleanupDiagnosticsLines) {
+      lines.push(line);
+    }
+  }
 
   return lines;
 };
@@ -790,7 +796,8 @@ export const resolveHubProjectStatus = (
   const repoRoot = resolveRepoRoot(cwd, options.resolveRepoRoot);
   const archloopUserDataDir = resolveUserDataDir(options.archloopUserDataDir);
   const hubProjectDir =
-    options.hubProjectDir ?? resolveHubProjectDir(archloopUserDataDir, repoRoot);
+    options.hubProjectDir ??
+    resolveHubProjectDir(archloopUserDataDir, repoRoot);
   const projectDevelopmentContract = resolveHubProjectDevelopmentContractState({
     repoRoot,
     hubProjectDir,

@@ -853,9 +853,9 @@ Existing single-runtime projects remain valid. `archloop init` does not automati
 
 Reports the selected Hub project by default, or an explicit `--project <name>` target when provided. In a TTY, if no project is selected yet, archLoop opens the Hub project picker; in non-interactive mode it requires a selected project or an explicit target.
 
-The summary includes the canonical git repo root, the archLoop user data directory, the Hub project directory, the selected Hub project profile, the Hub project development contract path, whether `bd` is available, and a CLI-first Hub task board summary. It still works from any directory once a Hub project has been selected or explicitly targeted, even if you have not run `archloop init` in the target repo.
+The summary includes the canonical git repo root, the archLoop user data directory, the Hub project directory, the selected Hub project profile, the Hub project development contract path, whether `bd` is available, a CLI-first Hub task board summary, and managed branch cleanup diagnostics so you can see safe candidates, blocked reasons, and historical unowned preservation rules without opening run logs. It still works from any directory once a Hub project has been selected or explicitly targeted, even if you have not run `archloop init` in the target repo.
 
-The summary includes task counts by Hub status, active runs and batch statuses, failed tasks with failure reason and suggested next action, sync state counts such as `push_pending` or `conflict`, recent Hub events, and paths to Hub run directories for full logs and artifacts. Output remains useful when Beads is unavailable, there are no tasks, no active runs, or GitHub sync is not configured.
+The summary includes task counts by Hub status, active runs and batch statuses, failed tasks with failure reason and suggested next action, sync state counts such as `push_pending` or `conflict`, recent Hub events, paths to Hub run directories for full logs and artifacts, and managed branch cleanup diagnostics with next actions for safe candidates and blocked branches. Output remains useful when Beads is unavailable, there are no tasks, no active runs, or GitHub sync is not configured.
 
 archLoop resolves the user data directory from `XDG_DATA_HOME` when it is set and falls back to `~/.local/share/archloop`.
 
@@ -995,9 +995,9 @@ Repairs failed or stale Hub execution state for a single Beads task. Recovery is
 
 ### `archloop tasks doctor`
 
-Audits local Beads task-board state against Hub run events and git branch/worktree state without mutating Beads, git, or remote GitHub Issues. It reports multiple archLoop status labels, stale `metadata.hubStatus`, missing execution claim fields, failed tasks that still have branch work, merge-ready run history that is not selectable for merge, terminal tasks that still carry execution claim metadata, dirty source worktree gates, worktree lease claim/occupancy mismatches (active execution, stale lease with failed claim, active lease without claim), and task state that still needs `archloop tasks push`.
+Audits local Beads task-board state against Hub run events and git branch/worktree state without mutating Beads, git, or remote GitHub Issues. It reports multiple archLoop status labels, stale `metadata.hubStatus`, missing execution claim fields, failed tasks that still have branch work, merge-ready run history that is not selectable for merge, terminal tasks that still carry execution claim metadata, dirty source worktree gates, worktree lease claim/occupancy mismatches (active execution, stale lease with failed claim, active lease without claim), task state that still needs `archloop tasks push`, and managed branch cleanup diagnostics for safe candidates, blocked branches, and historical unowned preservation rules.
 
-Doctor output includes the next action for each finding: rerun the flow, recover a failed task, repair local state, or push task sync. Dirty source files are a Git safety warning, not repairable Beads task-state pollution. If a later `run --flow` needs to land merge-ready branch work that overlaps those dirty files, commit, stash, or discard the listed blocking files, then rerun the same flow so the batch resumes.
+Doctor output includes the next action for each finding: rerun the flow, recover a failed task, repair local state, push task sync, or clean up managed branches with `archloop tasks cleanup --yes` or `--include-unowned` when appropriate. Dirty source files are a Git safety warning, not repairable Beads task-state pollution. If a later `run --flow` needs to land merge-ready branch work that overlaps those dirty files, commit, stash, or discard the listed blocking files, then rerun the same flow so the batch resumes.
 
 ### `archloop tasks repair-state <task-selector>`
 
@@ -1007,7 +1007,7 @@ Repair uses the same canonical task transition path as normal Hub lifecycle chan
 
 ### `archloop tasks cleanup`
 
-Previews and confirms cleanup of Hub-managed task branches. By default, archLoop only deletes safe managed branches that are already merged and proven to be Hub-owned. Historical unowned `archloop/...` branches remain listed as candidates but are never deleted unless you pass `--include-unowned`. Use `--dry-run` to preview without deleting any git refs.
+Previews and confirms cleanup of Hub-managed task branches. By default, archLoop only deletes safe managed branches that are already merged and proven to be Hub-owned. Historical unowned `archloop/...` branches remain listed as candidates but are preserved unless you pass `--include-unowned`. Use `--dry-run` to preview without deleting any git refs.
 
 ### `archloop tasks delete <task-selector> [task-selector...]`
 
