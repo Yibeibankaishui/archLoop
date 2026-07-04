@@ -86,6 +86,12 @@ import {
   type HubProjectListEntry,
 } from "./hubProjectRegistry.js";
 import {
+  formatHubProjectProfileRecommendation,
+  recommendHubProjectProfile,
+  resolveHubProjectRegistrationRepoRoot,
+  suggestHubProjectName,
+} from "./hubProjectOnboarding.js";
+import {
   configureHubProjectDevelopmentContract,
   formatHubProjectDevelopmentContractFactsSummary,
   resolveHubProjectDevelopmentContractPath,
@@ -2706,10 +2712,10 @@ const projectAddCommand = Command.make(
   ({ name, path, projectProfile }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-
       let projectName = optionalTextValue(name)?.trim() ?? "";
       let repoPath = optionalTextValue(path)?.trim() ?? "";
       let selectedProjectProfile = optionalTextValue(projectProfile)?.trim();
+      let shouldInitializeTaskStore = false;
 
       if (projectName.length === 0 || repoPath.length === 0) {
         if (!hasInteractiveTerminal()) {
@@ -2722,13 +2728,6 @@ const projectAddCommand = Command.make(
         }
       }
 
-      if (projectName.length === 0) {
-        projectName = yield* Effect.tryPromise({
-          try: () => resolveInteractiveProjectName(""),
-          catch: toHubProjectRegistryError,
-        });
-      }
-
       if (repoPath.length === 0) {
         repoPath = yield* Effect.tryPromise({
           try: () => resolveInteractiveProjectPath(),
@@ -2736,8 +2735,48 @@ const projectAddCommand = Command.make(
         });
       }
 
+      const repoRoot = yield* Effect.try({
+        try: () => resolveHubProjectRegistrationRepoRoot(repoPath),
+        catch: toHubProjectRegistryError,
+      });
+
+      if (projectName.length === 0) {
+        projectName = yield* Effect.tryPromise({
+          try: () =>
+            resolveInteractiveProjectName(suggestHubProjectName(repoRoot)),
+          catch: toHubProjectRegistryError,
+        });
+      }
+
+      const profileRecommendation = recommendHubProjectProfile(repoRoot);
       if (!selectedProjectProfile || selectedProjectProfile.length === 0) {
-        selectedProjectProfile = DEFAULT_PROJECT_PROFILE_NAME;
+        selectedProjectProfile = profileRecommendation.projectProfileName;
+        if (hasInteractiveTerminal()) {
+          yield* d.text(
+            formatHubProjectProfileRecommendation(profileRecommendation),
+          );
+          const selected = yield* Effect.tryPromise({
+            try: async () => {
+              const result = await clack.select({
+                message: "Select a project profile:",
+                initialValue: selectedProjectProfile,
+                options: listProjectProfiles().map((profile) => ({
+                  value: profile.name,
+                  label: profile.label,
+                  hint: profile.description,
+                })),
+              });
+              if (clack.isCancel(result)) {
+                throw new HubProjectRegistryError({
+                  message: "Project profile selection cancelled.",
+                });
+              }
+              return String(result);
+            },
+            catch: toHubProjectRegistryError,
+          });
+          selectedProjectProfile = selected;
+        }
       }
 
       const result = yield* Effect.try({
@@ -2746,9 +2785,57 @@ const projectAddCommand = Command.make(
             repoPath,
             projectName,
             projectProfileName: selectedProjectProfile,
+            initializeTaskStore: false,
           }),
         catch: toHubProjectRegistryError,
       });
+
+      if (hasInteractiveTerminal()) {
+        const taskStoreInitDecision = yield* Effect.tryPromise({
+          try: async () => {
+            const response = await clack.confirm({
+              message: "Initialize the local task store now?",
+              initialValue: true,
+            });
+            return clack.isCancel(response) ? false : response === true;
+          },
+          catch: toHubProjectRegistryError,
+        });
+        shouldInitializeTaskStore = taskStoreInitDecision;
+      }
+
+      let taskStoreInitialized = result.taskStoreInitialized;
+      if (shouldInitializeTaskStore) {
+        const taskStoreResult = (() => {
+          try {
+            return {
+              ok: true as const,
+              value: initHubTaskStore(result.project.repoRoot),
+            };
+          } catch (error) {
+            return {
+              ok: false as const,
+              error,
+            };
+          }
+        })();
+
+        if (!taskStoreResult.ok) {
+          const error =
+            taskStoreResult.error instanceof Error
+              ? taskStoreResult.error
+              : new Error(String(taskStoreResult.error));
+          yield* d.status(
+            `Skipped local task store initialization: ${error.message}`,
+            "warn",
+          );
+        } else {
+          taskStoreInitialized = true;
+          if (taskStoreResult.value.output.trim().length > 0) {
+            yield* d.text(taskStoreResult.value.output.trim());
+          }
+        }
+      }
 
       yield* d.summary("Hub project registered", {
         Name: result.project.name,
@@ -2756,12 +2843,20 @@ const projectAddCommand = Command.make(
         "Repo root": result.project.repoRoot,
         "Hub project dir": result.project.hubProjectDir,
         "Project profile": result.project.projectProfile,
+        "Hub project development contract":
+          result.projectDevelopmentContractPath,
+        "Task store initialized": taskStoreInitialized ? "yes" : "no",
         Selected: result.project.name,
       });
       yield* d.status(
         `Registered Hub project ${result.project.name} and selected it for this CLI.`,
         "success",
       );
+      if (!taskStoreInitialized) {
+        yield* d.text(
+          "Run `archloop tasks init` in this repository later to initialize the local task store.",
+        );
+      }
     }),
 );
 

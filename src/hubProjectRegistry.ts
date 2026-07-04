@@ -1,19 +1,16 @@
-import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 
 import { HubProjectRegistryError } from "./errors.js";
-import {
-  resolveArchloopUserDataDir,
-  resolveGitRepoRoot,
-} from "./projectStatus.js";
+import { resolveArchloopUserDataDir } from "./projectStatus.js";
 import {
   configureHubProjectDevelopmentContract,
   resolveHubProjectDevelopmentContractPath,
 } from "./hubProjectDevelopmentContract.js";
 import { DEFAULT_PROJECT_PROFILE_NAME } from "./InitService.js";
 import { initHubTaskStore } from "./hubTaskStore.js";
+import { resolveHubProjectRegistrationRepoRoot } from "./hubProjectOnboarding.js";
 
 export interface HubProjectRegistryEntry {
   readonly id: string;
@@ -223,22 +220,6 @@ const resolveProjectDir = (
     projectId,
   );
 
-const assertRepoHasInitialCommit = (repoRoot: string): void => {
-  try {
-    execFileSync("git", ["rev-parse", "--verify", "HEAD"], {
-      cwd: repoRoot,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new HubProjectRegistryError({
-      message:
-        `archloop project add requires a git repository with at least one commit: ${message}`,
-    });
-  }
-};
-
 const findProjectById = (
   projects: readonly HubProjectRegistryEntry[],
   projectId: string,
@@ -273,7 +254,8 @@ const ensureUniqueProjectName = (
   );
   if (existing) {
     throw new HubProjectRegistryError({
-      message: `Hub project name "${projectName}" is already registered for ${existing.repoRoot}. Use ` +
+      message:
+        `Hub project name "${projectName}" is already registered for ${existing.repoRoot}. Use ` +
         `a different name with \`archloop project add\`, or \`archloop project rename\` after registration.`,
     });
   }
@@ -286,7 +268,8 @@ const ensureUniqueRepoRoot = (
   const existing = projects.find((project) => project.repoRoot === repoRoot);
   if (existing) {
     throw new HubProjectRegistryError({
-      message: `Repository path ${repoRoot} is already registered as Hub project "${existing.name}". ` +
+      message:
+        `Repository path ${repoRoot} is already registered as Hub project "${existing.name}". ` +
         `Use \`archloop project select ${existing.name}\` or \`archloop project relink\` after registration.`,
     });
   }
@@ -327,8 +310,7 @@ export const registerHubProject = (
   input: RegisterHubProjectInput,
 ): RegisterHubProjectResult => {
   const now = nowIso(input.now);
-  const repoRoot = resolveGitRepoRoot(input.repoPath);
-  assertRepoHasInitialCommit(repoRoot);
+  const repoRoot = resolveHubProjectRegistrationRepoRoot(input.repoPath);
 
   const registry = readRegistryState(input);
   ensureUniqueProjectName(registry.projects, input.projectName);
@@ -378,9 +360,8 @@ export const registerHubProject = (
   return {
     project,
     selectedProjectId: projectId,
-    projectDevelopmentContractPath: resolveHubProjectDevelopmentContractPath(
-      hubProjectDir,
-    ),
+    projectDevelopmentContractPath:
+      resolveHubProjectDevelopmentContractPath(hubProjectDir),
     taskStoreInitialized,
   };
 };
