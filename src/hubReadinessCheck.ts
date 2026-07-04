@@ -540,16 +540,19 @@ const reportHasSeverity = (
     section.findings.some((finding) => finding.severity === severity),
   );
 
-const summarizeReport = (report: HubReadinessCheckReport): string => {
+const summarizeReport = (
+  report: HubReadinessCheckReport,
+  title: string,
+): string => {
   if (report.hasErrors) {
-    return "Hub readiness check failed.";
+    return `${title} failed.`;
   }
 
   if (report.hasWarnings) {
-    return "Hub readiness check completed with warnings.";
+    return `${title} completed with warnings.`;
   }
 
-  return "Hub readiness check passed.";
+  return `${title} passed.`;
 };
 
 export const collectHubReadinessChecks = async (
@@ -628,10 +631,12 @@ const formatFindingLines = (finding: HubReadinessFinding): string[] => {
   return lines;
 };
 
-export const formatHubReadinessCheckLines = (
+export const formatReadinessCheckLines = (
+  title: string,
   report: HubReadinessCheckReport,
+  summaryTitle: string = title,
 ): readonly string[] => {
-  const lines = ["Hub readiness check"];
+  const lines = [title];
   for (const section of report.sections) {
     lines.push("", section.title);
     for (const finding of section.findings) {
@@ -639,6 +644,15 @@ export const formatHubReadinessCheckLines = (
     }
   }
   lines.push("");
-  lines.push(summarizeReport(report));
+  lines.push(summarizeReport(report, summaryTitle));
   return lines;
 };
+
+export const formatHubReadinessCheckLines = (
+  report: HubReadinessCheckReport,
+): readonly string[] =>
+  formatReadinessCheckLines(
+    "Hub readiness check",
+    report,
+    "Hub readiness check",
+  );

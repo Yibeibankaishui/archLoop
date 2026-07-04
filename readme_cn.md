@@ -17,6 +17,8 @@ archLoop（`@yibeibankaishui/archloop`）是一个 TypeScript 工具包，用于
 
 如果你要先完成 Hub 级共享设置，再注册第一个项目，先运行 `archloop initialize`。它会配置共享 agent roles、env 和 auth 指引，默认再跑一次轻量 Hub check，并在成功后把 `archloop project add` 作为下一步。需要跳过 quick check 时，使用 `archloop initialize --skip-check`。
 
+`archloop check` 默认会同时检查 Hub 级 readiness 和当前 CLI selected 的 Hub project（如果存在）。也可以显式用 `archloop check --hub` 只检查 Hub，`archloop check --project <name>` 检查某个项目，或者 `archloop check --all-projects` 检查全部项目。项目级检查会验证 repo path、git repo、initial commit、development contract、local task store、ready/failed 任务摘要、active run 和 flow readiness signals；如果没有 selected project，它会给出 `archloop project add` / `archloop project select` 的提示，而不是直接报错。
+
 ## 核心思路：按仓库配置
 
 archLoop **不是**全局装一次到处用，而是**每个 Git 项目单独初始化**：

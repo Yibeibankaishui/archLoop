@@ -859,9 +859,13 @@ The summary includes task counts by Hub status, active runs and batch statuses, 
 
 archLoop resolves the user data directory from `XDG_DATA_HOME` when it is set and falls back to `~/.local/share/archloop`.
 
-### `archloop check [--hub]`
+### `archloop check [--hub] [--project <name>] [--all-projects]`
 
-Runs the Hub-wide readiness slice from any directory. The check validates Hub agent role completeness, Hub env/auth presence, configured provider references, provider CLI availability, and grouped provider/model smoke checks through the same provider path used by Hub flow execution. It renders visible progress while it runs, deduplicates smoke checks by provider, model, and options, and lists the roles covered by each smoke check. Blocking errors return a non-zero exit code; warnings stay visible and still exit successfully.
+Runs Hub readiness from any directory. By default, `archloop check` runs the Hub-wide slice plus the CLI selected Hub project when one exists. `--hub` limits the command to Hub-wide checks only, `--project <name>` checks one explicit Hub project, and `--all-projects` checks every registered project.
+
+The Hub-wide slice validates agent role completeness, Hub env/auth presence, configured provider references, provider CLI availability, and grouped provider/model smoke checks through the same provider path used by Hub flow execution. The project slice validates repo path existence, git repository validity, initial commit presence, development contract state, local task store state, ready/failed task summary, active run presence, and flow readiness signals.
+
+It renders visible progress while it runs, deduplicates smoke checks by provider, model, and options, and lists the roles covered by each smoke check. Missing selected projects are warnings with exact `archloop project add` and `archloop project select` guidance; blocking project failures such as a missing repo path return a non-zero exit code when that project is the requested target.
 
 ### `archloop initialize [--skip-check]`
 
