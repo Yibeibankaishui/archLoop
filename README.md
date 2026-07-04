@@ -37,6 +37,11 @@ archLoop bundles a pinned Beads runtime via `@beads/bd@1.0.4`, so Hub and
 Beads-backed commands can use the packaged `bd` binary without a separate
 system install. Set `ARCHLOOP_BD_PATH` to override the binary path if needed.
 
+If you are onboarding Hub projects, start with `archloop initialize`, then use
+`archloop project add`, `archloop project list`, `archloop project select`,
+`archloop check`, and selected-project `archloop run --flow ...`. The steps
+below describe the legacy repo-local scaffold path for `.archloop/`.
+
 2. Run `archloop init`. This scaffolds a `.archloop` directory with all the files needed.
 
 ```bash
@@ -761,7 +766,7 @@ Optional **no-sandbox only** add-on for WeChat Developer Tools / MCP runtime deb
 
 ### `archloop init`
 
-Scaffolds the `.archloop/` config directory and optionally builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a capability pack (first), default scaffold agent, installed runtimes, sandbox provider, backlog manager, optional capability add-ons (when the pack exposes them), workflow template, and Project profile. Init now offers `docker` and `no-sandbox`: choosing `docker` follows the normal image-build flow, while choosing `no-sandbox` skips image build during init and rewrites the scaffolded `main.mts` or `main.ts` to call `noSandbox()`. After scaffold (and before optional image build), init also points selected tools such as GitHub Issues, Codex, and Cursor toward env keys or Hub-owned auth sessions under the archLoop user data directory. When you select the `miniprogram` capability pack, init may also offer project-local `miniprogram-ci` installation and writes Mini Program verification scaffold files.
+Scaffolds the `.archloop/` config directory and optionally builds the sandbox image. This is the legacy repo-local scaffold command, not the Hub-wide onboarding entry point. Interactive init asks for a capability pack (first), default scaffold agent, installed runtimes, sandbox provider, backlog manager, optional capability add-ons (when the pack exposes them), workflow template, and Project profile. Init now offers `docker` and `no-sandbox`: choosing `docker` follows the normal image-build flow, while choosing `no-sandbox` skips image build during init and rewrites the scaffolded `main.mts` or `main.ts` to call `noSandbox()`. After scaffold (and before optional image build), init also points selected tools such as GitHub Issues, Codex, and Cursor toward env keys or Hub-owned auth sessions under the archLoop user data directory. When you select the `miniprogram` capability pack, init may also offer project-local `miniprogram-ci` installation and writes Mini Program verification scaffold files.
 
 Think of the init agent choices as two layers:
 
