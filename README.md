@@ -857,6 +857,12 @@ The summary includes task counts by Hub status, active runs and batch statuses, 
 
 archLoop resolves the user data directory from `XDG_DATA_HOME` when it is set and falls back to `~/.local/share/archloop`.
 
+### `archloop check [--hub]`
+
+Runs the Hub-wide readiness slice from any directory. The current slice checks Hub agent role completeness, Hub env/auth presence, configured provider references, and provider CLI availability, while rendering visible progress for each step. Blocking errors return a non-zero exit code; warnings stay visible and still exit successfully.
+
+This first slice does not yet make provider/model smoke calls. Instead, it emits a visible warning that the smoke-check stage is deferred until the next slice lands.
+
 ### `archloop project configure`
 
 Creates or updates the Hub project development contract for the current repository. Pass `--project-profile <profile>` to choose the profile explicitly; supported profiles reuse the init registry (`generic`, `node`, `python`, `cpp`). In an interactive terminal, omit the flag to pick a profile from a prompt. The contract is written as pretty-printed JSON to the Hub project assets directory under `development-contract.json`.

@@ -34,9 +34,10 @@ Hub flow 使用 archLoop 自带的 flow prompt，不读取目标项目里的 `.a
 
 ```bash
 archloop project status
+archloop check --hub
 ```
 
-这个命令用于确认：
+`project status` 用于确认：
 
 | 输出项                       | 用途                                         |
 | ---------------------------- | -------------------------------------------- |
@@ -45,6 +46,8 @@ archloop project status
 | Hub project directory        | 当前项目的 Hub 运行状态目录                  |
 | Beads availability           | Beads 是否可用                               |
 | Task summary                 | 当前任务表、失败任务、运行批次、同步状态摘要 |
+
+`check --hub` 用于验证 Hub 级 readiness：agent role 是否完整、共享凭据和 auth 是否存在、provider 引用是否可用、以及 provider CLI 是否能从 PATH 找到。当前首个 slice 只做静态检查，会在输出里显示进度，并提醒 provider/model smoke check 还未接入。
 
 ### 3.2 配置 agent roles
 

@@ -22,6 +22,7 @@ import {
   createHubRunContext,
   createHubTaskClaimMetadata,
 } from "./hubExecution.js";
+import { setHubAgentRole } from "./hubAgentConfig.js";
 import { resolveGitRepoRoot, resolveHubProjectDir } from "./projectStatus.js";
 import { resolveHubProjectDevelopmentContractPath } from "./hubProjectDevelopmentContract.js";
 import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
@@ -848,6 +849,132 @@ exit 1
     expect(stdout).toContain("Task board total");
   });
 
+  it("check runs from any directory, shows progress, and warns about deferred smoke checks", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "cli-check-data-"));
+    const env = {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+      CURSOR_API_KEY: "cursor-test-key",
+    };
+
+    const binDir = join(dataDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const agentPath = join(binDir, "agent");
+    await writeFile(
+      agentPath,
+      `#!/bin/sh
+exit 0
+`,
+    );
+    await chmod(agentPath, 0o755);
+
+    const storeEnv = { ...env, PATH: `${binDir}:${process.env.PATH ?? ""}` };
+    setHubAgentRole(
+      "planning",
+      { provider: "cursor", model: "auto" },
+      { env: storeEnv },
+    );
+    setHubAgentRole(
+      "triage",
+      { provider: "cursor", model: "auto" },
+      { env: storeEnv },
+    );
+    setHubAgentRole(
+      "implementation",
+      { provider: "cursor", model: "auto" },
+      { env: storeEnv },
+    );
+    setHubAgentRole(
+      "review",
+      { provider: "cursor", model: "auto" },
+      { env: storeEnv },
+    );
+    setHubAgentRole(
+      "merge",
+      { provider: "cursor", model: "auto" },
+      { env: storeEnv },
+    );
+    setHubAgentRole(
+      "recovery",
+      { provider: "cursor", model: "auto" },
+      { env: storeEnv },
+    );
+
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-check-cwd-"));
+    const { stdout } = await runCli("check --hub", otherDir, storeEnv);
+
+    expect(stdout).toContain("Hub readiness check");
+    expect(stdout).toContain("Checking Hub agent roles");
+    expect(stdout).toContain("Checking configured provider references");
+    expect(stdout).toContain("Checking Hub env and auth");
+    expect(stdout).toContain("Checking required tools");
+    expect(stdout).toContain("Provider/model smoke checks are deferred");
+    expect(stdout).toContain("Hub readiness check completed with warnings");
+  });
+
+  it("check reports missing credential guidance and exits non-zero", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "cli-check-missing-cred-"));
+    const env = {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+      CURSOR_API_KEY: "",
+    };
+
+    const binDir = join(dataDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const agentPath = join(binDir, "agent");
+    await writeFile(
+      agentPath,
+      `#!/bin/sh
+exit 0
+`,
+    );
+    await chmod(agentPath, 0o755);
+
+    const storeEnv = { ...env, PATH: `${binDir}:${process.env.PATH ?? ""}` };
+    setHubAgentRole(
+      "planning",
+      { provider: "cursor", model: "auto" },
+      { env: storeEnv },
+    );
+    setHubAgentRole(
+      "triage",
+      { provider: "cursor", model: "auto" },
+      { env: storeEnv },
+    );
+    setHubAgentRole(
+      "implementation",
+      { provider: "cursor", model: "auto" },
+      { env: storeEnv },
+    );
+    setHubAgentRole(
+      "review",
+      { provider: "cursor", model: "auto" },
+      { env: storeEnv },
+    );
+    setHubAgentRole(
+      "merge",
+      { provider: "cursor", model: "auto" },
+      { env: storeEnv },
+    );
+    setHubAgentRole(
+      "recovery",
+      { provider: "cursor", model: "auto" },
+      { env: storeEnv },
+    );
+
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-check-missing-cred-cwd-"));
+    try {
+      await runCli("check --hub", otherDir, storeEnv);
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain("Hub readiness check failed.");
+      expect(output).toContain("archloop env set CURSOR_API_KEY <value>");
+      expect(output).toContain("archloop env init");
+    }
+  });
+
   it("project configure writes a durable development contract and reports its path", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
@@ -1101,42 +1228,41 @@ process.exit(1);
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-    const bundledBd = join(
-      process.cwd(),
-      "node_modules",
-      "@beads",
-      "bd",
-      "bin",
-      "bd",
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const { mkdirSync, writeFileSync } = require("node:fs");
+const { join } = require("node:path");
+const [command] = process.argv.slice(2);
+if (command === "init") {
+  mkdirSync(".beads", { recursive: true });
+  writeFileSync(join(".beads", "metadata.json"), JSON.stringify({ backend: "dolt" }));
+  process.exit(0);
+}
+if (command === "list") {
+  process.stdout.write("[]\\n");
+  process.exit(0);
+}
+process.stderr.write("unsupported command\\n");
+process.exit(1);
+`,
     );
-    await access(bundledBd);
+    await chmod(bdPath, 0o755);
 
     const { stdout: initStdout } = await runCli("tasks init", hostDir, {
       ...process.env,
-      ARCHLOOP_BD_PATH: bundledBd,
-      PATH: `${join(hostDir, "bin")}:${process.env.PATH ?? ""}`,
+      ARCHLOOP_BD_PATH: bdPath,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
     });
     expect(initStdout).toContain("Initialized local Hub task store");
-
-    const boardJson = JSON.stringify([]);
-    const mockBdPath = join(hostDir, "bin", "bd");
-    await mkdir(join(hostDir, "bin"), { recursive: true });
-    await writeFile(
-      mockBdPath,
-      `#!/bin/sh
-if [ "$1" = "list" ]; then
-  printf '%s\\n' '${boardJson}'
-  exit 0
-fi
-exit 1
-`,
-    );
-    await chmod(mockBdPath, 0o755);
 
     const { stdout } = await runCli(
       "tasks list",
       hostDir,
-      withBdEnv(mockBdPath, hostDir),
+      withBdEnv(bdPath, hostDir),
     );
     expect(stdout).toContain("Hub task board");
     expect(stdout).toContain("No Beads tasks found");
