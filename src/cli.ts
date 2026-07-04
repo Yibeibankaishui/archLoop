@@ -119,15 +119,19 @@ import type {
 import {
   formatHubTaskBoardLines,
   appendHubTaskComment,
+  cleanupHubManagedBranches,
   createHubTask,
   deleteHubTasks,
+  formatHubManagedBranchCleanupLines,
   formatHubTaskCommentLines,
   formatHubTaskDetailsRows,
   loadHubTask,
   loadHubTaskBoard,
+  planHubManagedBranchCleanup,
   resolveHubTaskSelector,
   resolveHubTaskSelectors,
 } from "./taskBoard.js";
+import { evaluateHubManagedBranchCleanup } from "./hubManagedBranchCleanup.js";
 import { HUB_TRIAGE_DEFAULT_TASK_QUERY } from "./hubTriage.js";
 import { initHubTaskStore } from "./hubTaskStore.js";
 import { isTriageTaskIdInput } from "./hubTriageProposal.js";
@@ -1716,6 +1720,24 @@ const taskDeleteCascadeOption = Options.boolean("cascade").pipe(
   ),
   Options.withDefault(false),
 );
+const taskCleanupYesOption = Options.boolean("yes").pipe(
+  Options.withDescription(
+    "Confirm cleanup of safe managed branches without interactive prompts.",
+  ),
+  Options.withDefault(false),
+);
+const taskCleanupDryRunOption = Options.boolean("dry-run").pipe(
+  Options.withDescription(
+    "Preview managed branch cleanup without deleting any git refs.",
+  ),
+  Options.withDefault(false),
+);
+const taskCleanupIncludeUnownedOption = Options.boolean("include-unowned").pipe(
+  Options.withDescription(
+    "Also delete safe historical unowned archloop/... branches when confirming cleanup.",
+  ),
+  Options.withDefault(false),
+);
 const taskSyncYesOption = Options.boolean("yes").pipe(
   Options.withDescription(
     "Apply sync changes after previewing them. Required for non-interactive tasks sync.",
@@ -2272,6 +2294,108 @@ const tasksDoctorCommand = Command.make("doctor", {}, () =>
   }),
 );
 
+const tasksCleanupCommand = Command.make(
+  "cleanup",
+  {
+    yes: taskCleanupYesOption,
+    dryRun: taskCleanupDryRunOption,
+    includeUnowned: taskCleanupIncludeUnownedOption,
+  },
+  ({ yes, dryRun, includeUnowned }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = process.cwd();
+      const isTTY = process.stdin.isTTY === true;
+      const evaluation = yield* Effect.tryPromise({
+        try: () => evaluateHubManagedBranchCleanup({ cwd }),
+        catch: toTaskBoardError,
+      });
+      const cleanupPlan = planHubManagedBranchCleanup(evaluation, {
+        includeUnowned,
+      });
+      const managedDeletionCount = cleanupPlan.managedBranches.length;
+      const historicalDeletionCount = cleanupPlan.historicalBranches.length;
+
+      for (const line of formatHubManagedBranchCleanupLines(evaluation, {
+        dryRun,
+        includeUnowned,
+      })) {
+        yield* d.text(line);
+      }
+
+      if (dryRun) {
+        yield* d.status("Dry run for managed branch cleanup.", "info");
+        return;
+      }
+
+      if (cleanupPlan.totalBranches === 0) {
+        yield* d.status(
+          "No safe branches were eligible for managed branch cleanup.",
+          "info",
+        );
+        return;
+      }
+
+      if (!yes && !isTTY) {
+        return yield* Effect.fail(
+          new TaskBoardError({
+            message:
+              "archloop tasks cleanup mutates git refs. Re-run with --yes in non-interactive mode, or use --dry-run to preview.",
+          }),
+        );
+      }
+
+      if (!yes && isTTY) {
+        const approved = yield* Effect.tryPromise({
+          try: async () => {
+            const message =
+              historicalDeletionCount > 0
+                ? `Delete ${managedDeletionCount} managed branch(s) and ${historicalDeletionCount} safe historical candidate(s)? Historical candidates require --include-unowned.`
+                : `Delete ${managedDeletionCount} managed branch(s)?`;
+            const result = await clack.confirm({
+              message,
+              initialValue: false,
+            });
+            if (clack.isCancel(result)) {
+              throw new TaskBoardError({
+                message: "Managed branch cleanup cancelled.",
+              });
+            }
+            return result === true;
+          },
+          catch: toTaskBoardError,
+        });
+
+        if (!approved) {
+          return yield* Effect.fail(
+            new TaskBoardError({
+              message: "Managed branch cleanup cancelled.",
+            }),
+          );
+        }
+      }
+
+      const result = yield* Effect.tryPromise({
+        try: () =>
+          cleanupHubManagedBranches({
+            cwd,
+            includeUnowned,
+          }),
+        catch: toTaskBoardError,
+      });
+
+      for (const line of formatHubManagedBranchCleanupLines(result.evaluation, {
+        includeUnowned,
+        deletedManagedBranches: result.deletedManagedBranches,
+        deletedHistoricalBranches: result.deletedHistoricalBranches,
+      })) {
+        yield* d.text(line);
+      }
+
+      yield* d.status("Completed managed branch cleanup.", "success");
+    }),
+);
+
 const tasksRepairStateCommand = Command.make(
   "repair-state",
   {
@@ -2464,6 +2588,7 @@ const tasksCommand = Command.make("tasks", {}, () =>
     tasksCommentCommand,
     tasksRecoverCommand,
     tasksDoctorCommand,
+    tasksCleanupCommand,
     tasksRepairStateCommand,
     tasksDeleteCommand,
   ]),
