@@ -177,6 +177,7 @@ import {
 import {
   promptHubAgentRoleSetup,
   promptInitHubAgentConfig,
+  promptInitializeHubAgentConfig,
 } from "./hubAgentConfigPrompt.js";
 import {
   formatHubEnvShowLines,
@@ -184,7 +185,7 @@ import {
   resolveHubEnvPath,
   upsertHubEnvKey,
 } from "./hubEnv.js";
-import { promptInitHubEnv } from "./hubEnvPrompt.js";
+import { promptInitHubEnv, promptInitializeHubEnv } from "./hubEnvPrompt.js";
 import {
   ensureHubAuthDir,
   formatHubAuthShowLines,
@@ -2681,35 +2682,96 @@ const checkHubOption = Options.boolean("hub").pipe(
   Options.withDefault(false),
 );
 
+const runHubReadinessCheck = (
+  options: Parameters<typeof collectHubReadinessChecks>[0] = {},
+) =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const report = yield* Effect.tryPromise({
+      try: () => collectHubReadinessChecks(options),
+      catch: (error) =>
+        error instanceof Error ? error : new Error(String(error)),
+    });
+
+    for (const section of report.sections) {
+      yield* d.spinner(section.title, Effect.void);
+    }
+
+    for (const line of formatHubReadinessCheckLines(report)) {
+      yield* d.text(line);
+    }
+
+    if (report.hasErrors) {
+      return yield* Effect.fail(
+        new HubFlowError({
+          message: "Hub readiness check failed.",
+        }),
+      );
+    }
+  });
+
 const checkCommand = Command.make(
   "check",
   {
     hub: checkHubOption,
   },
-  () =>
+  () => runHubReadinessCheck({ env: process.env }),
+);
+
+const initializeSkipCheckOption = Options.boolean("skip-check").pipe(
+  Options.withDescription("Skip the default quick Hub check after setup."),
+  Options.withDefault(false),
+);
+
+const initializeCommand = Command.make(
+  "initialize",
+  {
+    skipCheck: initializeSkipCheckOption,
+  },
+  ({ skipCheck }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const report = yield* Effect.tryPromise({
-        try: () => collectHubReadinessChecks({ env: process.env }),
-        catch: (error) =>
-          error instanceof Error ? error : new Error(String(error)),
-      });
 
-      for (const section of report.sections) {
-        yield* d.spinner(section.title, Effect.void);
-      }
-
-      for (const line of formatHubReadinessCheckLines(report)) {
-        yield* d.text(line);
-      }
-
-      if (report.hasErrors) {
+      if (!hasInteractiveTerminal()) {
         return yield* Effect.fail(
-          new HubFlowError({
-            message: "Hub readiness check failed.",
+          new InitError({
+            message:
+              "Interactive Hub initialization requires a TTY. Use `archloop agent-config set-role`, `archloop env set`, and `archloop auth login` in scripts.",
           }),
         );
       }
+
+      yield* d.intro("Initialize archLoop Hub");
+      yield* d.status(
+        "Configure shared Hub agent roles, env values, and auth guidance without touching any Hub project.",
+        "info",
+      );
+
+      yield* Effect.tryPromise({
+        try: () => promptInitializeHubAgentConfig(),
+        catch: toHubAgentConfigError,
+      });
+
+      yield* Effect.tryPromise({
+        try: () => promptInitializeHubEnv(),
+        catch: toHubEnvError,
+      });
+
+      for (const line of formatHubAuthShowLines()) {
+        yield* d.text(line);
+      }
+
+      if (skipCheck) {
+        yield* d.status("Skipped the quick Hub check.", "info");
+      } else {
+        yield* d.text(
+          "Quick Hub check may make a small provider/model call. Run `archloop initialize --skip-check` to skip it.",
+        );
+        yield* runHubReadinessCheck({ env: process.env });
+      }
+
+      yield* d.status("Hub initialization complete.", "success");
+      yield* d.text("archloop project add");
     }),
 );
 
@@ -3832,6 +3894,7 @@ const rootCommand = Command.make("archloop", {}, () =>
 
 export const archloop = rootCommand.pipe(
   Command.withSubcommands([
+    initializeCommand,
     initCommand,
     checkCommand,
     runCommand,

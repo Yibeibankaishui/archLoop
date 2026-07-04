@@ -26,6 +26,8 @@ Unified interface 面向一个已有 Git 项目运行。目标项目需要满足
 
 Hub flow 使用 archLoop 自带的 flow prompt，不读取目标项目里的 `.archloop/main.ts` 或 `.archloop` prompt。目标项目不需要先执行 `archloop init`。
 
+如果你要先完成 Hub 级共享设置，再注册第一个项目，先运行 `archloop initialize`。它会配置共享 agent roles、env 和 auth 指引，默认再跑一次轻量 Hub check，并在成功后把 `archloop project add` 作为下一步。若要跳过 quick check，使用 `archloop initialize --skip-check`。
+
 ## 3 首次配置
 
 ### 3.1 检查项目状态

@@ -328,6 +328,6 @@ Goal: 提供 CLI-first 的 archLoop Hub 控制面，并在同一状态模型上�
 - [x] 实现共享 Hub project target resolver，并让 `project status` / `project configure` 优先使用显式目标、CLI selected project 和 TTY picker，而不是当前工作目录（见 [#191](https://github.com/Yibeibankaishui/archLoop/issues/191)、parent [#186](https://github.com/Yibeibankaishui/archLoop/issues/186)）。
 - [ ] 定义 archLoop Hub 控制面的核心用户路径。
 - [ ] 设计 Hub project onboarding、credentials、`archloop check` readiness 验证和 flow run CLI；v1 聚焦注册已有 git repo，后续再支持从 archLoop 创建全新代码项目（见 [hub-project-onboarding-and-check](./prd/hub-project-onboarding-and-check.md)、[#186](https://github.com/Yibeibankaishui/archLoop/issues/186)、[ADR-0029](./adr/0029-hub-project-registry-and-active-context.md)）。
-      Current slice: `archloop check --hub` now renders visible progress, runs real provider/model smoke checks through the provider path used by Hub flow execution, returns non-zero on blocking errors, and lists the roles covered by each provider/model check.
+      Current slice: `archloop initialize` now configures Hub-wide roles/env/auth guidance and runs the quick Hub check by default; `archloop check --hub` renders visible progress, runs real provider/model smoke checks through the provider path used by Hub flow execution, returns non-zero on blocking errors, and lists the roles covered by each provider/model check.
 - [ ] 设计 run / sandbox / branch / logs / agent stream 的可视化模型。
 - [ ] 明确 GUI 与 Hub CLI / JS API 的关系。

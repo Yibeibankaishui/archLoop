@@ -343,6 +343,11 @@ describe("archloop CLI", () => {
     expect(stdout).toContain("project status");
   });
 
+  it("root help exposes initialize", async () => {
+    const { stdout } = await runCli("--help", process.cwd());
+    expect(stdout).toContain("initialize");
+  });
+
   it("root help exposes the agent-config namespace", async () => {
     const { stdout } = await runCli("--help", process.cwd());
     expect(stdout).toContain("agent-config");
