@@ -11,6 +11,8 @@ import {
 } from "./hubAgentCatalog.js";
 import {
   initHubAgentConfig,
+  ensureHubAgentRolesConfigured,
+  HUB_AGENT_ROLES,
   type HubAgentConfig,
   type HubAgentConfigStoreOptions,
   type HubAgentRole,
@@ -186,6 +188,23 @@ export const promptInitHubAgentConfig = async (
       }
       return Boolean(applyToAll);
     },
+    configureRole: promptHubAgentRoleSetup,
+  });
+
+  clack.outro("Hub agent roles configured.");
+  return config;
+};
+
+export const promptInitializeHubAgentConfig = async (
+  options: HubAgentConfigStoreOptions = {},
+): Promise<HubAgentConfig> => {
+  clack.intro("Configure Hub agent roles");
+
+  const config = await ensureHubAgentRolesConfigured({
+    env: options.env,
+    homeDir: options.homeDir,
+    requiredRoles: HUB_AGENT_ROLES,
+    interactive: true,
     configureRole: promptHubAgentRoleSetup,
   });
 

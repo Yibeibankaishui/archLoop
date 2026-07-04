@@ -15,6 +15,8 @@ archLoop（`@yibeibankaishui/archloop`）是一个 TypeScript 工具包，用于
 
 如果想先浏览已注册的 Hub project，可以运行 `archloop project list`：它会显示项目名、repo path、Project profile、selected 标记、path/task readiness 标签，以及 active run 概览，方便先挑选再切换。
 
+如果你要先完成 Hub 级共享设置，再注册第一个项目，先运行 `archloop initialize`。它会配置共享 agent roles、env 和 auth 指引，默认再跑一次轻量 Hub check，并在成功后把 `archloop project add` 作为下一步。需要跳过 quick check 时，使用 `archloop initialize --skip-check`。
+
 ## 核心思路：按仓库配置
 
 archLoop **不是**全局装一次到处用，而是**每个 Git 项目单独初始化**：

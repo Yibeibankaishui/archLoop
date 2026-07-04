@@ -863,6 +863,10 @@ archLoop resolves the user data directory from `XDG_DATA_HOME` when it is set an
 
 Runs the Hub-wide readiness slice from any directory. The check validates Hub agent role completeness, Hub env/auth presence, configured provider references, provider CLI availability, and grouped provider/model smoke checks through the same provider path used by Hub flow execution. It renders visible progress while it runs, deduplicates smoke checks by provider, model, and options, and lists the roles covered by each smoke check. Blocking errors return a non-zero exit code; warnings stay visible and still exit successfully.
 
+### `archloop initialize [--skip-check]`
+
+Runs the Hub-wide first-run and repair setup. It configures shared Hub agent roles, shared env values, and auth guidance without touching any Hub project. Existing valid settings are preserved; reruns only repair missing Hub-wide readiness. By default it explains that the quick Hub check may make a small provider/model call, runs that check, and then ends by telling you to run `archloop project add`. Pass `--skip-check` to skip the quick check when you intentionally do not want the provider smoke call.
+
 ### `archloop project configure`
 
 Creates or updates the Hub project development contract for the selected Hub project. Pass `--project <name>` to target a specific project explicitly, and `--project-profile <profile>` to choose the profile explicitly; supported profiles reuse the init registry (`generic`, `node`, `python`, `cpp`). In an interactive terminal, omitting `--project` opens the Hub project picker when no project is selected, and omitting `--project-profile` picks a profile from a prompt. The contract is written as pretty-printed JSON to the Hub project assets directory under `development-contract.json`.
