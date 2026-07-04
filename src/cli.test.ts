@@ -26,6 +26,7 @@ import { HUB_AGENT_ROLES, setHubAgentRole } from "./hubAgentConfig.js";
 import { resolveGitRepoRoot, resolveHubProjectDir } from "./projectStatus.js";
 import { resolveHubProjectDevelopmentContractPath } from "./hubProjectDevelopmentContract.js";
 import {
+  readHubProjectRegistry,
   registerHubProject,
   resolveSelectedHubProject,
 } from "./hubProjectRegistry.js";
@@ -33,7 +34,7 @@ import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
 
 const execAsync = promisify(exec);
 vi.setConfig({ testTimeout: 60_000 });
-const registeredTaskBoardRepos = new Set<string>();
+const TEST_PROJECT_TIMESTAMP = new Date("2026-07-04T12:00:00.000Z");
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
@@ -116,6 +117,42 @@ const cliFailureOutput = (err: unknown): string => {
 const flattenCliOutput = (output: string): string =>
   output.replace(/[│\s]+/g, "");
 
+const hasInitialCommit = (repoDir: string): boolean => {
+  try {
+    execSync("git rev-parse --verify HEAD", {
+      cwd: repoDir,
+      stdio: "pipe",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const ensureTaskBoardProjectRegistered = (
+  repoDir: string,
+  env: NodeJS.ProcessEnv,
+) => {
+  if (!hasInitialCommit(repoDir)) {
+    return;
+  }
+
+  const repoRoot = resolveGitRepoRoot(repoDir);
+  const alreadyRegistered = readHubProjectRegistry({ env }).some(
+    (project) => project.repoRoot === repoRoot,
+  );
+  if (alreadyRegistered) {
+    return;
+  }
+
+  registerHubProject({
+    repoPath: repoRoot,
+    projectName: basename(repoRoot),
+    env,
+    now: TEST_PROJECT_TIMESTAMP,
+  });
+};
+
 const withBdEnv = (
   bdPath: string,
   repoDirOrEnv?: string | NodeJS.ProcessEnv,
@@ -142,29 +179,8 @@ const withBdEnv = (
     ARCHLOOP_BD_PATH: bdPath,
   };
 
-  const hasInitialCommit =
-    repoDir !== undefined
-      ? (() => {
-          try {
-            execSync("git rev-parse --verify HEAD", {
-              cwd: repoDir,
-              stdio: "pipe",
-            });
-            return true;
-          } catch {
-            return false;
-          }
-        })()
-      : false;
-
-  if (repoDir && hasInitialCommit && !registeredTaskBoardRepos.has(repoDir)) {
-    registeredTaskBoardRepos.add(repoDir);
-    registerHubProject({
-      repoPath: repoDir,
-      projectName: basename(repoDir),
-      env,
-      now: new Date("2026-07-04T12:00:00.000Z"),
-    });
+  if (repoDir) {
+    ensureTaskBoardProjectRegistered(repoDir, env);
   }
 
   return env;
@@ -211,13 +227,8 @@ const setupManagedBranchCleanupRepo = async (hostDir: string) => {
 
   const xdgDataHome = join(hostDir, "xdg-data");
   const env = { ...process.env, XDG_DATA_HOME: xdgDataHome };
+  ensureTaskBoardProjectRegistered(hostDir, env);
   const repoRoot = resolveGitRepoRoot(hostDir);
-  registerHubProject({
-    repoPath: hostDir,
-    projectName: basename(hostDir),
-    env,
-    now: new Date("2026-07-04T12:00:00.000Z"),
-  });
   const hubProjectDir = resolveHubProjectDir(
     join(xdgDataHome, "archloop"),
     repoRoot,
@@ -974,7 +985,6 @@ exit 1
       await setupManagedBranchCleanupRepo(hostDir);
     const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
 
-    await runCli(`project add --name alpha --path "${hostDir}"`, otherDir, env);
     const { stdout } = await runCli("project status", otherDir, env);
 
     expect(stdout).toContain("Managed branch cleanup diagnostics");
@@ -1386,19 +1396,13 @@ process.exit(1);
     );
     await chmod(bdPath, 0o755);
 
-    const dataHome = join(hostDir, ".test-xdg-data");
     const env = {
       ...process.env,
-      XDG_DATA_HOME: dataHome,
+      XDG_DATA_HOME: join(hostDir, ".test-xdg-data"),
       PATH: `${binDir}:${process.env.PATH ?? ""}`,
       ARCHLOOP_BD_PATH: bdPath,
     };
-    registerHubProject({
-      repoPath: hostDir,
-      projectName: basename(hostDir),
-      env,
-      now: new Date("2026-07-04T12:00:00.000Z"),
-    });
+    ensureTaskBoardProjectRegistered(hostDir, env);
 
     try {
       await runCli("tasks list", hostDir, env);
@@ -1438,19 +1442,13 @@ process.exit(1);
     );
     await chmod(bdPath, 0o755);
 
-    const dataHome = join(hostDir, ".test-xdg-data");
     const env = {
       ...process.env,
-      XDG_DATA_HOME: dataHome,
+      XDG_DATA_HOME: join(hostDir, ".test-xdg-data"),
       ARCHLOOP_BD_PATH: bdPath,
       PATH: `${binDir}:${process.env.PATH ?? ""}`,
     };
-    registerHubProject({
-      repoPath: hostDir,
-      projectName: basename(hostDir),
-      env,
-      now: new Date("2026-07-04T12:00:00.000Z"),
-    });
+    ensureTaskBoardProjectRegistered(hostDir, env);
 
     const { stdout: initStdout } = await runCli("tasks init", hostDir, env);
     expect(initStdout).toContain("Initialized local Hub task store");
@@ -1458,7 +1456,7 @@ process.exit(1);
     const { stdout } = await runCli(
       "tasks list",
       hostDir,
-      withBdEnv(bdPath, hostDir),
+      env,
     );
     expect(stdout).toContain("Hub task board");
     expect(stdout).toContain("No Beads tasks found");

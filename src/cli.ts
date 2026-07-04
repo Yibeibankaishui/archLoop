@@ -93,10 +93,7 @@ import {
   selectHubProject,
   type HubProjectListEntry,
 } from "./hubProjectRegistry.js";
-import {
-  resolveHubProjectTarget,
-  type ResolveHubProjectTargetResult,
-} from "./hubProjectTargetResolver.js";
+import { resolveHubProjectTarget } from "./hubProjectTargetResolver.js";
 import {
   formatHubProjectProfileRecommendation,
   recommendHubProjectProfile,
@@ -1825,16 +1822,18 @@ const taskSelectorsArg = Args.atLeast(
   1,
 );
 
-const resolveTaskCommandTarget = (
+const resolveTaskCommandRepoRoot = (
   project: OptionalTextFlag,
-): Effect.Effect<ResolveHubProjectTargetResult, TaskBoardError, never> =>
+): Effect.Effect<string, TaskBoardError, never> =>
   Effect.tryPromise({
-    try: () =>
-      resolveHubProjectTarget({
-        projectSelector: optionalTextValue(project),
-        isTTY: process.stdin.isTTY === true,
-        selectProject: resolveInteractiveProjectSelection,
-      }),
+    try: async () =>
+      (
+        await resolveHubProjectTarget({
+          projectSelector: optionalTextValue(project),
+          isTTY: process.stdin.isTTY === true,
+          selectProject: resolveInteractiveProjectSelection,
+        })
+      ).project.repoRoot,
     catch: toTaskBoardError,
   });
 
@@ -1897,8 +1896,7 @@ const tasksInitCommand = Command.make(
   ({ project }) =>
   Effect.gen(function* () {
     const d = yield* Display;
-    const target = yield* resolveTaskCommandTarget(project);
-    const cwd = target.project.repoRoot;
+    const cwd = yield* resolveTaskCommandRepoRoot(project);
     const result = yield* Effect.try({
       try: () => initHubTaskStore(cwd),
       catch: toTaskBoardError,
@@ -1922,8 +1920,7 @@ const tasksListCommand = Command.make(
   ({ warning, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const target = yield* resolveTaskCommandTarget(project);
-      const cwd = target.project.repoRoot;
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const warningFilter = yield* resolvePrdWarningFilter(warning);
       const board = yield* Effect.try({
         try: () => loadHubTaskBoard(cwd),
@@ -1948,8 +1945,7 @@ const tasksCreateCommand = Command.make(
   ({ title, origin, description, kind, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const target = yield* resolveTaskCommandTarget(project);
-      const cwd = target.project.repoRoot;
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const resolvedOrigin = yield* resolveTaskOrigin(origin);
       const kindValue = optionalTextValue(kind);
       const created = yield* Effect.try({
@@ -1978,8 +1974,7 @@ const tasksShowCommand = Command.make(
   ({ id, project }) =>
   Effect.gen(function* () {
     const d = yield* Display;
-    const target = yield* resolveTaskCommandTarget(project);
-    const cwd = target.project.repoRoot;
+    const cwd = yield* resolveTaskCommandRepoRoot(project);
     const task = yield* Effect.try({
       try: () => loadHubTask(cwd, id),
       catch: toTaskBoardError,
@@ -2017,8 +2012,7 @@ const tasksTriageCommand = Command.make(
   },
   ({ taskId, query, approve, project }) =>
     Effect.gen(function* () {
-      const target = yield* resolveTaskCommandTarget(project);
-      const cwd = target.project.repoRoot;
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const explicitTaskId = optionalTextValue(taskId)?.trim();
       const explicitQuery = optionalTextValue(query)?.trim();
       const yes = approve;
@@ -2148,8 +2142,7 @@ const tasksFromPrdCommand = Command.make(
   },
   ({ prdRef, approve, status, deps, project }) =>
     Effect.gen(function* () {
-      const target = yield* resolveTaskCommandTarget(project);
-      const cwd = target.project.repoRoot;
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const explicitHubStatusMode =
         !approve && status._tag === "Some"
           ? yield* resolvePrdHubStatusMode(status)
@@ -2272,10 +2265,10 @@ const tasksSyncCommand = Command.make(
   },
   ({ yes, dryRun, includeClosed, project }) =>
     Effect.gen(function* () {
-      const target = yield* resolveTaskCommandTarget(project);
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       return yield* runHubTaskSyncCommand({
         mode: "sync",
-        cwd: target.project.repoRoot,
+        cwd,
         yes,
         dryRun,
         includeClosed,
@@ -2292,10 +2285,10 @@ const tasksPullCommand = Command.make(
   },
   ({ includeClosed, dryRun, project }) =>
     Effect.gen(function* () {
-      const target = yield* resolveTaskCommandTarget(project);
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       return yield* runHubTaskSyncCommand({
         mode: "pull",
-        cwd: target.project.repoRoot,
+        cwd,
         includeClosed,
         dryRun,
       });
@@ -2307,10 +2300,10 @@ const tasksPushCommand = Command.make(
   { dryRun: taskSyncDryRunOption, project: projectTargetOption },
   ({ dryRun, project }) =>
     Effect.gen(function* () {
-      const target = yield* resolveTaskCommandTarget(project);
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       return yield* runHubTaskSyncCommand({
         mode: "push",
-        cwd: target.project.repoRoot,
+        cwd,
         dryRun,
       });
     }),
@@ -2329,8 +2322,7 @@ const tasksCommentCommand = Command.make(
   ({ id, body, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const target = yield* resolveTaskCommandTarget(project);
-      const cwd = target.project.repoRoot;
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const task = yield* Effect.try({
         try: () => resolveHubTaskSelector(cwd, id),
         catch: toTaskBoardError,
@@ -2371,8 +2363,7 @@ const tasksRecoverCommand = Command.make(
   ({ id, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const target = yield* resolveTaskCommandTarget(project);
-      const cwd = target.project.repoRoot;
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const task = yield* Effect.try({
         try: () => resolveHubTaskSelector(cwd, id),
         catch: toTaskBoardError,
@@ -2398,8 +2389,7 @@ const tasksDoctorCommand = Command.make(
   ({ project }) =>
   Effect.gen(function* () {
     const d = yield* Display;
-    const target = yield* resolveTaskCommandTarget(project);
-    const cwd = target.project.repoRoot;
+    const cwd = yield* resolveTaskCommandRepoRoot(project);
     const result = yield* Effect.tryPromise({
       try: () => doctorHubTaskState({ cwd }),
       catch: toTaskBoardError,
@@ -2422,8 +2412,7 @@ const tasksCleanupCommand = Command.make(
   ({ yes, dryRun, includeUnowned, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const target = yield* resolveTaskCommandTarget(project);
-      const cwd = target.project.repoRoot;
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const isTTY = process.stdin.isTTY === true;
       const evaluation = yield* Effect.tryPromise({
         try: () => evaluateHubManagedBranchCleanup({ cwd }),
@@ -2525,8 +2514,7 @@ const tasksRepairStateCommand = Command.make(
   ({ id, yes, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const target = yield* resolveTaskCommandTarget(project);
-      const cwd = target.project.repoRoot;
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const preview = yield* Effect.tryPromise({
         try: () => repairHubTaskState({ cwd, taskSelector: id }),
         catch: toTaskBoardError,
@@ -2598,8 +2586,7 @@ const tasksDeleteCommand = Command.make(
   ({ selectors, yes, dryRun, cascade, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const target = yield* resolveTaskCommandTarget(project);
-      const cwd = target.project.repoRoot;
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const tasks = yield* Effect.try({
         try: () => resolveHubTaskSelectors(cwd, selectors),
         catch: toTaskBoardError,
