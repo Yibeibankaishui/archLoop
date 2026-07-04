@@ -152,6 +152,7 @@ export interface HubTaskEvent {
     | "task_close_started"
     | "task_closed"
     | "task_close_failed"
+    | "task_branch_cleanup"
     | "task_status_advanced";
   readonly runId: string;
   readonly batchId: string;
@@ -168,6 +169,13 @@ export interface HubTaskEvent {
   readonly branchHasUnmergedWork?: boolean;
   readonly implementationWork?: "new_commits" | "existing_unmerged_work";
   readonly claim?: HubTaskClaimMetadata;
+  readonly cleanup?: {
+    readonly policy: "safe_managed";
+    readonly outcome: "deleted" | "skipped" | "failed";
+    readonly reasonCodes?: readonly string[];
+    readonly diagnosticSummary?: string;
+    readonly diagnostics?: Readonly<Record<string, unknown>>;
+  };
 }
 
 const readObject = (value: unknown): Record<string, unknown> =>
