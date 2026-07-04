@@ -38,9 +38,9 @@ Beads-backed commands can use the packaged `bd` binary without a separate
 system install. Set `ARCHLOOP_BD_PATH` to override the binary path if needed.
 
 If you are onboarding Hub projects, start with `archloop initialize`, then use
-`archloop project add`, `archloop project select`, `archloop check`, and
-selected-project `archloop run --flow ...`. The steps below describe the
-legacy repo-local scaffold path for `.archloop/`.
+`archloop project add`, `archloop project list`, `archloop project select`,
+`archloop check`, and selected-project `archloop run --flow ...`. The steps
+below describe the legacy repo-local scaffold path for `.archloop/`.
 
 2. Run `archloop init`. This scaffolds a `.archloop` directory with all the files needed.
 
