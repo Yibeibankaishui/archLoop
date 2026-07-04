@@ -1825,6 +1825,21 @@ const taskSelectorsArg = Args.atLeast(
   1,
 );
 
+const resolveTaskCommandRepoRoot = (
+  project: OptionalTextFlag,
+): Effect.Effect<string, TaskBoardError, never> =>
+  Effect.tryPromise({
+    try: async () =>
+      (
+        await resolveHubProjectTarget({
+          projectSelector: optionalTextValue(project),
+          isTTY: process.stdin.isTTY === true,
+          selectProject: resolveInteractiveProjectSelection,
+        })
+      ).project.repoRoot,
+    catch: toTaskBoardError,
+  });
+
 const normalizeTaskOrigin = (
   value: string,
 ): "manual" | "user-feedback" | undefined => {
@@ -1876,10 +1891,15 @@ const resolvePrdWarningFilter = (
   );
 };
 
-const tasksInitCommand = Command.make("init", {}, () =>
+const tasksInitCommand = Command.make(
+  "init",
+  {
+    project: projectTargetOption,
+  },
+  ({ project }) =>
   Effect.gen(function* () {
     const d = yield* Display;
-    const cwd = process.cwd();
+    const cwd = yield* resolveTaskCommandRepoRoot(project);
     const result = yield* Effect.try({
       try: () => initHubTaskStore(cwd),
       catch: toTaskBoardError,
@@ -1899,11 +1919,11 @@ const tasksInitCommand = Command.make("init", {}, () =>
 
 const tasksListCommand = Command.make(
   "list",
-  { warning: taskWarningOption },
-  ({ warning }) =>
+  { warning: taskWarningOption, project: projectTargetOption },
+  ({ warning, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = process.cwd();
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const warningFilter = yield* resolvePrdWarningFilter(warning);
       const board = yield* Effect.try({
         try: () => loadHubTaskBoard(cwd),
@@ -1923,11 +1943,12 @@ const tasksCreateCommand = Command.make(
     origin: taskOriginOption,
     description: taskDescriptionOption,
     kind: taskKindOption,
+    project: projectTargetOption,
   },
-  ({ title, origin, description, kind }) =>
+  ({ title, origin, description, kind, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = process.cwd();
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const resolvedOrigin = yield* resolveTaskOrigin(origin);
       const kindValue = optionalTextValue(kind);
       const created = yield* Effect.try({
@@ -1950,10 +1971,13 @@ const tasksCreateCommand = Command.make(
     }),
 );
 
-const tasksShowCommand = Command.make("show", { id: taskIdArg }, ({ id }) =>
+const tasksShowCommand = Command.make(
+  "show",
+  { id: taskIdArg, project: projectTargetOption },
+  ({ id, project }) =>
   Effect.gen(function* () {
     const d = yield* Display;
-    const cwd = process.cwd();
+    const cwd = yield* resolveTaskCommandRepoRoot(project);
     const task = yield* Effect.try({
       try: () => loadHubTask(cwd, id),
       catch: toTaskBoardError,
@@ -1987,10 +2011,11 @@ const tasksTriageCommand = Command.make(
     taskId: triageTaskIdArg,
     query: triageQueryOption,
     approve: triageApproveOption,
+    project: projectTargetOption,
   },
-  ({ taskId, query, approve }) =>
+  ({ taskId, query, approve, project }) =>
     Effect.gen(function* () {
-      const cwd = process.cwd();
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const explicitTaskId = optionalTextValue(taskId)?.trim();
       const explicitQuery = optionalTextValue(query)?.trim();
       const yes = approve;
@@ -2116,10 +2141,11 @@ const tasksFromPrdCommand = Command.make(
     approve: prdApproveOption,
     status: prdStatusOption,
     deps: prdDepsOption,
+    project: projectTargetOption,
   },
-  ({ prdRef, approve, status, deps }) =>
+  ({ prdRef, approve, status, deps, project }) =>
     Effect.gen(function* () {
-      const cwd = process.cwd();
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const explicitHubStatusMode =
         !approve && status._tag === "Some"
           ? yield* resolvePrdHubStatusMode(status)
@@ -2147,13 +2173,14 @@ const tasksFromPrdCommand = Command.make(
 
 const runHubTaskSyncCommand = (input: {
   readonly mode: "sync" | "pull" | "push";
+  readonly cwd: string;
   readonly yes?: boolean;
   readonly dryRun?: boolean;
   readonly includeClosed?: boolean;
 }) =>
   Effect.gen(function* () {
     const d = yield* Display;
-    const cwd = process.cwd();
+    const cwd = input.cwd;
     const dryRun = input.dryRun === true;
     const shouldPreview = input.mode === "sync" || dryRun;
 
@@ -2237,9 +2264,19 @@ const tasksSyncCommand = Command.make(
     yes: taskSyncYesOption,
     dryRun: taskSyncDryRunOption,
     includeClosed: taskSyncIncludeClosedOption,
+    project: projectTargetOption,
   },
-  ({ yes, dryRun, includeClosed }) =>
-    runHubTaskSyncCommand({ mode: "sync", yes, dryRun, includeClosed }),
+  ({ yes, dryRun, includeClosed, project }) =>
+    Effect.gen(function* () {
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      return yield* runHubTaskSyncCommand({
+        mode: "sync",
+        cwd,
+        yes,
+        dryRun,
+        includeClosed,
+      });
+    }),
 );
 
 const tasksPullCommand = Command.make(
@@ -2247,34 +2284,48 @@ const tasksPullCommand = Command.make(
   {
     includeClosed: taskSyncIncludeClosedOption,
     dryRun: taskSyncDryRunOption,
+    project: projectTargetOption,
   },
-  ({ includeClosed, dryRun }) =>
-    runHubTaskSyncCommand({
-      mode: "pull",
-      includeClosed,
-      dryRun,
+  ({ includeClosed, dryRun, project }) =>
+    Effect.gen(function* () {
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      return yield* runHubTaskSyncCommand({
+        mode: "pull",
+        cwd,
+        includeClosed,
+        dryRun,
+      });
     }),
 );
 
 const tasksPushCommand = Command.make(
   "push",
-  { dryRun: taskSyncDryRunOption },
-  ({ dryRun }) => runHubTaskSyncCommand({ mode: "push", dryRun }),
+  { dryRun: taskSyncDryRunOption, project: projectTargetOption },
+  ({ dryRun, project }) =>
+    Effect.gen(function* () {
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      return yield* runHubTaskSyncCommand({
+        mode: "push",
+        cwd,
+        dryRun,
+      });
+    }),
 );
 
 const tasksCommentCommand = Command.make(
   "comment",
   {
     id: taskIdArg,
+    project: projectTargetOption,
     body: Options.text("body").pipe(
       Options.withDescription("Comment body"),
       Options.optional,
     ),
   },
-  ({ id, body }) =>
+  ({ id, body, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = process.cwd();
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const task = yield* Effect.try({
         try: () => resolveHubTaskSelector(cwd, id),
         catch: toTaskBoardError,
@@ -2311,11 +2362,11 @@ const tasksCommentCommand = Command.make(
 
 const tasksRecoverCommand = Command.make(
   "recover",
-  { id: taskIdArg },
-  ({ id }) =>
+  { id: taskIdArg, project: projectTargetOption },
+  ({ id, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = process.cwd();
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const task = yield* Effect.try({
         try: () => resolveHubTaskSelector(cwd, id),
         catch: toTaskBoardError,
@@ -2335,10 +2386,13 @@ const tasksRecoverCommand = Command.make(
     }),
 );
 
-const tasksDoctorCommand = Command.make("doctor", {}, () =>
+const tasksDoctorCommand = Command.make(
+  "doctor",
+  { project: projectTargetOption },
+  ({ project }) =>
   Effect.gen(function* () {
     const d = yield* Display;
-    const cwd = process.cwd();
+    const cwd = yield* resolveTaskCommandRepoRoot(project);
     const result = yield* Effect.tryPromise({
       try: () => doctorHubTaskState({ cwd }),
       catch: toTaskBoardError,
@@ -2356,11 +2410,12 @@ const tasksCleanupCommand = Command.make(
     yes: taskCleanupYesOption,
     dryRun: taskCleanupDryRunOption,
     includeUnowned: taskCleanupIncludeUnownedOption,
+    project: projectTargetOption,
   },
-  ({ yes, dryRun, includeUnowned }) =>
+  ({ yes, dryRun, includeUnowned, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = process.cwd();
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const isTTY = process.stdin.isTTY === true;
       const evaluation = yield* Effect.tryPromise({
         try: () => evaluateHubManagedBranchCleanup({ cwd }),
@@ -2457,11 +2512,12 @@ const tasksRepairStateCommand = Command.make(
   {
     id: taskIdArg,
     yes: taskRepairStateYesOption,
+    project: projectTargetOption,
   },
-  ({ id, yes }) =>
+  ({ id, yes, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = process.cwd();
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const preview = yield* Effect.tryPromise({
         try: () => repairHubTaskState({ cwd, taskSelector: id }),
         catch: toTaskBoardError,
@@ -2528,11 +2584,12 @@ const tasksDeleteCommand = Command.make(
     yes: taskDeleteYesOption,
     dryRun: taskDeleteDryRunOption,
     cascade: taskDeleteCascadeOption,
+    project: projectTargetOption,
   },
-  ({ selectors, yes, dryRun, cascade }) =>
+  ({ selectors, yes, dryRun, cascade, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = process.cwd();
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const tasks = yield* Effect.try({
         try: () => resolveHubTaskSelectors(cwd, selectors),
         catch: toTaskBoardError,
