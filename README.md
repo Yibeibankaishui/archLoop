@@ -946,6 +946,7 @@ Runs `gh auth login --insecure-storage` with `GH_CONFIG_DIR` set to archLoop's H
 ### `archloop tasks list`
 
 Shows the Hub task board grouped by canonical Hub task status from Beads data in the current git repository. Use it to inspect inbox, ready, blocked, implementation, review, merge, done, failure, and sync-conflict buckets. Each displayed task includes a 1-based list number that can be used as a task selector in follow-up commands.
+Task commands target the selected Hub project by default and accept `--project <name>` for an explicit override.
 
 ### `archloop tasks show <task-selector>`
 

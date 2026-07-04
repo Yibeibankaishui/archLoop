@@ -123,6 +123,7 @@ archloop auth show
 
 ### 4.1 初始化本地任务表
 
+任务命令默认针对已选中的 Hub project；如需覆盖，可以显式传 `--project <name>`。
 如果目标项目还没有本地任务表，先运行：
 
 ```bash
