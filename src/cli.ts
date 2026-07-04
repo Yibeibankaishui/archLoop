@@ -80,6 +80,10 @@ import {
   resolveHubProjectStatus,
 } from "./projectStatus.js";
 import {
+  collectHubReadinessChecks,
+  formatHubReadinessCheckLines,
+} from "./hubReadinessCheck.js";
+import {
   listHubProjects,
   registerHubProject,
   selectHubProject,
@@ -2619,6 +2623,43 @@ const projectStatusCommand = Command.make("status", {}, () =>
   }),
 );
 
+const checkHubOption = Options.boolean("hub").pipe(
+  Options.withDescription(
+    "Run the Hub-wide readiness slice of archloop check.",
+  ),
+  Options.withDefault(false),
+);
+
+const checkCommand = Command.make(
+  "check",
+  {
+    hub: checkHubOption,
+  },
+  () =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const report = yield* Effect.sync(() =>
+        collectHubReadinessChecks({ env: process.env }),
+      );
+
+      for (const section of report.sections) {
+        yield* d.spinner(section.title, Effect.void);
+      }
+
+      for (const line of formatHubReadinessCheckLines(report)) {
+        yield* d.text(line);
+      }
+
+      if (report.hasErrors) {
+        return yield* Effect.fail(
+          new HubFlowError({
+            message: "Hub readiness check failed.",
+          }),
+        );
+      }
+    }),
+);
+
 const toHubProjectRegistryError = (error: unknown): HubProjectRegistryError =>
   error instanceof HubProjectRegistryError
     ? error
@@ -3776,6 +3817,7 @@ const rootCommand = Command.make("archloop", {}, () =>
 export const archloop = rootCommand.pipe(
   Command.withSubcommands([
     initCommand,
+    checkCommand,
     runCommand,
     tasksCommand,
     projectCommand,

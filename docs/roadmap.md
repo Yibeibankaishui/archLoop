@@ -326,5 +326,6 @@ Goal: 提供 CLI-first 的 archLoop Hub 控制面，并在同一状态模型上�
 - [x] 完成 Hub project onboarding 的 `project add` slice：repo path/name prompts、repo signal profile recommendation、development contract 刷新、local task store 推荐/可拒绝初始化，以及 selected project handoff（见 [#189](https://github.com/Yibeibankaishui/archLoop/issues/189)、parent [#186](https://github.com/Yibeibankaishui/archLoop/issues/186)）。
 - [ ] 定义 archLoop Hub 控制面的核心用户路径。
 - [ ] 设计 Hub project onboarding、credentials、`archloop check` readiness 验证和 flow run CLI；v1 聚焦注册已有 git repo，后续再支持从 archLoop 创建全新代码项目（见 [hub-project-onboarding-and-check](./prd/hub-project-onboarding-and-check.md)、[#186](https://github.com/Yibeibankaishui/archLoop/issues/186)、[ADR-0029](./adr/0029-hub-project-registry-and-active-context.md)）。
+      Current slice: `archloop check --hub` now renders visible progress for static Hub validation, returns non-zero on blocking errors, and warns that provider/model smoke checks are deferred until a later slice.
 - [ ] 设计 run / sandbox / branch / logs / agent stream 的可视化模型。
 - [ ] 明确 GUI 与 Hub CLI / JS API 的关系。
