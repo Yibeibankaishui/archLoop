@@ -36,7 +36,7 @@ Hub flow 使用 archLoop 自带的 flow prompt，不读取目标项目里的 `.a
 
 ```bash
 archloop project status
-archloop check --hub
+archloop check
 ```
 
 `project status` 用于确认当前选中的或显式指定的 Hub project：
@@ -50,7 +50,7 @@ archloop check --hub
 | Task summary                 | 当前任务表、失败任务、运行批次、同步状态摘要                                     |
 | Cleanup diagnostics          | safe managed candidates、blocked reasons 和 historical unowned preservation 规则 |
 
-`check --hub` 用于验证 Hub 级 readiness：agent role 是否完整、共享凭据和 auth 是否存在、provider 引用是否可用、provider CLI 是否能从 PATH 找到，以及是否可以通过真实 provider 路径完成最小 smoke check。输出会显示进度、按 provider/model/options 去重，并列出每个 smoke check 覆盖的 role。
+`check` 默认会同时验证 Hub 级 readiness 和当前 CLI selected 的 Hub project（如果存在）。你也可以显式使用 `archloop check --hub` 只跑 Hub 级检查，`archloop check --project <name>` 检查某个项目，或 `archloop check --all-projects` 检查全部项目。Hub 级检查会验证 agent role 是否完整、共享凭据和 auth 是否存在、provider 引用是否可用、provider CLI 是否能从 PATH 找到，以及是否可以通过真实 provider 路径完成最小 smoke check。项目级检查会验证 repo path、git repo、initial commit、development contract、local task store、ready/failed 任务摘要、active run 和 flow readiness signals。输出会显示进度、按 provider/model/options 去重，并列出每个 smoke check 覆盖的 role。
 
 `project list` 则提供更轻量的多项目概览：它按 Hub registry 列出项目，标记 selected 项，显示 repo path、project profile、path validity、local task store readiness 标签、ready/failed/total 数量（可用时）以及 active run 概览，适合快速决定接下来切换到哪个项目。
 

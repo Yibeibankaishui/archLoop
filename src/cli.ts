@@ -88,11 +88,17 @@ import {
   formatHubReadinessCheckLines,
 } from "./hubReadinessCheck.js";
 import {
+  collectHubProjectReadinessCheck,
+  formatHubProjectReadinessCheckLines,
+} from "./hubProjectReadinessCheck.js";
+import {
   listHubProjects,
   registerHubProject,
   relinkHubProject,
   renameHubProject,
+  readSelectedHubProject,
   selectHubProject,
+  type HubProjectRegistryEntry,
   type HubProjectListEntry,
 } from "./hubProjectRegistry.js";
 import { resolveHubProjectTarget } from "./hubProjectTargetResolver.js";
@@ -2741,6 +2747,14 @@ const checkHubOption = Options.boolean("hub").pipe(
   Options.withDefault(false),
 );
 
+const checkAllProjectsOption = Options.boolean("all-projects").pipe(
+  Options.withDescription("Check every registered Hub project."),
+  Options.withDefault(false),
+);
+
+const NO_SELECTED_PROJECT_MESSAGE =
+  "No selected Hub project exists. Run `archloop project add` to register one, `archloop project select <name>` to choose one, or pass `--project <name>`.";
+
 const runHubReadinessCheck = (
   options: Parameters<typeof collectHubReadinessChecks>[0] = {},
 ) =>
@@ -2769,12 +2783,136 @@ const runHubReadinessCheck = (
     }
   });
 
+const runHubProjectReadinessCheck = (
+  project: HubProjectRegistryEntry,
+): Effect.Effect<void, Error, Display> =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const report = yield* Effect.tryPromise({
+      try: () => collectHubProjectReadinessCheck(project, { env: process.env }),
+      catch: (error) =>
+        error instanceof Error ? error : new Error(String(error)),
+    });
+
+    for (const section of report.sections) {
+      yield* d.spinner(section.title, Effect.void);
+    }
+
+    for (const line of formatHubProjectReadinessCheckLines(project, report)) {
+      yield* d.text(line);
+    }
+
+    if (report.hasErrors) {
+      return yield* Effect.fail(
+        new HubFlowError({
+          message: "Hub readiness check failed.",
+        }),
+      );
+    }
+  });
+
 const checkCommand = Command.make(
   "check",
   {
     hub: checkHubOption,
+    project: projectTargetOption,
+    allProjects: checkAllProjectsOption,
   },
-  () => runHubReadinessCheck({ env: process.env }),
+  ({ hub, project, allProjects }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      let hasErrors = false;
+
+      if (hub && (project._tag === "Some" || allProjects)) {
+        return yield* Effect.fail(
+          new HubFlowError({
+            message:
+              "`--hub` cannot be combined with `--project` or `--all-projects`.",
+          }),
+        );
+      }
+
+      if (project._tag === "Some" && allProjects) {
+        return yield* Effect.fail(
+          new HubFlowError({
+            message: "`--project` and `--all-projects` are mutually exclusive.",
+          }),
+        );
+      }
+
+      const shouldRunHub = hub || (project._tag === "None" && !allProjects);
+      if (shouldRunHub) {
+        yield* runHubReadinessCheck({ env: process.env }).pipe(
+          Effect.catchAll((error) => {
+            hasErrors = true;
+            return Effect.succeed(undefined);
+          }),
+        );
+      }
+
+      if (project._tag === "Some") {
+        const resolved = yield* Effect.tryPromise({
+          try: () =>
+            resolveHubProjectTarget({
+              projectSelector: project.value,
+              isTTY: false,
+            }),
+          catch: toProjectStatusError,
+        });
+        yield* d.status(
+          `Checking explicit Hub project readiness for ${resolved.project.name}.`,
+          "info",
+        );
+        yield* runHubProjectReadinessCheck(resolved.project).pipe(
+          Effect.catchAll((error) => {
+            hasErrors = true;
+            return Effect.succeed(undefined);
+          }),
+        );
+      } else if (allProjects) {
+        const targets = listHubProjects({ env: process.env });
+        if (targets.length === 0) {
+          yield* d.status("No Hub projects are registered yet.", "info");
+        } else {
+          for (const target of targets) {
+            yield* d.status(
+              `Checking Hub project readiness for ${target.name}.`,
+              "info",
+            );
+            yield* runHubProjectReadinessCheck(target).pipe(
+              Effect.catchAll((error) => {
+                hasErrors = true;
+                return Effect.succeed(undefined);
+              }),
+            );
+          }
+        }
+      } else if (!hub) {
+        const selectedProject = readSelectedHubProject({ env: process.env });
+        if (!selectedProject) {
+          yield* d.status(NO_SELECTED_PROJECT_MESSAGE, "warn");
+        } else {
+          yield* d.status(
+            `Checking selected Hub project readiness for ${selectedProject.name}.`,
+            "info",
+          );
+          yield* runHubProjectReadinessCheck(selectedProject).pipe(
+            Effect.catchAll((error) => {
+              hasErrors = true;
+              return Effect.succeed(undefined);
+            }),
+          );
+        }
+      }
+
+      if (hasErrors) {
+        return yield* Effect.fail(
+          new HubFlowError({
+            message: "Hub readiness check failed.",
+          }),
+        );
+      }
+    }),
 );
 
 const initializeSkipCheckOption = Options.boolean("skip-check").pipe(
