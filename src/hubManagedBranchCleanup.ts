@@ -486,6 +486,24 @@ const sortCandidates = (
   right: HubManagedBranchCleanupCandidate,
 ): number => left.branch.localeCompare(right.branch);
 
+export const findHubManagedBranchCleanupCandidate = (
+  evaluation: HubManagedBranchCleanupEvaluation,
+  branch: string,
+): HubManagedBranchCleanupCandidate | undefined => {
+  for (const candidates of [
+    evaluation.managedSafeCandidates,
+    evaluation.managedBlockedBranches,
+    evaluation.unownedCandidates,
+  ]) {
+    const candidate = candidates.find((entry) => entry.branch === branch);
+    if (candidate) {
+      return candidate;
+    }
+  }
+
+  return undefined;
+};
+
 export const evaluateHubManagedBranchCleanup = async (
   input: EvaluateHubManagedBranchCleanupInput,
 ): Promise<HubManagedBranchCleanupEvaluation> => {
