@@ -275,4 +275,57 @@ describe("archloop project add interactive onboarding", () => {
     ) as { projectProfile: string };
     expect(contract.projectProfile).toBe("python");
   });
+
+  it("warns and keeps onboarding successful when task store init fails", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "cli-project-add-repo-"));
+    await initRepo(repoDir);
+    await writeFile(join(repoDir, "package.json"), "{}\n");
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    mockText.mockImplementation(
+      async (opts: { message: string; initialValue?: string }) => {
+        if (opts.message === "Repo path") {
+          return repoDir;
+        }
+        if (opts.message === "Hub project name") {
+          return "gamma";
+        }
+        throw new Error(`Unexpected text prompt: ${opts.message}`);
+      },
+    );
+    mockSelect.mockResolvedValue("node");
+    mockConfirm.mockResolvedValue(true);
+    mockInitHubTaskStore.mockImplementation(() => {
+      throw new Error("bd init failed");
+    });
+
+    const entries = await Effect.runPromise(
+      Effect.gen(function* () {
+        const ref = yield* Ref.make<ReadonlyArray<DisplayEntry>>([]);
+        yield* cli(["node", "archloop", "project", "add"]).pipe(
+          Effect.provide(SilentDisplay.layer(ref)),
+          Effect.provide(NodeContext.layer),
+        );
+        return yield* Ref.get(ref);
+      }),
+    );
+
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "status",
+        severity: "warn",
+        message: "Skipped local task store initialization: bd init failed",
+      }),
+    );
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "summary",
+        title: "Hub project registered",
+        rows: expect.objectContaining({
+          Name: "gamma",
+          "Task store initialized": "no",
+        }),
+      }),
+    );
+  });
 });

@@ -7,7 +7,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import { styleText } from "node:util";
 
-import { Display } from "./Display.js";
+import { Display, type DisplayService } from "./Display.js";
 import {
   buildDockerRootHostNextStepLines,
   resolveDockerUidBuildArgs,
@@ -2702,6 +2702,84 @@ const resolveInteractiveProjectSelection = async (
   return String(result);
 };
 
+const resolveInteractiveProjectProfile = async (
+  initialValue: string,
+): Promise<string> => {
+  const result = await clack.select({
+    message: "Select a project profile:",
+    initialValue,
+    options: listProjectProfiles().map((profile) => ({
+      value: profile.name,
+      label: profile.label,
+      hint: profile.description,
+    })),
+  });
+  if (clack.isCancel(result)) {
+    throw new HubProjectRegistryError({
+      message: "Project profile selection cancelled.",
+    });
+  }
+  return String(result);
+};
+
+const resolveProjectAddProfile = (
+  repoRoot: string,
+  projectProfile: string | undefined,
+  display: DisplayService,
+): Effect.Effect<string, HubProjectRegistryError> =>
+  Effect.gen(function* () {
+    const profileRecommendation = recommendHubProjectProfile(repoRoot);
+    if (projectProfile && projectProfile.length > 0) {
+      return projectProfile;
+    }
+
+    if (!hasInteractiveTerminal()) {
+      return profileRecommendation.projectProfileName;
+    }
+
+    yield* display.text(
+      formatHubProjectProfileRecommendation(profileRecommendation),
+    );
+
+    return yield* Effect.tryPromise({
+      try: () =>
+        resolveInteractiveProjectProfile(
+          profileRecommendation.projectProfileName,
+        ),
+      catch: toHubProjectRegistryError,
+    });
+  });
+
+const confirmProjectAddTaskStoreInitialization = async (): Promise<boolean> => {
+  const response = await clack.confirm({
+    message: "Initialize the local task store now?",
+    initialValue: true,
+  });
+  return clack.isCancel(response) ? false : response === true;
+};
+
+const initializeProjectAddTaskStore = (
+  display: DisplayService,
+  repoRoot: string,
+): Effect.Effect<boolean> =>
+  Effect.gen(function* () {
+    try {
+      const result = initHubTaskStore(repoRoot);
+      const output = result.output.trim();
+      if (output.length > 0) {
+        yield* display.text(output);
+      }
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      yield* display.status(
+        `Skipped local task store initialization: ${message}`,
+        "warn",
+      );
+      return false;
+    }
+  });
+
 const projectAddCommand = Command.make(
   "add",
   {
@@ -2715,7 +2793,6 @@ const projectAddCommand = Command.make(
       let projectName = optionalTextValue(name)?.trim() ?? "";
       let repoPath = optionalTextValue(path)?.trim() ?? "";
       let selectedProjectProfile = optionalTextValue(projectProfile)?.trim();
-      let shouldInitializeTaskStore = false;
 
       if (projectName.length === 0 || repoPath.length === 0) {
         if (!hasInteractiveTerminal()) {
@@ -2748,36 +2825,11 @@ const projectAddCommand = Command.make(
         });
       }
 
-      const profileRecommendation = recommendHubProjectProfile(repoRoot);
-      if (!selectedProjectProfile || selectedProjectProfile.length === 0) {
-        selectedProjectProfile = profileRecommendation.projectProfileName;
-        if (hasInteractiveTerminal()) {
-          yield* d.text(
-            formatHubProjectProfileRecommendation(profileRecommendation),
-          );
-          const selected = yield* Effect.tryPromise({
-            try: async () => {
-              const result = await clack.select({
-                message: "Select a project profile:",
-                initialValue: selectedProjectProfile,
-                options: listProjectProfiles().map((profile) => ({
-                  value: profile.name,
-                  label: profile.label,
-                  hint: profile.description,
-                })),
-              });
-              if (clack.isCancel(result)) {
-                throw new HubProjectRegistryError({
-                  message: "Project profile selection cancelled.",
-                });
-              }
-              return String(result);
-            },
-            catch: toHubProjectRegistryError,
-          });
-          selectedProjectProfile = selected;
-        }
-      }
+      selectedProjectProfile = yield* resolveProjectAddProfile(
+        repoRoot,
+        selectedProjectProfile,
+        d,
+      );
 
       const result = yield* Effect.try({
         try: () =>
@@ -2790,50 +2842,17 @@ const projectAddCommand = Command.make(
         catch: toHubProjectRegistryError,
       });
 
+      let taskStoreInitialized = result.taskStoreInitialized;
       if (hasInteractiveTerminal()) {
-        const taskStoreInitDecision = yield* Effect.tryPromise({
-          try: async () => {
-            const response = await clack.confirm({
-              message: "Initialize the local task store now?",
-              initialValue: true,
-            });
-            return clack.isCancel(response) ? false : response === true;
-          },
+        const shouldInitializeTaskStore = yield* Effect.tryPromise({
+          try: () => confirmProjectAddTaskStoreInitialization(),
           catch: toHubProjectRegistryError,
         });
-        shouldInitializeTaskStore = taskStoreInitDecision;
-      }
-
-      let taskStoreInitialized = result.taskStoreInitialized;
-      if (shouldInitializeTaskStore) {
-        const taskStoreResult = (() => {
-          try {
-            return {
-              ok: true as const,
-              value: initHubTaskStore(result.project.repoRoot),
-            };
-          } catch (error) {
-            return {
-              ok: false as const,
-              error,
-            };
-          }
-        })();
-
-        if (!taskStoreResult.ok) {
-          const error =
-            taskStoreResult.error instanceof Error
-              ? taskStoreResult.error
-              : new Error(String(taskStoreResult.error));
-          yield* d.status(
-            `Skipped local task store initialization: ${error.message}`,
-            "warn",
+        if (shouldInitializeTaskStore) {
+          taskStoreInitialized = yield* initializeProjectAddTaskStore(
+            d,
+            result.project.repoRoot,
           );
-        } else {
-          taskStoreInitialized = true;
-          if (taskStoreResult.value.output.trim().length > 0) {
-            yield* d.text(taskStoreResult.value.output.trim());
-          }
         }
       }
 
