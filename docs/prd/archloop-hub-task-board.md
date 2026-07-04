@@ -472,7 +472,7 @@ Command responsibilities:
 - `tasks push`: push linked local collaboration labels and done/wontfix closures to the remote task source.
 - `tasks sync`: preview and confirm a bidirectional pull/push reconcile plan.
 - `tasks comment`: append a Beads comment.
-- `tasks recover`: repair failed or stale execution states and write a recovery comment.
+- `tasks recover`: repair failed or stale execution states, preserve recoverable branch work for retry, and write a recovery comment. Safe managed empty branches may be cleaned when recovery returns the task to a collaboration state and branch cleanup is safe.
 - `tasks cleanup`: preview and confirm Hub-managed branch cleanup; safe managed branches delete by default, and historical unowned `archloop/...` branches require explicit `--include-unowned`.
 - `project status`: show project summary, credentials, active runs, and task board counts.
 

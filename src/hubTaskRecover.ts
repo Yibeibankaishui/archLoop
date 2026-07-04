@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { evaluateHubManagedBranchCleanup } from "./hubManagedBranchCleanup.js";
 import {
   createHubFlowRunVerifier,
   type HubFlowMerger,
@@ -195,6 +196,13 @@ export const hasBranchUnmergedWork = async (
 const resolveTaskBranch = (task: HubTaskProjection): string =>
   task.claim?.branch ?? resolveHubTaskBranch(task.id, task.title);
 
+const deleteGitBranch = async (
+  cwd: string,
+  branch: string,
+): Promise<void> => {
+  await execFileAsync("git", ["branch", "-d", branch], { cwd });
+};
+
 const defaultCloseFailedRecoveryCloser: HubTaskCloser = async (closeInput) =>
   completeCloseFailedRecovery(closeInput).task;
 
@@ -211,7 +219,6 @@ const recoverToTargetStatus = (
     metadata: task.metadata,
     env: input.env,
   });
-  appendRecoveryComment(input, summary);
 
   return {
     outcome: "recovered_failed",
@@ -278,20 +285,53 @@ const recoverCloseFailedTask = async (
   };
 };
 
+const attemptRecoveryCleanup = async (
+  input: RecoverHubTaskInput,
+  branch: string,
+): Promise<string> => {
+  const evaluation = await evaluateHubManagedBranchCleanup({
+    cwd: input.cwd,
+    env: input.env,
+  });
+  const candidate = [
+    ...evaluation.managedSafeCandidates,
+    ...evaluation.managedBlockedBranches,
+    ...evaluation.unownedCandidates,
+  ].find((entry) => entry.branch === branch);
+
+  if (!candidate) {
+    return `Cleanup skipped for ${branch}: branch is missing.`;
+  }
+
+  if (candidate.ownership === undefined) {
+    return `Cleanup skipped for ${branch}: branch has no Hub-managed ownership record.`;
+  }
+
+  if (candidate.skipReasons.length > 0) {
+    return `Cleanup skipped for ${branch}: ${candidate.skipReasons
+      .map((detail) => detail.message)
+      .join("; ")}`;
+  }
+
+  try {
+    await deleteGitBranch(input.cwd, branch);
+    return `Deleted safe managed branch ${branch} after recovery.`;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return `Cleanup failed for ${branch}: ${message}`;
+  }
+};
+
 const recoverGenericFailedTask = async (
   input: RecoverHubTaskInput,
   task: HubTaskProjection,
   failureReason: HubFailureReason | undefined,
 ): Promise<RecoverHubTaskResult> => {
   const branch = resolveTaskBranch(task);
-  const branchHasWork =
-    task.claim !== undefined &&
-    (await (input.branchHasUnmergedWork ?? hasBranchUnmergedWork)(
-      input.cwd,
-      branch,
-    ));
+  const branchHasWork = await (input.branchHasUnmergedWork ??
+    hasBranchUnmergedWork)(input.cwd, branch);
 
-  if (branchHasWork) {
+  if (branchHasWork && task.claim !== undefined) {
     const targetStatus = "waiting_for_merge";
     const summary = `Moved failed task from failed to waiting_for_merge because ${branch} has existing unmerged work.`;
     const updatedTask = updateHubTaskStatus({
@@ -313,12 +353,23 @@ const recoverGenericFailedTask = async (
   }
 
   const targetStatus = resolveFailedRecoveryTarget(task, failureReason);
-  return recoverToTargetStatus(
+  const recovered = recoverToTargetStatus(
     input,
     task,
     targetStatus,
     `Moved failed task from failed to ${targetStatus} and cleared execution failure metadata.`,
   );
+  const cleanupSummary = await attemptRecoveryCleanup(
+    input,
+    branch,
+  );
+  const summary = `${recovered.summary} ${cleanupSummary}`;
+  appendRecoveryComment(input, summary);
+
+  return {
+    ...recovered,
+    summary,
+  };
 };
 
 const releaseStaleClaim = (
@@ -349,12 +400,14 @@ const recoverStaleExecutionStatus = (
   task: HubTaskProjection,
 ): RecoverHubTaskResult => {
   const targetStatus = resolveFailedRecoveryTarget(task, undefined);
-  return recoverToTargetStatus(
+  const result = recoverToTargetStatus(
     input,
     task,
     targetStatus,
     `Reset stale execution status ${task.hubStatus} to ${targetStatus} and released claim metadata.`,
   );
+  appendRecoveryComment(input, result.summary);
+  return result;
 };
 
 export const recoverHubTask = async (

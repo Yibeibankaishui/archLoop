@@ -6,6 +6,13 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import type { HubFlowMerger, HubFlowVerifier } from "./hubBatchMerge.js";
+import { claimHubTaskForImplementation } from "./hubTaskLifecycle.js";
+import {
+  buildWorktreeLeaseMetadata,
+  leaseLockPath,
+  leaseNameFromBranch,
+  serializeWorktreeLeaseMetadata,
+} from "./WorktreeLease.js";
 import {
   formatHubRecoveryComment,
   isHubRecoveryComment,
@@ -159,6 +166,20 @@ process.exit(1);
   };
 };
 
+const updateMockTask = async (
+  stateFile: string,
+  taskId: string,
+  update: (task: MockBeadsTask) => void,
+) => {
+  const state = JSON.parse(await readFile(stateFile, "utf-8")) as MockBeadsTask[];
+  const task = state.find((entry) => entry.id === taskId);
+  if (!task) {
+    throw new Error(`missing task ${taskId}`);
+  }
+  update(task);
+  await writeFile(stateFile, JSON.stringify(state, null, 2));
+};
+
 describe("hub task recovery comments", () => {
   it("formats recovery comments with the archLoop prefix", () => {
     expect(formatHubRecoveryComment("Released stale claim metadata.")).toBe(
@@ -284,6 +305,8 @@ describe("recoverHubTask", () => {
         },
       },
     ]);
+    const branch = "archloop/bd-unmerged-failed-with-branch-work";
+    await execAsync(`git branch "${branch}"`, { cwd: repoDir });
 
     const result = await recoverHubTask({
       cwd: repoDir,
@@ -302,8 +325,144 @@ describe("recoverHubTask", () => {
     expect(task.claim).toBeDefined();
     expect(task.metadata.failed).toBeUndefined();
     expect(task.metadata.failureReason).toBeUndefined();
+    expect(await execAsync(`git branch --list "${branch}"`, { cwd: repoDir }))
+      .toMatchObject({
+        stdout: expect.stringContaining(branch),
+      });
     expect(await readFile(commentArgsFile, "utf-8")).toContain(
       "waiting_for_merge",
+    );
+  });
+
+  it("deletes a safe managed branch during recovery when no branch work remains", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-recover-cleanup-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "main.txt", "main", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env, commentArgsFile } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-cleanup",
+        title: "Cleanup candidate",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {
+          hubStatus: "ready_for_agent",
+        },
+      },
+    ]);
+
+    const branch = "archloop/bd-cleanup-cleanup-candidate";
+    const claimResult = await claimHubTaskForImplementation({
+      cwd: repoDir,
+      taskId: "bd-cleanup",
+      branch,
+      env,
+    });
+    await execAsync(`git branch "${branch}"`, { cwd: repoDir });
+
+    await updateMockTask(stateFile, "bd-cleanup", (task) => {
+      task.status = "open";
+      task.labels = ["failed"];
+      task.metadata = {
+        ...task.metadata,
+        hubStatus: "failed",
+        failed: true,
+        failureReason: "agent_failed",
+        claim: claimResult.task.claim?.raw,
+      };
+    });
+
+    const result = await recoverHubTask({
+      cwd: repoDir,
+      taskId: "bd-cleanup",
+      env,
+    });
+
+    const task = loadHubTask(repoDir, "bd-cleanup", env);
+    expect(result.outcome).toBe("recovered_failed");
+    expect(task.hubStatus).toBe("ready_for_agent");
+    expect(task.claim).toBeUndefined();
+    expect(await execAsync(`git branch --list "${branch}"`, { cwd: repoDir }))
+      .toMatchObject({
+        stdout: "",
+      });
+    expect(await readFile(commentArgsFile, "utf-8")).toContain(
+      "Deleted safe managed branch",
+    );
+  });
+
+  it("keeps a safe managed branch when recovery cleanup is blocked", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-recover-blocked-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "main.txt", "main", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env, commentArgsFile } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-blocked",
+        title: "Blocked cleanup",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {
+          hubStatus: "ready_for_agent",
+        },
+      },
+    ]);
+
+    const branch = "archloop/bd-blocked-blocked-cleanup";
+    const claimResult = await claimHubTaskForImplementation({
+      cwd: repoDir,
+      taskId: "bd-blocked",
+      branch,
+      env,
+    });
+    await execAsync(`git branch "${branch}"`, { cwd: repoDir });
+    mkdirSync(join(repoDir, ".archloop", "locks"), { recursive: true });
+    const lockPath = leaseLockPath(repoDir, leaseNameFromBranch(branch));
+    writeFileSync(
+      lockPath,
+      JSON.stringify(
+        serializeWorktreeLeaseMetadata(
+          buildWorktreeLeaseMetadata(branch, {
+            kind: "hub",
+            taskId: "bd-blocked",
+            flowId: "no-review",
+            batchId: "batch-blocked",
+          }),
+        ),
+      ),
+    );
+
+    await updateMockTask(stateFile, "bd-blocked", (task) => {
+      task.status = "open";
+      task.labels = ["failed"];
+      task.metadata = {
+        ...task.metadata,
+        hubStatus: "failed",
+        failed: true,
+        failureReason: "agent_failed",
+        claim: claimResult.task.claim?.raw,
+      };
+    });
+
+    const result = await recoverHubTask({
+      cwd: repoDir,
+      taskId: "bd-blocked",
+      env,
+    });
+
+    const task = loadHubTask(repoDir, "bd-blocked", env);
+    expect(result.outcome).toBe("recovered_failed");
+    expect(task.hubStatus).toBe("ready_for_agent");
+    expect(task.claim).toBeUndefined();
+    expect(await execAsync(`git branch --list "${branch}"`, { cwd: repoDir }))
+      .toMatchObject({
+        stdout: expect.stringContaining(branch),
+      });
+    expect(result.summary).toContain("active worktree lease");
+    expect(await readFile(commentArgsFile, "utf-8")).toContain(
+      "Cleanup skipped for",
     );
   });
 
