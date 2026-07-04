@@ -90,6 +90,8 @@ import {
 import {
   listHubProjects,
   registerHubProject,
+  relinkHubProject,
+  renameHubProject,
   selectHubProject,
   type HubProjectListEntry,
 } from "./hubProjectRegistry.js";
@@ -2742,6 +2744,22 @@ const projectSelectNameArg = Args.text({ name: "name" }).pipe(
   Args.optional,
 );
 
+const projectRenameProjectArg = Args.text({ name: "project" }).pipe(
+  Args.withDescription("Existing Hub project name or id"),
+);
+
+const projectRenameNameArg = Args.text({ name: "new-name" }).pipe(
+  Args.withDescription("New user-facing Hub project name"),
+);
+
+const projectRelinkProjectArg = Args.text({ name: "project" }).pipe(
+  Args.withDescription("Existing Hub project name or id"),
+);
+
+const projectRelinkPathOption = Options.text("path").pipe(
+  Options.withDescription("New path to the existing git repository"),
+);
+
 const resolveInteractiveProjectName = async (
   initialValue: string,
 ): Promise<string> => {
@@ -3049,6 +3067,73 @@ const projectSelectCommand = Command.make(
     }),
 );
 
+const projectRenameCommand = Command.make(
+  "rename",
+  {
+    project: projectRenameProjectArg,
+    newName: projectRenameNameArg,
+  },
+  ({ project, newName }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const result = yield* Effect.try({
+        try: () =>
+          renameHubProject({
+            projectSelector: project,
+            newProjectName: newName,
+            env: process.env,
+          }),
+        catch: toHubProjectRegistryError,
+      });
+
+      yield* d.summary("Hub project renamed", {
+        "Project id": result.project.id,
+        "Previous name": result.previousProjectName,
+        "New name": result.project.name,
+        "Repo root": result.project.repoRoot,
+        "Hub project dir": result.project.hubProjectDir,
+        Selected: result.project.name,
+      });
+      yield* d.status(
+        `Renamed Hub project ${result.previousProjectName} to ${result.project.name}.`,
+        "success",
+      );
+    }),
+);
+
+const projectRelinkCommand = Command.make(
+  "relink",
+  {
+    project: projectRelinkProjectArg,
+    path: projectRelinkPathOption,
+  },
+  ({ project, path }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const result = yield* Effect.try({
+        try: () =>
+          relinkHubProject({
+            projectSelector: project,
+            repoPath: path,
+            env: process.env,
+          }),
+        catch: toHubProjectRegistryError,
+      });
+
+      yield* d.summary("Hub project relinked", {
+        "Project id": result.project.id,
+        "Previous repo root": result.previousRepoRoot,
+        "New repo root": result.project.repoRoot,
+        "Hub project dir": result.project.hubProjectDir,
+        Selected: result.project.name,
+      });
+      yield* d.status(
+        `Relinked Hub project ${result.project.name} to ${result.project.repoRoot}.`,
+        "success",
+      );
+    }),
+);
+
 const projectConfigureCommand = Command.make(
   "configure",
   {
@@ -3124,6 +3209,8 @@ const projectCommand = Command.make("project", {}, () =>
     projectAddCommand,
     projectListCommand,
     projectSelectCommand,
+    projectRenameCommand,
+    projectRelinkCommand,
     projectStatusCommand,
     projectConfigureCommand,
   ]),

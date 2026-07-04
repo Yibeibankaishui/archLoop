@@ -1330,6 +1330,136 @@ exit 1
     expect(listResult.stdout).toContain("runs: none");
   });
 
+  it("project rename and relink preserve the stable Hub project id", async () => {
+    const repoA = await mkdtemp(join(tmpdir(), "cli-project-a-"));
+    await initRepo(repoA);
+    await commitFile(repoA, "hello.txt", "hello", "initial commit");
+
+    const repoB = await mkdtemp(join(tmpdir(), "cli-project-b-"));
+    await initRepo(repoB);
+    await commitFile(repoB, "hello.txt", "hello", "initial commit");
+
+    const dataDir = join(repoA, "xdg-data");
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+
+    await runCli(`project add --name alpha --path "${repoA}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+
+    const renameResult = await runCli("project rename alpha omega", otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    expect(renameResult.stdout).toContain("Renamed Hub project alpha to omega");
+    expect(renameResult.stdout).toContain("Project id:");
+
+    const relinkResult = await runCli(
+      `project relink omega --path "${repoB}"`,
+      otherDir,
+      {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      },
+    );
+    expect(relinkResult.stdout).toContain("Relinked Hub project omega");
+    expect(relinkResult.stdout).toContain("Project id:");
+
+    const listResult = await runCli("project list", otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    expect(listResult.stdout).toContain("omega");
+    expect(listResult.stdout).toContain(repoB);
+    expect(listResult.stdout).toContain("(selected)");
+    expect(listResult.stdout).toContain("path: valid");
+  });
+
+  it("project rename rejects duplicate names with actionable guidance", async () => {
+    const repoA = await mkdtemp(join(tmpdir(), "cli-project-a-"));
+    await initRepo(repoA);
+    await commitFile(repoA, "hello.txt", "hello", "initial commit");
+
+    const repoB = await mkdtemp(join(tmpdir(), "cli-project-b-"));
+    await initRepo(repoB);
+    await commitFile(repoB, "hello.txt", "hello", "initial commit");
+
+    const dataDir = join(repoA, "xdg-data");
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+
+    await runCli(`project add --name alpha --path "${repoA}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    await runCli(`project add --name beta --path "${repoB}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+
+    try {
+      await runCli("project rename alpha beta", otherDir, {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      });
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain("already registered");
+      expect(output).toContain("archloop project list");
+    }
+  });
+
+  it("project relink rejects duplicate repo paths and invalid paths with actionable guidance", async () => {
+    const repoA = await mkdtemp(join(tmpdir(), "cli-project-a-"));
+    await initRepo(repoA);
+    await commitFile(repoA, "hello.txt", "hello", "initial commit");
+
+    const repoB = await mkdtemp(join(tmpdir(), "cli-project-b-"));
+    await initRepo(repoB);
+    await commitFile(repoB, "hello.txt", "hello", "initial commit");
+
+    const nonRepoDir = await mkdtemp(join(tmpdir(), "cli-not-a-repo-"));
+
+    const dataDir = join(repoA, "xdg-data");
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+
+    await runCli(`project add --name alpha --path "${repoA}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    await runCli(`project add --name beta --path "${repoB}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+
+    try {
+      await runCli(`project relink alpha --path "${repoB}"`, otherDir, {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      });
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain("already registered");
+      expect(output).toContain("archloop project list");
+    }
+
+    try {
+      await runCli(`project relink alpha --path "${nonRepoDir}"`, otherDir, {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      });
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain(
+        "existing git repository with at least one commit",
+      );
+      expect(output).toContain("git init");
+      expect(output).toContain('git commit -m "Initial commit"');
+    }
+  });
+
   it("tasks list points to archloop tasks init when the task store is missing", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);

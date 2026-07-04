@@ -887,6 +887,14 @@ Lists registered Hub projects from the shared registry, marks the selected proje
 
 Sets the CLI selected Hub project by name. If no name is provided in a TTY, archLoop opens an interactive picker; in non-interactive mode the name is required. Selection is stored outside the target repo, so it remains available from any directory and does not depend on the current working directory.
 
+### `archloop project rename <project> <new-name>`
+
+Renames an existing Hub project without changing its stable Hub project id. Pass the existing Hub project name or id as the first argument and the new user-facing name as the second argument. Duplicate names are rejected with guidance to inspect `archloop project list` and choose a different name.
+
+### `archloop project relink <project> --path <repo-path>`
+
+Updates an existing Hub project to point at a new host repo path without changing its stable Hub project id. The new path must be an existing git repository with at least one commit, and paths already registered to another Hub project are rejected with guidance to inspect `archloop project list` and choose a different path.
+
 ### `archloop agent-config path`
 
 Prints the Hub-wide agent role config file path under the archLoop user data directory. Hub agent roles configure reusable stage providers and models for planning, triage, implementation, review, merge, and recovery. Credentials and login state stay in Hub env files and auth directories, not in role config.

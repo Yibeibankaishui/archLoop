@@ -13,7 +13,7 @@ archLoop（`@yibeibankaishui/archloop`）是一个 TypeScript 工具包，用于
 
 典型场景：并行 AFK agent、实现→评审流水线、从 GitHub Issues 自动领任务并提交。
 
-如果想先浏览已注册的 Hub project，可以运行 `archloop project list`：它会显示项目名、repo path、Project profile、selected 标记、path/task readiness 标签，以及 active run 概览，方便先挑选再切换。
+如果想先浏览已注册的 Hub project，可以运行 `archloop project list`：它会显示项目名、repo path、Project profile、selected 标记、path/task readiness 标签，以及 active run 概览，方便先挑选再切换。需要改名或迁移仓库路径时，可以用 `archloop project rename <project> <new-name>` 和 `archloop project relink <project> --path <repo-path>`；这两个命令都会保持 Hub project id 不变，所以任务和运行历史不会被拆开。
 
 ## 核心思路：按仓库配置
 
