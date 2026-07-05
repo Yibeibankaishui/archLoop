@@ -15,7 +15,7 @@ import {
 } from "./hubAgentConfig.js";
 import { resolveHubAuthSessionEnv } from "./hubAuth.js";
 import { resolveHubAgentProvider } from "./hubProposalAgent.js";
-import { resolveHubEnv } from "./hubEnv.js";
+import { isHubEnvValuePresent, resolveHubEnv } from "./hubEnv.js";
 import { noSandbox } from "./sandboxes/no-sandbox.js";
 import { run } from "./run.js";
 
@@ -254,14 +254,12 @@ const collectCredentialFindings = (
     const envKeys = requirements.credentialEnvKeys ?? [];
     const authEnvKey = requirements.authEnvKey;
 
-    const envSatisfied = envKeys.some((key) => {
-      const value = hubEnv[key] ?? runtimeEnv[key] ?? "";
-      return value.trim().length > 0;
-    });
+    const envSatisfied = envKeys.some((key) =>
+      isHubEnvValuePresent(hubEnv[key] ?? runtimeEnv[key]),
+    );
     const authSatisfied =
       authEnvKey !== undefined &&
-      (hubAuthEnv[authEnvKey] ?? runtimeEnv[authEnvKey] ?? "").trim().length >
-        0;
+      isHubEnvValuePresent(hubAuthEnv[authEnvKey] ?? runtimeEnv[authEnvKey]);
 
     if (envSatisfied || authSatisfied) {
       findings.push({

@@ -26,6 +26,7 @@ export const HUB_ENV_KNOWN_KEYS = [
 export type HubEnvKnownKey = (typeof HUB_ENV_KNOWN_KEYS)[number];
 
 const HUB_ENV_KNOWN_KEY_SET = new Set<string>(HUB_ENV_KNOWN_KEYS);
+const EMPTY_PLACEHOLDER_VALUES = new Set(["undefined", "null"]);
 
 export interface HubEnvStoreOptions {
   readonly env?: NodeJS.ProcessEnv;
@@ -36,6 +37,24 @@ export const resolveHubEnvPath = (options: HubEnvStoreOptions = {}): string => {
   const userDataDir = resolveArchloopUserDataDir(options.env, options.homeDir);
   return `${userDataDir}/.env`;
 };
+
+export const normalizeHubEnvValue = (value: string | undefined): string => {
+  const trimmed = value?.trim() ?? "";
+  return EMPTY_PLACEHOLDER_VALUES.has(trimmed.toLowerCase()) ? "" : trimmed;
+};
+
+export const isHubEnvValuePresent = (value: string | undefined): boolean =>
+  normalizeHubEnvValue(value).length > 0;
+
+const normalizeHubEnvRecord = (
+  vars: Readonly<Record<string, string>>,
+): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(vars).map(([key, value]) => [
+      key,
+      normalizeHubEnvValue(value),
+    ]),
+  );
 
 export const buildDefaultHubEnvTemplate = (): string =>
   serializeEnvFile(
@@ -53,7 +72,9 @@ export const readHubEnvFile = (
 ): Record<string, string> => {
   const envPath = resolveHubEnvPath(options);
   try {
-    return parseEnvFileContent(readFileSync(envPath, "utf8"));
+    return normalizeHubEnvRecord(
+      parseEnvFileContent(readFileSync(envPath, "utf8")),
+    );
   } catch {
     return {};
   }
@@ -67,9 +88,9 @@ export const resolveHubEnv = (
   const resolved: Record<string, string> = {};
 
   for (const [key, fileValue] of Object.entries(fileEnv)) {
-    const runtimeValue = runtimeEnv[key];
-    const value =
-      runtimeValue && runtimeValue.length > 0 ? runtimeValue : fileValue;
+    const runtimeValue = normalizeHubEnvValue(runtimeEnv[key]);
+    const normalizedFileValue = normalizeHubEnvValue(fileValue);
+    const value = runtimeValue.length > 0 ? runtimeValue : normalizedFileValue;
     if (value && value.length > 0) {
       resolved[key] = value;
     }
@@ -91,9 +112,9 @@ export const mergeHubAndProjectEnv = (input: {
   const resolved: Record<string, string> = {};
 
   for (const key of allKeys) {
-    const projectValue = input.projectFileEnv[key];
-    const hubValue = input.hubFileEnv[key];
-    const runtimeValue = runtimeEnv[key];
+    const projectValue = normalizeHubEnvValue(input.projectFileEnv[key]);
+    const hubValue = normalizeHubEnvValue(input.hubFileEnv[key]);
+    const runtimeValue = normalizeHubEnvValue(runtimeEnv[key]);
 
     let value: string | undefined;
     if (key in input.projectFileEnv) {
@@ -132,7 +153,7 @@ export const writeHubEnvFile = (
   mkdirSync(dirname(envPath), { recursive: true });
 
   const existing = readHubEnvFile(options);
-  const merged = { ...existing, ...vars };
+  const merged = normalizeHubEnvRecord({ ...existing, ...vars });
   const header = [
     "# archLoop Hub shared credentials",
     "# Values here apply to Hub flows (tasks from-prd, triage, run, and so on).",
@@ -201,9 +222,8 @@ export const formatHubEnvShowLines = (
   for (const key of keys) {
     const fileValue = fileEnv[key] ?? "";
     const effectiveValue = resolved[key] ?? "";
-    const runtimeValue = runtimeEnv[key];
+    const runtimeValue = normalizeHubEnvValue(runtimeEnv[key]);
     const runtimeOverride =
-      runtimeValue &&
       runtimeValue.length > 0 &&
       fileValue.length > 0 &&
       runtimeValue !== fileValue;

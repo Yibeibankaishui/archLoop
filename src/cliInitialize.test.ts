@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeContext } from "@effect/platform-node";
@@ -10,17 +10,32 @@ import {
   resolveHubProjectRegistryPath,
   resolveHubProjectSelectionPath,
 } from "./hubProjectRegistry.js";
+import { applyHubAgentRoleEntryToAllRoles } from "./hubAgentConfig.js";
+import { writeHubEnvFile } from "./hubEnv.js";
 
+const mockClackConfirm = vi.fn();
+const mockPromptInitHubAgentConfig = vi.fn();
 const mockPromptInitializeHubAgentConfig = vi.fn();
+const mockPromptInitHubEnv = vi.fn();
 const mockPromptInitializeHubEnv = vi.fn();
 const mockCollectHubReadinessChecks = vi.fn();
 const mockFormatHubReadinessCheckLines = vi.fn();
 const mockFormatHubAuthShowLines = vi.fn();
 
+vi.mock("@clack/prompts", async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>;
+  return {
+    ...actual,
+    confirm: (...args: unknown[]) => mockClackConfirm(...args),
+  };
+});
+
 vi.mock("./hubAgentConfigPrompt.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
+    promptInitHubAgentConfig: (...args: unknown[]) =>
+      mockPromptInitHubAgentConfig(...args),
     promptInitializeHubAgentConfig: (...args: unknown[]) =>
       mockPromptInitializeHubAgentConfig(...args),
   };
@@ -30,6 +45,7 @@ vi.mock("./hubEnvPrompt.js", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return {
     ...actual,
+    promptInitHubEnv: (...args: unknown[]) => mockPromptInitHubEnv(...args),
     promptInitializeHubEnv: (...args: unknown[]) =>
       mockPromptInitializeHubEnv(...args),
   };
@@ -84,7 +100,10 @@ describe("archloop initialize", () => {
       configurable: true,
       value: true,
     });
+    mockClackConfirm.mockResolvedValue(false);
+    mockPromptInitHubAgentConfig.mockResolvedValue(undefined);
     mockPromptInitializeHubAgentConfig.mockResolvedValue(undefined);
+    mockPromptInitHubEnv.mockResolvedValue(undefined);
     mockPromptInitializeHubEnv.mockResolvedValue(undefined);
     mockCollectHubReadinessChecks.mockResolvedValue({
       sections: [{ title: "Checking Hub agent roles", findings: [] }],
@@ -163,6 +182,76 @@ describe("archloop initialize", () => {
     await expect(
       access(resolveHubProjectSelectionPath({ env: process.env })),
     ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("asks before changing existing complete Hub configuration and checks when declined", async () => {
+    applyHubAgentRoleEntryToAllRoles(
+      { provider: "codex", model: "gpt-5.5" },
+      { env: process.env },
+    );
+    writeHubEnvFile(
+      { OPENAI_KEY: "real-openai-key", GH_TOKEN: "real-gh-token" },
+      { env: process.env },
+    );
+
+    const entries = await runInitialize("initialize");
+
+    expect(mockClackConfirm).toHaveBeenCalledTimes(2);
+    expect(mockClackConfirm).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        message:
+          "Existing Hub agent roles found. Change provider/model settings now?",
+        initialValue: false,
+      }),
+    );
+    expect(mockClackConfirm).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        message:
+          "Existing Hub env values found. Change shared env credentials now?",
+        initialValue: false,
+      }),
+    );
+    expect(mockPromptInitHubAgentConfig).not.toHaveBeenCalled();
+    expect(mockPromptInitializeHubAgentConfig).not.toHaveBeenCalled();
+    expect(mockPromptInitHubEnv).not.toHaveBeenCalled();
+    expect(mockPromptInitializeHubEnv).not.toHaveBeenCalled();
+    expect(mockCollectHubReadinessChecks).toHaveBeenCalledOnce();
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "status",
+        severity: "info",
+        message: "Keeping existing Hub agent role settings.",
+      }),
+    );
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "status",
+        severity: "info",
+        message: "Keeping existing Hub env values.",
+      }),
+    );
+  });
+
+  it("runs full interactive configuration when changing existing settings is confirmed", async () => {
+    applyHubAgentRoleEntryToAllRoles(
+      { provider: "codex", model: "gpt-5.5" },
+      { env: process.env },
+    );
+    writeHubEnvFile(
+      { OPENAI_KEY: "real-openai-key", GH_TOKEN: "real-gh-token" },
+      { env: process.env },
+    );
+    mockClackConfirm.mockResolvedValue(true);
+
+    await runInitialize("initialize --skip-check");
+
+    expect(mockPromptInitHubAgentConfig).toHaveBeenCalledOnce();
+    expect(mockPromptInitializeHubAgentConfig).not.toHaveBeenCalled();
+    expect(mockPromptInitHubEnv).toHaveBeenCalledOnce();
+    expect(mockPromptInitializeHubEnv).not.toHaveBeenCalled();
+    expect(mockCollectHubReadinessChecks).not.toHaveBeenCalled();
   });
 
   it("skips the quick check when requested", async () => {

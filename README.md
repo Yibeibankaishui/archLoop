@@ -874,7 +874,7 @@ It renders visible progress while it runs, deduplicates smoke checks by provider
 
 ### `archloop initialize [--skip-check]`
 
-Runs the Hub-wide first-run and repair setup. It configures shared Hub agent roles, shared env values, and auth guidance without touching any Hub project. Existing valid settings are preserved; reruns only repair missing Hub-wide readiness. By default it explains that the quick Hub check may make a small provider/model call, runs that check, and then ends by telling you to run `archloop project add`. Pass `--skip-check` to skip the quick check when you intentionally do not want the provider smoke call.
+Runs the Hub-wide first-run and repair setup. It configures shared Hub agent roles, shared env values, and auth guidance without touching any Hub project. Missing role or env settings are repaired through guided prompts. When existing settings are already complete, reruns explicitly ask whether you want to change agent provider/model settings and shared env credentials; declining keeps the current configuration and continues to the quick check. By default it explains that the quick Hub check may make a small provider/model call, runs that check, and then ends by telling you to run `archloop project add`. Pass `--skip-check` to skip the quick check when you intentionally do not want the provider smoke call.
 
 ### `archloop project configure`
 
@@ -934,7 +934,7 @@ Prints the Hub-wide env file path under the archLoop user data directory. Hub fl
 
 ### `archloop env show`
 
-Displays configured Hub env keys with masked values. `process.env` overrides file values at runtime. Empty known keys include a short acquisition hint and a pointer to `archloop env init`.
+Displays configured Hub env keys with masked values. `process.env` overrides file values at runtime. Empty known keys include a short acquisition hint and a pointer to `archloop env init`. Placeholder strings such as `undefined` and `null` are treated as empty values, so they do not satisfy readiness checks.
 
 ### `archloop env init`
 

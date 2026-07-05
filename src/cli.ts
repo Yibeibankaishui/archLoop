@@ -181,6 +181,7 @@ import {
   formatHubAgentConfigShowLines,
   formatHubAgentRoleOptions,
   HUB_AGENT_ROLES,
+  listMissingHubAgentRoles,
   readHubAgentConfig,
   resolveHubAgentConfigPath,
   resolveHubAgentRoleEntry,
@@ -194,8 +195,11 @@ import {
   promptInitializeHubAgentConfig,
 } from "./hubAgentConfigPrompt.js";
 import {
+  collectHubEnvKeysForSetup,
   formatHubEnvShowLines,
   isHubEnvKnownKey,
+  normalizeHubEnvValue,
+  resolveHubEnv,
   resolveHubEnvPath,
   upsertHubEnvKey,
 } from "./hubEnv.js";
@@ -2921,6 +2925,109 @@ const initializeSkipCheckOption = Options.boolean("skip-check").pipe(
   Options.withDefault(false),
 );
 
+const confirmInitializeConfigChange = (
+  message: string,
+): Effect.Effect<boolean, InitError> =>
+  Effect.tryPromise({
+    try: async () => {
+      const result = await clack.confirm({
+        message,
+        initialValue: false,
+      });
+      if (clack.isCancel(result)) {
+        throw new InitError({ message: "Hub initialization cancelled." });
+      }
+      return result === true;
+    },
+    catch: (error) =>
+      error instanceof InitError
+        ? error
+        : new InitError({
+            message: error instanceof Error ? error.message : String(error),
+          }),
+  });
+
+const listMissingInitializeHubEnvKeys = (): string[] => {
+  const existing = resolveHubEnv({ env: process.env });
+  return collectHubEnvKeysForSetup({ env: process.env }).filter(
+    (key) => normalizeHubEnvValue(existing[key]).length === 0,
+  );
+};
+
+const runInitializeHubAgentConfig = (): Effect.Effect<
+  void,
+  HubAgentConfigError | InitError,
+  Display
+> =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const config = yield* Effect.try({
+      try: () => readHubAgentConfig({ env: process.env }),
+      catch: toHubAgentConfigError,
+    });
+    const missingRoles = listMissingHubAgentRoles(config, HUB_AGENT_ROLES);
+
+    if (missingRoles.length > 0) {
+      yield* d.status(
+        `Missing Hub agent roles: ${missingRoles.join(", ")}. Starting guided setup.`,
+        "info",
+      );
+      yield* Effect.tryPromise({
+        try: () => promptInitializeHubAgentConfig(),
+        catch: toHubAgentConfigError,
+      });
+      return;
+    }
+
+    const shouldChange = yield* confirmInitializeConfigChange(
+      "Existing Hub agent roles found. Change provider/model settings now?",
+    );
+    if (shouldChange) {
+      yield* Effect.tryPromise({
+        try: () => promptInitHubAgentConfig(),
+        catch: toHubAgentConfigError,
+      });
+      return;
+    }
+
+    yield* d.status("Keeping existing Hub agent role settings.", "info");
+  });
+
+const runInitializeHubEnv = (): Effect.Effect<
+  void,
+  HubEnvError | InitError,
+  Display
+> =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const missingKeys = listMissingInitializeHubEnvKeys();
+
+    if (missingKeys.length > 0) {
+      yield* d.status(
+        `Missing Hub env values: ${missingKeys.join(", ")}. Starting guided setup.`,
+        "info",
+      );
+      yield* Effect.tryPromise({
+        try: () => promptInitializeHubEnv(),
+        catch: toHubEnvError,
+      });
+      return;
+    }
+
+    const shouldChange = yield* confirmInitializeConfigChange(
+      "Existing Hub env values found. Change shared env credentials now?",
+    );
+    if (shouldChange) {
+      yield* Effect.tryPromise({
+        try: () => promptInitHubEnv(),
+        catch: toHubEnvError,
+      });
+      return;
+    }
+
+    yield* d.status("Keeping existing Hub env values.", "info");
+  });
+
 const initializeCommand = Command.make(
   "initialize",
   {
@@ -2945,15 +3052,8 @@ const initializeCommand = Command.make(
         "info",
       );
 
-      yield* Effect.tryPromise({
-        try: () => promptInitializeHubAgentConfig(),
-        catch: toHubAgentConfigError,
-      });
-
-      yield* Effect.tryPromise({
-        try: () => promptInitializeHubEnv(),
-        catch: toHubEnvError,
-      });
+      yield* runInitializeHubAgentConfig();
+      yield* runInitializeHubEnv();
 
       for (const line of formatHubAuthShowLines()) {
         yield* d.text(line);
