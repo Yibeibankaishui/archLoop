@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type {
   HubBatchMergeCompletedEvent,
+  HubRunEvent,
   HubTaskEvent,
 } from "./hubExecution.js";
 import {
@@ -9,6 +10,7 @@ import {
   formatPlainHubRunEvent,
   formatPlainHubRunOutcome,
   projectHubRunOutcome,
+  projectHubRunStateOutcome,
   reduceHubRunDisplayState,
 } from "./hubRunDisplay.js";
 import type { RunHubFlowResult } from "./hubFlowExecution.js";
@@ -31,6 +33,71 @@ const makeRunResult = (
   projectDevelopmentContractPath: "/tmp/contract.md",
   projectDevelopmentContractCreatedGenericFallback: false,
   ...overrides,
+});
+
+describe("projectHubRunStateOutcome", () => {
+  it("retains failed task diagnostics and skipped counts for interrupted runs", () => {
+    const runStarted: HubRunEvent = {
+      type: "run_started",
+      runId: "run-interrupted",
+      branch: "flow/with-review",
+      startedAt: "2026-07-15T13:00:00.000Z",
+      repoRoot: "/tmp/repo",
+      hubProjectDir: "/tmp/hub",
+      eventId: "run-interrupted:1",
+      sequence: 1,
+    };
+    const reviewFailed: HubRunEvent = {
+      type: "task_review_failed",
+      runId: "run-interrupted",
+      batchId: "batch-interrupted",
+      taskId: "task-review-failed",
+      branch: "archloop/task-review-failed",
+      createdAt: "2026-07-15T13:00:01.000Z",
+      status: "failed",
+      diagnosticSummary: "review failed\nraw details",
+      diagnostics: { path: "/tmp/review.log" },
+      eventId: "run-interrupted:2",
+      sequence: 2,
+    };
+    const claimSkipped: HubRunEvent = {
+      type: "task_claim_skipped",
+      runId: "run-interrupted",
+      batchId: "batch-interrupted",
+      taskId: "task-skipped",
+      branch: "archloop/task-skipped",
+      createdAt: "2026-07-15T13:00:02.000Z",
+      status: "ready_for_agent",
+      eventId: "run-interrupted:3",
+      sequence: 3,
+    };
+    let state = createHubRunDisplayState({
+      hubProjectName: "alpha",
+      flowId: "with-review",
+    });
+    state = reduceHubRunDisplayState(state, runStarted);
+    state = reduceHubRunDisplayState(state, reviewFailed);
+    state = reduceHubRunDisplayState(state, claimSkipped);
+
+    expect(
+      projectHubRunStateOutcome(state, {
+        outcome: "cancelled",
+        summary: "Run cancelled",
+        exitCode: 130,
+      }),
+    ).toMatchObject({
+      counts: { failed: 1, skipped: 1 },
+      taskDetails: [
+        {
+          taskId: "task-review-failed",
+          stage: "Review failed",
+          diagnostic: "review failed",
+          logPath: "/tmp/review.log",
+          recoveryCommand: "archloop tasks recover task-review-failed",
+        },
+      ],
+    });
+  });
 });
 
 describe("plain Hub run lifecycle output", () => {

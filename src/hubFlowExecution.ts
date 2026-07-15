@@ -1136,6 +1136,10 @@ const runObservedHubFlow = async (
       flowId: input.flowId,
       createdAt: batchStartedAt.toISOString(),
       taskIds: selectedIds,
+      tasks: selectedTasks.map((task) => ({
+        taskId: task.id,
+        title: task.title,
+      })),
       ...batchPlannedMetadata,
     });
 

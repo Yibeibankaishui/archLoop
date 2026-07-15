@@ -88,6 +88,10 @@ export interface HubBatchPlannedEvent {
   readonly flowId: string;
   readonly createdAt: string;
   readonly taskIds: readonly string[];
+  readonly tasks?: readonly {
+    readonly taskId: string;
+    readonly title: string;
+  }[];
   readonly batchStrategyRequested?: string;
   readonly batchStrategyUsed?: string;
   readonly maxTasks?: number;

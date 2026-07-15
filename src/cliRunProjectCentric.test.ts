@@ -152,6 +152,20 @@ const setTerminalTtyState = (
   });
 };
 
+const setStdoutColumns = (columns: number | undefined) => {
+  Object.defineProperty(process.stdout, "columns", {
+    configurable: true,
+    value: columns,
+  });
+};
+
+const setStdoutRows = (rows: number | undefined) => {
+  Object.defineProperty(process.stdout, "rows", {
+    configurable: true,
+    value: rows,
+  });
+};
+
 const restoreXdgDataHome = (value: string | undefined) => {
   if (value === undefined) {
     delete process.env.XDG_DATA_HOME;
@@ -168,6 +182,7 @@ describe("archloop run project targeting", () => {
   let originalCwd: string;
   let originalStdinTTY: boolean | undefined;
   let originalStdoutTTY: boolean | undefined;
+  let originalStdoutRows: number | undefined;
   let originalXdgDataHome: string | undefined;
   let originalExitCode: typeof process.exitCode;
 
@@ -175,6 +190,7 @@ describe("archloop run project targeting", () => {
     originalCwd = process.cwd();
     originalStdinTTY = process.stdin.isTTY;
     originalStdoutTTY = process.stdout.isTTY;
+    originalStdoutRows = process.stdout.rows;
     originalXdgDataHome = process.env.XDG_DATA_HOME;
     originalExitCode = process.exitCode;
 
@@ -193,6 +209,7 @@ describe("archloop run project targeting", () => {
     process.env.XDG_DATA_HOME = join(hostDir, "xdg-data");
     process.chdir(otherDir);
     setTerminalTtyState(false);
+    setStdoutRows(24);
 
     const repoAlphaRoot = resolveGitRepoRoot(repoAlpha);
     const repoBetaRoot = resolveGitRepoRoot(repoBeta);
@@ -229,6 +246,7 @@ describe("archloop run project targeting", () => {
   afterEach(() => {
     process.chdir(originalCwd);
     setTerminalTtyState(originalStdinTTY, originalStdoutTTY);
+    setStdoutRows(originalStdoutRows);
     restoreXdgDataHome(originalXdgDataHome);
     process.exitCode = originalExitCode;
     vi.clearAllMocks();
@@ -242,29 +260,16 @@ describe("archloop run project targeting", () => {
   });
 
   it("uses the selected Hub project from any directory", async () => {
-    const alphaRoot = resolveGitRepoRoot(repoAlpha);
     const entries = await runCli(["run", "--flow", "no-review"]);
+    const lines = entries.map((entry) => {
+      expect(entry._tag).toBe("plain");
+      return (entry as { readonly message: string }).message;
+    });
 
-    expect(entries).toContainEqual(
-      expect.objectContaining({
-        _tag: "summary",
-        title: "Hub run plan",
-        rows: expect.objectContaining({
-          "Hub project": "alpha",
-          "Hub flow": "no-review",
-          "Repository root": alphaRoot,
-        }),
-      }),
+    expect(lines[0]).toMatch(
+      /^event=run_started hub_project="alpha" flow="no-review"/,
     );
-    expect(entries).toContainEqual(
-      expect.objectContaining({
-        _tag: "status",
-        severity: "info",
-        message: expect.stringContaining(
-          "Hub flow found no ready tasks to run.",
-        ),
-      }),
-    );
+    expect(lines.at(-1)).toContain('summary="Nothing to run"');
   });
 
   it("emits a plain lifecycle for a no-review run with nothing ready", async () => {
@@ -298,6 +303,313 @@ describe("archloop run project targeting", () => {
     expect(process.exitCode).toBe(0);
     expect(plainMessages.join("\n")).not.toContain("no_ready_tasks");
     expect(plainMessages.join("\n")).not.toMatch(/\u001b\[[0-?]*[ -/]*[@-~]/);
+  });
+
+  it("defaults redirected task-board output to deterministic plain lines", async () => {
+    const entries = await runCli(["run", "--flow", "no-review"]);
+    const lines = entries.map((entry) => {
+      expect(entry._tag).toBe("plain");
+      return (entry as { readonly message: string }).message;
+    });
+
+    expect(lines).toHaveLength(4);
+    expect(lines[0]).toMatch(
+      /^event=run_started hub_project="alpha" flow="no-review"/,
+    );
+    expect(lines.at(-1)).toContain('outcome="completed"');
+    expect(lines.join("\n")).not.toMatch(/\u001b\[[0-?]*[ -/]*[@-~]/);
+  });
+
+  it("defaults a capable TTY task-board run to bounded live output", async () => {
+    const originalColumns = process.stdout.columns;
+    const originalTerm = process.env.TERM;
+    const chunks: string[] = [];
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(((
+      chunk: string | Uint8Array,
+    ) => {
+      chunks.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write);
+    setTerminalTtyState(true);
+    setStdoutColumns(120);
+    process.env.TERM = "xterm-256color";
+    mockConfirm.mockResolvedValue(true);
+
+    try {
+      await runCli(["run", "--flow", "no-review"]);
+    } finally {
+      write.mockRestore();
+      setStdoutColumns(originalColumns);
+      if (originalTerm === undefined) {
+        delete process.env.TERM;
+      } else {
+        process.env.TERM = originalTerm;
+      }
+    }
+
+    const output = chunks.join("");
+    expect(mockConfirm).toHaveBeenCalledOnce();
+    expect(output).toContain("\x1b[?25l");
+    expect(output).toContain("archLoop run | Project alpha | Flow no-review");
+    expect(output).toContain("Nothing to run");
+    expect(output.endsWith("\x1b[?25h")).toBe(true);
+    expect(output).not.toContain("Nothing to run...");
+  });
+
+  it("keeps auto live output active without color cues", async () => {
+    const originalColumns = process.stdout.columns;
+    const originalTerm = process.env.TERM;
+    const chunks: string[] = [];
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(((
+      chunk: string | Uint8Array,
+    ) => {
+      chunks.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write);
+    setTerminalTtyState(true);
+    setStdoutColumns(120);
+    process.env.TERM = "xterm-256color";
+    mockConfirm.mockResolvedValue(true);
+
+    try {
+      await runCli([
+        "run",
+        "--flow",
+        "no-review",
+        "--output",
+        "auto",
+        "--no-color",
+      ]);
+    } finally {
+      write.mockRestore();
+      setStdoutColumns(originalColumns);
+      if (originalTerm === undefined) {
+        delete process.env.TERM;
+      } else {
+        process.env.TERM = originalTerm;
+      }
+    }
+
+    const output = chunks.join("");
+    expect(output).toContain("\x1b[?25l");
+    expect(output).toContain("Nothing to run");
+    expect(output).not.toMatch(/\x1b\[(?:3\d|9\d)m/);
+  });
+
+  it("falls back to plain without prompting in CI", async () => {
+    const originalCi = process.env.CI;
+    const originalTerm = process.env.TERM;
+    const originalColumns = process.stdout.columns;
+    process.env.CI = "true";
+    process.env.TERM = "xterm-256color";
+    setTerminalTtyState(true);
+    setStdoutColumns(120);
+
+    try {
+      const entries = await runCli(["run", "--flow", "no-review"]);
+      expect(entries).toHaveLength(4);
+      expect(entries.every((entry) => entry._tag === "plain")).toBe(true);
+      expect(mockConfirm).not.toHaveBeenCalled();
+    } finally {
+      if (originalCi === undefined) {
+        delete process.env.CI;
+      } else {
+        process.env.CI = originalCi;
+      }
+      if (originalTerm === undefined) {
+        delete process.env.TERM;
+      } else {
+        process.env.TERM = originalTerm;
+      }
+      setStdoutColumns(originalColumns);
+    }
+  });
+
+  it("replays the complete plain lifecycle when a live resize becomes unsafe", async () => {
+    const resizeListenerCountBeforeRun = process.stdout.listenerCount("resize");
+    let resizeListenerCountAfterFallback = -1;
+    mockRunHubFlow.mockImplementation(async (input) => {
+      const runId = "run-resize-fallback";
+      const batchId = "batch-resize-fallback";
+      const hubProjectDir = join(
+        process.env.XDG_DATA_HOME!,
+        "archloop",
+        "hub",
+        "projects",
+        "resize-fallback",
+      );
+      input.onEvent?.({
+        type: "run_started",
+        runId,
+        branch: "flow/no-review",
+        startedAt: "2026-07-15T12:40:00.000Z",
+        repoRoot: repoAlpha,
+        hubProjectDir,
+        eventId: `${runId}:1`,
+        sequence: 1,
+      });
+      input.onEvent?.({
+        type: "batch_started",
+        runId,
+        batchId,
+        branch: "flow/no-review",
+        startedAt: "2026-07-15T12:40:01.000Z",
+        eventId: `${runId}:2`,
+        sequence: 2,
+      });
+      input.onEvent?.({
+        type: "batch_planned",
+        runId,
+        batchId,
+        flowId: "no-review",
+        createdAt: "2026-07-15T12:40:02.000Z",
+        taskIds: [],
+        tasks: [],
+        eventId: `${runId}:3`,
+        sequence: 3,
+      });
+      setStdoutColumns(39);
+      process.stdout.emit("resize");
+      resizeListenerCountAfterFallback = process.stdout.listenerCount("resize");
+      return {
+        flowId: "no-review",
+        runId,
+        batchId,
+        runDir: join(hubProjectDir, "runs", runId),
+        mode: "new_batch",
+        completedBatchCount: 0,
+        completedTaskCount: 0,
+        stopReason: "no_ready_tasks",
+        batchResults: [],
+        selectedTaskIds: [],
+        results: [],
+        unfinishedBatchIds: [],
+        projectDevelopmentContractPath: "/tmp/contract.md",
+        projectDevelopmentContractCreatedGenericFallback: false,
+      };
+    });
+    const originalColumns = process.stdout.columns;
+    const originalTerm = process.env.TERM;
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    const clearIntervalSpy = vi.spyOn(global, "clearInterval");
+    let refreshTimerCleared = false;
+    setTerminalTtyState(true);
+    setStdoutColumns(120);
+    process.env.TERM = "xterm-256color";
+    mockConfirm.mockResolvedValue(true);
+
+    let entries: readonly DisplayEntry[] = [];
+    try {
+      entries = await runCli(["run", "--flow", "no-review"]);
+    } finally {
+      refreshTimerCleared = clearIntervalSpy.mock.calls.length > 0;
+      clearIntervalSpy.mockRestore();
+      write.mockRestore();
+      setStdoutColumns(originalColumns);
+      if (originalTerm === undefined) {
+        delete process.env.TERM;
+      } else {
+        process.env.TERM = originalTerm;
+      }
+    }
+    const plainLines = entries.flatMap((entry) =>
+      entry._tag === "plain" ? [entry.message] : [],
+    );
+
+    expect(plainLines.map((line) => line.match(/^event=([^ ]+)/)?.[1])).toEqual(
+      ["run_started", "batch_started", "batch_planned", "run_completed"],
+    );
+    expect(resizeListenerCountAfterFallback).toBe(resizeListenerCountBeforeRun);
+    expect(refreshTimerCleared).toBe(true);
+  });
+
+  it("falls back to the complete plain lifecycle when a live write fails", async () => {
+    const originalColumns = process.stdout.columns;
+    const originalTerm = process.env.TERM;
+    const chunks: string[] = [];
+    let failNextWrite = true;
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        const text = String(chunk);
+        if (failNextWrite) {
+          failNextWrite = false;
+          chunks.push(text.slice(0, "\x1b[?25l".length));
+          throw new Error("simulated terminal write failure");
+        }
+        chunks.push(text);
+        return true;
+      });
+    setTerminalTtyState(true);
+    setStdoutColumns(120);
+    process.env.TERM = "xterm-256color";
+    mockConfirm.mockResolvedValue(true);
+
+    let entries: readonly DisplayEntry[] = [];
+    try {
+      entries = await runCli(["run", "--flow", "no-review"]);
+    } finally {
+      write.mockRestore();
+      setStdoutColumns(originalColumns);
+      if (originalTerm === undefined) {
+        delete process.env.TERM;
+      } else {
+        process.env.TERM = originalTerm;
+      }
+    }
+
+    const plainLines = entries.flatMap((entry) =>
+      entry._tag === "plain" ? [entry.message] : [],
+    );
+    expect(plainLines.map((line) => line.match(/^event=([^ ]+)/)?.[1])).toEqual(
+      ["run_started", "batch_started", "batch_planned", "run_completed"],
+    );
+    expect(process.exitCode).toBe(0);
+    expect(chunks.join("")).toContain("\x1b[?25h");
+  });
+
+  it("falls back to a plain outcome when the final live write fails", async () => {
+    const originalColumns = process.stdout.columns;
+    const originalTerm = process.env.TERM;
+    let failedFinalWrite = false;
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        const text = String(chunk);
+        if (!failedFinalWrite && text.includes("Nothing to run")) {
+          failedFinalWrite = true;
+          throw new Error("simulated final terminal write failure");
+        }
+        return true;
+      });
+    setTerminalTtyState(true);
+    setStdoutColumns(120);
+    process.env.TERM = "xterm-256color";
+    mockConfirm.mockResolvedValue(true);
+
+    let entries: readonly DisplayEntry[] = [];
+    try {
+      entries = await runCli(["run", "--flow", "no-review"]);
+    } finally {
+      write.mockRestore();
+      setStdoutColumns(originalColumns);
+      if (originalTerm === undefined) {
+        delete process.env.TERM;
+      } else {
+        process.env.TERM = originalTerm;
+      }
+    }
+
+    const plainLines = entries.flatMap((entry) =>
+      entry._tag === "plain" ? [entry.message] : [],
+    );
+    expect(failedFinalWrite).toBe(true);
+    expect(plainLines.map((line) => line.match(/^event=([^ ]+)/)?.[1])).toEqual(
+      ["run_started", "batch_started", "batch_planned", "run_completed"],
+    );
+    expect(process.exitCode).toBe(0);
   });
 
   it("emits stdout-pure JSONL for a no-review run with nothing ready", async () => {
@@ -375,7 +687,6 @@ describe("archloop run project targeting", () => {
   });
 
   it("honors an explicit Hub project override", async () => {
-    const betaRoot = resolveGitRepoRoot(repoBeta);
     const entries = await runCli([
       "run",
       "--project",
@@ -384,38 +695,22 @@ describe("archloop run project targeting", () => {
       "no-review",
     ]);
 
-    expect(entries).toContainEqual(
-      expect.objectContaining({
-        _tag: "summary",
-        title: "Hub run plan",
-        rows: expect.objectContaining({
-          "Hub project": "beta",
-          "Hub flow": "no-review",
-          "Repository root": betaRoot,
-        }),
-      }),
-    );
+    expect(entries[0]).toMatchObject({
+      _tag: "plain",
+      message: expect.stringContaining('hub_project="beta"'),
+    });
   });
 
   it("accepts a positional Hub project override", async () => {
-    const betaRoot = resolveGitRepoRoot(repoBeta);
     const entries = await runCli(["run", "beta", "--flow", "no-review"]);
 
-    expect(entries).toContainEqual(
-      expect.objectContaining({
-        _tag: "summary",
-        title: "Hub run plan",
-        rows: expect.objectContaining({
-          "Hub project": "beta",
-          "Hub flow": "no-review",
-          "Repository root": betaRoot,
-        }),
-      }),
-    );
+    expect(entries[0]).toMatchObject({
+      _tag: "plain",
+      message: expect.stringContaining('hub_project="beta"'),
+    });
   });
 
   it("keeps legacy path targets working with guidance", async () => {
-    const alphaRoot = resolveGitRepoRoot(repoAlpha);
     const entries = await runCli(
       ["run", ".", "--flow", "with-review"],
       repoAlpha,
@@ -430,13 +725,8 @@ describe("archloop run project targeting", () => {
     );
     expect(entries).toContainEqual(
       expect.objectContaining({
-        _tag: "summary",
-        title: "Hub run plan",
-        rows: expect.objectContaining({
-          "Legacy path target": ".",
-          "Repository root": alphaRoot,
-          "Hub flow": "with-review",
-        }),
+        _tag: "plain",
+        message: expect.stringContaining('flow="with-review"'),
       }),
     );
   });
@@ -809,6 +1099,261 @@ describe("archloop run project targeting", () => {
       stopReason: "cancelled",
       exitCode: 130,
     });
+  });
+
+  it("finalizes and restores a live terminal when execution is cancelled", async () => {
+    mockRunHubFlow.mockImplementation(async (input) => {
+      input.onEvent?.({
+        type: "run_started",
+        runId: "run-live-cancelled",
+        branch: "flow/no-review",
+        startedAt: "2026-07-15T12:30:00.000Z",
+        repoRoot: repoAlpha,
+        hubProjectDir: join(
+          process.env.XDG_DATA_HOME!,
+          "archloop",
+          "hub",
+          "projects",
+          "live-cancelled",
+        ),
+        eventId: "run-live-cancelled:1",
+        sequence: 1,
+      });
+      input.onEvent?.({
+        type: "task_review_failed",
+        runId: "run-live-cancelled",
+        batchId: "batch-live-cancelled",
+        taskId: "task-live-failed",
+        branch: "archloop/task-live-failed",
+        createdAt: "2026-07-15T12:30:01.000Z",
+        status: "failed",
+        diagnosticSummary: "review failed before cancellation",
+        diagnostics: { path: "/tmp/live-review.log" },
+        eventId: "run-live-cancelled:2",
+        sequence: 2,
+      });
+      const error = new Error("The run was cancelled");
+      error.name = "AbortError";
+      throw error;
+    });
+    const originalColumns = process.stdout.columns;
+    const originalTerm = process.env.TERM;
+    const chunks: string[] = [];
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(((
+      chunk: string | Uint8Array,
+    ) => {
+      chunks.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write);
+    setTerminalTtyState(true);
+    setStdoutColumns(120);
+    process.env.TERM = "xterm-256color";
+    mockConfirm.mockResolvedValue(true);
+
+    try {
+      await runCli(["run", "--flow", "no-review"]);
+    } finally {
+      write.mockRestore();
+      setStdoutColumns(originalColumns);
+      if (originalTerm === undefined) {
+        delete process.env.TERM;
+      } else {
+        process.env.TERM = originalTerm;
+      }
+    }
+
+    const output = chunks.join("");
+    expect(process.exitCode).toBe(130);
+    expect(output).toContain("Task task-live-failed | Review failed");
+    expect(output).toContain("review failed before cancellation");
+    expect(output).toContain("archloop tasks recover task-live-failed");
+    expect(output).toContain("Run cancelled");
+    expect(output.endsWith("\x1b[?25h")).toBe(true);
+  });
+
+  it("falls back to a plain cancellation when the final live write fails", async () => {
+    mockRunHubFlow.mockImplementation(async (input) => {
+      input.onEvent?.({
+        type: "run_started",
+        runId: "run-live-cancel-write-failed",
+        branch: "flow/no-review",
+        startedAt: "2026-07-15T12:32:00.000Z",
+        repoRoot: repoAlpha,
+        hubProjectDir: join(
+          process.env.XDG_DATA_HOME!,
+          "archloop",
+          "hub",
+          "projects",
+          "live-cancel-write-failed",
+        ),
+        eventId: "run-live-cancel-write-failed:1",
+        sequence: 1,
+      });
+      const error = new Error("The run was cancelled");
+      error.name = "AbortError";
+      throw error;
+    });
+    const originalColumns = process.stdout.columns;
+    const originalTerm = process.env.TERM;
+    let failedFinalWrite = false;
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        const text = String(chunk);
+        if (!failedFinalWrite && text.includes("Run cancelled")) {
+          failedFinalWrite = true;
+          throw new Error("simulated cancellation terminal write failure");
+        }
+        return true;
+      });
+    setTerminalTtyState(true);
+    setStdoutColumns(120);
+    process.env.TERM = "xterm-256color";
+    mockConfirm.mockResolvedValue(true);
+
+    let entries: readonly DisplayEntry[] = [];
+    try {
+      entries = await runCli(["run", "--flow", "no-review"]);
+    } finally {
+      write.mockRestore();
+      setStdoutColumns(originalColumns);
+      if (originalTerm === undefined) {
+        delete process.env.TERM;
+      } else {
+        process.env.TERM = originalTerm;
+      }
+    }
+
+    const output = entries
+      .flatMap((entry) => (entry._tag === "plain" ? [entry.message] : []))
+      .join("\n");
+    expect(failedFinalWrite).toBe(true);
+    expect(output).toContain("event=run_started");
+    expect(output).toContain('outcome="cancelled"');
+    expect(process.exitCode).toBe(130);
+  });
+
+  it("finalizes actionable live output before surfacing an execution failure", async () => {
+    mockRunHubFlow.mockImplementation(async (input) => {
+      input.onEvent?.({
+        type: "run_started",
+        runId: "run-live-failed",
+        branch: "flow/no-review",
+        startedAt: "2026-07-15T12:35:00.000Z",
+        repoRoot: repoAlpha,
+        hubProjectDir: join(
+          process.env.XDG_DATA_HOME!,
+          "archloop",
+          "hub",
+          "projects",
+          "live-failed",
+        ),
+        eventId: "run-live-failed:1",
+        sequence: 1,
+      });
+      input.onEvent?.({
+        type: "task_implementation_failed",
+        runId: "run-live-failed",
+        batchId: "batch-live-failed",
+        taskId: "task-live-failed",
+        branch: "archloop/task-live-failed",
+        createdAt: "2026-07-15T12:35:01.000Z",
+        status: "failed",
+        diagnosticSummary: "implementation failed before host error",
+        diagnostics: { path: "/tmp/live-implementation.log" },
+        eventId: "run-live-failed:2",
+        sequence: 2,
+      });
+      throw new Error("host execution failed");
+    });
+    const originalColumns = process.stdout.columns;
+    const originalTerm = process.env.TERM;
+    const chunks: string[] = [];
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(((
+      chunk: string | Uint8Array,
+    ) => {
+      chunks.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write);
+    setTerminalTtyState(true);
+    setStdoutColumns(120);
+    process.env.TERM = "xterm-256color";
+    mockConfirm.mockResolvedValue(true);
+
+    try {
+      await expect(
+        runCli(["run", "--flow", "no-review"]),
+      ).rejects.toMatchObject({ message: "host execution failed" });
+    } finally {
+      write.mockRestore();
+      setStdoutColumns(originalColumns);
+      if (originalTerm === undefined) {
+        delete process.env.TERM;
+      } else {
+        process.env.TERM = originalTerm;
+      }
+    }
+
+    const output = chunks.join("");
+    expect(output).toContain("Task task-live-failed | Implementation failed");
+    expect(output).toContain("implementation failed before host error");
+    expect(output).toContain("Run failed");
+    expect(output.endsWith("\x1b[?25h")).toBe(true);
+  });
+
+  it("preserves the execution error when the failed live outcome cannot be written", async () => {
+    mockRunHubFlow.mockImplementation(async (input) => {
+      input.onEvent?.({
+        type: "run_started",
+        runId: "run-live-failure-write-failed",
+        branch: "flow/no-review",
+        startedAt: "2026-07-15T12:38:00.000Z",
+        repoRoot: repoAlpha,
+        hubProjectDir: join(
+          process.env.XDG_DATA_HOME!,
+          "archloop",
+          "hub",
+          "projects",
+          "live-failure-write-failed",
+        ),
+        eventId: "run-live-failure-write-failed:1",
+        sequence: 1,
+      });
+      throw new Error("host execution failed");
+    });
+    const originalColumns = process.stdout.columns;
+    const originalTerm = process.env.TERM;
+    let failedFinalWrite = false;
+    const write = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation((chunk: string | Uint8Array) => {
+        const text = String(chunk);
+        if (!failedFinalWrite && text.includes("Run failed")) {
+          failedFinalWrite = true;
+          throw new Error("simulated failure terminal write failure");
+        }
+        return true;
+      });
+    setTerminalTtyState(true);
+    setStdoutColumns(120);
+    process.env.TERM = "xterm-256color";
+    mockConfirm.mockResolvedValue(true);
+
+    try {
+      await expect(
+        runCli(["run", "--flow", "no-review"]),
+      ).rejects.toMatchObject({ message: "host execution failed" });
+    } finally {
+      write.mockRestore();
+      setStdoutColumns(originalColumns);
+      if (originalTerm === undefined) {
+        delete process.env.TERM;
+      } else {
+        process.env.TERM = originalTerm;
+      }
+    }
+
+    expect(failedFinalWrite).toBe(true);
   });
 
   it("fails in non-interactive mode when flow is omitted", async () => {

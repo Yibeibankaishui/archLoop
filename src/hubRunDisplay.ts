@@ -348,6 +348,7 @@ export interface HubRunDisplayState {
       {
         readonly batchId: string;
         readonly selectedTaskIds: readonly string[];
+        readonly taskTitles?: Readonly<Record<string, string>>;
         readonly status: "planning" | "merging" | "done" | "partial_failed";
         readonly stage: string;
       }
@@ -361,6 +362,8 @@ export interface HubRunDisplayState {
         readonly batchId: string;
         readonly status: string;
         readonly stage: string;
+        readonly skipped?: boolean;
+        readonly detail?: HubRunTaskDetail;
       }
     >
   >;
@@ -418,6 +421,79 @@ const resolveTaskStage = (event: Extract<HubRunEvent, { taskId: string }>) => {
   }
 };
 
+const projectEventTaskDetail = (
+  state: HubRunDisplayState,
+  event: Extract<HubRunEvent, { taskId: string }>,
+): HubRunTaskDetail | undefined => {
+  const isBlocked =
+    event.type === "task_retry_blocked" || event.status === "blocked";
+  const isFailed = event.type.endsWith("_failed") || event.status === "failed";
+  if (!isBlocked && !isFailed) {
+    return undefined;
+  }
+  const stage =
+    event.type === "task_implementation_failed"
+      ? "Implementation failed"
+      : event.type === "task_review_failed"
+        ? "Review failed"
+        : isBlocked
+          ? "Execution blocked"
+          : resolveTaskStage(event);
+  const diagnostics = event.diagnostics;
+  const explicitLogPath =
+    typeof diagnostics?.path === "string"
+      ? diagnostics.path
+      : typeof diagnostics?.logPath === "string"
+        ? diagnostics.logPath
+        : undefined;
+  const fallbackLogPath = state.runDir
+    ? event.type === "task_implementation_failed"
+      ? join(state.runDir, "logs", `${event.taskId}.log`)
+      : event.type === "task_review_failed"
+        ? join(state.runDir, "logs", `${event.taskId}-review.log`)
+        : state.runDir
+    : undefined;
+  return {
+    taskId: event.taskId,
+    stage,
+    diagnostic: conciseDiagnostic(
+      event.diagnosticSummary ??
+        event.message ??
+        event.reason ??
+        event.failureReason,
+      isBlocked ? "Task execution is blocked." : "Task failed.",
+    ),
+    ...((explicitLogPath ?? fallbackLogPath)
+      ? { logPath: explicitLogPath ?? fallbackLogPath }
+      : {}),
+    recoveryCommand: `archloop tasks recover ${event.taskId}`,
+  };
+};
+
+export const projectHubRunStateOutcome = (
+  state: HubRunDisplayState,
+  input: {
+    readonly outcome: HubRunOutcome;
+    readonly summary: string;
+    readonly exitCode: number;
+  },
+): HubRunOutcomeProjection => {
+  const tasks = Object.values(state.tasks);
+  const countStatus = (status: string): number =>
+    tasks.filter((task) => task.status === status && !task.skipped).length;
+  return {
+    ...input,
+    counts: {
+      completed: countStatus("done"),
+      failed: countStatus("failed"),
+      blocked: countStatus("blocked"),
+      skipped: tasks.filter((task) => task.skipped).length,
+      readyToMerge: countStatus("waiting_for_merge"),
+    },
+    taskDetails: tasks.flatMap((task) => (task.detail ? [task.detail] : [])),
+  };
+};
+
 const reduceBatchEvent = (
   state: HubRunDisplayState,
   event: Extract<HubRunEvent, { batchId: string }>,
@@ -428,6 +504,7 @@ const reduceBatchEvent = (
       return {
         batchId: event.batchId,
         selectedTaskIds: current?.selectedTaskIds ?? [],
+        taskTitles: current?.taskTitles,
         status: "planning",
         stage: "Planning",
       };
@@ -435,6 +512,11 @@ const reduceBatchEvent = (
       return {
         batchId: event.batchId,
         selectedTaskIds: event.taskIds,
+        taskTitles: event.tasks
+          ? Object.fromEntries(
+              event.tasks.map((task) => [task.taskId, task.title]),
+            )
+          : current?.taskTitles,
         status: "planning",
         stage: "Planning",
       };
@@ -442,6 +524,7 @@ const reduceBatchEvent = (
       return {
         batchId: event.batchId,
         selectedTaskIds: event.selectedTaskIds,
+        taskTitles: current?.taskTitles,
         status: "merging",
         stage: "Preparing to merge",
       };
@@ -449,6 +532,7 @@ const reduceBatchEvent = (
       return {
         batchId: event.batchId,
         selectedTaskIds: event.taskIds,
+        taskTitles: current?.taskTitles,
         status: "merging",
         stage: "Merging",
       };
@@ -456,6 +540,7 @@ const reduceBatchEvent = (
       return {
         batchId: event.batchId,
         selectedTaskIds: event.taskIds,
+        taskTitles: current?.taskTitles,
         status: event.batchStatus,
         stage:
           event.batchStatus === "done"
@@ -487,6 +572,8 @@ export const reduceHubRunDisplayState = (
   }
 
   if ("taskId" in event) {
+    const detail = projectEventTaskDetail(state, event);
+    const skipped = event.type === "task_claim_skipped";
     return {
       ...state,
       tasks: {
@@ -496,6 +583,8 @@ export const reduceHubRunDisplayState = (
           batchId: event.batchId,
           status: event.status,
           stage: resolveTaskStage(event),
+          ...(skipped ? { skipped: true } : {}),
+          ...(detail ? { detail } : {}),
         },
       },
       seenEventIds,

@@ -120,15 +120,22 @@ import {
   parseHubFlowMaxBatches,
   runHubFlow,
 } from "./hubFlowExecution.js";
+import type { HubRunEvent } from "./hubExecution.js";
 import {
   createHubRunDisplayState,
   formatPlainHubRunEvent,
   formatPlainHubRunCancellation,
   formatPlainHubRunOutcome,
   projectHubRunOutcome,
+  projectHubRunStateOutcome,
   reduceHubRunDisplayState,
 } from "./hubRunDisplay.js";
 import { createHubRunJsonRenderer } from "./hubRunJsonDisplay.js";
+import { createHubRunLiveDisplay } from "./hubRunLiveDisplay.js";
+import {
+  resolveHubRunOutputMode,
+  supportsHubRunCursorControl,
+} from "./hubRunOutputMode.js";
 import { createHubBatchPlannerInvoker } from "./hubBatchPlannerAgent.js";
 import { resolveHubBatchSelectionOptions } from "./hubBatchPlanner.js";
 import {
@@ -3628,14 +3635,22 @@ const flowMaxBatchesOption = Options.text("max-batches").pipe(
   Options.optional,
 );
 
-const flowOutputOption = Options.choice("output", ["plain", "json"] as [
+const flowOutputOption = Options.choice("output", ["auto", "plain", "json"] as [
+  "auto",
   "plain",
   "json",
 ]).pipe(
   Options.withDescription(
-    "Task-board run output mode (plain for deterministic text, json for versioned JSONL)",
+    "Run output mode (auto for a live TTY view with plain fallback, plain for deterministic text, json for versioned JSONL)",
   ),
   Options.optional,
+);
+
+const flowNoColorOption = Options.boolean("no-color").pipe(
+  Options.withDescription(
+    "Disable color while preserving live terminal labels and symbols.",
+  ),
+  Options.withDefault(false),
 );
 
 const runProjectArg = Args.text({ name: "project" }).pipe(
@@ -4318,6 +4333,7 @@ const runCommand = Command.make(
     maxTasks: flowMaxTasksOption,
     maxBatches: flowMaxBatchesOption,
     output: flowOutputOption,
+    noColor: flowNoColorOption,
   },
   ({
     projectPath,
@@ -4329,14 +4345,30 @@ const runCommand = Command.make(
     maxTasks,
     maxBatches,
     output,
+    noColor,
   }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const outputMode = output._tag === "Some" ? output.value : undefined;
+      const outputMode = output._tag === "Some" ? output.value : "auto";
       const isPlainOutput = outputMode === "plain";
       const isJsonOutput = outputMode === "json";
       const isMachineOutput = isPlainOutput || isJsonOutput;
-      const isInteractive = hasInteractiveTerminal() && !isMachineOutput;
+      const autoOutputResolution =
+        outputMode === "auto"
+          ? resolveHubRunOutputMode({
+              isTTY: process.stdout.isTTY,
+              columns: process.stdout.columns,
+              rows: process.stdout.rows,
+              colorEnabled: !noColor,
+              cursorControl: supportsHubRunCursorControl(process.env),
+              env: process.env,
+            })
+          : undefined;
+      const autoDisablesPrompts =
+        autoOutputResolution?.mode === "plain" &&
+        autoOutputResolution.reason === "ci";
+      const isInteractive =
+        hasInteractiveTerminal() && !isMachineOutput && !autoDisablesPrompts;
       const projectFlag = trimOptionalText(optionalTextValue(project));
       const positionalProject = trimOptionalText(
         optionalTextValue(projectPath),
@@ -4363,6 +4395,17 @@ const runCommand = Command.make(
           }),
         );
       }
+      const usesTaskBoardOutput = flowDefinition.kind === "task-board";
+      let activeTaskBoardOutput: "live" | "plain" | "json" | undefined =
+        usesTaskBoardOutput
+          ? isJsonOutput
+            ? "json"
+            : isPlainOutput
+              ? "plain"
+              : autoOutputResolution?.mode
+          : undefined;
+      const suppressDecoratedTaskBoardOutput =
+        activeTaskBoardOutput !== undefined;
 
       const batchSelectionOptions = yield* Effect.try({
         try: () =>
@@ -4400,14 +4443,17 @@ const runCommand = Command.make(
           }),
         catch: toHubFlowError,
       });
-      if (validatedInput && !isMachineOutput) {
+      if (
+        validatedInput &&
+        (!suppressDecoratedTaskBoardOutput || isInteractive)
+      ) {
         yield* d.status(
           formatValidatedHubFlowInputSummary(validatedInput),
           "info",
         );
       }
 
-      if (!isMachineOutput) {
+      if (!suppressDecoratedTaskBoardOutput || isInteractive) {
         yield* d.summary(
           "Hub run plan",
           buildRunPlanSummaryRows({
@@ -4470,6 +4516,117 @@ const runCommand = Command.make(
             flowId: flowDefinition.id,
           })
         : undefined;
+      const plainHistory: string[] = [];
+      const seenPlainSourceEventIds = new Set<string>();
+      const plainSourceSequences = new Map<string, number>();
+      let plainHistoryFlushed = false;
+      const acceptsPlainSourceEvent = (event: HubRunEvent): boolean => {
+        if (seenPlainSourceEventIds.has(event.eventId)) {
+          return false;
+        }
+        seenPlainSourceEventIds.add(event.eventId);
+        const scope =
+          "taskId" in event
+            ? `${event.runId}:task:${event.taskId}`
+            : "batchId" in event
+              ? `${event.runId}:batch:${event.batchId}`
+              : `${event.runId}:run`;
+        const currentSequence = plainSourceSequences.get(scope);
+        if (
+          currentSequence !== undefined &&
+          event.sequence <= currentSequence
+        ) {
+          return false;
+        }
+        plainSourceSequences.set(scope, event.sequence);
+        return true;
+      };
+      const flushPlainHistory = (): void => {
+        if (plainHistoryFlushed) {
+          return;
+        }
+        for (const line of plainHistory) {
+          Effect.runSync(d.plain(line));
+        }
+        plainHistory.length = 0;
+        plainHistoryFlushed = true;
+      };
+      let liveDisplay =
+        activeTaskBoardOutput === "live" &&
+        autoOutputResolution?.mode === "live"
+          ? createHubRunLiveDisplay({
+              terminal: {
+                write: (chunk) => {
+                  process.stdout.write(chunk);
+                },
+              },
+              clock: { now: () => Date.now() },
+              startedAt: Date.now(),
+              columns: process.stdout.columns ?? 0,
+              rows: process.stdout.rows,
+              color: autoOutputResolution.color,
+            })
+          : undefined;
+      let liveRefresh: ReturnType<typeof setInterval> | undefined;
+      let resizeLiveDisplay: (() => void) | undefined;
+      const stopLiveRuntime = (): void => {
+        if (liveRefresh) {
+          clearInterval(liveRefresh);
+          liveRefresh = undefined;
+        }
+        if (resizeLiveDisplay) {
+          process.stdout.off("resize", resizeLiveDisplay);
+          resizeLiveDisplay = undefined;
+        }
+      };
+      const fallbackLiveToPlain = (): void => {
+        try {
+          liveDisplay?.dispose();
+        } catch {
+          // Process-level terminal cleanup remains the final fallback.
+        }
+        stopLiveRuntime();
+        flushPlainHistory();
+        liveDisplay = undefined;
+        activeTaskBoardOutput = "plain";
+      };
+      if (liveDisplay) {
+        liveRefresh = setInterval(() => {
+          try {
+            if (liveDisplay?.refresh() === false) {
+              fallbackLiveToPlain();
+            }
+          } catch {
+            fallbackLiveToPlain();
+          }
+        }, 1_000);
+        liveRefresh.unref();
+        resizeLiveDisplay = () => {
+          try {
+            if (
+              liveDisplay?.resize(
+                process.stdout.columns ?? 0,
+                process.stdout.rows,
+              )
+            ) {
+              return;
+            }
+          } catch {
+            // Fall through to deterministic plain output.
+          }
+          fallbackLiveToPlain();
+        };
+        process.stdout.on("resize", resizeLiveDisplay);
+      }
+      const cleanupLiveDisplay = (): void => {
+        stopLiveRuntime();
+        try {
+          liveDisplay?.dispose();
+        } catch {
+          // setupTerminalCleanup() restores the cursor on process exit.
+        }
+        liveDisplay = undefined;
+      };
       const runAttempt = yield* Effect.promise(() =>
         runHubFlow({
           flowId: flowDefinition.id,
@@ -4477,13 +4634,13 @@ const runCommand = Command.make(
           implementer: createHubFlowRunImplementer({
             cwd: repoRoot,
             env: process.env,
-            showAgentStartup: !isMachineOutput,
+            showAgentStartup: !suppressDecoratedTaskBoardOutput,
           }),
           reviewer: flowDefinition.hasReviewer
             ? createHubFlowRunReviewer({
                 cwd: repoRoot,
                 env: process.env,
-                showAgentStartup: !isMachineOutput,
+                showAgentStartup: !suppressDecoratedTaskBoardOutput,
               })
             : undefined,
           batchStrategy: batchSelectionOptions.batchStrategy,
@@ -4493,13 +4650,13 @@ const runCommand = Command.make(
             batchSelectionOptions.batchStrategy === "planned"
               ? createHubBatchPlannerInvoker({ env: process.env })
               : undefined,
-          onEvent: isMachineOutput
+          onEvent: suppressDecoratedTaskBoardOutput
             ? (event) => {
                 const nextDisplayState = reduceHubRunDisplayState(
                   displayState,
                   event,
                 );
-                if (isJsonOutput) {
+                if (activeTaskBoardOutput === "json") {
                   displayState = nextDisplayState;
                   const line = jsonRenderer?.event(event);
                   if (line !== undefined) {
@@ -4507,7 +4664,24 @@ const runCommand = Command.make(
                   }
                   return;
                 }
-                if (nextDisplayState === displayState) {
+                const acceptedPlainEvent = acceptsPlainSourceEvent(event);
+                if (activeTaskBoardOutput === "live") {
+                  displayState = nextDisplayState;
+                  if (acceptedPlainEvent && event.type !== "run_completed") {
+                    plainHistory.push(
+                      formatPlainHubRunEvent(event, displayState),
+                    );
+                  }
+                  try {
+                    if (liveDisplay?.update(displayState) === false) {
+                      fallbackLiveToPlain();
+                    }
+                  } catch {
+                    fallbackLiveToPlain();
+                  }
+                  return;
+                }
+                if (!acceptedPlainEvent) {
                   return;
                 }
                 displayState = nextDisplayState;
@@ -4529,40 +4703,90 @@ const runCommand = Command.make(
       );
       if (runAttempt._tag === "Cancelled") {
         process.exitCode = 130;
-        if (isJsonOutput) {
+        if (activeTaskBoardOutput === "live") {
+          let finalized = false;
+          try {
+            liveDisplay?.cancel(displayState);
+            finalized = true;
+          } catch {
+            fallbackLiveToPlain();
+          } finally {
+            cleanupLiveDisplay();
+          }
+          if (finalized) {
+            return;
+          }
+        }
+        if (activeTaskBoardOutput === "json") {
           for (const line of jsonRenderer!.cancellation(displayState)) {
             yield* d.plain(line);
           }
-        } else if (isPlainOutput) {
+        } else if (activeTaskBoardOutput === "plain") {
           yield* d.plain(formatPlainHubRunCancellation(displayState));
         } else {
           yield* d.status("Run cancelled.", "warn");
         }
+        cleanupLiveDisplay();
         return;
       }
       if (runAttempt._tag === "Failure") {
-        if (isJsonOutput) {
+        if (activeTaskBoardOutput === "json") {
           process.exitCode = 1;
           yield* d.plain(jsonRenderer!.failure(displayState, runAttempt.error));
+          cleanupLiveDisplay();
           return;
         }
+        if (activeTaskBoardOutput === "live") {
+          try {
+            liveDisplay?.finalize(
+              displayState,
+              projectHubRunStateOutcome(displayState, {
+                outcome: "failed",
+                summary: "Run failed",
+                exitCode: 1,
+              }),
+            );
+          } catch {
+            fallbackLiveToPlain();
+          } finally {
+            cleanupLiveDisplay();
+          }
+        }
+        cleanupLiveDisplay();
         return yield* Effect.fail(toHubFlowError(runAttempt.error));
       }
       const result = runAttempt.result;
       const outcome = projectHubRunOutcome(result);
       process.exitCode = outcome.exitCode;
 
-      if (isJsonOutput) {
+      if (activeTaskBoardOutput === "live") {
+        let finalized = false;
+        try {
+          liveDisplay?.finalize(displayState, outcome);
+          finalized = true;
+        } catch {
+          fallbackLiveToPlain();
+        } finally {
+          cleanupLiveDisplay();
+        }
+        if (finalized) {
+          return;
+        }
+      }
+
+      if (activeTaskBoardOutput === "json") {
         for (const line of jsonRenderer!.outcome(result, outcome)) {
           yield* d.plain(line);
         }
+        cleanupLiveDisplay();
         return;
       }
 
-      if (isPlainOutput) {
+      if (activeTaskBoardOutput === "plain") {
         for (const line of formatPlainHubRunOutcome(result, outcome)) {
           yield* d.plain(line);
         }
+        cleanupLiveDisplay();
         return;
       }
 
