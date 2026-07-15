@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { SilentDisplay, type DisplayEntry } from "./Display.js";
+import { ClackDisplay, SilentDisplay, type DisplayEntry } from "./Display.js";
 import { HUB_AGENT_ROLES, setHubAgentRole } from "./hubAgentConfig.js";
 import type { RunHubFlowInput, RunHubFlowResult } from "./hubFlowExecution.js";
 import {
@@ -99,6 +99,42 @@ const runCli = async (args: string[], cwd = process.cwd()) => {
     );
   } finally {
     process.chdir(originalCwd);
+  }
+};
+
+const runCliWithTerminalDisplay = async (
+  args: string[],
+  cwd = process.cwd(),
+): Promise<readonly string[]> => {
+  const { cli } = await import("./cli.js");
+  const lines: string[] = [];
+  const directWrites: string[] = [];
+  const log = vi
+    .spyOn(console, "log")
+    .mockImplementation((...values: unknown[]) => {
+      lines.push(values.map(String).join(" "));
+    });
+  const write = vi.spyOn(process.stdout, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ) => {
+    directWrites.push(String(chunk));
+    return true;
+  }) as typeof process.stdout.write);
+  const originalCwd = process.cwd();
+  process.chdir(cwd);
+  try {
+    await Effect.runPromise(
+      cli(["node", "archloop", ...args]).pipe(
+        Effect.provide(ClackDisplay.layer),
+        Effect.provide(NodeContext.layer),
+      ),
+    );
+    expect(directWrites).toEqual([]);
+    return lines;
+  } finally {
+    process.chdir(originalCwd);
+    log.mockRestore();
+    write.mockRestore();
   }
 };
 
@@ -262,6 +298,80 @@ describe("archloop run project targeting", () => {
     expect(process.exitCode).toBe(0);
     expect(plainMessages.join("\n")).not.toContain("no_ready_tasks");
     expect(plainMessages.join("\n")).not.toMatch(/\u001b\[[0-?]*[ -/]*[@-~]/);
+  });
+
+  it("emits stdout-pure JSONL for a no-review run with nothing ready", async () => {
+    const entries = await runCli([
+      "run",
+      "--flow",
+      "no-review",
+      "--output",
+      "json",
+    ]);
+    const lines = entries.map((entry) => {
+      expect(entry._tag).toBe("plain");
+      return (entry as { readonly message: string }).message;
+    });
+    const records = lines.map(
+      (line) => JSON.parse(line) as Record<string, unknown>,
+    );
+
+    expect(records).toHaveLength(4);
+    expect(records.map((record) => record.type)).toEqual([
+      "run_started",
+      "batch_started",
+      "batch_planned",
+      "run_completed",
+    ]);
+    expect(records.map((record) => record.sequence)).toEqual([1, 2, 3, 4]);
+    expect(records[0]).toMatchObject({
+      schemaVersion: 1,
+      hubProject: "alpha",
+      flowId: "no-review",
+    });
+    expect(records.at(-1)).toMatchObject({
+      schemaVersion: 1,
+      type: "run_completed",
+      flowId: "no-review",
+      outcome: "completed",
+      summary: "Nothing to run",
+      counts: {
+        completed: 0,
+        failed: 0,
+        blocked: 0,
+        skipped: 0,
+        readyToMerge: 0,
+      },
+      completedBatchCount: 0,
+      stopReason: "no_ready_tasks",
+      exitCode: 0,
+    });
+    expect(process.exitCode).toBe(0);
+    expect(lines.every((line) => !line.includes("\n"))).toBe(true);
+    expect(lines.join("\n")).not.toMatch(/\u001b\[[0-?]*[ -/]*[@-~]/);
+  });
+
+  it("writes only JSONL through the real terminal stdout display", async () => {
+    const lines = await runCliWithTerminalDisplay([
+      "run",
+      "--flow",
+      "no-review",
+      "--output",
+      "json",
+    ]);
+
+    expect(lines).toHaveLength(4);
+    expect(lines.map((line) => JSON.parse(line))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "run_started" }),
+        expect.objectContaining({
+          type: "run_completed",
+          outcome: "completed",
+          exitCode: 0,
+        }),
+      ]),
+    );
+    expect(lines.join("\n")).not.toMatch(/\u001b\[[0-?]*[ -/]*[@-~]/);
   });
 
   it("honors an explicit Hub project override", async () => {
@@ -497,6 +607,116 @@ describe("archloop run project targeting", () => {
     expect(output).toContain('outcome="failed"');
   });
 
+  it("keeps a blocking run outcome structured in JSONL", async () => {
+    mockRunHubFlow.mockResolvedValue({
+      flowId: "no-review",
+      runId: "run-json-blocked",
+      batchId: "batch-json-blocked",
+      runDir: "/tmp/runs/run-json-blocked",
+      mode: "new_batch",
+      completedBatchCount: 0,
+      completedTaskCount: 0,
+      stopReason: "batch_failed",
+      batchResults: [
+        {
+          batchId: "batch-json-blocked",
+          selectedTaskIds: ["task-json-blocked"],
+          completedTaskCount: 0,
+          batchStatus: "failed",
+        },
+      ],
+      selectedTaskIds: ["task-json-blocked"],
+      results: [
+        {
+          taskId: "task-json-blocked",
+          title: "Blocked task",
+          branch: "archloop/task-json-blocked",
+          outcome: "active_execution",
+          hubStatus: "implementing",
+          commitCount: 0,
+        },
+      ],
+      unfinishedBatchIds: ["batch-json-blocked"],
+      projectDevelopmentContractPath: "/tmp/contract.md",
+      projectDevelopmentContractCreatedGenericFallback: false,
+    });
+
+    const entries = await runCli([
+      "run",
+      "--flow",
+      "no-review",
+      "--output",
+      "json",
+    ]);
+    const records = entries.map((entry) =>
+      JSON.parse((entry as { readonly message: string }).message),
+    );
+
+    expect(process.exitCode).toBe(1);
+    expect(records.at(-1)).toMatchObject({
+      type: "run_completed",
+      outcome: "failed",
+      counts: {
+        completed: 0,
+        failed: 0,
+        blocked: 1,
+        skipped: 0,
+        readyToMerge: 0,
+      },
+      stopReason: "batch_failed",
+      exitCode: 1,
+    });
+  });
+
+  it("keeps lifecycle execution errors inside stdout-pure JSONL", async () => {
+    mockRunHubFlow.mockImplementation(async (input) => {
+      input.onEvent?.({
+        type: "run_started",
+        runId: "run-error",
+        branch: "flow/no-review",
+        startedAt: "2026-07-15T12:10:00.000Z",
+        repoRoot: repoAlpha,
+        hubProjectDir: join(
+          process.env.XDG_DATA_HOME!,
+          "archloop",
+          "hub",
+          "projects",
+          "failed",
+        ),
+        eventId: "run-error:1",
+        sequence: 1,
+      });
+      throw new Error('execution "failed"\nraw agent details');
+    });
+
+    const lines = await runCliWithTerminalDisplay([
+      "run",
+      "--flow",
+      "no-review",
+      "--output",
+      "json",
+    ]);
+    const records = lines.map(
+      (line) => JSON.parse(line) as Record<string, unknown>,
+    );
+
+    expect(process.exitCode).toBe(1);
+    expect(records.map((record) => record.type)).toEqual([
+      "run_started",
+      "run_failed",
+    ]);
+    expect(records.at(-1)).toMatchObject({
+      schemaVersion: 1,
+      type: "run_failed",
+      runId: "run-error",
+      flowId: "no-review",
+      outcome: "failed",
+      diagnostic: 'execution "failed"',
+      exitCode: 1,
+      logs: expect.stringContaining("run-error"),
+    });
+  });
+
   it("renders a cancelled plain outcome when run execution aborts", async () => {
     mockRunHubFlow.mockImplementation(async (input) => {
       input.onEvent?.({
@@ -536,6 +756,59 @@ describe("archloop run project targeting", () => {
       'event=run_completed outcome="cancelled" summary="Run cancelled"',
     );
     expect(output).toContain('run_id="run-cancelled"');
+  });
+
+  it("renders cancellation as stdout-pure JSONL with exit code 130", async () => {
+    mockRunHubFlow.mockImplementation(async (input) => {
+      input.onEvent?.({
+        type: "run_started",
+        runId: "run-json-cancelled",
+        branch: "flow/no-review",
+        startedAt: "2026-07-15T12:20:00.000Z",
+        repoRoot: repoAlpha,
+        hubProjectDir: join(
+          process.env.XDG_DATA_HOME!,
+          "archloop",
+          "hub",
+          "projects",
+          "json-cancelled",
+        ),
+        eventId: "run-json-cancelled:1",
+        sequence: 1,
+      });
+      const error = new Error("The run was cancelled");
+      error.name = "AbortError";
+      throw error;
+    });
+
+    const entries = await runCli([
+      "run",
+      "--flow",
+      "no-review",
+      "--output",
+      "json",
+    ]);
+    const records = entries.map((entry) => {
+      expect(entry._tag).toBe("plain");
+      return JSON.parse(
+        (entry as { readonly message: string }).message,
+      ) as Record<string, unknown>;
+    });
+
+    expect(process.exitCode).toBe(130);
+    expect(records.map((record) => record.type)).toEqual([
+      "run_started",
+      "run_completed",
+    ]);
+    expect(records.at(-1)).toMatchObject({
+      schemaVersion: 1,
+      runId: "run-json-cancelled",
+      flowId: "no-review",
+      outcome: "cancelled",
+      cancelled: true,
+      stopReason: "cancelled",
+      exitCode: 130,
+    });
   });
 
   it("fails in non-interactive mode when flow is omitted", async () => {

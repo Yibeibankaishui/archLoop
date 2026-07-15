@@ -128,6 +128,7 @@ import {
   projectHubRunOutcome,
   reduceHubRunDisplayState,
 } from "./hubRunDisplay.js";
+import { createHubRunJsonRenderer } from "./hubRunJsonDisplay.js";
 import { createHubBatchPlannerInvoker } from "./hubBatchPlannerAgent.js";
 import { resolveHubBatchSelectionOptions } from "./hubBatchPlanner.js";
 import {
@@ -3627,9 +3628,12 @@ const flowMaxBatchesOption = Options.text("max-batches").pipe(
   Options.optional,
 );
 
-const flowOutputOption = Options.choice("output", ["plain"] as ["plain"]).pipe(
+const flowOutputOption = Options.choice("output", ["plain", "json"] as [
+  "plain",
+  "json",
+]).pipe(
   Options.withDescription(
-    "Task-board run output mode (plain emits deterministic append-only lifecycle lines)",
+    "Task-board run output mode (plain for deterministic text, json for versioned JSONL)",
   ),
   Options.optional,
 );
@@ -4330,7 +4334,9 @@ const runCommand = Command.make(
       const d = yield* Display;
       const outputMode = output._tag === "Some" ? output.value : undefined;
       const isPlainOutput = outputMode === "plain";
-      const isInteractive = hasInteractiveTerminal() && !isPlainOutput;
+      const isJsonOutput = outputMode === "json";
+      const isMachineOutput = isPlainOutput || isJsonOutput;
+      const isInteractive = hasInteractiveTerminal() && !isMachineOutput;
       const projectFlag = trimOptionalText(optionalTextValue(project));
       const positionalProject = trimOptionalText(
         optionalTextValue(projectPath),
@@ -4350,11 +4356,10 @@ const runCommand = Command.make(
           ),
         catch: toHubFlowError,
       });
-      if (isPlainOutput && flowDefinition.kind !== "task-board") {
+      if (isMachineOutput && flowDefinition.kind !== "task-board") {
         return yield* Effect.fail(
           new HubFlowError({
-            message:
-              "--output plain currently supports the no-review and with-review task-board flows.",
+            message: `--output ${outputMode} currently supports the no-review and with-review task-board flows.`,
           }),
         );
       }
@@ -4395,14 +4400,14 @@ const runCommand = Command.make(
           }),
         catch: toHubFlowError,
       });
-      if (validatedInput && !isPlainOutput) {
+      if (validatedInput && !isMachineOutput) {
         yield* d.status(
           formatValidatedHubFlowInputSummary(validatedInput),
           "info",
         );
       }
 
-      if (!isPlainOutput) {
+      if (!isMachineOutput) {
         yield* d.summary(
           "Hub run plan",
           buildRunPlanSummaryRows({
@@ -4458,6 +4463,13 @@ const runCommand = Command.make(
         hubProjectName: targetProjectName ?? legacyProjectTarget ?? repoRoot,
         flowId: flowDefinition.id,
       });
+      const jsonRenderer = isJsonOutput
+        ? createHubRunJsonRenderer({
+            hubProjectName:
+              targetProjectName ?? legacyProjectTarget ?? repoRoot,
+            flowId: flowDefinition.id,
+          })
+        : undefined;
       const runAttempt = yield* Effect.promise(() =>
         runHubFlow({
           flowId: flowDefinition.id,
@@ -4465,13 +4477,13 @@ const runCommand = Command.make(
           implementer: createHubFlowRunImplementer({
             cwd: repoRoot,
             env: process.env,
-            showAgentStartup: !isPlainOutput,
+            showAgentStartup: !isMachineOutput,
           }),
           reviewer: flowDefinition.hasReviewer
             ? createHubFlowRunReviewer({
                 cwd: repoRoot,
                 env: process.env,
-                showAgentStartup: !isPlainOutput,
+                showAgentStartup: !isMachineOutput,
               })
             : undefined,
           batchStrategy: batchSelectionOptions.batchStrategy,
@@ -4481,12 +4493,20 @@ const runCommand = Command.make(
             batchSelectionOptions.batchStrategy === "planned"
               ? createHubBatchPlannerInvoker({ env: process.env })
               : undefined,
-          onEvent: isPlainOutput
+          onEvent: isMachineOutput
             ? (event) => {
                 const nextDisplayState = reduceHubRunDisplayState(
                   displayState,
                   event,
                 );
+                if (isJsonOutput) {
+                  displayState = nextDisplayState;
+                  const line = jsonRenderer?.event(event);
+                  if (line !== undefined) {
+                    Effect.runSync(d.plain(line));
+                  }
+                  return;
+                }
                 if (nextDisplayState === displayState) {
                   return;
                 }
@@ -4509,7 +4529,11 @@ const runCommand = Command.make(
       );
       if (runAttempt._tag === "Cancelled") {
         process.exitCode = 130;
-        if (isPlainOutput) {
+        if (isJsonOutput) {
+          for (const line of jsonRenderer!.cancellation(displayState)) {
+            yield* d.plain(line);
+          }
+        } else if (isPlainOutput) {
           yield* d.plain(formatPlainHubRunCancellation(displayState));
         } else {
           yield* d.status("Run cancelled.", "warn");
@@ -4517,11 +4541,23 @@ const runCommand = Command.make(
         return;
       }
       if (runAttempt._tag === "Failure") {
+        if (isJsonOutput) {
+          process.exitCode = 1;
+          yield* d.plain(jsonRenderer!.failure(displayState, runAttempt.error));
+          return;
+        }
         return yield* Effect.fail(toHubFlowError(runAttempt.error));
       }
       const result = runAttempt.result;
       const outcome = projectHubRunOutcome(result);
       process.exitCode = outcome.exitCode;
+
+      if (isJsonOutput) {
+        for (const line of jsonRenderer!.outcome(result, outcome)) {
+          yield* d.plain(line);
+        }
+        return;
+      }
 
       if (isPlainOutput) {
         for (const line of formatPlainHubRunOutcome(result, outcome)) {
