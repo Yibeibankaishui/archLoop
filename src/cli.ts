@@ -120,6 +120,11 @@ import {
   parseHubFlowMaxBatches,
   runHubFlow,
 } from "./hubFlowExecution.js";
+import {
+  createHubRunDisplayState,
+  formatPlainHubRunEvent,
+  reduceHubRunDisplayState,
+} from "./hubRunDisplay.js";
 import { createHubBatchPlannerInvoker } from "./hubBatchPlannerAgent.js";
 import { resolveHubBatchSelectionOptions } from "./hubBatchPlanner.js";
 import {
@@ -3619,6 +3624,13 @@ const flowMaxBatchesOption = Options.text("max-batches").pipe(
   Options.optional,
 );
 
+const flowOutputOption = Options.choice("output", ["plain"] as ["plain"]).pipe(
+  Options.withDescription(
+    "Task-board run output mode (plain emits deterministic append-only lifecycle lines)",
+  ),
+  Options.optional,
+);
+
 const runProjectArg = Args.text({ name: "project" }).pipe(
   Args.withDescription(
     "Hub project name or legacy repo path (use . temporarily for the current repo)",
@@ -4288,6 +4300,7 @@ const runCommand = Command.make(
     batchStrategy: flowBatchStrategyOption,
     maxTasks: flowMaxTasksOption,
     maxBatches: flowMaxBatchesOption,
+    output: flowOutputOption,
   },
   ({
     projectPath,
@@ -4298,10 +4311,13 @@ const runCommand = Command.make(
     batchStrategy,
     maxTasks,
     maxBatches,
+    output,
   }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const isInteractive = hasInteractiveTerminal();
+      const outputMode = output._tag === "Some" ? output.value : undefined;
+      const isPlainOutput = outputMode === "plain";
+      const isInteractive = hasInteractiveTerminal() && !isPlainOutput;
       const projectFlag = trimOptionalText(optionalTextValue(project));
       const positionalProject = trimOptionalText(
         optionalTextValue(projectPath),
@@ -4321,6 +4337,14 @@ const runCommand = Command.make(
           ),
         catch: toHubFlowError,
       });
+      if (isPlainOutput && flowDefinition.kind !== "task-board") {
+        return yield* Effect.fail(
+          new HubFlowError({
+            message:
+              "--output plain currently supports the no-review and with-review task-board flows.",
+          }),
+        );
+      }
 
       const batchSelectionOptions = yield* Effect.try({
         try: () =>
@@ -4358,23 +4382,25 @@ const runCommand = Command.make(
           }),
         catch: toHubFlowError,
       });
-      if (validatedInput) {
+      if (validatedInput && !isPlainOutput) {
         yield* d.status(
           formatValidatedHubFlowInputSummary(validatedInput),
           "info",
         );
       }
 
-      yield* d.summary(
-        "Hub run plan",
-        buildRunPlanSummaryRows({
-          repoRoot,
-          flowDefinition,
-          targetProjectName,
-          legacyProjectTarget,
-          validatedInput,
-        }),
-      );
+      if (!isPlainOutput) {
+        yield* d.summary(
+          "Hub run plan",
+          buildRunPlanSummaryRows({
+            repoRoot,
+            flowDefinition,
+            targetProjectName,
+            legacyProjectTarget,
+            validatedInput,
+          }),
+        );
+      }
 
       if (isInteractive) {
         yield* confirmRunPlan();
@@ -4410,6 +4436,10 @@ const runCommand = Command.make(
         return;
       }
 
+      let displayState = createHubRunDisplayState({
+        hubProjectName: targetProjectName ?? legacyProjectTarget ?? repoRoot,
+        flowId: flowDefinition.id,
+      });
       const result = yield* Effect.tryPromise({
         try: () =>
           runHubFlow({
@@ -4418,11 +4448,13 @@ const runCommand = Command.make(
             implementer: createHubFlowRunImplementer({
               cwd: repoRoot,
               env: process.env,
+              showAgentStartup: !isPlainOutput,
             }),
             reviewer: flowDefinition.hasReviewer
               ? createHubFlowRunReviewer({
                   cwd: repoRoot,
                   env: process.env,
+                  showAgentStartup: !isPlainOutput,
                 })
               : undefined,
             batchStrategy: batchSelectionOptions.batchStrategy,
@@ -4432,9 +4464,28 @@ const runCommand = Command.make(
               batchSelectionOptions.batchStrategy === "planned"
                 ? createHubBatchPlannerInvoker({ env: process.env })
                 : undefined,
+            onEvent: isPlainOutput
+              ? (event) => {
+                  const nextDisplayState = reduceHubRunDisplayState(
+                    displayState,
+                    event,
+                  );
+                  if (nextDisplayState === displayState) {
+                    return;
+                  }
+                  displayState = nextDisplayState;
+                  Effect.runSync(
+                    d.plain(formatPlainHubRunEvent(event, displayState)),
+                  );
+                }
+              : undefined,
           }),
         catch: toHubFlowError,
       });
+
+      if (isPlainOutput) {
+        return;
+      }
 
       for (const line of formatHubFlowResultLines(result)) {
         yield* d.status(line, "info");

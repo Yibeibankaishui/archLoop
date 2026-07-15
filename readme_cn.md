@@ -255,6 +255,8 @@ archLoop 使用常规容器将宿主 worktree 挂载进沙箱，agent 在容器�
 
 ## Hub flow 脏工作区诊断
 
+任务看板 flow 可显式使用稳定的纯文本输出：`archloop run --flow no-review --output plain` 或 `archloop run --flow with-review --output plain`。该模式按 canonical lifecycle event 每次追加一行，字段顺序稳定、值会转义，不使用 ANSI 光标重写；输出会包含 Hub project、flow、所选任务、用户可读阶段、run id、Hub run directory、完成的批次/任务数和最终结果。初始队列为空时会成功退出并显示 `Nothing to run`。agent prose、tool 参数和直接的 agent 启动装饰不会混入纯文本生命周期输出，详细内容仍保存在 Hub run directory。省略 `--output` 时保持现有终端行为；当前 `plain` 仅支持 `no-review` 与 `with-review`。
+
 `archloop run --flow no-review` 和 `archloop run --flow with-review` 启动时会提前提醒宿主仓库里的 dirty source files。若同一个 flow 已有未完成的 `waiting_for_merge` 批次，archLoop 会先恢复该批次，并在领取新任务前检查待合并分支是否会改到这些脏文件。
 
 非重叠脏文件不会阻塞 merge：archLoop 会在干净的 integration worktree/branch 中验证结果，并只在不会覆盖宿主脏文件时落回当前分支。若存在重叠，CLI 会列出具体 blocking files；先 commit、stash 或 discard 这些文件，再重新运行同一个 flow，archLoop 会继续恢复 `waiting_for_merge` 任务。

@@ -12,7 +12,9 @@ import {
   appendHubTaskEvent,
   createHubRunContext,
   createHubRunIdentifiers,
+  observeHubRunEvents,
   type HubRunCompletedBatchResult,
+  type HubRunEventObserver,
   type HubRunStopReason,
   type HubTaskClaimMetadata,
 } from "./hubExecution.js";
@@ -143,6 +145,7 @@ export interface RunHubFlowInput {
   readonly maxTasks?: number;
   readonly maxBatches?: number;
   readonly batchPlanner?: HubBatchPlannerInvoker;
+  readonly onEvent?: HubRunEventObserver;
 }
 
 export interface HubFlowTaskResult {
@@ -614,6 +617,7 @@ const runHubAgent = async (input: {
   readonly env?: NodeJS.ProcessEnv;
   readonly retryContext?: string;
   readonly projectDevelopmentContract?: HubProjectDevelopmentContractState;
+  readonly showAgentStartup?: boolean;
 }) => {
   await assertAgentCredentialsConfigured({
     providerName: input.agent.name,
@@ -644,6 +648,7 @@ const runHubAgent = async (input: {
     logging: {
       type: "file",
       path: join(input.runDir, "logs", input.logFileName),
+      showStartup: input.showAgentStartup,
     },
   });
 };
@@ -949,7 +954,7 @@ const implementSelectedTask = async (
   };
 };
 
-export const runHubFlow = async (
+const runObservedHubFlow = async (
   input: RunHubFlowInput,
 ): Promise<RunHubFlowResult> => {
   const cwd = input.cwd ?? process.cwd();
@@ -1279,6 +1284,9 @@ export const runHubFlow = async (
   };
 };
 
+export const runHubFlow = (input: RunHubFlowInput): Promise<RunHubFlowResult> =>
+  observeHubRunEvents(input.onEvent, () => runObservedHubFlow(input));
+
 export const formatHubFlowResultLines = (
   result: RunHubFlowResult,
 ): readonly string[] => {
@@ -1434,6 +1442,7 @@ export const createHubFlowRunImplementer = (options: {
   readonly env?: NodeJS.ProcessEnv;
   readonly homeDir?: string;
   readonly roleEntry?: HubAgentRoleEntry;
+  readonly showAgentStartup?: boolean;
 }): HubFlowImplementer => {
   const agent = resolveHubFlowRunnerAgent("implementation", options);
 
@@ -1454,6 +1463,7 @@ export const createHubFlowRunImplementer = (options: {
         env: options.env,
         retryContext: input.retryContext,
         projectDevelopmentContract: input.projectDevelopmentContract,
+        showAgentStartup: options.showAgentStartup,
       });
 
       if (!result.completionSignal) {
@@ -1495,6 +1505,7 @@ export const createHubFlowRunReviewer = (options: {
   readonly env?: NodeJS.ProcessEnv;
   readonly homeDir?: string;
   readonly roleEntry?: HubAgentRoleEntry;
+  readonly showAgentStartup?: boolean;
 }): HubFlowReviewer => {
   const agent = resolveHubFlowRunnerAgent("review", options);
 
@@ -1513,6 +1524,7 @@ export const createHubFlowRunReviewer = (options: {
         name: `review-${input.taskId}`,
         logFileName: `${input.taskId}-review.log`,
         env: options.env,
+        showAgentStartup: options.showAgentStartup,
       });
 
       if (!result.completionSignal) {

@@ -8,6 +8,11 @@ import { FileSystem } from "@effect/platform";
 import { NodeFileSystem } from "@effect/platform-node";
 import { describe, expect, it, vi } from "vitest";
 import { appendHubBatchEvent, createHubRunContext } from "./hubExecution.js";
+import {
+  createHubRunDisplayState,
+  formatPlainHubRunEvent,
+  reduceHubRunDisplayState,
+} from "./hubRunDisplay.js";
 import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
 import {
   createHubFlowRunImplementer,
@@ -1300,6 +1305,11 @@ describe("Hub flow planner", () => {
     ]);
 
     const invocations: HubImplementTaskInput[] = [];
+    let displayState = createHubRunDisplayState({
+      hubProjectName: "Multi-batch project",
+      flowId: "no-review",
+    });
+    const plainLines: string[] = [];
     const hubProjectDir = join(
       repoDir,
       "data",
@@ -1335,6 +1345,13 @@ describe("Hub flow planner", () => {
           };
         },
         runMergePhase: false,
+        onEvent: (event) => {
+          const nextState = reduceHubRunDisplayState(displayState, event);
+          if (nextState !== displayState) {
+            displayState = nextState;
+            plainLines.push(formatPlainHubRunEvent(event, displayState));
+          }
+        },
       });
 
       expect(readyLoadCount).toBeGreaterThanOrEqual(4);
@@ -1352,6 +1369,16 @@ describe("Hub flow planner", () => {
         "bd-second",
         "bd-third",
       ]);
+      expect(
+        plainLines.filter((line) => line.startsWith("event=batch_planned")),
+      ).toEqual([
+        expect.stringContaining('selected_tasks=["bd-first","bd-second"]'),
+        expect.stringContaining('selected_tasks=["bd-third"]'),
+        expect.stringContaining("selected_tasks=[]"),
+      ]);
+      expect(plainLines.at(-1)).toMatch(
+        /^event=run_completed outcome="completed" summary="Run completed" completed_batches=2 completed_tasks=3 /,
+      );
 
       const taskEvents = await readJsonl(
         join(result.runDir, "events", "task.jsonl"),
@@ -1452,6 +1479,75 @@ describe("Hub flow planner", () => {
 });
 
 describe("no-review Hub flow execution", () => {
+  it("projects a successful task through user-facing plain lifecycle stages", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-plain-success-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-plain",
+        title: "Do not print this agent prose",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "plain-success",
+    );
+    let displayState = createHubRunDisplayState({
+      hubProjectName: "Plain project",
+      flowId: "no-review",
+    });
+    const lines: string[] = [];
+
+    await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      implementer: async () => ({
+        outcome: "success",
+        commits: [{ sha: "abc123" }],
+        completionSignal: "<promise>COMPLETE</promise>",
+        message: "raw agent prose that must stay out of lifecycle output",
+      }),
+      runMergePhase: false,
+      onEvent: (event) => {
+        displayState = reduceHubRunDisplayState(displayState, event);
+        lines.push(formatPlainHubRunEvent(event, displayState));
+      },
+    });
+
+    expect(lines).toContainEqual(
+      expect.stringMatching(
+        /^event=batch_planned .* selected_tasks=\["bd-plain"\]$/,
+      ),
+    );
+    expect(lines).toContainEqual(
+      expect.stringMatching(
+        /^event=task_implementation_started .* task_id="bd-plain" stage="Implementing"$/,
+      ),
+    );
+    expect(lines).toContainEqual(
+      expect.stringMatching(
+        /^event=task_implementation_succeeded .* task_id="bd-plain" stage="Waiting for merge"$/,
+      ),
+    );
+    expect(lines.at(-1)).toMatch(
+      /^event=run_completed outcome="completed" summary="Run completed" completed_batches=1 completed_tasks=1 /,
+    );
+    expect(lines.join("\n")).not.toContain("raw agent prose");
+    expect(lines.join("\n")).not.toContain("Do not print this agent prose");
+  });
+
   it("claims tasks, invokes the implementer with task metadata, and advances successful work to waiting_for_merge", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-run-"));
     await initRepo(repoDir);
@@ -2423,6 +2519,7 @@ describe("with-review Hub flow execution", () => {
       "projects",
       "review-run",
     );
+    const observedEventTypes: string[] = [];
 
     const result = await runHubFlow({
       flowId: "with-review",
@@ -2432,11 +2529,22 @@ describe("with-review Hub flow execution", () => {
       implementer,
       reviewer,
       runMergePhase: false,
+      onEvent: (event) => {
+        observedEventTypes.push(event.type);
+      },
     });
 
     expect(result.selectedTaskIds).toEqual(["bd-71"]);
     expect(implementInvocations).toHaveLength(1);
     expect(reviewInvocations).toHaveLength(1);
+    expect(observedEventTypes).toEqual(
+      expect.arrayContaining([
+        "task_implementation_started",
+        "task_review_started",
+        "task_review_succeeded",
+        "run_completed",
+      ]),
+    );
     expect(reviewInvocations[0]).toMatchObject({
       taskId: "bd-71",
       title: "Review me",
@@ -2716,6 +2824,68 @@ describe("with-review Hub flow execution", () => {
         runSpy.mock.calls[0]?.[0].promptArgs
           ?.PROJECT_DEVELOPMENT_CONTRACT_SETUP,
       ).toContain("no-op baseline");
+    } finally {
+      runSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("configures task-board agent file logging without startup decoration for plain output", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "hub-flow-plain-agents-"));
+    await initRepo(cwd);
+    const projectDevelopmentContract =
+      resolveHubProjectDevelopmentContractState({
+        repoRoot: cwd,
+        hubProjectDir: join(cwd, "hub-project"),
+        now: new Date("2026-07-15T10:00:00.000Z"),
+      });
+    const runSpy = vi.spyOn(runModule, "run").mockResolvedValue({
+      completionSignal: "<promise>COMPLETE</promise>",
+      commits: [{ sha: "abc123" }],
+      branch: "archloop/bd-1-test-task",
+      iterations: [],
+      stdout: "raw agent text",
+    });
+    const options = {
+      cwd,
+      env: { OPENAI_KEY: "test-openai-key" },
+      roleEntry: { provider: "codex" as const, model: "gpt-5.4-mini" },
+      showAgentStartup: false,
+    };
+    const implementer = createHubFlowRunImplementer(options);
+    const reviewer = createHubFlowRunReviewer(options);
+
+    vi.stubEnv("OPENAI_KEY", "");
+    vi.stubEnv("CODEX_HOME", "");
+    try {
+      await implementer({
+        flowId: "with-review",
+        batchId: "batch-test",
+        taskId: "bd-1",
+        title: "Test task",
+        branch: "archloop/bd-1-test-task",
+        promptFile: "/tmp/implement.md",
+        cwd,
+        runDir: cwd,
+        projectDevelopmentContract,
+      });
+      await reviewer({
+        flowId: "with-review",
+        batchId: "batch-test",
+        taskId: "bd-1",
+        title: "Test task",
+        branch: "archloop/bd-1-test-task",
+        promptFile: "/tmp/review.md",
+        cwd,
+        runDir: cwd,
+        implementCommitCount: 1,
+      });
+
+      expect(runSpy).toHaveBeenCalledTimes(2);
+      expect(runSpy.mock.calls.map((call) => call[0].logging)).toEqual([
+        expect.objectContaining({ type: "file", showStartup: false }),
+        expect.objectContaining({ type: "file", showStartup: false }),
+      ]);
     } finally {
       runSpy.mockRestore();
       vi.unstubAllEnvs();

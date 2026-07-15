@@ -300,6 +300,7 @@ Goal: 提供 CLI-first 的 archLoop Hub 控制面，并在同一状态模型上�
 - [x] 实现 `archloop tasks from-prd <prd-ref>` 的 PRD 垂直切片分解、AFK/HITL 分类、人工确认依赖与 Beads 任务创建（见 [#67](https://github.com/yibeibankaishui/archloop/issues/67)）。
 - [x] 实现 task claim metadata 与 Hub run 事件存储，为 flow 执行提供 run/batch/task 记录（见 [#69](https://github.com/yibeibankaishui/archloop/issues/69)）。
 - [x] 为 task-board flow 的单批运行补充 run completion 事件与外层完成摘要，记录 completed batch/task counts 和 stop reason，避免 CLI 与 run history 只能从 batch 事件推断 flow 结束状态（见 [#174](https://github.com/Yibeibankaishui/archLoop/issues/174)）。
+- [x] 为 task-board `archloop run` 增加显式 `--output plain`：通过进程内 Hub event observer 投影确定性 append-only lifecycle lines，覆盖空队列、单批、多批和 with-review 成功路径，并隔离 agent prose 与 ANSI 光标重写（见 [#203](https://github.com/Yibeibankaishui/archLoop/issues/203)、parent [#202](https://github.com/Yibeibankaishui/archLoop/issues/202)）。
 - [x] 实现首个 no-review Hub flow：从 Beads ready queue 选择任务、claim、运行 implementer，并将成功任务推进到 `waiting_for_merge`（见 [#70](https://github.com/yibeibankaishui/archloop/issues/70)）。
 - [x] 实现 GitHub Issues 远程任务交换：`archloop tasks pull` 默认只拉 open issues，`tasks push` 将本地协作状态/关闭动作推到 GitHub，`tasks sync` 以 preview/确认方式做双向 reconcile，并避免同标题远端 issue 静默创建重复本地任务（见 [#68](https://github.com/yibeibankaishui/archloop/issues/68)、[#113](https://github.com/yibeibankaishui/archloop/issues/113)）。
 - [x] 实现 with-review Hub flow：implementation 成功后进入 `reviewing`，reviewer 完成后推进到 `waiting_for_merge`（见 [#71](https://github.com/yibeibankaishui/archloop/issues/71)）。

@@ -206,9 +206,43 @@ describe("archloop run project targeting", () => {
       expect.objectContaining({
         _tag: "status",
         severity: "info",
-        message: expect.stringContaining("Hub flow found no ready tasks to run."),
+        message: expect.stringContaining(
+          "Hub flow found no ready tasks to run.",
+        ),
       }),
     );
+  });
+
+  it("emits a plain lifecycle for a no-review run with nothing ready", async () => {
+    const entries = await runCli([
+      "run",
+      "--flow",
+      "no-review",
+      "--output",
+      "plain",
+    ]);
+    const plainMessages = entries.flatMap((entry) =>
+      (entry as { readonly _tag: string })._tag === "plain"
+        ? [(entry as { readonly message: string }).message]
+        : [],
+    );
+
+    expect(entries).toHaveLength(4);
+    expect(plainMessages).toHaveLength(4);
+    expect(plainMessages[0]).toMatch(
+      /^event=run_started hub_project="alpha" flow="no-review" run_id="run-[^"]+" logs="[^"]+"$/,
+    );
+    expect(plainMessages[1]).toMatch(
+      /^event=batch_started run_id="run-[^"]+" batch_id="batch-[^"]+" stage="Planning"$/,
+    );
+    expect(plainMessages[2]).toMatch(
+      /^event=batch_planned run_id="run-[^"]+" batch_id="batch-[^"]+" selected_tasks=\[\]$/,
+    );
+    expect(plainMessages[3]).toMatch(
+      /^event=run_completed outcome="completed" summary="Nothing to run" completed_batches=0 completed_tasks=0 run_id="run-[^"]+" logs="[^"]+"$/,
+    );
+    expect(plainMessages.join("\n")).not.toContain("no_ready_tasks");
+    expect(plainMessages.join("\n")).not.toMatch(/\u001b\[[0-?]*[ -/]*[@-~]/);
   });
 
   it("honors an explicit Hub project override", async () => {
@@ -253,7 +287,10 @@ describe("archloop run project targeting", () => {
 
   it("keeps legacy path targets working with guidance", async () => {
     const alphaRoot = resolveGitRepoRoot(repoAlpha);
-    const entries = await runCli(["run", ".", "--flow", "with-review"], repoAlpha);
+    const entries = await runCli(
+      ["run", ".", "--flow", "with-review"],
+      repoAlpha,
+    );
 
     expect(entries).toContainEqual(
       expect.objectContaining({
