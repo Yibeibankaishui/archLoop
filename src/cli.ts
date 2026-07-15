@@ -133,6 +133,18 @@ import {
 import { createHubRunJsonRenderer } from "./hubRunJsonDisplay.js";
 import { createHubRunLiveDisplay } from "./hubRunLiveDisplay.js";
 import {
+  acceptsHubProposalPresentationEvent,
+  createHubProposalRunDisplayState,
+  createHubProposalRunJsonRenderer,
+  formatPlainHubProposalEvent,
+  formatPlainHubProposalOutcome,
+  projectHubProposalRunOutcome,
+  projectHubProposalRunFailure,
+  reduceHubProposalRunDisplayState,
+} from "./hubProposalRunDisplay.js";
+import { createHubProposalRunLiveDisplay } from "./hubProposalRunLiveDisplay.js";
+import type { HubProposalPresentationEvent } from "./hubProposalSession.js";
+import {
   resolveHubRunOutputMode,
   supportsHubRunCursorControl,
 } from "./hubRunOutputMode.js";
@@ -3798,11 +3810,13 @@ const resolveRunProjectTarget = ({
   positionalProject,
   isInteractive,
   display,
+  showLegacyGuidance,
 }: {
   readonly projectFlag: string | undefined;
   readonly positionalProject: string | undefined;
   readonly isInteractive: boolean;
   readonly display: DisplayService;
+  readonly showLegacyGuidance: boolean;
 }): Effect.Effect<RunProjectResolution, HubFlowError> =>
   Effect.gen(function* () {
     const legacyProjectTarget =
@@ -3817,10 +3831,12 @@ const resolveRunProjectTarget = ({
         try: () => resolveGitRepoRoot(legacyProjectTarget),
         catch: toHubFlowError,
       });
-      yield* display.status(
-        "Legacy path target detected. Run `archloop project add` and `archloop project select <name>` to target this repo by Hub project name next time.",
-        "warn",
-      );
+      if (showLegacyGuidance) {
+        yield* display.status(
+          "Legacy path target detected. Run `archloop project add` and `archloop project select <name>` to target this repo by Hub project name next time.",
+          "warn",
+        );
+      }
       return {
         repoRoot,
         legacyProjectTarget,
@@ -4321,6 +4337,36 @@ const isHubRunCancellationError = (error: unknown): boolean => {
   );
 };
 
+const formatEarlyHubRunJsonFailure = (input: {
+  readonly flowId: string;
+  readonly hubProject?: string;
+  readonly error: unknown;
+}): string => {
+  const rawDiagnostic =
+    input.error instanceof Error ? input.error.message : String(input.error);
+  const diagnostic =
+    rawDiagnostic
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.length > 0)
+      ?.slice(0, 240) ?? "Run failed.";
+  return JSON.stringify({
+    schemaVersion: 1,
+    eventId: "unknown:output:1",
+    sequence: 1,
+    timestamp: new Date().toISOString(),
+    type: "run_failed",
+    runId: "unknown",
+    flowId: input.flowId,
+    ...(input.hubProject ? { hubProject: input.hubProject } : {}),
+    outcome: "failed",
+    summary: "Run failed",
+    diagnostic,
+    exitCode: 1,
+    logs: "",
+  });
+};
+
 const runCommand = Command.make(
   "run",
   {
@@ -4379,6 +4425,7 @@ const runCommand = Command.make(
           positionalProject,
           isInteractive,
           display: d,
+          showLegacyGuidance: !isMachineOutput,
         });
       const flowDefinition = yield* Effect.tryPromise({
         try: () =>
@@ -4388,16 +4435,11 @@ const runCommand = Command.make(
           ),
         catch: toHubFlowError,
       });
-      if (isMachineOutput && flowDefinition.kind !== "task-board") {
-        return yield* Effect.fail(
-          new HubFlowError({
-            message: `--output ${outputMode} currently supports the no-review and with-review task-board flows.`,
-          }),
-        );
-      }
       const usesTaskBoardOutput = flowDefinition.kind === "task-board";
+      const usesStructuredRunOutput =
+        usesTaskBoardOutput || flowDefinition.kind === "proposal";
       let activeTaskBoardOutput: "live" | "plain" | "json" | undefined =
-        usesTaskBoardOutput
+        usesStructuredRunOutput
           ? isJsonOutput
             ? "json"
             : isPlainOutput
@@ -4476,32 +4518,211 @@ const runCommand = Command.make(
       }
 
       if (flowDefinition.kind === "proposal") {
-        const result = yield* Effect.tryPromise({
-          try: () =>
-            runHubProposalFlowFromCli({
-              cwd: repoRoot,
-              validatedInput: requireProposalRunInput(
-                flowDefinition,
-                validatedInput,
-              ),
-              yes,
-              isTTY: process.stdin.isTTY,
-            }),
-          catch: toHubFlowError,
+        let proposalDisplayState = createHubProposalRunDisplayState({
+          hubProjectName: targetProjectName ?? legacyProjectTarget ?? repoRoot,
+          flowId: flowDefinition.id,
         });
-
-        if (result.flowId === "prd-decomposition") {
-          yield* handlePrdDecompositionFlowDisplay(
-            result.result,
-            (message) => new HubFlowError({ message }),
+        const proposalJsonRenderer =
+          activeTaskBoardOutput === "json"
+            ? createHubProposalRunJsonRenderer({
+                hubProjectName:
+                  targetProjectName ?? legacyProjectTarget ?? repoRoot,
+                flowId: flowDefinition.id,
+              })
+            : undefined;
+        let proposalLiveDisplay =
+          activeTaskBoardOutput === "live" &&
+          autoOutputResolution?.mode === "live"
+            ? createHubProposalRunLiveDisplay({
+                terminal: {
+                  write: (chunk) => {
+                    process.stdout.write(chunk);
+                  },
+                },
+                clock: { now: () => Date.now() },
+                startedAt: Date.now(),
+                columns: process.stdout.columns ?? 0,
+                rows: process.stdout.rows,
+                color: autoOutputResolution.color,
+              })
+            : undefined;
+        const proposalPlainHistory: string[] = [];
+        let proposalLiveRefresh: ReturnType<typeof setInterval> | undefined;
+        let resizeProposalLiveDisplay: (() => void) | undefined;
+        const stopProposalLiveRuntime = (): void => {
+          if (proposalLiveRefresh) {
+            clearInterval(proposalLiveRefresh);
+            proposalLiveRefresh = undefined;
+          }
+          if (resizeProposalLiveDisplay) {
+            process.stdout.off("resize", resizeProposalLiveDisplay);
+            resizeProposalLiveDisplay = undefined;
+          }
+        };
+        const flushProposalPlainHistory = (): void => {
+          for (const line of proposalPlainHistory) {
+            Effect.runSync(d.plain(line));
+          }
+          proposalPlainHistory.length = 0;
+        };
+        const fallbackProposalLiveToPlain = (): void => {
+          try {
+            proposalLiveDisplay?.dispose();
+          } catch {
+            // Process-level cleanup remains the final fallback.
+          }
+          proposalLiveDisplay = undefined;
+          stopProposalLiveRuntime();
+          activeTaskBoardOutput = "plain";
+          flushProposalPlainHistory();
+        };
+        if (proposalLiveDisplay) {
+          proposalLiveRefresh = setInterval(() => {
+            try {
+              if (proposalLiveDisplay?.refresh() === false) {
+                fallbackProposalLiveToPlain();
+              }
+            } catch {
+              fallbackProposalLiveToPlain();
+            }
+          }, 1_000);
+          proposalLiveRefresh.unref();
+          resizeProposalLiveDisplay = () => {
+            try {
+              if (
+                proposalLiveDisplay?.resize(
+                  process.stdout.columns ?? 0,
+                  process.stdout.rows,
+                )
+              ) {
+                return;
+              }
+            } catch {
+              // Fall through to deterministic plain output.
+            }
+            fallbackProposalLiveToPlain();
+          };
+          process.stdout.on("resize", resizeProposalLiveDisplay);
+        }
+        const onPresentationEvent = (
+          event: HubProposalPresentationEvent,
+        ): void => {
+          if (
+            !acceptsHubProposalPresentationEvent(proposalDisplayState, event)
+          ) {
+            return;
+          }
+          proposalDisplayState = reduceHubProposalRunDisplayState(
+            proposalDisplayState,
+            event,
+          );
+          if (activeTaskBoardOutput === "json") {
+            Effect.runSync(d.plain(proposalJsonRenderer!.event(event)));
+            return;
+          }
+          const line = formatPlainHubProposalEvent(
+            event,
+            proposalDisplayState.hubProjectName,
+          );
+          if (activeTaskBoardOutput === "live") {
+            proposalPlainHistory.push(line);
+            try {
+              if (proposalLiveDisplay?.update(proposalDisplayState) === false) {
+                fallbackProposalLiveToPlain();
+              }
+            } catch {
+              fallbackProposalLiveToPlain();
+            }
+            return;
+          }
+          Effect.runSync(d.plain(line));
+        };
+        const proposalAttempt = yield* Effect.promise(() =>
+          runHubProposalFlowFromCli({
+            cwd: repoRoot,
+            validatedInput: requireProposalRunInput(
+              flowDefinition,
+              validatedInput,
+            ),
+            yes,
+            isTTY: process.stdin.isTTY,
+            interactive: isInteractive,
+            showDecoratedOutput: false,
+            onPresentationEvent,
+            beforePrompt: () => {
+              try {
+                proposalLiveDisplay?.suspend();
+              } catch {
+                fallbackProposalLiveToPlain();
+              }
+            },
+            afterPrompt: () => {
+              try {
+                if (proposalLiveDisplay?.resume() === false) {
+                  fallbackProposalLiveToPlain();
+                }
+              } catch {
+                fallbackProposalLiveToPlain();
+              }
+            },
+          }).then(
+            (result) => ({ _tag: "Success" as const, result }),
+            (error: unknown) => ({ _tag: "Failure" as const, error }),
+          ),
+        );
+        if (proposalAttempt._tag === "Failure") {
+          const failure = projectHubProposalRunFailure(
+            proposalDisplayState,
+            proposalAttempt.error,
+          );
+          process.exitCode = 1;
+          stopProposalLiveRuntime();
+          if (activeTaskBoardOutput === "json") {
+            yield* d.plain(
+              proposalJsonRenderer!.failure(
+                proposalDisplayState,
+                proposalAttempt.error,
+              ),
+            );
+            return;
+          }
+          if (activeTaskBoardOutput === "live") {
+            try {
+              proposalLiveDisplay?.finalize(proposalDisplayState, failure);
+              return;
+            } catch {
+              fallbackProposalLiveToPlain();
+            }
+          }
+          yield* d.plain(
+            formatPlainHubProposalOutcome(proposalDisplayState, failure),
           );
           return;
         }
+        const result = proposalAttempt.result;
 
-        yield* handleTriageProposalFlowDisplay(
-          result.result,
-          (message) => new HubFlowError({ message }),
+        const outcome = projectHubProposalRunOutcome(proposalDisplayState);
+        process.exitCode = outcome.exitCode;
+        if (activeTaskBoardOutput === "live") {
+          try {
+            proposalLiveDisplay?.finalize(proposalDisplayState, outcome);
+            stopProposalLiveRuntime();
+            return;
+          } catch {
+            fallbackProposalLiveToPlain();
+          }
+        }
+        if (activeTaskBoardOutput === "json") {
+          stopProposalLiveRuntime();
+          yield* d.plain(
+            proposalJsonRenderer!.outcome(proposalDisplayState, outcome),
+          );
+          return;
+        }
+        yield* d.plain(
+          formatPlainHubProposalOutcome(proposalDisplayState, outcome),
         );
+        stopProposalLiveRuntime();
         return;
       }
 
@@ -4810,7 +5031,26 @@ const runCommand = Command.make(
       } else {
         yield* d.status("Hub flow completed.", "success");
       }
-    }),
+    }).pipe(
+      Effect.catchAll((error) => {
+        if (output._tag !== "Some" || output.value !== "json") {
+          return Effect.fail(error);
+        }
+        return Effect.gen(function* () {
+          const d = yield* Display;
+          process.exitCode = 1;
+          yield* d.plain(
+            formatEarlyHubRunJsonFailure({
+              flowId: trimOptionalText(optionalTextValue(flow)) ?? "unknown",
+              hubProject:
+                trimOptionalText(optionalTextValue(project)) ??
+                trimOptionalText(optionalTextValue(projectPath)),
+              error,
+            }),
+          );
+        });
+      }),
+    ),
 );
 
 // --- Docker namespace command ---

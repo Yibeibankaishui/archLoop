@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { Output } from "./Output.js";
+import { ProposalPromptCancelledError } from "./errors.js";
 import {
   runProposalSession,
   type ProposalAgentInvokeInput,
@@ -73,6 +74,59 @@ const createFakeInvoker = (
 const createHubProjectDir = (prefix: string) => mkdtemp(join(tmpdir(), prefix));
 
 describe("runProposalSession", () => {
+  it("emits canonical presentation phases without exposing agent prose", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "proposal-session-events-"));
+    await initRepo(repoDir);
+    const hubProjectDir = await createHubProjectDir(
+      "proposal-session-events-hub-",
+    );
+    const events: Array<{
+      phase: string;
+      status: string;
+      assistantMessage?: string;
+    }> = [];
+    const { invoker } = createFakeInvoker({
+      draft: { assistantMessage: "Private draft prose" },
+      finalization: {
+        assistantMessage:
+          '<task-proposal>{"title":"Slice one"}</task-proposal>',
+      },
+    });
+
+    const result = await runProposalSession({
+      flowId: "prd-decomposition",
+      cwd: repoDir,
+      hubProjectDir,
+      preparedContext: { prdRef: "docs/prd.md" },
+      draftPrompt: "Draft a proposal.",
+      finalizationPrompt: "Finalize the proposal.",
+      output: Output.object({
+        tag: "task-proposal",
+        schema: testProposalSchema(),
+      }),
+      agentInvoker: invoker,
+      oneShot: true,
+      approve: true,
+      onPresentationEvent: (event) => events.push(event),
+    });
+
+    expect(result.outcome).toBe("completed");
+    expect(events.map(({ phase, status }) => [phase, status])).toEqual([
+      ["input_preparation", "completed"],
+      ["draft", "started"],
+      ["draft", "completed"],
+      ["finalization", "started"],
+      ["finalization", "completed"],
+      ["mutation_detection", "started"],
+      ["mutation_detection", "completed"],
+      ["approval", "started"],
+      ["approval", "completed"],
+    ]);
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ assistantMessage: expect.anything() }),
+    );
+  });
+
   it("runs an initial draft turn from prepared context and persists artifacts", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "proposal-session-draft-"));
     await initRepo(repoDir);
@@ -421,5 +475,94 @@ describe("runProposalSession", () => {
         (event) => (event as { type?: string }).type === "session_cancelled",
       ),
     ).toBe(true);
+  });
+
+  it("turns refinement prompt cancellation into a canonical cancelled session", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "proposal-refine-cancel-"));
+    await initRepo(repoDir);
+    const hubProjectDir = await createHubProjectDir(
+      "proposal-refine-cancel-hub-",
+    );
+    const presentationEvents: Array<{ phase: string; status: string }> = [];
+    const { invoker } = createFakeInvoker({
+      draft: { assistantMessage: "Draft proposal" },
+    });
+
+    const result = await runProposalSession({
+      flowId: "prd-decomposition",
+      cwd: repoDir,
+      hubProjectDir,
+      preparedContext: { prdRef: "docs/prd.md" },
+      draftPrompt: "Draft a PRD decomposition proposal.",
+      finalizationPrompt: "Emit the final task proposal.",
+      output: Output.object({
+        tag: "task-proposal",
+        schema: testProposalSchema(),
+      }),
+      agentInvoker: invoker,
+      interaction: {
+        requestRefinement: async () => {
+          throw new ProposalPromptCancelledError({
+            message: "Refinement cancelled.",
+          });
+        },
+      },
+      onPresentationEvent: (event) => presentationEvents.push(event),
+    });
+
+    expect(result).toMatchObject({
+      outcome: "cancelled",
+      phase: "refinement",
+    });
+    expect(presentationEvents.at(-1)).toEqual(
+      expect.objectContaining({ phase: "refinement", status: "cancelled" }),
+    );
+  });
+
+  it("turns approval prompt cancellation into exit-safe cancellation", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "proposal-approval-cancel-"));
+    await initRepo(repoDir);
+    const hubProjectDir = await createHubProjectDir(
+      "proposal-approval-cancel-hub-",
+    );
+    const presentationEvents: Array<{ phase: string; status: string }> = [];
+    const { invoker } = createFakeInvoker({
+      draft: { assistantMessage: "Draft proposal" },
+      finalization: {
+        assistantMessage:
+          '<task-proposal>{"title":"Slice one"}</task-proposal>',
+      },
+    });
+
+    const result = await runProposalSession({
+      flowId: "prd-decomposition",
+      cwd: repoDir,
+      hubProjectDir,
+      preparedContext: { prdRef: "docs/prd.md" },
+      draftPrompt: "Draft a PRD decomposition proposal.",
+      finalizationPrompt: "Emit the final task proposal.",
+      output: Output.object({
+        tag: "task-proposal",
+        schema: testProposalSchema(),
+      }),
+      agentInvoker: invoker,
+      interaction: {
+        requestRefinement: async () => null,
+        requestApproval: async () => {
+          throw new ProposalPromptCancelledError({
+            message: "Approval cancelled.",
+          });
+        },
+      },
+      onPresentationEvent: (event) => presentationEvents.push(event),
+    });
+
+    expect(result).toMatchObject({
+      outcome: "cancelled",
+      phase: "approval",
+    });
+    expect(presentationEvents.at(-1)).toEqual(
+      expect.objectContaining({ phase: "approval", status: "cancelled" }),
+    );
   });
 });

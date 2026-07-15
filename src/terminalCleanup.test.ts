@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { SHOW_CURSOR, makeTerminalCleanupHandler } from "./terminalCleanup.js";
+import {
+  SHOW_CURSOR,
+  makeTerminalCleanupHandler,
+  setupTerminalCleanup,
+} from "./terminalCleanup.js";
 
 describe("makeTerminalCleanupHandler", () => {
   it("calls setRawMode(false) and writes show-cursor when stdin is a TTY", () => {
@@ -57,6 +61,24 @@ describe("makeTerminalCleanupHandler", () => {
 
     expect(() => handler()).not.toThrow();
     // cursor is still shown even after setRawMode failure
+    expect(write).toHaveBeenCalledWith(SHOW_CURSOR);
+  });
+});
+
+describe("setupTerminalCleanup", () => {
+  it("registers cleanup against the diagnostic stream instead of stdout", () => {
+    const write = vi.fn(() => true);
+    let registered: (() => void) | undefined;
+
+    setupTerminalCleanup({
+      stdin: { isTTY: false },
+      output: { write },
+      registerExit: (handler) => {
+        registered = handler;
+      },
+    });
+    registered?.();
+
     expect(write).toHaveBeenCalledWith(SHOW_CURSOR);
   });
 });

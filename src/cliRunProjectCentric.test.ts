@@ -827,6 +827,413 @@ describe("archloop run project targeting", () => {
     }
   });
 
+  it("renders PRD proposal phases as deterministic plain output", async () => {
+    await mkdir(join(repoAlpha, "docs"), { recursive: true });
+    await writeFile(join(repoAlpha, "docs", "proposal.md"), "# Proposal\n");
+    const runDir = join(hostDir, "proposal-run");
+    mockRunHubProposalFlowFromCli.mockImplementation(
+      async (input: {
+        onPresentationEvent?: (event: Record<string, unknown>) => void;
+      }) => {
+        for (const [sequence, phase, status, data] of [
+          [1, "input_preparation", "completed"],
+          [2, "draft", "started"],
+          [3, "draft", "completed"],
+          [4, "apply", "completed", { applied: 2, dependencies: 1 }],
+        ] as const) {
+          const presentationEvent = {
+            eventId: `proposal-plain:${sequence}`,
+            sequence,
+            createdAt: `2026-07-15T12:00:0${sequence}.000Z`,
+            runId: "proposal-plain",
+            runDir,
+            flowId: "prd-decomposition",
+            phase,
+            status,
+            ...(data ? { data } : {}),
+          };
+          input.onPresentationEvent?.(presentationEvent);
+          if (sequence === 1) {
+            input.onPresentationEvent?.(presentationEvent);
+          }
+        }
+        return {
+          flowId: "prd-decomposition",
+          result: {
+            outcome: "applied",
+            runId: "proposal-plain",
+            runDir,
+            hubStatusMode: "inbox",
+            proposal: {},
+            tasks: [{ id: "bd-1" }, { id: "bd-2" }],
+            dependencies: [{ dependentId: "bd-2", blockerId: "bd-1" }],
+          },
+        };
+      },
+    );
+
+    const entries = await runCli([
+      "run",
+      "--flow",
+      "prd-decomposition",
+      "--input",
+      "docs/proposal.md",
+      "--output",
+      "plain",
+      "--yes",
+    ]);
+    const lines = entries.flatMap((entry) =>
+      entry._tag === "plain" ? [entry.message] : [],
+    );
+
+    expect(entries.every((entry) => entry._tag === "plain")).toBe(true);
+    expect(lines[0]).toContain(
+      'event=proposal_phase hub_project="alpha" flow="prd-decomposition" phase="input_preparation"',
+    );
+    expect(
+      lines.filter((line) => line.includes('phase="input_preparation"')),
+    ).toHaveLength(1);
+    expect(lines.at(-1)).toContain(
+      'event=run_completed outcome="applied" summary="Proposal approved and applied" applied=2',
+    );
+    expect(mockHandlePrdDecompositionFlowDisplay).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(0);
+  });
+
+  it("renders triage proposal phases and no-change outcome as stdout-pure JSONL", async () => {
+    const runDir = join(hostDir, "triage-json-run");
+    mockRunHubProposalFlowFromCli.mockImplementation(
+      async (input: {
+        onPresentationEvent?: (event: Record<string, unknown>) => void;
+      }) => {
+        for (const [sequence, phase, status, data] of [
+          [1, "input_preparation", "completed"],
+          [2, "validation", "completed"],
+          [3, "apply", "no_change", { applied: 0, skipped: 1 }],
+        ] as const) {
+          input.onPresentationEvent?.({
+            eventId: `triage-json:${sequence}`,
+            sequence,
+            createdAt: `2026-07-15T12:10:0${sequence}.000Z`,
+            runId: "triage-json",
+            runDir,
+            flowId: "triage",
+            phase,
+            status,
+            ...(data ? { data } : {}),
+          });
+        }
+        return {
+          flowId: "triage",
+          result: {
+            outcome: "applied",
+            runId: "triage-json",
+            runDir,
+            proposal: {},
+            appliedDecisions: [],
+            skippedDecisions: [{ taskId: "bd-1", reason: "unconfirmed" }],
+            dependencies: [],
+            skippedDependencies: [],
+          },
+        };
+      },
+    );
+
+    const entries = await runCli([
+      "run",
+      "--flow",
+      "triage",
+      "--input",
+      "inbox",
+      "--output",
+      "json",
+      "--yes",
+    ]);
+    const records = entries.map((entry) => {
+      expect(entry._tag).toBe("plain");
+      return JSON.parse((entry as { message: string }).message) as Record<
+        string,
+        unknown
+      >;
+    });
+
+    expect(records).toHaveLength(4);
+    expect(
+      records.every(
+        (record) =>
+          record.schemaVersion === 1 &&
+          typeof record.eventId === "string" &&
+          typeof record.sequence === "number" &&
+          typeof record.timestamp === "string",
+      ),
+    ).toBe(true);
+    expect(records.at(-1)).toMatchObject({
+      type: "run_completed",
+      outcome: "no_change",
+      exitCode: 0,
+      counts: { applied: 0, skipped: 1, dependencies: 0 },
+    });
+    expect(mockHandleTriageProposalFlowDisplay).not.toHaveBeenCalled();
+  });
+
+  it("runs proposal phases in bounded live output on a capable TTY", async () => {
+    await mkdir(join(repoAlpha, "docs"), { recursive: true });
+    await writeFile(join(repoAlpha, "docs", "live.md"), "# Live proposal\n");
+    const originalColumns = process.stdout.columns;
+    const originalTerm = process.env.TERM;
+    const listenerCountBefore = process.stdout.listenerCount("resize");
+    let listenerCountDuring = listenerCountBefore;
+    const chunks: string[] = [];
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(((
+      chunk: string | Uint8Array,
+    ) => {
+      chunks.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write);
+    setTerminalTtyState(true);
+    setStdoutColumns(120);
+    setStdoutRows(30);
+    process.env.TERM = "xterm-256color";
+    mockConfirm.mockResolvedValue(true);
+    mockRunHubProposalFlowFromCli.mockImplementation(
+      async (input: {
+        interactive?: boolean;
+        onPresentationEvent?: (event: Record<string, unknown>) => void;
+      }) => {
+        listenerCountDuring = process.stdout.listenerCount("resize");
+        expect(input.interactive).toBe(true);
+        for (const [sequence, phase, status, data] of [
+          [1, "input_preparation", "completed"],
+          [2, "draft", "started"],
+          [3, "draft", "completed"],
+          [4, "apply", "completed", { applied: 1 }],
+        ] as const) {
+          input.onPresentationEvent?.({
+            eventId: `proposal-live:${sequence}`,
+            sequence,
+            createdAt: `2026-07-15T12:20:0${sequence}.000Z`,
+            runId: "proposal-live",
+            runDir: "/tmp/proposal-live",
+            flowId: "prd-decomposition",
+            phase,
+            status,
+            ...(data ? { data } : {}),
+          });
+        }
+        return {
+          flowId: "prd-decomposition",
+          result: {
+            outcome: "applied",
+            runId: "proposal-live",
+            runDir: "/tmp/proposal-live",
+            hubStatusMode: "inbox",
+            proposal: {},
+            tasks: [{ id: "bd-1" }],
+            dependencies: [],
+          },
+        };
+      },
+    );
+
+    try {
+      await runCli([
+        "run",
+        "--flow",
+        "prd-decomposition",
+        "--input",
+        "docs/live.md",
+      ]);
+    } finally {
+      write.mockRestore();
+      setStdoutColumns(originalColumns);
+      if (originalTerm === undefined) {
+        delete process.env.TERM;
+      } else {
+        process.env.TERM = originalTerm;
+      }
+    }
+
+    const output = chunks.join("");
+    expect(listenerCountDuring).toBeGreaterThan(listenerCountBefore);
+    expect(process.stdout.listenerCount("resize")).toBe(listenerCountBefore);
+    expect(output).toContain(
+      "archLoop run | Project alpha | Flow prd-decomposition",
+    );
+    expect(output).toContain("Generate draft | Completed");
+    expect(output).toContain("Proposal approved and applied");
+    expect(output.endsWith("\x1b[?25h")).toBe(true);
+  });
+
+  it("falls back to plain and continues when suspending live output for a prompt fails", async () => {
+    await mkdir(join(repoAlpha, "docs"), { recursive: true });
+    await writeFile(join(repoAlpha, "docs", "prompt.md"), "# Prompt\n");
+    const originalColumns = process.stdout.columns;
+    const originalTerm = process.env.TERM;
+    const chunks: string[] = [];
+    let writeCount = 0;
+    let promptContinued = false;
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(((
+      chunk: string | Uint8Array,
+    ) => {
+      writeCount += 1;
+      if (writeCount === 2) {
+        throw new Error("prompt suspend write failed");
+      }
+      chunks.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write);
+    setTerminalTtyState(true);
+    setStdoutColumns(120);
+    setStdoutRows(30);
+    process.env.TERM = "xterm-256color";
+    mockConfirm.mockResolvedValue(true);
+    mockRunHubProposalFlowFromCli.mockImplementation(
+      async (input: {
+        beforePrompt?: () => void;
+        afterPrompt?: () => void;
+        onPresentationEvent?: (event: Record<string, unknown>) => void;
+      }) => {
+        const emit = (sequence: number, phase: string, status: string) =>
+          input.onPresentationEvent?.({
+            eventId: `prompt-fallback:${sequence}`,
+            sequence,
+            createdAt: `2026-07-15T12:30:0${sequence}.000Z`,
+            runId: "prompt-fallback",
+            runDir: "/tmp/prompt-fallback",
+            flowId: "prd-decomposition",
+            phase,
+            status,
+            ...(phase === "apply"
+              ? { data: { applied: 1, dependencies: 0 } }
+              : {}),
+          });
+        emit(1, "draft", "started");
+        input.beforePrompt?.();
+        promptContinued = true;
+        input.afterPrompt?.();
+        emit(2, "draft", "completed");
+        emit(3, "apply", "completed");
+        return {
+          flowId: "prd-decomposition",
+          result: {
+            outcome: "applied",
+            runId: "prompt-fallback",
+            runDir: "/tmp/prompt-fallback",
+            hubStatusMode: "inbox",
+            proposal: {},
+            tasks: [{ id: "bd-1" }],
+            dependencies: [],
+          },
+        };
+      },
+    );
+
+    let entries: readonly DisplayEntry[] = [];
+    try {
+      entries = await runCli([
+        "run",
+        "--flow",
+        "prd-decomposition",
+        "--input",
+        "docs/prompt.md",
+      ]);
+    } finally {
+      write.mockRestore();
+      setStdoutColumns(originalColumns);
+      if (originalTerm === undefined) {
+        delete process.env.TERM;
+      } else {
+        process.env.TERM = originalTerm;
+      }
+    }
+
+    const lines = entries.flatMap((entry) =>
+      entry._tag === "plain" ? [entry.message] : [],
+    );
+    expect(promptContinued).toBe(true);
+    expect(lines.filter((line) => line.includes('phase="draft"'))).toHaveLength(
+      2,
+    );
+    expect(lines.at(-1)).toContain('outcome="applied"');
+    expect(chunks.join("")).toContain("\x1b[?25h");
+    expect(process.exitCode).toBe(0);
+  });
+
+  it("keeps early proposal execution failures inside stdout-pure JSONL", async () => {
+    mockRunHubProposalFlowFromCli.mockRejectedValue(
+      new Error("proposal agent unavailable\nprivate stack"),
+    );
+
+    const entries = await runCli([
+      "run",
+      "--flow",
+      "triage",
+      "--input",
+      "inbox",
+      "--output",
+      "json",
+      "--yes",
+    ]);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?._tag).toBe("plain");
+    const record = JSON.parse(
+      (entries[0] as { message: string }).message,
+    ) as Record<string, unknown>;
+    expect(record).toMatchObject({
+      schemaVersion: 1,
+      type: "run_failed",
+      outcome: "failed",
+      diagnostic: "proposal agent unavailable",
+      exitCode: 1,
+    });
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("keeps proposal input validation failures inside stdout-pure JSONL", async () => {
+    const entries = await runCli([
+      "run",
+      "--flow",
+      "prd-decomposition",
+      "--output",
+      "json",
+      "--yes",
+    ]);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?._tag).toBe("plain");
+    const record = JSON.parse(
+      (entries[0] as { message: string }).message,
+    ) as Record<string, unknown>;
+    expect(record).toMatchObject({
+      schemaVersion: 1,
+      type: "run_failed",
+      outcome: "failed",
+      flowId: "prd-decomposition",
+      exitCode: 1,
+    });
+    expect(String(record.diagnostic)).toMatch(/input|required/i);
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("suppresses legacy target guidance from JSON stdout", async () => {
+    const entries = await runCli([
+      "run",
+      repoAlpha,
+      "--flow",
+      "no-review",
+      "--output",
+      "json",
+    ]);
+
+    expect(entries.every((entry) => entry._tag === "plain")).toBe(true);
+    expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) {
+      expect(() =>
+        JSON.parse((entry as { readonly message: string }).message),
+      ).not.toThrow();
+    }
+  });
+
   it("returns exit code 130 when the user cancels the run plan", async () => {
     setTerminalTtyState(true);
     mockConfirm.mockResolvedValue(false);

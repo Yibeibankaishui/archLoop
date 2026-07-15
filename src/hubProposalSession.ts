@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { extractStructuredOutput } from "./extractStructuredOutput.js";
+import { isProposalPromptCancelledError } from "./errors.js";
 import {
   captureProposalFlowStateSnapshot,
   detectProposalFlowMutations,
@@ -20,6 +21,58 @@ import {
 import type { OutputObjectDefinition } from "./Output.js";
 
 export type ProposalSessionPhase = "draft" | "refinement" | "finalization";
+
+export type HubProposalPresentationPhase =
+  | "input_preparation"
+  | "draft"
+  | "refinement"
+  | "finalization"
+  | "approval"
+  | "validation"
+  | "mutation_detection"
+  | "apply";
+
+export type HubProposalPresentationStatus =
+  | "started"
+  | "completed"
+  | "cancelled"
+  | "failed"
+  | "no_change";
+
+export interface HubProposalPresentationEvent {
+  readonly eventId: string;
+  readonly sequence: number;
+  readonly createdAt: string;
+  readonly runId: string;
+  readonly runDir: string;
+  readonly flowId: string;
+  readonly phase: HubProposalPresentationPhase;
+  readonly status: HubProposalPresentationStatus;
+  readonly diagnostic?: string;
+  readonly data?: Readonly<Record<string, unknown>>;
+}
+
+export const createHubProposalPresentationEvent = (input: {
+  readonly runId: string;
+  readonly runDir: string;
+  readonly flowId: string;
+  readonly sequence: number;
+  readonly phase: HubProposalPresentationPhase;
+  readonly status: HubProposalPresentationStatus;
+  readonly diagnostic?: string;
+  readonly data?: Readonly<Record<string, unknown>>;
+}): HubProposalPresentationEvent => ({
+  eventId: `${input.runId}:proposal:${input.sequence}`,
+  sequence: input.sequence,
+  createdAt: new Date().toISOString(),
+  runId: input.runId,
+  runDir: input.runDir,
+  flowId: input.flowId,
+  phase: input.phase,
+  status: input.status,
+  ...(input.diagnostic ? { diagnostic: input.diagnostic } : {}),
+  ...(input.data ? { data: input.data } : {}),
+});
 
 export interface ProposalTranscriptTurn {
   readonly role: "user" | "assistant";
@@ -72,6 +125,7 @@ export interface RunProposalSessionInput<T> {
   readonly refinements?: readonly string[];
   readonly approve?: boolean;
   readonly oneShot?: boolean;
+  readonly onPresentationEvent?: (event: HubProposalPresentationEvent) => void;
 }
 
 export type RunProposalSessionResult<T> =
@@ -194,6 +248,8 @@ interface ProposalSessionState {
   readonly runId: string;
   readonly runDir: string;
   readonly paths: ProposalSessionArtifactPaths;
+  readonly onPresentationEvent?: (event: HubProposalPresentationEvent) => void;
+  presentationSequence: number;
 }
 
 const writeJson = (path: string, value: unknown): void => {
@@ -232,6 +288,26 @@ const proposalEventBase = (state: ProposalSessionState) => ({
   runId: state.runId,
   createdAt: new Date().toISOString(),
 });
+
+const emitPresentationEvent = (
+  state: ProposalSessionState,
+  phase: HubProposalPresentationPhase,
+  status: HubProposalPresentationStatus,
+  details: Pick<HubProposalPresentationEvent, "diagnostic" | "data"> = {},
+): void => {
+  state.presentationSequence += 1;
+  state.onPresentationEvent?.(
+    createHubProposalPresentationEvent({
+      runId: state.runId,
+      runDir: state.runDir,
+      flowId: state.flowId,
+      sequence: state.presentationSequence,
+      phase,
+      status,
+      ...details,
+    }),
+  );
+};
 
 export const writeProposalSessionApplyResult = (
   runDir: string,
@@ -389,6 +465,7 @@ const failSession = <T>(
   state: ProposalSessionState,
   phase: ProposalSessionPhase,
   reason: string,
+  emitPhaseFailure = true,
 ): RunProposalSessionResult<T> => {
   appendProposalEvent(state.runDir, {
     type: "session_failed",
@@ -396,6 +473,9 @@ const failSession = <T>(
     phase,
     reason,
   });
+  if (emitPhaseFailure) {
+    emitPresentationEvent(state, phase, "failed", { diagnostic: reason });
+  }
   return {
     outcome: "failed",
     flowId: state.flowId,
@@ -403,6 +483,25 @@ const failSession = <T>(
     runDir: state.runDir,
     phase,
     reason,
+  };
+};
+
+const cancelSession = <T>(
+  state: ProposalSessionState,
+  phase: "approval" | "refinement",
+): RunProposalSessionResult<T> => {
+  appendProposalEvent(state.runDir, {
+    type: "session_cancelled",
+    ...proposalEventBase(state),
+    phase,
+  });
+  emitPresentationEvent(state, phase, "cancelled");
+  return {
+    outcome: "cancelled",
+    flowId: state.flowId,
+    runId: state.runId,
+    runDir: state.runDir,
+    phase,
   };
 };
 
@@ -435,6 +534,7 @@ const failOnProposalFlowMutations = <T>(
     afterSnapshot,
   );
   if (!mutationReport.hasMutations) {
+    emitPresentationEvent(state, "mutation_detection", "completed");
     return undefined;
   }
 
@@ -448,7 +548,10 @@ const failOnProposalFlowMutations = <T>(
     ...proposalEventBase(state),
     reason,
   });
-  return failSession(state, "finalization", reason);
+  emitPresentationEvent(state, "mutation_detection", "failed", {
+    diagnostic: reason,
+  });
+  return failSession(state, "finalization", reason, false);
 };
 
 export const runProposalSession = async <T>(
@@ -471,6 +574,8 @@ export const runProposalSession = async <T>(
     runId: context.runId,
     runDir: context.runDir,
     paths: resolveProposalSessionArtifactPaths(context.runDir),
+    onPresentationEvent: input.onPresentationEvent,
+    presentationSequence: 0,
   };
   const transcript: ProposalTranscriptTurn[] = [];
   const mutationBeforeSnapshot = captureProposalFlowStateSnapshot({
@@ -480,6 +585,7 @@ export const runProposalSession = async <T>(
 
   persistPreparedContext(state.paths, input.preparedContext);
   persistTranscript(state.paths, transcript);
+  emitPresentationEvent(state, "input_preparation", "completed");
 
   appendProposalEvent(state.runDir, {
     type: "session_started",
@@ -487,6 +593,7 @@ export const runProposalSession = async <T>(
     runId: state.runId,
     createdAt: startedAt.toISOString(),
   });
+  emitPresentationEvent(state, "draft", "started");
 
   appendProposalEvent(state.runDir, {
     type: "draft_started",
@@ -519,6 +626,7 @@ export const runProposalSession = async <T>(
     ...proposalEventBase(state),
     assistantMessage: draftResult.assistantMessage,
   });
+  emitPresentationEvent(state, "draft", "completed");
   await notifyAssistantMessage(
     input.interaction,
     state,
@@ -529,11 +637,19 @@ export const runProposalSession = async <T>(
   if (!input.oneShot) {
     let refinementIndex = 0;
     while (true) {
-      const userMessage = await requestNextRefinement({
-        interaction: input.interaction,
-        refinements: input.refinements,
-        refinementIndex,
-      });
+      let userMessage: string | null;
+      try {
+        userMessage = await requestNextRefinement({
+          interaction: input.interaction,
+          refinements: input.refinements,
+          refinementIndex,
+        });
+      } catch (error) {
+        if (isProposalPromptCancelledError(error)) {
+          return cancelSession(state, "refinement");
+        }
+        throw error;
+      }
       if (!userMessage) {
         break;
       }
@@ -546,6 +662,7 @@ export const runProposalSession = async <T>(
         ...proposalEventBase(state),
         userMessage,
       });
+      emitPresentationEvent(state, "refinement", "started");
 
       let refinementResult: ProposalAgentInvokeResult;
       try {
@@ -577,6 +694,7 @@ export const runProposalSession = async <T>(
         ...proposalEventBase(state),
         assistantMessage: refinementResult.assistantMessage,
       });
+      emitPresentationEvent(state, "refinement", "completed");
       await notifyAssistantMessage(
         input.interaction,
         state,
@@ -590,6 +708,7 @@ export const runProposalSession = async <T>(
     type: "finalization_started",
     ...proposalEventBase(state),
   });
+  emitPresentationEvent(state, "finalization", "started");
 
   let finalizationResult: ProposalAgentInvokeResult;
   try {
@@ -632,7 +751,9 @@ export const runProposalSession = async <T>(
   }
 
   writeJson(state.paths.finalProposalPath, finalProposal);
+  emitPresentationEvent(state, "finalization", "completed");
 
+  emitPresentationEvent(state, "mutation_detection", "started");
   const mutationFailure = failOnProposalFlowMutations<T>(state, {
     repoRoot,
     env: input.env,
@@ -642,27 +763,26 @@ export const runProposalSession = async <T>(
     return mutationFailure;
   }
 
-  const approved = await requestApprovalDecision({
-    interaction: input.interaction,
-    approve: input.approve,
-    proposal: finalProposal,
-  });
-  if (!approved) {
-    appendProposalEvent(state.runDir, {
-      type: "session_cancelled",
-      ...proposalEventBase(state),
-      phase: "approval",
+  emitPresentationEvent(state, "approval", "started");
+  let approved: boolean;
+  try {
+    approved = await requestApprovalDecision({
+      interaction: input.interaction,
+      approve: input.approve,
+      proposal: finalProposal,
     });
-    return {
-      outcome: "cancelled",
-      flowId: state.flowId,
-      runId: state.runId,
-      runDir: state.runDir,
-      phase: "approval",
-    };
+  } catch (error) {
+    if (isProposalPromptCancelledError(error)) {
+      return cancelSession(state, "approval");
+    }
+    throw error;
+  }
+  if (!approved) {
+    return cancelSession(state, "approval");
   }
 
   writeJson(state.paths.applyResultPath, { status: "pending" });
+  emitPresentationEvent(state, "approval", "completed");
   appendProposalEvent(state.runDir, {
     type: "finalization_succeeded",
     ...proposalEventBase(state),

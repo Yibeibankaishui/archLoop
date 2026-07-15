@@ -21,7 +21,7 @@ export const SHOW_CURSOR = "\x1b[?25h";
 export const makeTerminalCleanupHandler =
   (
     stdin: { isTTY?: boolean; setRawMode?: (raw: boolean) => void },
-    stdout: { write: (data: string) => boolean },
+    output: { write: (data: string) => boolean },
   ) =>
   (): void => {
     if (stdin.isTTY && stdin.setRawMode) {
@@ -31,13 +31,26 @@ export const makeTerminalCleanupHandler =
         // Best-effort — may fail if stdin is already closed
       }
     }
-    stdout.write(SHOW_CURSOR);
+    output.write(SHOW_CURSOR);
   };
 
 /**
  * Registers the terminal cleanup handler on process 'exit'.
  * Call once at program startup (main.ts).
  */
-export const setupTerminalCleanup = (): void => {
-  process.on("exit", makeTerminalCleanupHandler(process.stdin, process.stdout));
+export const setupTerminalCleanup = (
+  options: {
+    readonly stdin?: {
+      isTTY?: boolean;
+      setRawMode?: (raw: boolean) => void;
+    };
+    readonly output?: { write: (data: string) => boolean };
+    readonly registerExit?: (handler: () => void) => void;
+  } = {},
+): void => {
+  const handler = makeTerminalCleanupHandler(
+    options.stdin ?? process.stdin,
+    options.output ?? process.stderr,
+  );
+  (options.registerExit ?? ((onExit) => process.on("exit", onExit)))(handler);
 };

@@ -288,11 +288,11 @@ archloop run --flow with-review
 
 适合需要实现后审核的流程：实现成功后进入 `reviewing`，review 完成后进入 `waiting_for_merge`，再进入 merge 阶段。
 
-`no-review` 和 `with-review` 默认使用 `--output auto`。交互式 TTY 在尺寸与 cursor control 可用时显示有界 live view：紧凑 header、稳定的当前 batch 任务行、规范 stage、elapsed、logs、完成 batch scrollback 和最终五类计数；它不进入 alternate screen，也不暴露 agent prose、tool arguments、百分比或 ETA。resize 会在宽/堆叠布局间切换，成功、失败、取消和异常退出都会恢复 cursor。重定向、CI、`TERM=dumb`、不支持 cursor control 或终端宽度、高度不安全时自动回退 plain。在 live view 中，`NO_COLOR` 或 `--no-color` 保留文字与符号语义，只去掉颜色。
+所有 Hub flow 默认使用 `--output auto`。交互式 TTY 在尺寸与 cursor control 可用时显示有界 live view；任务看板显示 batch/task，PRD decomposition 与 triage 显示 proposal session phases。proposal live view 在 refinement、status、approval、apply prompt 前暂停并恢复，不暴露 agent prose。重定向、CI、dumb/unsupported/unsafe terminal 自动回退 plain，所有退出路径都会恢复 cursor。
 
-两种 task-board flow 也支持显式 `--output plain`，例如 `archloop run --flow with-review --output plain`。该模式为 CI 或重定向日志输出稳定的 append-only records：每条 lifecycle 或 task-attention 记录占一个物理行，字段顺序固定、值安全转义，不使用 ANSI 光标控制。输出包含 Hub project、flow、selected tasks、用户可读 task stage、run id、Hub run directory，以及 completed、failed、blocked、skipped、ready-to-merge 五类计数。最终 outcome 为 `completed`、`completed_with_failures`、`failed` 或 `cancelled`：初始队列为空显示 `Nothing to run`，达到 `--max-batches` 也是 exit `0`；阻塞或部分失败返回非零，用户取消返回 `130`。agent prose、tool arguments 和直接的 agent startup decoration 只保留在 Hub run directory 中。proposal flow 暂不支持 `plain`。
+所有 flow 支持显式 `--output plain`。proposal records 为 append-only canonical phase/status，不包含原始 agent prose；最终 outcome 区分 applied、no-change、cancelled、validation failure、mutation failure 和其他 failure，并提供 applied/skipped/dependencies、logs、diagnostic 与 recovery。显式 plain/JSON 不发起交互 prompt，写入 proposal 必须传 `--yes`；未确认时不 apply。
 
-脚本和 CI 可改用 `--output json`。stdout 此时是 schema version 1 JSONL，每个物理行都能独立 `JSON.parse`，并带有稳定的 `eventId`、`sequence`、`timestamp`、`type`、`runId` 和 `flowId`；batch/task lifecycle 还包含相应 identity 与事件 data。失败任务会追加 `task_attention`，提供 failed stage、diagnostic、log path、recovery command 和 blocking paths；最终 `run_completed` 提供 outcome、五类计数、完成的 batch/task 数、stop reason、日志目录和 exit code。取消返回 `cancelled` outcome 和 exit `130`。JSON 模式不会输出 prompt、人工状态装饰、ANSI 控制序列、agent startup 或原始 agent prose；version 1 消费者应忽略未知字段，以兼容后续新增字段。
+脚本和 CI 可改用 `--output json`。proposal phases 使用 stdout-pure schema version 1 `proposal_phase` JSONL，最终使用 `run_completed`；应用/无变化退出 `0`，取消退出 `130`，validation/mutation/general failure 非零。version 1 消费者应忽略未知字段。
 
 失败或阻塞任务会保留 failed stage、简短 diagnostic、相关 log path 和下一步命令。agent、sandbox、implementation 与 review 失败使用 `archloop tasks recover <selector>`；claim 或 task projection 不一致使用 `archloop tasks repair-state <selector>`；dirty-worktree overlap 会列出准确 blocking paths，并说明先 commit、stash 或 discard。仍在 `waiting_for_merge` 的工作应重新运行同一个 `archloop run --flow <id>`，由既有自动恢复逻辑继续批次；不要使用不存在的 `archloop run --resume`。
 
