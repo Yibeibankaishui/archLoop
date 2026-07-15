@@ -1,6 +1,331 @@
 import { join } from "node:path";
 
 import type { HubRunEvent, HubRunStopReason } from "./hubExecution.js";
+import type { RunHubFlowResult } from "./hubFlowExecution.js";
+
+export type HubRunOutcome =
+  | "completed"
+  | "completed_with_failures"
+  | "failed"
+  | "cancelled";
+
+export interface HubRunTaskDetail {
+  readonly taskId: string;
+  readonly stage: string;
+  readonly diagnostic: string;
+  readonly logPath?: string;
+  readonly recoveryCommand?: string;
+  readonly blockingPaths?: readonly string[];
+}
+
+export interface HubRunOutcomeProjection {
+  readonly outcome: HubRunOutcome;
+  readonly summary: string;
+  readonly counts: {
+    readonly completed: number;
+    readonly failed: number;
+    readonly blocked: number;
+    readonly skipped: number;
+    readonly readyToMerge: number;
+  };
+  readonly taskDetails: readonly HubRunTaskDetail[];
+  readonly exitCode: number;
+}
+
+export const resolveHubRunExitCode = (outcome: HubRunOutcome): number =>
+  outcome === "completed" ? 0 : outcome === "cancelled" ? 130 : 1;
+
+const classifyHubRunTasks = (
+  result: RunHubFlowResult,
+): HubRunOutcomeProjection["counts"] => {
+  const completed = new Set(
+    result.batchResults.flatMap((batch) =>
+      batch.batchStatus === "completed" ? batch.selectedTaskIds : [],
+    ),
+  );
+  const failed = new Set<string>();
+  const blocked = new Set<string>();
+  const skipped = new Set<string>();
+  const readyToMerge = new Set<string>();
+
+  for (const task of result.results) {
+    if (completed.has(task.taskId)) {
+      continue;
+    }
+    if (
+      task.outcome === "agent_failed" ||
+      task.outcome === "sandbox_failed" ||
+      task.hubStatus === "failed"
+    ) {
+      failed.add(task.taskId);
+    } else if (task.outcome === "active_execution") {
+      blocked.add(task.taskId);
+    } else if (task.outcome === "claim_skipped") {
+      skipped.add(task.taskId);
+    } else if (task.hubStatus === "waiting_for_merge") {
+      readyToMerge.add(task.taskId);
+    }
+  }
+
+  for (const diagnostic of result.mergeResult?.selectionDiagnostics ?? []) {
+    if (completed.has(diagnostic.taskId) || failed.has(diagnostic.taskId)) {
+      continue;
+    }
+    if (diagnostic.decision === "blocked") {
+      blocked.add(diagnostic.taskId);
+      skipped.delete(diagnostic.taskId);
+      readyToMerge.delete(diagnostic.taskId);
+    } else if (diagnostic.decision === "skipped") {
+      skipped.add(diagnostic.taskId);
+      readyToMerge.delete(diagnostic.taskId);
+    }
+  }
+
+  for (const task of result.mergeResult?.results ?? []) {
+    blocked.delete(task.taskId);
+    skipped.delete(task.taskId);
+    readyToMerge.delete(task.taskId);
+    if (task.outcome === "merged") {
+      completed.add(task.taskId);
+      failed.delete(task.taskId);
+    } else if (task.outcome === "skipped") {
+      if (task.hubStatus === "waiting_for_merge") {
+        readyToMerge.add(task.taskId);
+      } else {
+        skipped.add(task.taskId);
+      }
+    } else {
+      failed.add(task.taskId);
+    }
+  }
+
+  return {
+    completed: completed.size,
+    failed: failed.size,
+    blocked: blocked.size,
+    skipped: skipped.size,
+    readyToMerge: readyToMerge.size,
+  };
+};
+
+const conciseDiagnostic = (
+  value: string | undefined,
+  fallback: string,
+): string => {
+  const firstLine = value
+    ?.split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  if (!firstLine) {
+    return fallback;
+  }
+  return firstLine.length <= 240 ? firstLine : `${firstLine.slice(0, 237)}...`;
+};
+
+const projectFailedTaskDetails = (
+  result: RunHubFlowResult,
+): readonly HubRunTaskDetail[] =>
+  result.results.flatMap((task) => {
+    if (task.outcome !== "agent_failed" && task.outcome !== "sandbox_failed") {
+      return [];
+    }
+
+    const failureStage =
+      task.failureStage ??
+      (task.hubStatus === "failed" ? "implementation" : undefined);
+    const canRecover = [
+      "failed",
+      "implementing",
+      "reviewing",
+      "merging",
+    ].includes(task.hubStatus);
+    return [
+      {
+        taskId: task.taskId,
+        stage:
+          failureStage === "review"
+            ? "Review failed"
+            : failureStage === "implementation"
+              ? "Implementation failed"
+              : "Execution blocked",
+        diagnostic: conciseDiagnostic(
+          task.diagnosticSummary,
+          task.outcome === "sandbox_failed"
+            ? "Sandbox execution failed."
+            : "Agent execution failed.",
+        ),
+        logPath:
+          task.logPath ??
+          (failureStage
+            ? join(
+                result.runDir,
+                "logs",
+                failureStage === "review"
+                  ? `${task.taskId}-review.log`
+                  : `${task.taskId}.log`,
+              )
+            : result.runDir),
+        ...(canRecover
+          ? { recoveryCommand: `archloop tasks recover ${task.taskId}` }
+          : {}),
+      },
+    ];
+  });
+
+const projectMergeSelectionDetails = (
+  result: RunHubFlowResult,
+): readonly HubRunTaskDetail[] =>
+  (result.mergeResult?.selectionDiagnostics ?? []).flatMap((diagnostic) => {
+    if (
+      diagnostic.reason !== "state_inconsistent" &&
+      diagnostic.reason !== "dirty_worktree"
+    ) {
+      return [];
+    }
+
+    const isStateInconsistent = diagnostic.reason === "state_inconsistent";
+    return [
+      {
+        taskId: diagnostic.taskId,
+        stage: "Merge blocked",
+        diagnostic:
+          diagnostic.message ??
+          (isStateInconsistent
+            ? "Task projection state is inconsistent."
+            : "Dirty source files overlap this task branch. Commit, stash, or discard them, then rerun the same flow."),
+        ...(isStateInconsistent
+          ? {
+              recoveryCommand:
+                diagnostic.suggestedRecovery ??
+                `archloop tasks repair-state ${diagnostic.taskId}`,
+            }
+          : {}),
+        ...(diagnostic.blockingPaths
+          ? { blockingPaths: diagnostic.blockingPaths }
+          : {}),
+      },
+    ];
+  });
+
+const projectWaitingMergeDetails = (
+  result: RunHubFlowResult,
+): readonly HubRunTaskDetail[] => {
+  const completedTaskIds = new Set(
+    result.batchResults.flatMap((batch) =>
+      batch.batchStatus === "completed" ? batch.selectedTaskIds : [],
+    ),
+  );
+  const failedMergeTaskIds = new Set(
+    (result.mergeResult?.results ?? []).flatMap((task) =>
+      task.outcome === "merged" || task.outcome === "skipped"
+        ? []
+        : [task.taskId],
+    ),
+  );
+  const mergedTaskIds = new Set(
+    (result.mergeResult?.results ?? []).flatMap((task) =>
+      task.outcome === "merged" ? [task.taskId] : [],
+    ),
+  );
+  const nonSelectedTaskIds = new Set(
+    (result.mergeResult?.selectionDiagnostics ?? []).flatMap((diagnostic) =>
+      diagnostic.decision !== "selected" ? [diagnostic.taskId] : [],
+    ),
+  );
+
+  return result.results.flatMap((task) =>
+    task.hubStatus === "waiting_for_merge" &&
+    !completedTaskIds.has(task.taskId) &&
+    !failedMergeTaskIds.has(task.taskId) &&
+    !mergedTaskIds.has(task.taskId) &&
+    !nonSelectedTaskIds.has(task.taskId)
+      ? [
+          {
+            taskId: task.taskId,
+            stage: "Waiting for merge",
+            diagnostic:
+              "Work is ready to merge. Rerun the same flow to resume this batch.",
+            recoveryCommand: `archloop run --flow ${result.flowId}`,
+          },
+        ]
+      : [],
+  );
+};
+
+const MERGE_FAILURE_STAGE: Readonly<Record<string, string>> = {
+  merge_conflict: "Merge conflict",
+  merge_failed: "Merge failed",
+  verification_failed: "Verification failed",
+  close_failed: "Task close failed",
+};
+
+const projectMergeFailureDetails = (
+  result: RunHubFlowResult,
+): readonly HubRunTaskDetail[] =>
+  (result.mergeResult?.results ?? []).flatMap((task) => {
+    const stage = MERGE_FAILURE_STAGE[task.outcome];
+    if (!stage) {
+      return [];
+    }
+
+    return [
+      {
+        taskId: task.taskId,
+        stage,
+        diagnostic:
+          task.diagnosticSummary ??
+          task.failureReason ??
+          "The merge phase failed.",
+        logPath:
+          task.logPath ??
+          (task.outcome === "merge_conflict"
+            ? join(result.runDir, "logs", `${task.taskId}-merge.log`)
+            : result.runDir),
+        recoveryCommand: `archloop tasks recover ${task.taskId}`,
+      },
+    ];
+  });
+
+export const projectHubRunOutcome = (
+  result: RunHubFlowResult,
+  options: { readonly cancelled?: boolean } = {},
+): HubRunOutcomeProjection => {
+  const counts = classifyHubRunTasks(result);
+  const hasPartialProgress = counts.completed > 0 || counts.readyToMerge > 0;
+  const outcome: HubRunOutcome =
+    options.cancelled === true
+      ? "cancelled"
+      : result.stopReason !== "batch_failed"
+        ? "completed"
+        : hasPartialProgress
+          ? "completed_with_failures"
+          : "failed";
+
+  return {
+    outcome,
+    summary:
+      outcome === "cancelled"
+        ? "Run cancelled"
+        : outcome === "completed_with_failures"
+          ? "Run completed with failures"
+          : outcome === "failed"
+            ? "Run failed"
+            : result.stopReason === "no_ready_tasks" &&
+                result.completedBatchCount === 0
+              ? "Nothing to run"
+              : result.stopReason === "max_batches_reached"
+                ? "Reached configured flow-batch limit"
+                : "Run completed",
+    counts,
+    taskDetails: [
+      ...projectFailedTaskDetails(result),
+      ...projectMergeSelectionDetails(result),
+      ...projectMergeFailureDetails(result),
+      ...projectWaitingMergeDetails(result),
+    ],
+    exitCode: resolveHubRunExitCode(outcome),
+  };
+};
 
 export interface HubRunDisplayState {
   readonly hubProjectName: string;
@@ -235,6 +560,66 @@ const textField = (name: string, value: string): string =>
   `${name}=${JSON.stringify(value)}`;
 
 const numberField = (name: string, value: number): string => `${name}=${value}`;
+
+export const formatPlainHubRunOutcome = (
+  result: RunHubFlowResult,
+  projection: HubRunOutcomeProjection,
+): readonly string[] => [
+  ...projection.taskDetails.map((detail) =>
+    [
+      "event=task_attention",
+      textField("run_id", result.runId),
+      textField("task_id", detail.taskId),
+      textField("stage", detail.stage),
+      textField("diagnostic", detail.diagnostic),
+      ...(detail.logPath ? [textField("log", detail.logPath)] : []),
+      ...(detail.recoveryCommand
+        ? [textField("recovery", detail.recoveryCommand)]
+        : []),
+      ...(detail.blockingPaths
+        ? [`blocking_paths=${JSON.stringify(detail.blockingPaths)}`]
+        : []),
+    ].join(" "),
+  ),
+  [
+    "event=run_completed",
+    textField("outcome", projection.outcome),
+    textField("summary", projection.summary),
+    numberField("completed", projection.counts.completed),
+    numberField("failed", projection.counts.failed),
+    numberField("blocked", projection.counts.blocked),
+    numberField("skipped", projection.counts.skipped),
+    numberField("ready_to_merge", projection.counts.readyToMerge),
+    numberField("completed_batches", result.completedBatchCount),
+    textField("run_id", result.runId),
+    textField("logs", result.runDir),
+  ].join(" "),
+];
+
+export const formatPlainHubRunCancellation = (
+  state: HubRunDisplayState,
+): string => {
+  const tasks = Object.values(state.tasks);
+  const countStatus = (status: string): number =>
+    tasks.filter((task) => task.status === status).length;
+  return [
+    "event=run_completed",
+    textField("outcome", "cancelled"),
+    textField("summary", "Run cancelled"),
+    numberField("completed", countStatus("done")),
+    numberField("failed", countStatus("failed")),
+    numberField("blocked", countStatus("blocked")),
+    numberField("skipped", 0),
+    numberField("ready_to_merge", countStatus("waiting_for_merge")),
+    numberField(
+      "completed_batches",
+      Object.values(state.batches).filter((batch) => batch.status === "done")
+        .length,
+    ),
+    textField("run_id", state.runId ?? ""),
+    textField("logs", state.runDir ?? ""),
+  ].join(" ");
+};
 
 const formatRunSummary = (state: HubRunDisplayState): string =>
   state.stopReason === "no_ready_tasks" && state.completedBatchCount === 0

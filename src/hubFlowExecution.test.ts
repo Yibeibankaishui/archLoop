@@ -1879,6 +1879,9 @@ describe("no-review Hub flow execution", () => {
       outcome: "agent_failed",
       hubStatus: "failed",
       failureReason: "agent_failed",
+      failureStage: "implementation",
+      diagnosticSummary: "agent exited non-zero",
+      logPath: join(result.runDir, "logs", "bd-fail.log"),
     });
   });
 
@@ -2711,6 +2714,9 @@ describe("with-review Hub flow execution", () => {
       outcome: "agent_failed",
       hubStatus: "failed",
       failureReason: "agent_failed",
+      failureStage: "review",
+      diagnosticSummary: "reviewer exited non-zero",
+      logPath: join(result.runDir, "logs", "bd-review-fail-review.log"),
     });
     expect(result.stopReason).toBe("batch_failed");
     expect(result.completedBatchCount).toBe(0);

@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SilentDisplay, type DisplayEntry } from "./Display.js";
 import { HUB_AGENT_ROLES, setHubAgentRole } from "./hubAgentConfig.js";
+import type { RunHubFlowInput, RunHubFlowResult } from "./hubFlowExecution.js";
 import {
   registerHubProject,
   resolveHubProjectSelectionPath,
@@ -23,6 +24,8 @@ const mockText = vi.fn();
 const mockRunHubProposalFlowFromCli = vi.fn();
 const mockHandlePrdDecompositionFlowDisplay = vi.fn();
 const mockHandleTriageProposalFlowDisplay = vi.fn();
+const mockRunHubFlow =
+  vi.fn<(input: RunHubFlowInput) => Promise<RunHubFlowResult>>();
 
 vi.mock("@clack/prompts", async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
@@ -44,6 +47,17 @@ vi.mock("./hubProposalFlowCli.js", async (importOriginal) => {
       mockHandlePrdDecompositionFlowDisplay(...args),
     handleTriageProposalFlowDisplay: (...args: unknown[]) =>
       mockHandleTriageProposalFlowDisplay(...args),
+  };
+});
+
+vi.mock("./hubFlowExecution.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./hubFlowExecution.js")>();
+  return {
+    ...actual,
+    runHubFlow: (input: RunHubFlowInput) =>
+      mockRunHubFlow.getMockImplementation()
+        ? mockRunHubFlow(input)
+        : actual.runHubFlow(input),
   };
 });
 
@@ -119,12 +133,14 @@ describe("archloop run project targeting", () => {
   let originalStdinTTY: boolean | undefined;
   let originalStdoutTTY: boolean | undefined;
   let originalXdgDataHome: string | undefined;
+  let originalExitCode: typeof process.exitCode;
 
   beforeEach(async () => {
     originalCwd = process.cwd();
     originalStdinTTY = process.stdin.isTTY;
     originalStdoutTTY = process.stdout.isTTY;
     originalXdgDataHome = process.env.XDG_DATA_HOME;
+    originalExitCode = process.exitCode;
 
     hostDir = await mkdtemp(join(tmpdir(), "cli-run-target-"));
     otherDir = await mkdtemp(join(tmpdir(), "cli-run-other-"));
@@ -178,6 +194,7 @@ describe("archloop run project targeting", () => {
     process.chdir(originalCwd);
     setTerminalTtyState(originalStdinTTY, originalStdoutTTY);
     restoreXdgDataHome(originalXdgDataHome);
+    process.exitCode = originalExitCode;
     vi.clearAllMocks();
     mockSelect.mockReset();
     mockConfirm.mockReset();
@@ -185,6 +202,7 @@ describe("archloop run project targeting", () => {
     mockRunHubProposalFlowFromCli.mockReset();
     mockHandlePrdDecompositionFlowDisplay.mockReset();
     mockHandleTriageProposalFlowDisplay.mockReset();
+    mockRunHubFlow.mockReset();
   });
 
   it("uses the selected Hub project from any directory", async () => {
@@ -239,8 +257,9 @@ describe("archloop run project targeting", () => {
       /^event=batch_planned run_id="run-[^"]+" batch_id="batch-[^"]+" selected_tasks=\[\]$/,
     );
     expect(plainMessages[3]).toMatch(
-      /^event=run_completed outcome="completed" summary="Nothing to run" completed_batches=0 completed_tasks=0 run_id="run-[^"]+" logs="[^"]+"$/,
+      /^event=run_completed outcome="completed" summary="Nothing to run" completed=0 failed=0 blocked=0 skipped=0 ready_to_merge=0 completed_batches=0 run_id="run-[^"]+" logs="[^"]+"$/,
     );
+    expect(process.exitCode).toBe(0);
     expect(plainMessages.join("\n")).not.toContain("no_ready_tasks");
     expect(plainMessages.join("\n")).not.toMatch(/\u001b\[[0-?]*[ -/]*[@-~]/);
   });
@@ -406,6 +425,117 @@ describe("archloop run project targeting", () => {
       setTerminalTtyState(originalTty.stdin, originalTty.stdout);
       restoreXdgDataHome(originalXdgDataHome);
     }
+  });
+
+  it("returns exit code 130 when the user cancels the run plan", async () => {
+    setTerminalTtyState(true);
+    mockConfirm.mockResolvedValue(false);
+
+    const entries = await runCli(["run", "--flow", "no-review"]);
+
+    expect(process.exitCode).toBe(130);
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "status",
+        severity: "warn",
+        message: "Run cancelled.",
+      }),
+    );
+  });
+
+  it("returns a nonzero exit code for a blocking plain run outcome", async () => {
+    mockRunHubFlow.mockResolvedValue({
+      flowId: "no-review",
+      runId: "run-failed",
+      batchId: "batch-failed",
+      runDir: "/tmp/runs/run-failed",
+      mode: "new_batch",
+      completedBatchCount: 0,
+      completedTaskCount: 0,
+      stopReason: "batch_failed",
+      batchResults: [
+        {
+          batchId: "batch-failed",
+          selectedTaskIds: ["task-failed"],
+          completedTaskCount: 0,
+          batchStatus: "failed",
+        },
+      ],
+      selectedTaskIds: ["task-failed"],
+      results: [
+        {
+          taskId: "task-failed",
+          title: "Failed task",
+          branch: "archloop/task-failed",
+          outcome: "agent_failed",
+          hubStatus: "failed",
+          failureReason: "agent_failed",
+          failureStage: "implementation",
+          diagnosticSummary: "agent exited non-zero",
+          logPath: "/tmp/runs/run-failed/logs/task-failed.log",
+          commitCount: 0,
+        },
+      ],
+      unfinishedBatchIds: [],
+      projectDevelopmentContractPath: "/tmp/contract.md",
+      projectDevelopmentContractCreatedGenericFallback: false,
+    });
+
+    const entries = await runCli([
+      "run",
+      "--flow",
+      "no-review",
+      "--output",
+      "plain",
+    ]);
+    const output = entries
+      .flatMap((entry) => (entry._tag === "plain" ? [entry.message] : []))
+      .join("\n");
+
+    expect(process.exitCode).toBe(1);
+    expect(output).toContain('event=task_attention run_id="run-failed"');
+    expect(output).toContain('outcome="failed"');
+  });
+
+  it("renders a cancelled plain outcome when run execution aborts", async () => {
+    mockRunHubFlow.mockImplementation(async (input) => {
+      input.onEvent?.({
+        type: "run_started",
+        runId: "run-cancelled",
+        branch: "flow/no-review",
+        startedAt: "2026-07-15T12:00:00.000Z",
+        repoRoot: repoAlpha,
+        hubProjectDir: join(
+          process.env.XDG_DATA_HOME!,
+          "archloop",
+          "hub",
+          "projects",
+          "cancelled",
+        ),
+        eventId: "run-cancelled:1",
+        sequence: 1,
+      });
+      const error = new Error("The run was cancelled");
+      error.name = "AbortError";
+      throw error;
+    });
+
+    const entries = await runCli([
+      "run",
+      "--flow",
+      "no-review",
+      "--output",
+      "plain",
+    ]);
+    const output = entries
+      .flatMap((entry) => (entry._tag === "plain" ? [entry.message] : []))
+      .join("\n");
+
+    expect(process.exitCode).toBe(130);
+    expect(output).toContain(
+      'event=run_completed outcome="cancelled" summary="Run cancelled"',
+    );
+    expect(output).toContain('run_id="run-cancelled"');
   });
 
   it("fails in non-interactive mode when flow is omitted", async () => {

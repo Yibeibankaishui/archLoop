@@ -255,7 +255,7 @@ archLoop 使用常规容器将宿主 worktree 挂载进沙箱，agent 在容器�
 
 ## Hub flow 脏工作区诊断
 
-任务看板 flow 可显式使用稳定的纯文本输出：`archloop run --flow no-review --output plain` 或 `archloop run --flow with-review --output plain`。该模式按 canonical lifecycle event 每次追加一行，字段顺序稳定、值会转义，不使用 ANSI 光标重写；输出会包含 Hub project、flow、所选任务、用户可读阶段、run id、Hub run directory、完成的批次/任务数和最终结果。初始队列为空时会成功退出并显示 `Nothing to run`。agent prose、tool 参数和直接的 agent 启动装饰不会混入纯文本生命周期输出，详细内容仍保存在 Hub run directory。省略 `--output` 时保持现有终端行为；当前 `plain` 仅支持 `no-review` 与 `with-review`。
+任务看板 flow 可显式使用稳定的纯文本输出：`archloop run --flow no-review --output plain` 或 `archloop run --flow with-review --output plain`。该模式让每条 lifecycle 或 task-attention 记录各占一个物理行，字段顺序稳定、值会转义，不使用 ANSI 光标重写；输出会包含 Hub project、flow、所选任务、用户可读阶段、run id、Hub run directory，以及 completed、failed、blocked、skipped、ready-to-merge 五类计数。最终结果区分 `completed`、`completed_with_failures`、`failed` 和 `cancelled`；初始队列为空会显示 `Nothing to run`，达到 `--max-batches` 也视为成功，二者退出码为 `0`，阻塞或部分失败为非零，用户取消为 `130`。失败详情保留阶段、简短诊断和日志路径：agent、sandbox、implementation 或 review 失败提示 `archloop tasks recover <selector>`，状态不一致提示 `archloop tasks repair-state <selector>`，dirty overlap 列出准确路径并提示 commit、stash 或 discard。`waiting_for_merge` 工作只需重新运行同一个 flow，archLoop 不提供新的 `run --resume` 契约。agent prose、tool 参数和直接的 agent 启动装饰不会混入纯文本生命周期输出，详细内容仍保存在 Hub run directory。省略 `--output` 时保持现有终端行为；当前 `plain` 仅支持 `no-review` 与 `with-review`。
 
 `archloop run --flow no-review` 和 `archloop run --flow with-review` 启动时会提前提醒宿主仓库里的 dirty source files。若同一个 flow 已有未完成的 `waiting_for_merge` 批次，archLoop 会先恢复该批次，并在领取新任务前检查待合并分支是否会改到这些脏文件。
 

@@ -288,7 +288,9 @@ archloop run --flow with-review
 
 适合需要实现后审核的流程：实现成功后进入 `reviewing`，review 完成后进入 `waiting_for_merge`，再进入 merge 阶段。
 
-`no-review` 和 `with-review` 都支持显式 `--output plain`，例如 `archloop run --flow with-review --output plain`。该模式为 CI 或重定向日志输出稳定的 append-only lifecycle lines：每个 canonical event 占一个物理行，字段顺序固定、值安全转义，不使用 ANSI 光标控制。输出包含 Hub project、flow、selected tasks、用户可读 task stage、run id、Hub run directory、完成批次/任务数和最终结果；初始队列为空会以 `Nothing to run` 成功结束。agent prose、tool arguments 和直接的 agent startup decoration 只保留在 Hub run directory 中。未传 `--output` 时沿用现有终端输出；proposal flow 暂不支持 `plain`。
+`no-review` 和 `with-review` 都支持显式 `--output plain`，例如 `archloop run --flow with-review --output plain`。该模式为 CI 或重定向日志输出稳定的 append-only records：每条 lifecycle 或 task-attention 记录占一个物理行，字段顺序固定、值安全转义，不使用 ANSI 光标控制。输出包含 Hub project、flow、selected tasks、用户可读 task stage、run id、Hub run directory，以及 completed、failed、blocked、skipped、ready-to-merge 五类计数。最终 outcome 为 `completed`、`completed_with_failures`、`failed` 或 `cancelled`：初始队列为空显示 `Nothing to run`，达到 `--max-batches` 也是 exit `0`；阻塞或部分失败返回非零，用户取消返回 `130`。agent prose、tool arguments 和直接的 agent startup decoration 只保留在 Hub run directory 中。未传 `--output` 时沿用现有终端输出；proposal flow 暂不支持 `plain`。
+
+失败或阻塞任务会保留 failed stage、简短 diagnostic、相关 log path 和下一步命令。agent、sandbox、implementation 与 review 失败使用 `archloop tasks recover <selector>`；claim 或 task projection 不一致使用 `archloop tasks repair-state <selector>`；dirty-worktree overlap 会列出准确 blocking paths，并说明先 commit、stash 或 discard。仍在 `waiting_for_merge` 的工作应重新运行同一个 `archloop run --flow <id>`，由既有自动恢复逻辑继续批次；不要使用不存在的 `archloop run --resume`。
 
 Merge 阶段会在真正合并前输出 selected / skipped / blocked 诊断。若 Hub 事件显示任务已实现或审核完成、分支仍有未合并工作，但 Beads 投影状态或 claim 元数据已经过期，诊断会显示 `state_inconsistent` 并提示运行 `archloop tasks repair-state <selector>`；若任务处于 failed 或 stale execution 状态，`archloop tasks recover <selector>` 也可能适用。`run --flow` 启动时会提前提醒宿主仓库存在 dirty source files；若已有 `waiting_for_merge` 批次，会先做 overlap 检查。非重叠脏文件不会阻塞：archLoop 会在干净的 integration worktree/branch 中验证 merge，并在落回宿主前再次确认不会覆盖脏文件。若输出显示 dirty 文件会被覆盖或冲突，任务会留在 `waiting_for_merge`，按列出的 blocking files 先 commit、stash 或 discard，再重新运行同一个 flow 即可恢复批次。
 

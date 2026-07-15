@@ -485,7 +485,9 @@ describe("runHubBatchMerge", () => {
   });
 
   it("records cleanup failures without corrupting the merged task lifecycle", async () => {
-    const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-merge-cleanup-fail-"));
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-batch-merge-cleanup-fail-"),
+    );
     await initRepo(repoDir);
     await commitFile(repoDir, "hello.txt", "hello", "initial commit");
 
@@ -1285,6 +1287,7 @@ describe("runHubBatchMerge", () => {
         decision: "blocked",
         reason: "dirty_worktree",
         branch,
+        blockingPaths: ["shared.txt"],
         message: expect.stringContaining("shared.txt"),
       }),
     );
@@ -1607,6 +1610,8 @@ test ! -f notes.txt
         outcome: "verification_failed",
         hubStatus: "failed",
         failureReason: "verification_failure",
+        diagnosticSummary: "verification failed",
+        logPath: join(context.runDir, "events", "task.jsonl"),
       }),
       expect.objectContaining({
         taskId: "bd-second",

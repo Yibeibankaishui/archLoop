@@ -161,6 +161,9 @@ export interface HubFlowTaskResult {
     | "sandbox_failed";
   readonly hubStatus: string;
   readonly failureReason?: HubFailureReason;
+  readonly failureStage?: "implementation" | "review";
+  readonly diagnosticSummary?: string;
+  readonly logPath?: string;
   readonly commitCount: number;
   readonly implementationWork?: "new_commits" | "existing_unmerged_work";
 }
@@ -741,7 +744,14 @@ const reviewSelectedTask = async (
     hubStatus: lifecycleResult.hubStatus,
     commitCount,
     ...("failureReason" in lifecycleResult
-      ? { failureReason: lifecycleResult.failureReason }
+      ? {
+          failureReason: lifecycleResult.failureReason,
+          failureStage: "review" as const,
+          ...(reviewResult.message
+            ? { diagnosticSummary: reviewResult.message }
+            : {}),
+          logPath: join(context.runDir, "logs", `${task.id}-review.log`),
+        }
       : {}),
   };
 };
@@ -794,6 +804,7 @@ const implementSelectedTask = async (
       outcome: "sandbox_failed",
       hubStatus: task.hubStatus,
       failureReason: "sandbox_failed",
+      diagnosticSummary: retryPreparation.message,
       commitCount: 0,
     };
   }
@@ -950,6 +961,11 @@ const implementSelectedTask = async (
         : "agent_failed",
     hubStatus: updatedTask.hubStatus,
     failureReason,
+    failureStage: "implementation",
+    ...(implementationResult.message
+      ? { diagnosticSummary: implementationResult.message }
+      : {}),
+    logPath: join(context.runDir, "logs", `${task.id}.log`),
     commitCount: implementationResult.commits.length,
   };
 };

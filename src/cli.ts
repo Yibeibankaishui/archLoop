@@ -123,6 +123,9 @@ import {
 import {
   createHubRunDisplayState,
   formatPlainHubRunEvent,
+  formatPlainHubRunCancellation,
+  formatPlainHubRunOutcome,
+  projectHubRunOutcome,
   reduceHubRunDisplayState,
 } from "./hubRunDisplay.js";
 import { createHubBatchPlannerInvoker } from "./hubBatchPlannerAgent.js";
@@ -3850,7 +3853,7 @@ const buildRunPlanSummaryRows = ({
   return rows;
 };
 
-const confirmRunPlan = (): Effect.Effect<void, HubFlowError> =>
+const confirmRunPlan = (): Effect.Effect<boolean, HubFlowError> =>
   Effect.gen(function* () {
     const confirmed = yield* Effect.tryPromise({
       try: () =>
@@ -3860,13 +3863,7 @@ const confirmRunPlan = (): Effect.Effect<void, HubFlowError> =>
         }),
       catch: toHubFlowError,
     });
-    if (clack.isCancel(confirmed) || confirmed !== true) {
-      return yield* Effect.fail(
-        new HubFlowError({
-          message: "Run cancelled.",
-        }),
-      );
-    }
+    return !clack.isCancel(confirmed) && confirmed === true;
   });
 
 const requireProposalRunInput = (
@@ -4289,6 +4286,22 @@ const toHubFlowError = (error: unknown): HubFlowError =>
         message: error instanceof Error ? error.message : String(error),
       });
 
+const isHubRunCancellationError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const candidate = error as {
+    readonly name?: unknown;
+    readonly code?: unknown;
+    readonly _tag?: unknown;
+  };
+  return (
+    candidate.name === "AbortError" ||
+    candidate.code === "ABORT_ERR" ||
+    candidate._tag === "InterruptedException"
+  );
+};
+
 const runCommand = Command.make(
   "run",
   {
@@ -4403,7 +4416,12 @@ const runCommand = Command.make(
       }
 
       if (isInteractive) {
-        yield* confirmRunPlan();
+        const confirmed = yield* confirmRunPlan();
+        if (!confirmed) {
+          process.exitCode = 130;
+          yield* d.status("Run cancelled.", "warn");
+          return;
+        }
       }
 
       if (flowDefinition.kind === "proposal") {
@@ -4440,50 +4458,75 @@ const runCommand = Command.make(
         hubProjectName: targetProjectName ?? legacyProjectTarget ?? repoRoot,
         flowId: flowDefinition.id,
       });
-      const result = yield* Effect.tryPromise({
-        try: () =>
-          runHubFlow({
-            flowId: flowDefinition.id,
+      const runAttempt = yield* Effect.promise(() =>
+        runHubFlow({
+          flowId: flowDefinition.id,
+          cwd: repoRoot,
+          implementer: createHubFlowRunImplementer({
             cwd: repoRoot,
-            implementer: createHubFlowRunImplementer({
-              cwd: repoRoot,
-              env: process.env,
-              showAgentStartup: !isPlainOutput,
-            }),
-            reviewer: flowDefinition.hasReviewer
-              ? createHubFlowRunReviewer({
-                  cwd: repoRoot,
-                  env: process.env,
-                  showAgentStartup: !isPlainOutput,
-                })
-              : undefined,
-            batchStrategy: batchSelectionOptions.batchStrategy,
-            maxTasks: batchSelectionOptions.maxTasks,
-            maxBatches: flowMaxBatches,
-            batchPlanner:
-              batchSelectionOptions.batchStrategy === "planned"
-                ? createHubBatchPlannerInvoker({ env: process.env })
-                : undefined,
-            onEvent: isPlainOutput
-              ? (event) => {
-                  const nextDisplayState = reduceHubRunDisplayState(
-                    displayState,
-                    event,
-                  );
-                  if (nextDisplayState === displayState) {
-                    return;
-                  }
-                  displayState = nextDisplayState;
-                  Effect.runSync(
-                    d.plain(formatPlainHubRunEvent(event, displayState)),
-                  );
-                }
-              : undefined,
+            env: process.env,
+            showAgentStartup: !isPlainOutput,
           }),
-        catch: toHubFlowError,
-      });
+          reviewer: flowDefinition.hasReviewer
+            ? createHubFlowRunReviewer({
+                cwd: repoRoot,
+                env: process.env,
+                showAgentStartup: !isPlainOutput,
+              })
+            : undefined,
+          batchStrategy: batchSelectionOptions.batchStrategy,
+          maxTasks: batchSelectionOptions.maxTasks,
+          maxBatches: flowMaxBatches,
+          batchPlanner:
+            batchSelectionOptions.batchStrategy === "planned"
+              ? createHubBatchPlannerInvoker({ env: process.env })
+              : undefined,
+          onEvent: isPlainOutput
+            ? (event) => {
+                const nextDisplayState = reduceHubRunDisplayState(
+                  displayState,
+                  event,
+                );
+                if (nextDisplayState === displayState) {
+                  return;
+                }
+                displayState = nextDisplayState;
+                if (event.type === "run_completed") {
+                  return;
+                }
+                Effect.runSync(
+                  d.plain(formatPlainHubRunEvent(event, displayState)),
+                );
+              }
+            : undefined,
+        }).then(
+          (result) => ({ _tag: "Success" as const, result }),
+          (error: unknown) =>
+            isHubRunCancellationError(error)
+              ? ({ _tag: "Cancelled" as const, error } as const)
+              : ({ _tag: "Failure" as const, error } as const),
+        ),
+      );
+      if (runAttempt._tag === "Cancelled") {
+        process.exitCode = 130;
+        if (isPlainOutput) {
+          yield* d.plain(formatPlainHubRunCancellation(displayState));
+        } else {
+          yield* d.status("Run cancelled.", "warn");
+        }
+        return;
+      }
+      if (runAttempt._tag === "Failure") {
+        return yield* Effect.fail(toHubFlowError(runAttempt.error));
+      }
+      const result = runAttempt.result;
+      const outcome = projectHubRunOutcome(result);
+      process.exitCode = outcome.exitCode;
 
       if (isPlainOutput) {
+        for (const line of formatPlainHubRunOutcome(result, outcome)) {
+          yield* d.plain(line);
+        }
         return;
       }
 
