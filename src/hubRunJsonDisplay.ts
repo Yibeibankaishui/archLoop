@@ -1,8 +1,9 @@
 import type { HubRunEvent } from "./hubExecution.js";
 import { join } from "node:path";
-import type {
-  HubRunDisplayState,
-  HubRunOutcomeProjection,
+import {
+  projectHubRunStateOutcome,
+  type HubRunDisplayState,
+  type HubRunOutcomeProjection,
 } from "./hubRunDisplay.js";
 import type { RunHubFlowResult } from "./hubFlowExecution.js";
 
@@ -14,7 +15,10 @@ export interface HubRunJsonRenderer {
     result: RunHubFlowResult,
     projection: HubRunOutcomeProjection,
   ) => readonly string[];
-  readonly cancellation: (state: HubRunDisplayState) => readonly string[];
+  readonly cancellation: (
+    state: HubRunDisplayState,
+    exitCode?: 130 | 143,
+  ) => readonly string[];
   readonly failure: (state: HubRunDisplayState, error: unknown) => string;
 }
 
@@ -221,10 +225,12 @@ export const createHubRunJsonRenderer = (input: {
         }),
       ];
     },
-    cancellation: (state) => {
-      const tasks = Object.values(state.tasks);
-      const countStatus = (status: string): number =>
-        tasks.filter((task) => task.status === status).length;
+    cancellation: (state, exitCode = 130) => {
+      const projection = projectHubRunStateOutcome(state, {
+        outcome: "cancelled",
+        summary: "Run cancelled",
+        exitCode,
+      });
       const runId = state.runId ?? "unknown";
       const timestamp = now().toISOString();
       return [
@@ -235,19 +241,13 @@ export const createHubRunJsonRenderer = (input: {
           outcome: "cancelled",
           summary: "Run cancelled",
           cancelled: true,
-          counts: {
-            completed: countStatus("done"),
-            failed: countStatus("failed"),
-            blocked: countStatus("blocked"),
-            skipped: 0,
-            readyToMerge: countStatus("waiting_for_merge"),
-          },
+          counts: projection.counts,
           completedBatchCount: Object.values(state.batches).filter(
             (batch) => batch.status === "done",
           ).length,
-          completedTaskCount: countStatus("done"),
+          completedTaskCount: projection.counts.completed,
           stopReason: "cancelled",
-          exitCode: 130,
+          exitCode,
           logs: state.runDir ?? "",
         }),
       ];

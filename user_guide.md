@@ -292,7 +292,7 @@ archloop run --flow with-review
 
 所有 flow 支持显式 `--output plain`。proposal records 为 append-only canonical phase/status，不包含原始 agent prose；最终 outcome 区分 applied、no-change、cancelled、validation failure、mutation failure 和其他 failure，并提供 applied/skipped/dependencies、logs、diagnostic 与 recovery。显式 plain/JSON 不发起交互 prompt，写入 proposal 必须传 `--yes`；未确认时不 apply。
 
-脚本和 CI 可改用 `--output json`。proposal phases 使用 stdout-pure schema version 1 `proposal_phase` JSONL，最终使用 `run_completed`；应用/无变化退出 `0`，取消退出 `130`，validation/mutation/general failure 非零。version 1 消费者应忽略未知字段。
+脚本和 CI 可改用 `--output json`。proposal phases 使用 stdout-pure schema version 1 `proposal_phase` JSONL，最终使用 `run_completed`；应用/无变化退出 `0`，Ctrl+C 取消退出 `130`，SIGTERM 保留退出码 `143`，validation/mutation/general failure 非零。version 1 消费者应忽略未知字段。
 
 失败或阻塞任务会保留 failed stage、简短 diagnostic、相关 log path 和下一步命令。agent、sandbox、implementation 与 review 失败使用 `archloop tasks recover <selector>`；claim 或 task projection 不一致使用 `archloop tasks repair-state <selector>`；dirty-worktree overlap 会列出准确 blocking paths，并说明先 commit、stash 或 discard。仍在 `waiting_for_merge` 的工作应重新运行同一个 `archloop run --flow <id>`，由既有自动恢复逻辑继续批次；不要使用不存在的 `archloop run --resume`。
 

@@ -356,6 +356,38 @@ describe("archloop run project targeting", () => {
     expect(output).not.toContain("Nothing to run...");
   });
 
+  it("does not prompt for run-plan confirmation with --yes in an auto TTY", async () => {
+    const originalColumns = process.stdout.columns;
+    const originalTerm = process.env.TERM;
+    const chunks: string[] = [];
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(((
+      chunk: string | Uint8Array,
+    ) => {
+      chunks.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write);
+    setTerminalTtyState(true);
+    setStdoutColumns(120);
+    process.env.TERM = "xterm-256color";
+    mockConfirm.mockResolvedValue(false);
+
+    try {
+      await runCli(["run", "--flow", "no-review", "--yes"]);
+    } finally {
+      write.mockRestore();
+      setStdoutColumns(originalColumns);
+      if (originalTerm === undefined) {
+        delete process.env.TERM;
+      } else {
+        process.env.TERM = originalTerm;
+      }
+    }
+
+    expect(mockConfirm).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(0);
+    expect(chunks.join("")).toContain("Nothing to run");
+  });
+
   it("keeps auto live output active without color cues", async () => {
     const originalColumns = process.stdout.columns;
     const originalTerm = process.env.TERM;
@@ -900,6 +932,44 @@ describe("archloop run project targeting", () => {
     expect(process.exitCode).toBe(0);
   });
 
+  it("projects SIGTERM cancellation for a proposal run", async () => {
+    await mkdir(join(repoAlpha, "docs"), { recursive: true });
+    await writeFile(join(repoAlpha, "docs", "proposal.md"), "# Proposal\n");
+    const listenersBefore = new Set(process.listeners("SIGTERM"));
+    mockRunHubProposalFlowFromCli.mockImplementation(
+      async (input: { signal?: AbortSignal }) => {
+        expect(input.signal).toBeDefined();
+        const runListener = process
+          .listeners("SIGTERM")
+          .find((listener) => !listenersBefore.has(listener));
+        expect(runListener).toBeDefined();
+        runListener?.("SIGTERM");
+        input.signal?.throwIfAborted();
+        throw new Error("Expected SIGTERM to abort the proposal run");
+      },
+    );
+
+    const entries = await runCli([
+      "run",
+      "--flow",
+      "prd-decomposition",
+      "--input",
+      "docs/proposal.md",
+      "--output",
+      "plain",
+      "--yes",
+    ]);
+    const lines = entries.flatMap((entry) =>
+      entry._tag === "plain" ? [entry.message] : [],
+    );
+
+    expect(process.exitCode).toBe(143);
+    expect(lines.at(-1)).toContain(
+      'event=run_completed outcome="cancelled" summary="Proposal cancelled"',
+    );
+    expect(process.listeners("SIGTERM")).toEqual([...listenersBefore]);
+  });
+
   it("renders triage proposal phases and no-change outcome as stdout-pure JSONL", async () => {
     const runDir = join(hostDir, "triage-json-run");
     mockRunHubProposalFlowFromCli.mockImplementation(
@@ -1414,6 +1484,40 @@ describe("archloop run project targeting", () => {
     });
   });
 
+  it("appends a deterministic plain failure outcome without decorated errors", async () => {
+    mockRunHubFlow.mockImplementation(async (input) => {
+      input.onEvent?.({
+        type: "run_started",
+        runId: "run-plain-error",
+        branch: "flow/no-review",
+        startedAt: "2026-07-15T12:15:00.000Z",
+        repoRoot: repoAlpha,
+        hubProjectDir: "/tmp/hub-plain-error",
+        eventId: "run-plain-error:1",
+        sequence: 1,
+      });
+      throw new Error('execution "failed"\nraw agent details');
+    });
+
+    const lines = await runCliWithTerminalDisplay([
+      "run",
+      "--flow",
+      "no-review",
+      "--output",
+      "plain",
+    ]);
+
+    expect(process.exitCode).toBe(1);
+    expect(lines.map((line) => line.match(/^event=([^ ]+)/)?.[1])).toEqual([
+      "run_started",
+      "run_failed",
+    ]);
+    expect(lines.at(-1)).toBe(
+      'event=run_failed outcome="failed" summary="Run failed" diagnostic="execution \\"failed\\"" completed=0 failed=0 blocked=0 skipped=0 ready_to_merge=0 completed_batches=0 run_id="run-plain-error" logs="/tmp/hub-plain-error/runs/run-plain-error" recovery="archloop run --flow no-review"',
+    );
+    expect(lines.join("\n")).not.toMatch(/\u001b\[[0-?]*[ -/]*[@-~]/);
+  });
+
   it("renders a cancelled plain outcome when run execution aborts", async () => {
     mockRunHubFlow.mockImplementation(async (input) => {
       input.onEvent?.({
@@ -1453,6 +1557,52 @@ describe("archloop run project targeting", () => {
       'event=run_completed outcome="cancelled" summary="Run cancelled"',
     );
     expect(output).toContain('run_id="run-cancelled"');
+  });
+
+  it("projects a real SIGINT listener through the run AbortSignal", async () => {
+    const listenersBefore = new Set(process.listeners("SIGINT"));
+    mockRunHubFlow.mockImplementation(async (input) => {
+      input.onEvent?.({
+        type: "run_started",
+        runId: "run-sigint",
+        branch: "flow/no-review",
+        startedAt: "2026-07-15T12:10:00.000Z",
+        repoRoot: repoAlpha,
+        hubProjectDir: join(
+          process.env.XDG_DATA_HOME!,
+          "archloop",
+          "hub",
+          "projects",
+          "sigint",
+        ),
+        eventId: "run-sigint:1",
+        sequence: 1,
+      });
+      expect(input.signal).toBeDefined();
+      const runListener = process
+        .listeners("SIGINT")
+        .find((listener) => !listenersBefore.has(listener));
+      expect(runListener).toBeDefined();
+      runListener?.("SIGINT");
+      input.signal?.throwIfAborted();
+      throw new Error("Expected SIGINT to abort the run");
+    });
+
+    const entries = await runCli([
+      "run",
+      "--flow",
+      "no-review",
+      "--output",
+      "plain",
+    ]);
+    const output = entries
+      .flatMap((entry) => (entry._tag === "plain" ? [entry.message] : []))
+      .join("\n");
+
+    expect(process.exitCode).toBe(130);
+    expect(output).toContain('outcome="cancelled"');
+    expect(output).toContain('run_id="run-sigint"');
+    expect(process.listeners("SIGINT")).toEqual([...listenersBefore]);
   });
 
   it("renders cancellation as stdout-pure JSONL with exit code 130", async () => {
@@ -1539,6 +1689,17 @@ describe("archloop run project targeting", () => {
         eventId: "run-live-cancelled:2",
         sequence: 2,
       });
+      input.onEvent?.({
+        type: "task_claim_skipped",
+        runId: "run-live-cancelled",
+        batchId: "batch-live-cancelled",
+        taskId: "task-live-skipped",
+        branch: "archloop/task-live-skipped",
+        createdAt: "2026-07-15T12:30:02.000Z",
+        status: "ready_for_agent",
+        eventId: "run-live-cancelled:3",
+        sequence: 3,
+      });
       const error = new Error("The run was cancelled");
       error.name = "AbortError";
       throw error;
@@ -1574,6 +1735,7 @@ describe("archloop run project targeting", () => {
     expect(output).toContain("Task task-live-failed | Review failed");
     expect(output).toContain("review failed before cancellation");
     expect(output).toContain("archloop tasks recover task-live-failed");
+    expect(output).toContain("Skipped 1");
     expect(output).toContain("Run cancelled");
     expect(output.endsWith("\x1b[?25h")).toBe(true);
   });

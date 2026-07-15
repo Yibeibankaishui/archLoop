@@ -1,11 +1,15 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createHubProposalAgentInvoker,
   resolveHubAgentProvider,
 } from "./hubProposalAgent.js";
+
+const { runMock } = vi.hoisted(() => ({ runMock: vi.fn() }));
+
+vi.mock("./run.js", () => ({ run: runMock }));
 
 describe("resolveHubAgentProvider", () => {
   it("passes claude-code effort options from Hub role config", () => {
@@ -29,6 +33,7 @@ describe("createHubProposalAgentInvoker", () => {
   let originalCursorApiKey: string | undefined;
 
   beforeEach(async () => {
+    runMock.mockReset();
     originalXdgDataHome = process.env.XDG_DATA_HOME;
     originalCursorApiKey = process.env.CURSOR_API_KEY;
     process.env.XDG_DATA_HOME = await mkdtemp(
@@ -65,5 +70,40 @@ describe("createHubProposalAgentInvoker", () => {
         runDir: cwd,
       }),
     ).rejects.toThrow(/archloop env init/);
+  });
+
+  it("suppresses direct startup output from the proposal agent run", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "hub-proposal-startup-"));
+    const env = { ...process.env, CURSOR_API_KEY: "test-key" };
+    runMock.mockResolvedValue({ stdout: "proposal response" });
+    const abortController = new AbortController();
+    const invoker = createHubProposalAgentInvoker({
+      cwd,
+      roleEntry: {
+        provider: "cursor",
+        model: "auto",
+      },
+      env,
+      signal: abortController.signal,
+    });
+
+    await invoker({
+      flowId: "test-flow",
+      phase: "draft",
+      prompt: "test prompt",
+      transcript: [],
+      preparedContext: {},
+      runDir: cwd,
+    });
+
+    expect(runMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        signal: abortController.signal,
+        logging: expect.objectContaining({
+          type: "file",
+          showStartup: false,
+        }),
+      }),
+    );
   });
 });

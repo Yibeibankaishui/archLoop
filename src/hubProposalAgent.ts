@@ -94,12 +94,14 @@ type CreateHubProposalAgentInvokerInput =
       readonly cwd: string;
       readonly roleEntry: HubAgentRoleEntry;
       readonly env?: NodeJS.ProcessEnv;
+      readonly signal?: AbortSignal;
     }
   | {
       readonly cwd: string;
       readonly role: HubAgentRole;
       readonly env?: NodeJS.ProcessEnv;
       readonly homeDir?: string;
+      readonly signal?: AbortSignal;
     };
 
 const resolveHubProposalRoleEntry = (
@@ -147,9 +149,11 @@ export const createHubProposalAgentInvoker = (
       logging: {
         type: "file",
         path: join(logDir, `${invokeInput.flowId}-${invokeInput.phase}.log`),
+        showStartup: false,
       },
       completionSignal: [],
       maxIterations: 1,
+      signal: input.signal,
     });
 
     return { assistantMessage: result.stdout };

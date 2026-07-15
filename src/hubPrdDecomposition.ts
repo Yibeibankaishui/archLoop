@@ -726,6 +726,7 @@ export interface RunPrdDecompositionFlowInput {
     proposal: PrdDecompositionProposal,
   ) => Promise<void>;
   readonly onPresentationEvent?: (event: HubProposalPresentationEvent) => void;
+  readonly signal?: AbortSignal;
 }
 
 const determineHubStatusMode = async (
@@ -844,6 +845,7 @@ export const runPrdDecompositionFlow = async (
       cwd: input.cwd,
       roleEntry: planningRole,
       env: input.env,
+      signal: input.signal,
     });
 
   const session = await runProposalSession({
@@ -863,6 +865,7 @@ export const runPrdDecompositionFlow = async (
     approve: resolveProposalSessionApproval(input),
     oneShot: input.yes,
     onPresentationEvent: acceptPresentationEvent,
+    signal: input.signal,
   });
 
   if (session.outcome === "cancelled") {

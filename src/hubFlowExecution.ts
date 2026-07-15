@@ -92,6 +92,7 @@ export interface HubImplementTaskInput {
   readonly projectDevelopmentContract: HubProjectDevelopmentContractState;
   readonly retryContext?: string;
   readonly preservedWorktreePath?: string;
+  readonly signal?: AbortSignal;
 }
 
 export interface HubImplementTaskResult {
@@ -116,6 +117,7 @@ export interface HubReviewTaskInput {
   readonly cwd: string;
   readonly runDir: string;
   readonly implementCommitCount: number;
+  readonly signal?: AbortSignal;
 }
 
 export interface HubReviewTaskResult {
@@ -146,6 +148,7 @@ export interface RunHubFlowInput {
   readonly maxBatches?: number;
   readonly batchPlanner?: HubBatchPlannerInvoker;
   readonly onEvent?: HubRunEventObserver;
+  readonly signal?: AbortSignal;
 }
 
 export interface HubFlowTaskResult {
@@ -621,6 +624,7 @@ const runHubAgent = async (input: {
   readonly retryContext?: string;
   readonly projectDevelopmentContract?: HubProjectDevelopmentContractState;
   readonly showAgentStartup?: boolean;
+  readonly signal?: AbortSignal;
 }) => {
   await assertAgentCredentialsConfigured({
     providerName: input.agent.name,
@@ -653,6 +657,7 @@ const runHubAgent = async (input: {
       path: join(input.runDir, "logs", input.logFileName),
       showStartup: input.showAgentStartup,
     },
+    signal: input.signal,
   });
 };
 
@@ -700,8 +705,10 @@ const reviewSelectedTask = async (
       cwd,
       runDir: context.runDir,
       implementCommitCount,
+      signal: input.signal,
     });
   } catch (error) {
+    input.signal?.throwIfAborted();
     const message =
       error instanceof Error ? error.message : "Hub reviewer failed";
     reviewResult = {
@@ -877,8 +884,10 @@ const implementSelectedTask = async (
       projectDevelopmentContract: input.projectDevelopmentContract!,
       retryContext,
       preservedWorktreePath: retryPreparation.preservedWorktreePath,
+      signal: input.signal,
     });
   } catch (error) {
+    input.signal?.throwIfAborted();
     const message =
       error instanceof Error ? error.message : "Hub implementer failed";
     implementationResult = {
@@ -1111,6 +1120,7 @@ const runObservedHubFlow = async (
       batchStrategy,
       maxTasks,
       batchPlanner: input.batchPlanner,
+      signal: input.signal,
     });
     const freshBoard = loadHubReadyQueue(repoRoot, input.env);
     const freshValidation = resolveFreshValidatedHubBatchSelection({
@@ -1484,6 +1494,7 @@ export const createHubFlowRunImplementer = (options: {
         retryContext: input.retryContext,
         projectDevelopmentContract: input.projectDevelopmentContract,
         showAgentStartup: options.showAgentStartup,
+        signal: input.signal,
       });
 
       if (!result.completionSignal) {
@@ -1515,6 +1526,7 @@ export const createHubFlowRunImplementer = (options: {
         branchHasUnmergedWork,
       };
     } catch (error) {
+      input.signal?.throwIfAborted();
       return buildHubFlowRunnerFailure(error);
     }
   };
@@ -1545,6 +1557,7 @@ export const createHubFlowRunReviewer = (options: {
         logFileName: `${input.taskId}-review.log`,
         env: options.env,
         showAgentStartup: options.showAgentStartup,
+        signal: input.signal,
       });
 
       if (!result.completionSignal) {
@@ -1561,6 +1574,7 @@ export const createHubFlowRunReviewer = (options: {
         completionSignal: result.completionSignal,
       };
     } catch (error) {
+      input.signal?.throwIfAborted();
       return buildHubFlowRunnerFailure(error);
     }
   };

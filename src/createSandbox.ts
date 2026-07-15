@@ -29,6 +29,7 @@ import { resolvePrompt } from "./PromptResolver.js";
 import { preprocessPrompt } from "./PromptPreprocessor.js";
 import type { LoggingOption, Timeouts } from "./run.js";
 import { buildLogFilename, printFileDisplayStartup } from "./run.js";
+import { getSignalExitCode } from "./runSignal.js";
 import {
   withSandboxLifecycle,
   runHostHooks,
@@ -892,9 +893,9 @@ export const createSandbox = async (
     console.error(`  To clean up: git worktree remove --force ${worktreePath}`);
   };
 
-  const onSignal = () => {
+  const onSignal = (signal: "SIGINT" | "SIGTERM") => {
     forceCleanup();
-    process.exit(1);
+    process.exit(getSignalExitCode(signal));
   };
 
   process.on("SIGINT", onSignal);

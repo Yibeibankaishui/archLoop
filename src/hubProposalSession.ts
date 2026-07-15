@@ -126,6 +126,7 @@ export interface RunProposalSessionInput<T> {
   readonly approve?: boolean;
   readonly oneShot?: boolean;
   readonly onPresentationEvent?: (event: HubProposalPresentationEvent) => void;
+  readonly signal?: AbortSignal;
 }
 
 export type RunProposalSessionResult<T> =
@@ -557,6 +558,7 @@ const failOnProposalFlowMutations = <T>(
 export const runProposalSession = async <T>(
   input: RunProposalSessionInput<T>,
 ): Promise<RunProposalSessionResult<T>> => {
+  input.signal?.throwIfAborted();
   const cwd = input.cwd ?? process.cwd();
   const repoRoot = resolveGitRepoRoot(cwd);
   const startedAt = input.startedAt ?? new Date();
@@ -610,6 +612,7 @@ export const runProposalSession = async <T>(
       transcript,
     );
   } catch (error) {
+    input.signal?.throwIfAborted();
     return failSession(
       state,
       "draft",
@@ -674,6 +677,7 @@ export const runProposalSession = async <T>(
           transcript,
         );
       } catch (error) {
+        input.signal?.throwIfAborted();
         return failSession(
           state,
           "refinement",
@@ -724,6 +728,7 @@ export const runProposalSession = async <T>(
       transcript,
     );
   } catch (error) {
+    input.signal?.throwIfAborted();
     return failFinalization(
       state,
       proposalAgentErrorMessage(error, "Proposal finalization agent failed"),

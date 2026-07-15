@@ -7,6 +7,7 @@ import {
   createHubProposalRunJsonRenderer,
   formatPlainHubProposalEvent,
   formatPlainHubProposalOutcome,
+  projectHubProposalRunCancellation,
   projectHubProposalRunOutcome,
   reduceHubProposalRunDisplayState,
 } from "./hubProposalRunDisplay.js";
@@ -241,6 +242,20 @@ describe("proposal run presentation", () => {
       outcome: "cancelled",
       summary: "Proposal cancelled",
       exitCode: 130,
+    });
+  });
+
+  it("projects process-signal cancellation before a phase can emit", () => {
+    const state = createHubProposalRunDisplayState({
+      hubProjectName: "Demo",
+      flowId: "triage",
+    });
+
+    expect(projectHubProposalRunCancellation(state, 143)).toMatchObject({
+      outcome: "cancelled",
+      summary: "Proposal cancelled",
+      exitCode: 143,
+      logs: "",
     });
   });
 });

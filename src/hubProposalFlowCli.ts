@@ -192,6 +192,7 @@ export const runPrdDecompositionProposalFlowFromCli = async (input: {
   readonly onPresentationEvent?: (event: HubProposalPresentationEvent) => void;
   readonly beforePrompt?: () => void;
   readonly afterPrompt?: () => void;
+  readonly signal?: AbortSignal;
 }): Promise<RunPrdDecompositionFlowResult> => {
   let latestProposal: PrdDecompositionProposal | undefined;
 
@@ -236,6 +237,7 @@ export const runPrdDecompositionProposalFlowFromCli = async (input: {
             ),
     isTTY: input.interactive === false ? false : input.isTTY,
     onPresentationEvent: input.onPresentationEvent,
+    signal: input.signal,
     onProposalReady: async (proposal) => {
       latestProposal = proposal;
       if (input.showDecoratedOutput !== false) {
@@ -288,6 +290,7 @@ export const runHubProposalFlowFromCli = async (input: {
   readonly onPresentationEvent?: (event: HubProposalPresentationEvent) => void;
   readonly beforePrompt?: () => void;
   readonly afterPrompt?: () => void;
+  readonly signal?: AbortSignal;
 }): Promise<HubProposalFlowExecutionResult> => {
   const flowId = input.validatedInput.flowId;
   switch (flowId) {
@@ -306,6 +309,7 @@ export const runHubProposalFlowFromCli = async (input: {
           onPresentationEvent: input.onPresentationEvent,
           beforePrompt: input.beforePrompt,
           afterPrompt: input.afterPrompt,
+          signal: input.signal,
         }),
       };
     case "triage": {
@@ -332,6 +336,7 @@ export const runHubProposalFlowFromCli = async (input: {
           onPresentationEvent: input.onPresentationEvent,
           beforePrompt: input.beforePrompt,
           afterPrompt: input.afterPrompt,
+          signal: input.signal,
         }),
       };
     }

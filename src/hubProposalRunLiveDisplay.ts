@@ -15,7 +15,7 @@ import type {
   HubProposalPresentationPhase,
   HubProposalPresentationStatus,
 } from "./hubProposalSession.js";
-import { SHOW_CURSOR } from "./terminalCleanup.js";
+import { SHOW_CURSOR, setTerminalCursorHidden } from "./terminalCleanup.js";
 
 const HIDE_CURSOR = "\x1b[?25l";
 const ERASE_LINE = "\r\x1b[2K";
@@ -204,6 +204,7 @@ export const createHubProposalRunLiveDisplay = (
       options.terminal.write(
         `${clearRegion(renderedPhysicalLineCount(columns))}${SHOW_CURSOR}`,
       );
+      setTerminalCursorHidden(false);
     }
     renderedLineCount = 0;
     renderedLines = [];
@@ -232,6 +233,7 @@ export const createHubProposalRunLiveDisplay = (
     const shouldHideCursor = !cursorHidden;
     if (shouldHideCursor) {
       cursorHidden = true;
+      setTerminalCursorHidden(true);
     }
     options.terminal.write(
       `${shouldHideCursor ? HIDE_CURSOR : clearRegion(renderedPhysicalLineCount(columns))}${output.join("\n")}`,
@@ -252,6 +254,7 @@ export const createHubProposalRunLiveDisplay = (
         options.terminal.write(
           `${clearRegion(renderedPhysicalLineCount(columns))}${SHOW_CURSOR}`,
         );
+        setTerminalCursorHidden(false);
       }
       renderedLineCount = 0;
       renderedLines = [];
@@ -304,6 +307,7 @@ export const createHubProposalRunLiveDisplay = (
       options.terminal.write(
         `${clearRegion(renderedPhysicalLineCount(columns))}${lines.join("\n")}\n${SHOW_CURSOR}`,
       );
+      setTerminalCursorHidden(false);
       renderedLineCount = 0;
       renderedLines = [];
       cursorHidden = false;

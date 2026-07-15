@@ -45,6 +45,7 @@ const resolveHubBatchPlannerRoleEntry = (input: {
 export const createHubBatchPlannerInvoker = (input: {
   readonly env?: NodeJS.ProcessEnv;
   readonly homeDir?: string;
+  readonly signal?: AbortSignal;
 }): HubBatchPlannerInvoker => {
   const roleEntry = resolveHubBatchPlannerRoleEntry(input);
   const agent = resolveHubAgentProvider(roleEntry);
@@ -76,9 +77,11 @@ export const createHubBatchPlannerInvoker = (input: {
       logging: {
         type: "file",
         path: join(logDir, `batch-planner-${invokeInput.flowId}.log`),
+        showStartup: false,
       },
       completionSignal: [],
       maxIterations: 1,
+      signal: input.signal,
     });
 
     return result.stdout;

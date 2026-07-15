@@ -123,8 +123,9 @@ import {
 import type { HubRunEvent } from "./hubExecution.js";
 import {
   createHubRunDisplayState,
-  formatPlainHubRunEvent,
   formatPlainHubRunCancellation,
+  formatPlainHubRunEvent,
+  formatPlainHubRunFailure,
   formatPlainHubRunOutcome,
   projectHubRunOutcome,
   projectHubRunStateOutcome,
@@ -138,12 +139,17 @@ import {
   createHubProposalRunJsonRenderer,
   formatPlainHubProposalEvent,
   formatPlainHubProposalOutcome,
+  projectHubProposalRunCancellation,
   projectHubProposalRunOutcome,
   projectHubProposalRunFailure,
   reduceHubProposalRunDisplayState,
 } from "./hubProposalRunDisplay.js";
 import { createHubProposalRunLiveDisplay } from "./hubProposalRunLiveDisplay.js";
 import type { HubProposalPresentationEvent } from "./hubProposalSession.js";
+import {
+  createRunSignalController,
+  getRunCancellationExitCode,
+} from "./runSignal.js";
 import {
   resolveHubRunOutputMode,
   supportsHubRunCursorControl,
@@ -4508,7 +4514,7 @@ const runCommand = Command.make(
         );
       }
 
-      if (isInteractive) {
+      if (isInteractive && !yes) {
         const confirmed = yield* confirmRunPlan();
         if (!confirmed) {
           process.exitCode = 130;
@@ -4637,6 +4643,7 @@ const runCommand = Command.make(
           }
           Effect.runSync(d.plain(line));
         };
+        const proposalRunSignal = createRunSignalController();
         const proposalAttempt = yield* Effect.promise(() =>
           runHubProposalFlowFromCli({
             cwd: repoRoot,
@@ -4665,11 +4672,43 @@ const runCommand = Command.make(
                 fallbackProposalLiveToPlain();
               }
             },
-          }).then(
-            (result) => ({ _tag: "Success" as const, result }),
-            (error: unknown) => ({ _tag: "Failure" as const, error }),
-          ),
+            signal: proposalRunSignal.signal,
+          })
+            .then(
+              (result) => ({ _tag: "Success" as const, result }),
+              (error: unknown) =>
+                isHubRunCancellationError(error)
+                  ? ({ _tag: "Cancelled" as const, error } as const)
+                  : ({ _tag: "Failure" as const, error } as const),
+            )
+            .finally(proposalRunSignal.dispose),
         );
+        if (proposalAttempt._tag === "Cancelled") {
+          const cancellation = projectHubProposalRunCancellation(
+            proposalDisplayState,
+            getRunCancellationExitCode(proposalAttempt.error),
+          );
+          process.exitCode = cancellation.exitCode;
+          stopProposalLiveRuntime();
+          if (activeTaskBoardOutput === "live") {
+            try {
+              proposalLiveDisplay?.finalize(proposalDisplayState, cancellation);
+              return;
+            } catch {
+              fallbackProposalLiveToPlain();
+            }
+          }
+          if (activeTaskBoardOutput === "json") {
+            yield* d.plain(
+              proposalJsonRenderer!.outcome(proposalDisplayState, cancellation),
+            );
+            return;
+          }
+          yield* d.plain(
+            formatPlainHubProposalOutcome(proposalDisplayState, cancellation),
+          );
+          return;
+        }
         if (proposalAttempt._tag === "Failure") {
           const failure = projectHubProposalRunFailure(
             proposalDisplayState,
@@ -4699,8 +4738,6 @@ const runCommand = Command.make(
           );
           return;
         }
-        const result = proposalAttempt.result;
-
         const outcome = projectHubProposalRunOutcome(proposalDisplayState);
         process.exitCode = outcome.exitCode;
         if (activeTaskBoardOutput === "live") {
@@ -4848,10 +4885,12 @@ const runCommand = Command.make(
         }
         liveDisplay = undefined;
       };
+      const taskBoardRunSignal = createRunSignalController();
       const runAttempt = yield* Effect.promise(() =>
         runHubFlow({
           flowId: flowDefinition.id,
           cwd: repoRoot,
+          signal: taskBoardRunSignal.signal,
           implementer: createHubFlowRunImplementer({
             cwd: repoRoot,
             env: process.env,
@@ -4869,7 +4908,10 @@ const runCommand = Command.make(
           maxBatches: flowMaxBatches,
           batchPlanner:
             batchSelectionOptions.batchStrategy === "planned"
-              ? createHubBatchPlannerInvoker({ env: process.env })
+              ? createHubBatchPlannerInvoker({
+                  env: process.env,
+                  signal: taskBoardRunSignal.signal,
+                })
               : undefined,
           onEvent: suppressDecoratedTaskBoardOutput
             ? (event) => {
@@ -4914,16 +4956,18 @@ const runCommand = Command.make(
                 );
               }
             : undefined,
-        }).then(
-          (result) => ({ _tag: "Success" as const, result }),
-          (error: unknown) =>
-            isHubRunCancellationError(error)
-              ? ({ _tag: "Cancelled" as const, error } as const)
-              : ({ _tag: "Failure" as const, error } as const),
-        ),
+        })
+          .then(
+            (result) => ({ _tag: "Success" as const, result }),
+            (error: unknown) =>
+              isHubRunCancellationError(error)
+                ? ({ _tag: "Cancelled" as const, error } as const)
+                : ({ _tag: "Failure" as const, error } as const),
+          )
+          .finally(taskBoardRunSignal.dispose),
       );
       if (runAttempt._tag === "Cancelled") {
-        process.exitCode = 130;
+        process.exitCode = getRunCancellationExitCode(runAttempt.error);
         if (activeTaskBoardOutput === "live") {
           let finalized = false;
           try {
@@ -4939,7 +4983,10 @@ const runCommand = Command.make(
           }
         }
         if (activeTaskBoardOutput === "json") {
-          for (const line of jsonRenderer!.cancellation(displayState)) {
+          for (const line of jsonRenderer!.cancellation(
+            displayState,
+            getRunCancellationExitCode(runAttempt.error),
+          )) {
             yield* d.plain(line);
           }
         } else if (activeTaskBoardOutput === "plain") {
@@ -4954,6 +5001,14 @@ const runCommand = Command.make(
         if (activeTaskBoardOutput === "json") {
           process.exitCode = 1;
           yield* d.plain(jsonRenderer!.failure(displayState, runAttempt.error));
+          cleanupLiveDisplay();
+          return;
+        }
+        if (activeTaskBoardOutput === "plain") {
+          process.exitCode = 1;
+          yield* d.plain(
+            formatPlainHubRunFailure(displayState, runAttempt.error),
+          );
           cleanupLiveDisplay();
           return;
         }

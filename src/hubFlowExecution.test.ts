@@ -2802,6 +2802,7 @@ describe("with-review Hub flow execution", () => {
       env: { OPENAI_KEY: "test-openai-key" },
       roleEntry: { provider: "codex", model: "gpt-5.4-mini" },
     });
+    const abortController = new AbortController();
 
     vi.stubEnv("OPENAI_KEY", "");
     vi.stubEnv("CODEX_HOME", "");
@@ -2816,10 +2817,12 @@ describe("with-review Hub flow execution", () => {
         cwd,
         runDir: cwd,
         projectDevelopmentContract,
+        signal: abortController.signal,
       });
 
       expect(result.outcome).toBe("success");
       expect(runSpy).toHaveBeenCalledTimes(1);
+      expect(runSpy.mock.calls[0]?.[0].signal).toBe(abortController.signal);
       expect(runSpy.mock.calls[0]?.[0].promptArgs).toMatchObject({
         TASK_ID: "bd-1",
         PROJECT_PROFILE: "generic",
@@ -2830,6 +2833,53 @@ describe("with-review Hub flow execution", () => {
         runSpy.mock.calls[0]?.[0].promptArgs
           ?.PROJECT_DEVELOPMENT_CONTRACT_SETUP,
       ).toContain("no-op baseline");
+    } finally {
+      runSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("createHubFlowRunImplementer propagates an aborted run", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "hub-flow-implementer-abort-"));
+    await initRepo(cwd);
+    const projectDevelopmentContract =
+      resolveHubProjectDevelopmentContractState({
+        repoRoot: cwd,
+        hubProjectDir: join(cwd, "hub-project"),
+        now: new Date("2026-07-15T12:00:00.000Z"),
+      });
+    const controller = new AbortController();
+    const reason = Object.assign(new Error("Run cancelled by SIGINT"), {
+      name: "AbortError",
+      code: "ABORT_ERR",
+    });
+    const runSpy = vi.spyOn(runModule, "run").mockImplementation(async () => {
+      controller.abort(reason);
+      throw reason;
+    });
+    const implementer = createHubFlowRunImplementer({
+      cwd,
+      env: { OPENAI_KEY: "test-openai-key" },
+      roleEntry: { provider: "codex", model: "gpt-5.4-mini" },
+    });
+
+    vi.stubEnv("OPENAI_KEY", "");
+    vi.stubEnv("CODEX_HOME", "");
+    try {
+      await expect(
+        implementer({
+          flowId: "no-review",
+          batchId: "batch-test",
+          taskId: "bd-1",
+          title: "Test task",
+          branch: "archloop/bd-1-test-task",
+          promptFile: "/tmp/prompt.md",
+          cwd,
+          runDir: cwd,
+          projectDevelopmentContract,
+          signal: controller.signal,
+        }),
+      ).rejects.toBe(reason);
     } finally {
       runSpy.mockRestore();
       vi.unstubAllEnvs();

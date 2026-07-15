@@ -259,7 +259,7 @@ Hub flow 默认使用 `--output auto`。能力足够的交互式 TTY 会显示�
 
 所有 Hub flow 都可显式使用 `--output plain`。该模式让每条 lifecycle 记录各占一个物理行，字段顺序稳定、值会转义，不使用 ANSI 光标重写。任务看板仍输出五类任务计数、失败诊断和恢复动作；proposal flow 只输出 canonical phase/status，以及 applied、skipped、dependencies 计数，终态区分 `applied`、`no_change`、`cancelled`、`validation_failed`、`mutation_failed`、`failed`。显式 plain/JSON 为非交互模式，proposal 写入需要 `--yes`；auto TTY 保留 refinement、status、approval 和 guarded apply prompts。agent prose 与 tool 参数只保存在 Hub run directory。
 
-自动化消费可使用 `archloop run --flow <id> --output json`。stdout 只包含 schema version 1 JSONL；proposal 使用 `proposal_phase` 和 `run_completed` 记录同一组阶段与终态，不混入 prompt、人工装饰、ANSI、agent 启动文本或原始 agent 输出。应用/无变化退出 `0`，取消退出 `130`，validation、mutation 或其他失败返回非零；消费者应忽略 version 1 的未知新增字段。
+自动化消费可使用 `archloop run --flow <id> --output json`。stdout 只包含 schema version 1 JSONL；proposal 使用 `proposal_phase` 和 `run_completed` 记录同一组阶段与终态，不混入 prompt、人工装饰、ANSI、agent 启动文本或原始 agent 输出。应用/无变化退出 `0`，Ctrl+C 取消退出 `130`，SIGTERM 保留退出码 `143`，validation、mutation 或其他失败返回非零；消费者应忽略 version 1 的未知新增字段。
 
 `archloop run --flow no-review` 和 `archloop run --flow with-review` 启动时会提前提醒宿主仓库里的 dirty source files。若同一个 flow 已有未完成的 `waiting_for_merge` 批次，archLoop 会先恢复该批次，并在领取新任务前检查待合并分支是否会改到这些脏文件。
 

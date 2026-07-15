@@ -965,6 +965,7 @@ export interface RunTriageProposalFlowInput {
   readonly agentInvoker?: ProposalAgentInvoker;
   readonly onProposalReady?: (proposal: TriageProposal) => Promise<void>;
   readonly onPresentationEvent?: (event: HubProposalPresentationEvent) => void;
+  readonly signal?: AbortSignal;
   readonly applyConfirmation?: (
     decision: TriageProposalDecision,
     reason: TriageConfirmationReason,
@@ -1098,6 +1099,7 @@ export const runTriageProposalFlow = async (
       cwd: input.cwd,
       roleEntry: triageRole,
       env: input.env,
+      signal: input.signal,
     });
 
   const session = await runProposalSession({
@@ -1117,6 +1119,7 @@ export const runTriageProposalFlow = async (
     approve: resolveProposalSessionApproval(input),
     oneShot: input.yes,
     onPresentationEvent: acceptPresentationEvent,
+    signal: input.signal,
   });
 
   if (session.outcome === "cancelled") {

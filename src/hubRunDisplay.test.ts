@@ -7,6 +7,7 @@ import type {
 } from "./hubExecution.js";
 import {
   createHubRunDisplayState,
+  formatPlainHubRunCancellation,
   formatPlainHubRunEvent,
   formatPlainHubRunOutcome,
   projectHubRunOutcome,
@@ -101,6 +102,29 @@ describe("projectHubRunStateOutcome", () => {
 });
 
 describe("plain Hub run lifecycle output", () => {
+  it("uses the reducer skipped count in cancellation outcomes", () => {
+    const claimSkipped: HubRunEvent = {
+      type: "task_claim_skipped",
+      runId: "run-cancelled",
+      batchId: "batch-cancelled",
+      taskId: "task-skipped",
+      branch: "archloop/task-skipped",
+      createdAt: "2026-07-15T13:05:00.000Z",
+      status: "ready_for_agent",
+      eventId: "run-cancelled:1",
+      sequence: 1,
+    };
+    const state = reduceHubRunDisplayState(
+      createHubRunDisplayState({
+        hubProjectName: "alpha",
+        flowId: "with-review",
+      }),
+      claimSkipped,
+    );
+
+    expect(formatPlainHubRunCancellation(state)).toContain("skipped=1");
+  });
+
   it("treats an initially empty ready queue as successful completion", () => {
     const result: RunHubFlowResult = {
       flowId: "no-review",

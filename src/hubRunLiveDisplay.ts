@@ -11,7 +11,7 @@ import {
   HUB_RUN_MIN_LIVE_ROWS,
   HUB_RUN_WIDE_COLUMNS,
 } from "./hubRunOutputMode.js";
-import { SHOW_CURSOR } from "./terminalCleanup.js";
+import { SHOW_CURSOR, setTerminalCursorHidden } from "./terminalCleanup.js";
 
 const HIDE_CURSOR = "\x1b[?25l";
 const ERASE_LINE = "\r\x1b[2K";
@@ -374,6 +374,7 @@ export const createHubRunLiveDisplay = (
     options.terminal.write(
       `${clearRenderedRegion(renderedPhysicalLineCount(columns))}${lines.join("\n")}\n${SHOW_CURSOR}`,
     );
+    setTerminalCursorHidden(false);
     renderedLineCount = 0;
     renderedLines = [];
     cursorMayBeHidden = false;
@@ -388,6 +389,7 @@ export const createHubRunLiveDisplay = (
       options.terminal.write(
         `${clearRenderedRegion(renderedPhysicalLineCount(columns))}${SHOW_CURSOR}`,
       );
+      setTerminalCursorHidden(false);
     }
     renderedLineCount = 0;
     renderedLines = [];
@@ -430,6 +432,7 @@ export const createHubRunLiveDisplay = (
     const shouldHideCursor = renderedLineCount === 0 && !cursorMayBeHidden;
     if (shouldHideCursor) {
       cursorMayBeHidden = true;
+      setTerminalCursorHidden(true);
     }
     options.terminal.write(
       `${shouldHideCursor ? HIDE_CURSOR : clearRegion}${completedBatchLines.length > 0 ? `${completedBatchLines.join("\n")}\n` : ""}${lines.join("\n")}`,
@@ -465,6 +468,7 @@ export const createHubRunLiveDisplay = (
           options.terminal.write(
             `${clearRenderedRegion(renderedPhysicalLineCount(cleanupColumns))}${SHOW_CURSOR}`,
           );
+          setTerminalCursorHidden(false);
           renderedLineCount = 0;
           renderedLines = [];
           cursorMayBeHidden = false;

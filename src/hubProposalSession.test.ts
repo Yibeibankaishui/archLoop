@@ -565,4 +565,38 @@ describe("runProposalSession", () => {
       expect.objectContaining({ phase: "approval", status: "cancelled" }),
     );
   });
+
+  it("propagates an agent abort reason instead of recording a draft failure", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "proposal-agent-abort-"));
+    await initRepo(repoDir);
+    const hubProjectDir = await createHubProjectDir(
+      "proposal-agent-abort-hub-",
+    );
+    const controller = new AbortController();
+    const reason = Object.assign(new Error("Run cancelled by SIGINT"), {
+      name: "AbortError",
+      code: "ABORT_ERR",
+    });
+    const invoker: ProposalAgentInvoker = async () => {
+      controller.abort(reason);
+      throw reason;
+    };
+
+    await expect(
+      runProposalSession({
+        flowId: "prd-decomposition",
+        cwd: repoDir,
+        hubProjectDir,
+        preparedContext: { prdRef: "docs/prd.md" },
+        draftPrompt: "Draft a PRD decomposition proposal.",
+        finalizationPrompt: "Emit the final task proposal.",
+        output: Output.object({
+          tag: "task-proposal",
+          schema: testProposalSchema(),
+        }),
+        agentInvoker: invoker,
+        signal: controller.signal,
+      }),
+    ).rejects.toBe(reason);
+  });
 });

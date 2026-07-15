@@ -314,6 +314,65 @@ describe("JSONL Hub run lifecycle output", () => {
     });
   });
 
+  it("preserves SIGTERM exit code in cancellation JSONL", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+    });
+    const state = createHubRunDisplayState({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+    });
+
+    const record = parseRecord(renderer.cancellation(state, 143).at(-1)!);
+
+    expect(record).toMatchObject({
+      type: "run_completed",
+      outcome: "cancelled",
+      exitCode: 143,
+    });
+  });
+
+  it("uses the reducer skipped count in cancellation records", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "with-review",
+    });
+    const runStarted: HubRunEvent = {
+      type: "run_started",
+      eventId: "run-cancel-skipped:1",
+      sequence: 1,
+      runId: "run-cancel-skipped",
+      branch: "feature/cancel",
+      startedAt: "2026-07-15T10:05:00.000Z",
+      repoRoot: "/tmp/repo",
+      hubProjectDir: "/tmp/hub",
+    };
+    const claimSkipped: HubRunEvent = {
+      type: "task_claim_skipped",
+      eventId: "run-cancel-skipped:2",
+      sequence: 2,
+      runId: "run-cancel-skipped",
+      batchId: "batch-cancel-skipped",
+      taskId: "task-skipped",
+      branch: "archloop/task-skipped",
+      createdAt: "2026-07-15T10:05:01.000Z",
+      status: "ready_for_agent",
+    };
+    let state = createHubRunDisplayState({
+      hubProjectName: "alpha",
+      flowId: "with-review",
+    });
+    state = reduceHubRunDisplayState(state, runStarted);
+    state = reduceHubRunDisplayState(state, claimSkipped);
+    renderer.event(runStarted);
+    renderer.event(claimSkipped);
+
+    const record = parseRecord(renderer.cancellation(state).at(-1)!);
+
+    expect(record.counts).toMatchObject({ skipped: 1 });
+  });
+
   it("retains actionable failed-task details when cancellation follows a failure", () => {
     const renderer = createHubRunJsonRenderer({
       hubProjectName: "alpha",

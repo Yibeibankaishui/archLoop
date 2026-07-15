@@ -12,7 +12,8 @@ describe("makeTerminalCleanupHandler", () => {
 
     const handler = makeTerminalCleanupHandler(
       { isTTY: true, setRawMode },
-      { write },
+      { isTTY: true, write },
+      () => true,
     );
     handler();
 
@@ -27,7 +28,8 @@ describe("makeTerminalCleanupHandler", () => {
 
     const handler = makeTerminalCleanupHandler(
       { isTTY: false, setRawMode },
-      { write },
+      { isTTY: true, write },
+      () => true,
     );
     handler();
 
@@ -40,7 +42,8 @@ describe("makeTerminalCleanupHandler", () => {
 
     const handler = makeTerminalCleanupHandler(
       { isTTY: true }, // isTTY true but no setRawMode
-      { write },
+      { isTTY: true, write },
+      () => true,
     );
     handler();
 
@@ -56,23 +59,53 @@ describe("makeTerminalCleanupHandler", () => {
 
     const handler = makeTerminalCleanupHandler(
       { isTTY: true, setRawMode },
-      { write },
+      { isTTY: true, write },
+      () => true,
     );
 
     expect(() => handler()).not.toThrow();
     // cursor is still shown even after setRawMode failure
     expect(write).toHaveBeenCalledWith(SHOW_CURSOR);
   });
+
+  it("does not write cursor control when the output is not a TTY", () => {
+    const setRawMode = vi.fn();
+    const write = vi.fn(() => true);
+
+    const handler = makeTerminalCleanupHandler(
+      { isTTY: false, setRawMode },
+      { isTTY: false, write },
+      () => true,
+    );
+    handler();
+
+    expect(setRawMode).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("does not write cursor control when no live renderer hid it", () => {
+    const write = vi.fn(() => true);
+    const handler = makeTerminalCleanupHandler(
+      { isTTY: true },
+      { isTTY: true, write },
+      () => false,
+    );
+
+    handler();
+
+    expect(write).not.toHaveBeenCalled();
+  });
 });
 
 describe("setupTerminalCleanup", () => {
-  it("registers cleanup against the diagnostic stream instead of stdout", () => {
+  it("registers cleanup against the TTY output stream", () => {
     const write = vi.fn(() => true);
     let registered: (() => void) | undefined;
 
     setupTerminalCleanup({
       stdin: { isTTY: false },
-      output: { write },
+      output: { isTTY: true, write },
+      shouldRestoreCursor: () => true,
       registerExit: (handler) => {
         registered = handler;
       },

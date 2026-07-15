@@ -4,6 +4,7 @@ import { stripVTControlCharacters } from "node:util";
 
 import type { HubRunDisplayState } from "./hubRunDisplay.js";
 import { createHubRunLiveDisplay } from "./hubRunLiveDisplay.js";
+import { isTerminalCursorHidden } from "./terminalCleanup.js";
 
 const runningState = (): HubRunDisplayState => ({
   hubProjectName: "archloop",
@@ -52,6 +53,8 @@ describe("createHubRunLiveDisplay", () => {
 
     display.update(runningState());
 
+    expect(isTerminalCursorHidden()).toBe(true);
+
     expect(output).toContain(
       "archLoop run | Project archloop | Flow with-review | Run run-7",
     );
@@ -59,6 +62,8 @@ describe("createHubRunLiveDisplay", () => {
     expect(output).toContain("Implementing | task-b");
     expect(output).toContain("Reviewing | task-a");
     expect(output.indexOf("task-b")).toBeLessThan(output.indexOf("task-a"));
+    display.dispose();
+    expect(isTerminalCursorHidden()).toBe(false);
   });
 
   it("keeps every planned task row stable before its first task event", () => {

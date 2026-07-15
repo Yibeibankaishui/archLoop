@@ -255,6 +255,7 @@ export const runTriageProposalFlowFromCli = async (input: {
   readonly onPresentationEvent?: (event: HubProposalPresentationEvent) => void;
   readonly beforePrompt?: () => void;
   readonly afterPrompt?: () => void;
+  readonly signal?: AbortSignal;
 }): Promise<RunTriageProposalFlowResult> =>
   runTriageProposalFlow({
     cwd: input.cwd,
@@ -289,4 +290,5 @@ export const runTriageProposalFlowFromCli = async (input: {
             ),
     isTTY: input.interactive === false ? false : input.isTTY,
     onPresentationEvent: input.onPresentationEvent,
+    signal: input.signal,
   });

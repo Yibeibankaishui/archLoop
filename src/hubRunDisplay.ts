@@ -688,18 +688,20 @@ export const formatPlainHubRunOutcome = (
 export const formatPlainHubRunCancellation = (
   state: HubRunDisplayState,
 ): string => {
-  const tasks = Object.values(state.tasks);
-  const countStatus = (status: string): number =>
-    tasks.filter((task) => task.status === status).length;
+  const projection = projectHubRunStateOutcome(state, {
+    outcome: "cancelled",
+    summary: "Run cancelled",
+    exitCode: 130,
+  });
   return [
     "event=run_completed",
-    textField("outcome", "cancelled"),
-    textField("summary", "Run cancelled"),
-    numberField("completed", countStatus("done")),
-    numberField("failed", countStatus("failed")),
-    numberField("blocked", countStatus("blocked")),
-    numberField("skipped", 0),
-    numberField("ready_to_merge", countStatus("waiting_for_merge")),
+    textField("outcome", projection.outcome),
+    textField("summary", projection.summary),
+    numberField("completed", projection.counts.completed),
+    numberField("failed", projection.counts.failed),
+    numberField("blocked", projection.counts.blocked),
+    numberField("skipped", projection.counts.skipped),
+    numberField("ready_to_merge", projection.counts.readyToMerge),
     numberField(
       "completed_batches",
       Object.values(state.batches).filter((batch) => batch.status === "done")
@@ -707,6 +709,40 @@ export const formatPlainHubRunCancellation = (
     ),
     textField("run_id", state.runId ?? ""),
     textField("logs", state.runDir ?? ""),
+  ].join(" ");
+};
+
+export const formatPlainHubRunFailure = (
+  state: HubRunDisplayState,
+  error: unknown,
+): string => {
+  const projection = projectHubRunStateOutcome(state, {
+    outcome: "failed",
+    summary: "Run failed",
+    exitCode: 1,
+  });
+  const diagnostic = conciseDiagnostic(
+    error instanceof Error ? error.message : String(error),
+    "Run execution failed.",
+  );
+  return [
+    "event=run_failed",
+    textField("outcome", projection.outcome),
+    textField("summary", projection.summary),
+    textField("diagnostic", diagnostic),
+    numberField("completed", projection.counts.completed),
+    numberField("failed", projection.counts.failed),
+    numberField("blocked", projection.counts.blocked),
+    numberField("skipped", projection.counts.skipped),
+    numberField("ready_to_merge", projection.counts.readyToMerge),
+    numberField(
+      "completed_batches",
+      Object.values(state.batches).filter((batch) => batch.status === "done")
+        .length,
+    ),
+    textField("run_id", state.runId ?? ""),
+    textField("logs", state.runDir ?? ""),
+    textField("recovery", `archloop run --flow ${state.flowId}`),
   ].join(" ");
 };
 

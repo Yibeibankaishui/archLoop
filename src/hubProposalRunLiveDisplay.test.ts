@@ -7,7 +7,7 @@ import {
   reduceHubProposalRunDisplayState,
 } from "./hubProposalRunDisplay.js";
 import { createHubProposalRunLiveDisplay } from "./hubProposalRunLiveDisplay.js";
-import { SHOW_CURSOR } from "./terminalCleanup.js";
+import { isTerminalCursorHidden, SHOW_CURSOR } from "./terminalCleanup.js";
 
 describe("proposal live run output", () => {
   it("suspends the live region for interactive prompts and resumes latest state", () => {
@@ -36,7 +36,9 @@ describe("proposal live run output", () => {
     );
 
     live.update(state);
+    expect(isTerminalCursorHidden()).toBe(true);
     live.suspend();
+    expect(isTerminalCursorHidden()).toBe(false);
     const writesBeforeSuspendedUpdate = writes.length;
     live.update(state);
     expect(writes).toHaveLength(writesBeforeSuspendedUpdate);
@@ -44,6 +46,9 @@ describe("proposal live run output", () => {
     expect(live.resume()).toBe(true);
     expect(writes.at(-1)).toContain("Approve proposal | In progress");
     expect(writes.at(-1)).toContain("\x1b[?25l");
+    expect(isTerminalCursorHidden()).toBe(true);
+    live.dispose();
+    expect(isTerminalCursorHidden()).toBe(false);
   });
 
   it("uses the shared run frame around canonical proposal phases", () => {

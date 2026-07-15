@@ -260,6 +260,17 @@ export const projectHubProposalRunFailure = (
   logs: state.runDir ?? "",
 });
 
+export const projectHubProposalRunCancellation = (
+  state: HubProposalRunDisplayState,
+  exitCode: 130 | 143 = 130,
+): HubProposalRunOutcomeProjection => ({
+  outcome: "cancelled",
+  summary: "Proposal cancelled",
+  counts: outcomeCounts(state),
+  exitCode,
+  logs: state.runDir ?? "",
+});
+
 export const projectHubProposalRunOutcome = (
   state: HubProposalRunDisplayState,
 ): HubProposalRunOutcomeProjection => {
