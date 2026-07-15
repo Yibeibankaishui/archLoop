@@ -652,8 +652,12 @@ describe("archloop CLI", () => {
       );
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
-      expect(cliFailureOutput(err)).toMatch(
-        /PRD input: docs\/feature.md|Missing Hub agent role config: planning/i,
+      const output = cliFailureOutput(err);
+      expect(output).not.toMatch(
+        /PRD file does not exist|PRD file is not readable/i,
+      );
+      expect(output).toMatch(
+        /PRD input: docs\/feature.md|Missing Hub agent role config: planning|archloop tasks init/i,
       );
     }
   });
