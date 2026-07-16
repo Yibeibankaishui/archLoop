@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -32,8 +33,11 @@ export interface CreateHubRunContextOptions {
 export interface HubTaskClaimMetadata {
   readonly runId: string | undefined;
   readonly batchId: string | undefined;
+  readonly taskId?: string;
   readonly branch: string | undefined;
   readonly claimedAt: string | undefined;
+  readonly baseHead?: string;
+  readonly branchExistedBeforeClaim?: boolean;
   readonly raw: Readonly<Record<string, unknown>>;
 }
 
@@ -84,6 +88,10 @@ export interface HubBatchPlannedEvent {
   readonly flowId: string;
   readonly createdAt: string;
   readonly taskIds: readonly string[];
+  readonly tasks?: readonly {
+    readonly taskId: string;
+    readonly title: string;
+  }[];
   readonly batchStrategyRequested?: string;
   readonly batchStrategyUsed?: string;
   readonly maxTasks?: number;
@@ -149,6 +157,7 @@ export interface HubTaskEvent {
     | "task_close_started"
     | "task_closed"
     | "task_close_failed"
+    | "task_branch_cleanup"
     | "task_status_advanced";
   readonly runId: string;
   readonly batchId: string;
@@ -165,7 +174,43 @@ export interface HubTaskEvent {
   readonly branchHasUnmergedWork?: boolean;
   readonly implementationWork?: "new_commits" | "existing_unmerged_work";
   readonly claim?: HubTaskClaimMetadata;
+  readonly cleanup?: {
+    readonly policy: "safe_managed";
+    readonly outcome: "deleted" | "skipped" | "failed";
+    readonly reasonCodes?: readonly string[];
+    readonly diagnosticSummary?: string;
+    readonly diagnostics?: Readonly<Record<string, unknown>>;
+  };
 }
+
+type HubRunEventData =
+  | HubRunStartedEvent
+  | HubRunCompletedEvent
+  | HubBatchStartedEvent
+  | HubBatchPlannedEvent
+  | HubBatchMergeSelectionEvent
+  | HubBatchMergeStartedEvent
+  | HubBatchMergeCompletedEvent
+  | HubTaskEvent;
+
+export type HubRunEvent = HubRunEventData & {
+  readonly eventId: string;
+  readonly sequence: number;
+};
+
+export type HubRunEventObserver = (
+  event: HubRunEvent,
+) => void | PromiseLike<void>;
+
+const hubRunEventObserver = new AsyncLocalStorage<HubRunEventObserver>();
+
+export const observeHubRunEvents = <T>(
+  observer: HubRunEventObserver | undefined,
+  operation: () => T,
+): T =>
+  observer === undefined
+    ? operation()
+    : hubRunEventObserver.run(observer, operation);
 
 const readObject = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -180,6 +225,27 @@ const readFirstString = (
     const value = record[key];
     if (typeof value === "string" && value.trim().length > 0) {
       return value.trim();
+    }
+  }
+  return undefined;
+};
+
+const readBoolean = (
+  record: Readonly<Record<string, unknown>>,
+  keys: readonly string[],
+): boolean | undefined => {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "boolean") {
+      return value;
+    }
+    if (typeof value === "string") {
+      if (value === "true") {
+        return true;
+      }
+      if (value === "false") {
+        return false;
+      }
     }
   }
   return undefined;
@@ -212,13 +278,59 @@ const writeJsonl = (path: string, record: unknown): void => {
   appendFileSync(path, `${JSON.stringify(record)}\n`, "utf8");
 };
 
-const appendHubEvent = <T>(
+const hubRunEventSequences = new Map<string, number>();
+
+const readPersistedHubRunEventSequence = (eventsDir: string): number => {
+  let eventCount = 0;
+  let maximumSequence = 0;
+  for (const filename of ["run.jsonl", "batch.jsonl", "task.jsonl"]) {
+    const path = join(eventsDir, filename);
+    if (!existsSync(path)) {
+      continue;
+    }
+    for (const line of readFileSync(path, "utf8").split("\n")) {
+      if (line.length === 0) {
+        continue;
+      }
+      eventCount += 1;
+      try {
+        const parsed = JSON.parse(line) as { readonly sequence?: unknown };
+        if (typeof parsed.sequence === "number") {
+          maximumSequence = Math.max(maximumSequence, parsed.sequence);
+        }
+      } catch {
+        // Existing event readers remain responsible for reporting corrupt JSONL.
+      }
+    }
+  }
+  return Math.max(eventCount, maximumSequence);
+};
+
+const appendHubEvent = <T extends HubRunEventData>(
   directory: string,
   path: string,
   event: T,
 ): string => {
   mkdirSync(directory, { recursive: true });
-  writeJsonl(path, event);
+  const currentSequence =
+    hubRunEventSequences.get(directory) ??
+    readPersistedHubRunEventSequence(directory);
+  const sequence = currentSequence + 1;
+  hubRunEventSequences.set(directory, sequence);
+  const observedEvent = {
+    ...event,
+    eventId: `${event.runId}:${sequence}`,
+    sequence,
+  } as HubRunEvent;
+  writeJsonl(path, observedEvent);
+  try {
+    const observation = hubRunEventObserver.getStore()?.(observedEvent);
+    if (observation !== undefined) {
+      void Promise.resolve(observation).catch(() => undefined);
+    }
+  } catch {
+    // Presentation failures must not change the persisted run lifecycle.
+  }
   return path;
 };
 
@@ -255,20 +367,33 @@ export const resolveHubRunEventsPaths = (
 
 export const createHubTaskClaimMetadata = (
   input: Pick<HubTaskClaimMetadata, "runId" | "batchId" | "branch"> & {
+    readonly taskId?: string;
     readonly claimedAt?: string;
+    readonly baseHead?: string;
+    readonly branchExistedBeforeClaim?: boolean;
   },
 ): HubTaskClaimMetadata => {
   const claimedAt = input.claimedAt ?? new Date().toISOString();
   return {
     runId: input.runId,
     batchId: input.batchId,
+    taskId: input.taskId,
     branch: input.branch,
     claimedAt,
+    baseHead: input.baseHead,
+    branchExistedBeforeClaim: input.branchExistedBeforeClaim,
     raw: {
       runId: input.runId,
       batchId: input.batchId,
+      ...(input.taskId === undefined ? {} : { taskId: input.taskId }),
       branch: input.branch,
       claimedAt,
+      ...(input.baseHead === undefined ? {} : { baseHead: input.baseHead }),
+      ...(input.branchExistedBeforeClaim === undefined
+        ? {}
+        : {
+            branchExistedBeforeClaim: input.branchExistedBeforeClaim,
+          }),
     },
   };
 };
@@ -296,7 +421,7 @@ export const createHubRunContext = (
   mkdirSync(eventsDir, { recursive: true });
 
   if (!options.runId) {
-    writeJsonl(paths.runEventsPath, {
+    appendHubEvent(eventsDir, paths.runEventsPath, {
       type: "run_started",
       runId: ids.runId,
       branch: options.branch,
@@ -305,7 +430,7 @@ export const createHubRunContext = (
       hubProjectDir,
     } satisfies HubRunStartedEvent);
 
-    writeJsonl(paths.batchEventsPath, {
+    appendHubEvent(eventsDir, paths.batchEventsPath, {
       type: "batch_started",
       runId: ids.runId,
       batchId: ids.batchId,
@@ -410,13 +535,22 @@ export const readHubTaskClaim = (
   const claimedAt = readFirstString(claimRecord, ["claimedAt", "claimed_at"]);
   const runId = readFirstString(claimRecord, ["runId", "run_id"]);
   const batchId = readFirstString(claimRecord, ["batchId", "batch_id"]);
+  const taskId = readFirstString(claimRecord, ["taskId", "task_id"]);
   const branch = readFirstString(claimRecord, ["branch"]);
+  const baseHead = readFirstString(claimRecord, ["baseHead", "base_head"]);
+  const branchExistedBeforeClaim = readBoolean(claimRecord, [
+    "branchExistedBeforeClaim",
+    "branch_existed_before_claim",
+  ]);
 
   return {
     runId,
     batchId,
+    taskId,
     branch,
     claimedAt,
+    baseHead,
+    branchExistedBeforeClaim,
     raw: claimRecord,
   };
 };

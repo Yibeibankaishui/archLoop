@@ -13,6 +13,14 @@ archLoop（`@yibeibankaishui/archloop`）是一个 TypeScript 工具包，用于
 
 典型场景：并行 AFK agent、实现→评审流水线、从 GitHub Issues 自动领任务并提交。
 
+Hub onboarding 的推荐路径是 `archloop initialize` -> `archloop project add` / `select` / `list` -> `archloop check` -> selected-project `archloop run --flow ...`。`archloop init` 仍然保留，但只作为 legacy 的 repo-local scaffold 路径。
+
+如果想先浏览已注册的 Hub project，可以运行 `archloop project list`：它会显示项目名、repo path、Project profile、selected 标记、path/task readiness 标签，以及 active run 概览，方便先挑选再切换。需要改名或迁移仓库路径时，可以用 `archloop project rename <project> <new-name>` 和 `archloop project relink <project> --path <repo-path>`；这两个命令都会保持 Hub project id 不变，所以任务和运行历史不会被拆开。
+
+如果你要先完成 Hub 级共享设置，再注册第一个项目，先运行 `archloop initialize`。它会配置共享 agent roles、env 和 auth 指引，默认再跑一次轻量 Hub check，并在成功后把 `archloop project add` 作为下一步。需要跳过 quick check 时，使用 `archloop initialize --skip-check`。
+
+`archloop check` 默认会同时检查 Hub 级 readiness 和当前 CLI selected 的 Hub project（如果存在）。也可以显式用 `archloop check --hub` 只检查 Hub，`archloop check --project <name>` 检查某个项目，或者 `archloop check --all-projects` 检查全部项目。项目级检查会验证 repo path、git repo、initial commit、development contract、local task store、ready/failed 任务摘要、active run 和 flow readiness signals；如果没有 selected project，它会给出 `archloop project add` / `archloop project select` 的提示，而不是直接报错。
+
 ## 核心思路：按仓库配置
 
 archLoop **不是**全局装一次到处用，而是**每个 Git 项目单独初始化**：
@@ -47,7 +55,7 @@ npm install --save-dev @yibeibankaishui/archloop
 pnpm add -D @yibeibankaishui/archloop
 ```
 
-### 步骤 2：初始化（每个项目仅一次）
+### 步骤 2：初始化（legacy repo-local scaffold，每个项目仅一次）
 
 ```bash
 npx archloop init
@@ -244,6 +252,20 @@ archLoop 使用常规容器将宿主 worktree 挂载进沙箱，agent 在容器�
 2. **日志**：`.archloop/logs/` 是否生成对应运行日志。
 3. **沙箱环境**：容器内能否执行项目关键命令（测试、构建、启动）；不足则改 `Dockerfile` 与 `bootstrap.sh`。
 4. **凭据**：`.archloop/.env` 是否在 init 提示的变量均已填写。
+
+## Hub flow 脏工作区诊断
+
+Hub flow 默认使用 `--output auto`。能力足够的交互式 TTY 会显示共享的紧凑 run header、elapsed、durable logs 和最终 outcome。任务看板 flow 显示当前 batch 任务行；`prd-decomposition` 与 `triage` 显示 input preparation、draft、可选 refinement、finalization、mutation detection、approval、validation、apply proposal phases，并在交互 prompt 前暂停 live region。它不进入 alternate screen，也不显示原始 agent prose、tool 参数、百分比或 ETA；resize 与成功、失败、取消、异常清理都保持有界并恢复光标。重定向、CI、`TERM=dumb`、不支持 cursor control 或终端尺寸不安全时自动回退 plain；`NO_COLOR` 或 `--no-color` 只关闭 live view 颜色。
+
+所有 Hub flow 都可显式使用 `--output plain`。该模式让每条 lifecycle 记录各占一个物理行，字段顺序稳定、值会转义，不使用 ANSI 光标重写。任务看板仍输出五类任务计数、失败诊断和恢复动作；proposal flow 只输出 canonical phase/status，以及 applied、skipped、dependencies 计数，终态区分 `applied`、`no_change`、`cancelled`、`validation_failed`、`mutation_failed`、`failed`。显式 plain/JSON 为非交互模式，proposal 写入需要 `--yes`；auto TTY 保留 refinement、status、approval 和 guarded apply prompts。agent prose 与 tool 参数只保存在 Hub run directory。
+
+自动化消费可使用 `archloop run --flow <id> --output json`。stdout 只包含 schema version 1 JSONL；proposal 使用 `proposal_phase` 和 `run_completed` 记录同一组阶段与终态，不混入 prompt、人工装饰、ANSI、agent 启动文本或原始 agent 输出。应用/无变化退出 `0`，Ctrl+C 取消退出 `130`，SIGTERM 保留退出码 `143`，validation、mutation 或其他失败返回非零；消费者应忽略 version 1 的未知新增字段。
+
+`archloop run --flow no-review` 和 `archloop run --flow with-review` 启动时会提前提醒宿主仓库里的 dirty source files。若同一个 flow 已有未完成的 `waiting_for_merge` 批次，archLoop 会先恢复该批次，并在领取新任务前检查待合并分支是否会改到这些脏文件。
+
+非重叠脏文件不会阻塞 merge：archLoop 会在干净的 integration worktree/branch 中验证结果，并只在不会覆盖宿主脏文件时落回当前分支。若存在重叠，CLI 会列出具体 blocking files；先 commit、stash 或 discard 这些文件，再重新运行同一个 flow，archLoop 会继续恢复 `waiting_for_merge` 任务。
+
+任务命令默认针对已选中的 Hub project；如需覆盖，可以显式传 `--project <name>`。`.beads/issues.jsonl`、`.beads/interactions.jsonl` 等 Beads runtime/export 文件会单独报告，通常不要提交；通过 `archloop tasks pull` / `push` / `sync` 交换远端任务状态。
 
 ---
 

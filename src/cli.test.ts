@@ -1,4 +1,4 @@
-import { exec } from "node:child_process";
+import { exec, execSync } from "node:child_process";
 import {
   access,
   chmod,
@@ -10,20 +10,31 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { NodeContext } from "@effect/platform-node";
 import { Effect, Ref } from "effect";
 import { describe, expect, it, vi } from "vitest";
 
 import { SilentDisplay, type DisplayEntry } from "./Display.js";
-import { createHubRunContext } from "./hubExecution.js";
+import {
+  appendHubTaskEvent,
+  createHubRunContext,
+  createHubTaskClaimMetadata,
+} from "./hubExecution.js";
+import { HUB_AGENT_ROLES, setHubAgentRole } from "./hubAgentConfig.js";
 import { resolveGitRepoRoot, resolveHubProjectDir } from "./projectStatus.js";
 import { resolveHubProjectDevelopmentContractPath } from "./hubProjectDevelopmentContract.js";
+import {
+  readHubProjectRegistry,
+  registerHubProject,
+  resolveSelectedHubProject,
+} from "./hubProjectRegistry.js";
 import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
 
 const execAsync = promisify(exec);
 vi.setConfig({ testTimeout: 60_000 });
+const TEST_PROJECT_TIMESTAMP = new Date("2026-07-04T12:00:00.000Z");
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
@@ -40,6 +51,12 @@ const commitFile = async (
   await writeFile(join(dir, name), content);
   await execAsync(`git add "${name}"`, { cwd: dir });
   await execAsync(`git commit -m "${message}"`, { cwd: dir });
+};
+
+const mergeBranch = async (dir: string, branch: string, message: string) => {
+  await execAsync(`git merge --no-ff "${branch}" -m "${message}"`, {
+    cwd: dir,
+  });
 };
 
 const seedArchloopPackage = async (dir: string) => {
@@ -97,6 +114,45 @@ const cliFailureOutput = (err: unknown): string => {
   throw err;
 };
 
+const flattenCliOutput = (output: string): string =>
+  output.replace(/[│\s]+/g, "");
+
+const hasInitialCommit = (repoDir: string): boolean => {
+  try {
+    execSync("git rev-parse --verify HEAD", {
+      cwd: repoDir,
+      stdio: "pipe",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const ensureTaskBoardProjectRegistered = (
+  repoDir: string,
+  env: NodeJS.ProcessEnv,
+) => {
+  if (!hasInitialCommit(repoDir)) {
+    return;
+  }
+
+  const repoRoot = resolveGitRepoRoot(repoDir);
+  const alreadyRegistered = readHubProjectRegistry({ env }).some(
+    (project) => project.repoRoot === repoRoot,
+  );
+  if (alreadyRegistered) {
+    return;
+  }
+
+  registerHubProject({
+    repoPath: repoRoot,
+    projectName: basename(repoRoot),
+    env,
+    now: TEST_PROJECT_TIMESTAMP,
+  });
+};
+
 const withBdEnv = (
   bdPath: string,
   repoDirOrEnv?: string | NodeJS.ProcessEnv,
@@ -116,11 +172,141 @@ const withBdEnv = (
     seedHubTaskStoreMetadata(repoDir);
   }
 
-  return {
+  const env = {
     ...process.env,
     ...mergedEnv,
     PATH: `${dirname(bdPath)}:${mergedEnv.PATH ?? process.env.PATH ?? ""}`,
     ARCHLOOP_BD_PATH: bdPath,
+  };
+
+  if (repoDir) {
+    ensureTaskBoardProjectRegistered(repoDir, env);
+  }
+
+  return env;
+};
+
+const createMockTool = async (
+  binDir: string,
+  name: string,
+  script = "#!/bin/sh\nexit 0\n",
+) => {
+  await mkdir(binDir, { recursive: true });
+  const toolPath = join(binDir, name);
+  await writeFile(toolPath, script);
+  await chmod(toolPath, 0o755);
+  return toolPath;
+};
+
+const CODEX_SMOKE_OUTPUT =
+  '#!/bin/sh\ncat >/dev/null\nprintf \'%s\\n\' \'{"type":"item.completed","item":{"type":"agent_message","text":"<smoke>ARCHLOOP_SMOKE_OK</smoke>"}}\'\n';
+
+const setAllHubAgentRoles = (env: NodeJS.ProcessEnv) => {
+  for (const role of HUB_AGENT_ROLES) {
+    setHubAgentRole(role, { provider: "cursor", model: "auto" }, { env });
+  }
+};
+
+const setAllCodexAgentRoles = (env: NodeJS.ProcessEnv) => {
+  for (const role of HUB_AGENT_ROLES) {
+    const options =
+      role === "planning" || role === "triage"
+        ? { effort: "medium" }
+        : { effort: "high" };
+    setHubAgentRole(
+      role,
+      { provider: "codex", model: "gpt-5.4-mini", options },
+      { env },
+    );
+  }
+};
+
+const setupManagedBranchCleanupRepo = async (hostDir: string) => {
+  await initRepo(hostDir);
+  await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+  const xdgDataHome = join(hostDir, "xdg-data");
+  const env = { ...process.env, XDG_DATA_HOME: xdgDataHome };
+  ensureTaskBoardProjectRegistered(hostDir, env);
+  const repoRoot = resolveGitRepoRoot(hostDir);
+  const hubProjectDir = resolveHubProjectDir(
+    join(xdgDataHome, "archloop"),
+    repoRoot,
+  );
+
+  const safeBranch = "archloop/bd-safe-safe-branch";
+  await execAsync(`git checkout -b "${safeBranch}"`, { cwd: hostDir });
+  await commitFile(hostDir, "safe.txt", "safe", "safe branch work");
+  await execAsync("git checkout main", { cwd: hostDir });
+  await mergeBranch(hostDir, safeBranch, "merge safe branch");
+
+  const blockedBranch = "archloop/bd-blocked-blocked-branch";
+  await execAsync(`git checkout -b "${blockedBranch}"`, { cwd: hostDir });
+  await commitFile(hostDir, "blocked.txt", "blocked", "blocked branch work");
+  await execAsync("git checkout main", { cwd: hostDir });
+
+  const historicalBranch = "archloop/unowned-history";
+  await execAsync(`git checkout -b "${historicalBranch}"`, { cwd: hostDir });
+  await commitFile(hostDir, "historical.txt", "historical", "historical work");
+  await execAsync("git checkout main", { cwd: hostDir });
+  await mergeBranch(hostDir, historicalBranch, "merge historical branch");
+
+  const safeBaseHead = (
+    await execAsync("git rev-parse HEAD", { cwd: hostDir })
+  ).stdout.trim();
+  const runContext = createHubRunContext({
+    cwd: hostDir,
+    env,
+    branch: "main",
+    runId: "run-cleanup",
+    batchId: "batch-cleanup",
+    hubProjectDir,
+  });
+  const safeClaim = createHubTaskClaimMetadata({
+    runId: runContext.runId,
+    batchId: runContext.batchId,
+    taskId: "bd-safe",
+    branch: safeBranch,
+    claimedAt: "2026-07-04T12:00:00.000Z",
+    baseHead: safeBaseHead,
+    branchExistedBeforeClaim: false,
+  });
+  appendHubTaskEvent(runContext.runDir, {
+    type: "task_claimed",
+    runId: runContext.runId,
+    batchId: runContext.batchId,
+    taskId: "bd-safe",
+    branch: safeBranch,
+    createdAt: safeClaim.claimedAt ?? "2026-07-04T12:00:00.000Z",
+    status: "implementing",
+    claim: safeClaim,
+  });
+
+  const blockedClaim = createHubTaskClaimMetadata({
+    runId: runContext.runId,
+    batchId: runContext.batchId,
+    taskId: "bd-blocked",
+    branch: blockedBranch,
+    claimedAt: "2026-07-04T12:05:00.000Z",
+    baseHead: safeBaseHead,
+    branchExistedBeforeClaim: true,
+  });
+  appendHubTaskEvent(runContext.runDir, {
+    type: "task_claimed",
+    runId: runContext.runId,
+    batchId: runContext.batchId,
+    taskId: "bd-blocked",
+    branch: blockedBranch,
+    createdAt: blockedClaim.claimedAt ?? "2026-07-04T12:05:00.000Z",
+    status: "implementing",
+    claim: blockedClaim,
+  });
+
+  return {
+    env,
+    historicalBranch,
+    blockedBranch,
+    safeBranch,
   };
 };
 
@@ -199,7 +385,15 @@ describe("archloop CLI", () => {
   it("root help exposes the project namespace", async () => {
     const { stdout } = await runCli("--help", process.cwd());
     expect(stdout).toContain("project");
+    expect(stdout).toContain("project add");
+    expect(stdout).toContain("project list");
+    expect(stdout).toContain("project select");
     expect(stdout).toContain("project status");
+  });
+
+  it("root help exposes initialize", async () => {
+    const { stdout } = await runCli("--help", process.cwd());
+    expect(stdout).toContain("initialize");
   });
 
   it("root help exposes the agent-config namespace", async () => {
@@ -458,8 +652,12 @@ describe("archloop CLI", () => {
       );
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
-      expect(cliFailureOutput(err)).toMatch(
-        /PRD input: docs\/feature.md|Missing Hub agent role config: planning/i,
+      const output = cliFailureOutput(err);
+      expect(output).not.toMatch(
+        /PRD file does not exist|PRD file is not readable/i,
+      );
+      expect(output).toMatch(
+        /PRD input: docs\/feature.md|Missing Hub agent role config: planning|archloop tasks init/i,
       );
     }
   });
@@ -654,6 +852,9 @@ exit 1
 
   it("project --help shows the status subcommand", async () => {
     const { stdout } = await runCli("project --help", process.cwd());
+    expect(stdout).toContain("add");
+    expect(stdout).toContain("list");
+    expect(stdout).toContain("select");
     expect(stdout).toContain("status");
     expect(stdout).toContain("configure");
   });
@@ -672,6 +873,7 @@ exit 1
     expect(stdout).toContain("comment");
     expect(stdout).toContain("doctor");
     expect(stdout).toContain("repair-state");
+    expect(stdout).toContain("cleanup");
     expect(stdout).toContain("delete");
   });
 
@@ -716,24 +918,34 @@ exit 1
     }
   });
 
-  it("project status works from a git repo that has not run init", async () => {
+  it("project status targets the selected project from another directory", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
     const dataDir = join(hostDir, "xdg-data");
-    const binDir = join(hostDir, "bin");
-    await mkdir(binDir, { recursive: true });
-    const gitPath = (await execAsync("command -v git")).stdout.trim();
-    await symlink(gitPath, join(binDir, "git"));
-    const { stdout } = await runCli("project status", hostDir, {
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+
+    await runCli(`project add --name alpha --path "${hostDir}"`, otherDir, {
       ...process.env,
       XDG_DATA_HOME: dataDir,
-      PATH: binDir,
+    });
+    const selectedProject = resolveSelectedHubProject({
+      env: {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      },
+    });
+
+    const { stdout } = await runCli("project status", otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
     });
 
     expect(stdout).toContain("Hub project status");
-    expect(stdout).toContain(hostDir);
+    expect(flattenCliOutput(stdout)).toContain(
+      flattenCliOutput(selectedProject!.repoRoot),
+    );
     expect(stdout).toContain("xdg-data/archloop");
     expect(stdout).toContain("Hub project profile");
     expect(stdout).toContain("Hub project development contract");
@@ -741,6 +953,133 @@ exit 1
     expect(stdout).toContain("Task store initialized");
     expect(stdout).toContain("Task board ready");
     expect(stdout).toContain("Task board total");
+  });
+
+  it("project status honors an explicit project override", async () => {
+    const repoA = await mkdtemp(join(tmpdir(), "cli-project-a-"));
+    await initRepo(repoA);
+    await commitFile(repoA, "hello.txt", "hello", "initial commit");
+
+    const repoB = await mkdtemp(join(tmpdir(), "cli-project-b-"));
+    await initRepo(repoB);
+    await commitFile(repoB, "hello.txt", "hello", "initial commit");
+
+    const dataDir = join(repoA, "xdg-data");
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+
+    await runCli(`project add --name alpha --path "${repoA}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    await runCli(`project add --name beta --path "${repoB}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+
+    const explicitRepoRoot = resolveGitRepoRoot(repoB);
+    const selectedRepoRoot = resolveGitRepoRoot(repoA);
+    const { stdout } = await runCli("project status --project beta", otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+
+    const flattenedOutput = flattenCliOutput(stdout);
+    expect(flattenedOutput).toContain(flattenCliOutput(explicitRepoRoot));
+    expect(flattenedOutput).not.toContain(flattenCliOutput(selectedRepoRoot));
+  });
+
+  it("project status surfaces managed branch cleanup diagnostics", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    const { env, blockedBranch, historicalBranch, safeBranch } =
+      await setupManagedBranchCleanupRepo(hostDir);
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+
+    const { stdout } = await runCli("project status", otherDir, env);
+
+    expect(stdout).toContain("Managed branch cleanup diagnostics");
+    expect(stdout).toContain("Safe managed candidates (1)");
+    expect(stdout).toContain(safeBranch);
+    expect(stdout).toContain(
+      "Next action: Run `archloop tasks cleanup --yes` to delete this safe managed branch.",
+    );
+    expect(stdout).toContain("Blocked managed candidates (1)");
+    expect(stdout).toContain(blockedBranch);
+    expect(stdout).toContain(
+      "Preserve this branch; it existed before Hub claimed the task.",
+    );
+    expect(stdout).toContain("Historical unowned candidates (1)");
+    expect(stdout).toContain(historicalBranch);
+    expect(stdout).toContain(
+      "Use `archloop tasks cleanup --yes --include-unowned` to include this safe historical branch.",
+    );
+  });
+
+  it("check runs from any directory, shows progress, and runs provider smoke checks", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "cli-check-data-"));
+    await mkdir(join(dataDir, "archloop"), { recursive: true });
+    await writeFile(
+      join(dataDir, "archloop", ".env"),
+      "OPENAI_KEY=openai-test-key\n",
+    );
+    const env = {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+      OPENAI_KEY: "openai-test-key",
+    };
+
+    const binDir = join(dataDir, "bin");
+    await createMockTool(binDir, "codex", CODEX_SMOKE_OUTPUT);
+
+    const storeEnv = { ...env, PATH: `${binDir}:${process.env.PATH ?? ""}` };
+    setAllCodexAgentRoles(storeEnv);
+
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-check-cwd-"));
+    const { stdout } = await runCli("check --hub", otherDir, storeEnv);
+
+    expect(stdout).toContain("Hub readiness check");
+    expect(stdout).toContain("Checking Hub agent roles");
+    expect(stdout).toContain("Checking configured provider references");
+    expect(stdout).toContain("Checking Hub env and auth");
+    expect(stdout).toContain("Checking required tools");
+    expect(stdout).toContain("Checking provider/model smoke");
+    expect(stdout).toContain(
+      "Roles covered: implementation, merge, recovery, review.",
+    );
+    expect(stdout).toContain("Roles covered: planning, triage.");
+    expect(stdout).toContain("Smoke response token: ARCHLOOP_SMOKE_OK.");
+    expect(stdout).toContain("Hub readiness check passed");
+  });
+
+  it("check reports missing credential guidance and exits non-zero", async () => {
+    const dataDir = await mkdtemp(join(tmpdir(), "cli-check-missing-cred-"));
+    const env = {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+      OPENAI_KEY: "",
+      CODEX_HOME: "",
+    };
+
+    const binDir = join(dataDir, "bin");
+    await createMockTool(binDir, "codex", CODEX_SMOKE_OUTPUT);
+
+    const storeEnv = { ...env, PATH: `${binDir}:${process.env.PATH ?? ""}` };
+    setAllCodexAgentRoles(storeEnv);
+
+    const otherDir = await mkdtemp(
+      join(tmpdir(), "cli-check-missing-cred-cwd-"),
+    );
+    try {
+      await runCli("check --hub", otherDir, storeEnv);
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain("Hub readiness check failed.");
+      expect(output).toContain("archloop env set OPENAI_KEY <value>");
+      expect(output).toContain("archloop auth login codex");
+      expect(output).toContain(
+        "credential or tool validation failed earlier in the check",
+      );
+    }
   });
 
   it("project configure writes a durable development contract and reports its path", async () => {
@@ -758,22 +1097,29 @@ exit 1
     );
 
     const dataDir = join(hostDir, "xdg-data");
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+    await runCli(`project add --name alpha --path "${hostDir}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    const selectedProject = resolveSelectedHubProject({
+      env: {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      },
+    });
     const { stdout } = await runCli(
       "project configure --project-profile node",
-      hostDir,
+      otherDir,
       {
         ...process.env,
         XDG_DATA_HOME: dataDir,
       },
     );
 
-    const repoRoot = resolveGitRepoRoot(hostDir);
-    const hubProjectDir = resolveHubProjectDir(
-      join(dataDir, "archloop"),
-      repoRoot,
+    const contractPath = resolveHubProjectDevelopmentContractPath(
+      selectedProject!.hubProjectDir,
     );
-    const contractPath =
-      resolveHubProjectDevelopmentContractPath(hubProjectDir);
     const contract = JSON.parse(await readFile(contractPath, "utf8")) as {
       projectProfile: string;
       projectFacts: { observedFiles: string[]; configuredScripts: string[] };
@@ -802,15 +1148,23 @@ exit 1
     await commitFile(hostDir, "package.json", "{}", "initial commit");
 
     const dataDir = join(hostDir, "xdg-data");
-    const repoRoot = resolveGitRepoRoot(hostDir);
-    const hubProjectDir = resolveHubProjectDir(
-      join(dataDir, "archloop"),
-      repoRoot,
-    );
-    const initialContractPath =
-      resolveHubProjectDevelopmentContractPath(hubProjectDir);
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
 
-    await runCli("project configure --project-profile node", hostDir, {
+    await runCli(`project add --name alpha --path "${hostDir}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    const selectedProject = resolveSelectedHubProject({
+      env: {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      },
+    });
+    const initialContractPath = resolveHubProjectDevelopmentContractPath(
+      selectedProject!.hubProjectDir,
+    );
+
+    await runCli("project configure --project-profile node", otherDir, {
       ...process.env,
       XDG_DATA_HOME: dataDir,
     });
@@ -835,7 +1189,7 @@ exit 1
 
     const { stdout } = await runCli(
       "project configure --project-profile python",
-      hostDir,
+      otherDir,
       {
         ...process.env,
         XDG_DATA_HOME: dataDir,
@@ -860,8 +1214,8 @@ exit 1
     expect(changedContract.context).not.toContain("custom node context");
 
     const backupPath = join(
-      hubProjectDir,
-      (await readdir(hubProjectDir)).find((entry) =>
+      selectedProject!.hubProjectDir,
+      (await readdir(selectedProject!.hubProjectDir)).find((entry) =>
         entry.startsWith("development-contract.backup-node-"),
       )!,
     );
@@ -879,17 +1233,286 @@ exit 1
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+    const dataDir = join(hostDir, "xdg-data");
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+
+    await runCli(`project add --name alpha --path "${hostDir}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
 
     try {
-      await runCli("project configure", hostDir, {
+      await runCli("project configure", otherDir, {
         ...process.env,
-        XDG_DATA_HOME: join(hostDir, "xdg-data"),
+        XDG_DATA_HOME: dataDir,
       });
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       const output = cliFailureOutput(err);
       expect(output).toContain("--project-profile");
       expect(output).toContain("Available: generic, node, python, cpp");
+    }
+  });
+
+  it("project list reports an empty registry from any directory", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+
+    const result = await runCli("project list", otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: join(hostDir, "xdg-data"),
+    });
+
+    expect(result.stdout).toContain("No Hub projects registered yet.");
+    expect(result.stdout).toContain("archloop project add");
+  });
+
+  it("project add registers a project from an explicit path and project list marks it selected from another directory", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const dataDir = join(hostDir, "xdg-data");
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+
+    const addResult = await runCli(
+      `project add --name alpha --path "${hostDir}"`,
+      otherDir,
+      {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      },
+    );
+    expect(addResult.stdout).toContain("alpha");
+    expect(addResult.stdout).toContain("Hub project");
+
+    const listResult = await runCli("project list", otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    expect(listResult.stdout).toContain("alpha");
+    expect(listResult.stdout).toContain("(selected)");
+    expect(listResult.stdout).toContain(hostDir);
+    expect(listResult.stdout).toContain("path: valid");
+    expect(listResult.stdout).toContain("tasks: local task store missing");
+    expect(listResult.stdout).toContain("runs: none");
+  });
+
+  it("project add rejects a path that is not a git repo with exact guidance", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const nonRepoDir = await mkdtemp(join(tmpdir(), "cli-not-a-repo-"));
+
+    try {
+      await runCli(`project add --name alpha --path "${nonRepoDir}"`, hostDir, {
+        ...process.env,
+        XDG_DATA_HOME: join(hostDir, "xdg-data"),
+      });
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain(
+        "existing git repository with at least one commit",
+      );
+      expect(output).toContain("git init");
+      expect(output).toContain('git commit -m "Initial commit"');
+    }
+  });
+
+  it("project add rejects a git repo without an initial commit with exact guidance", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const emptyRepo = await mkdtemp(join(tmpdir(), "cli-empty-repo-"));
+    await initRepo(emptyRepo);
+
+    try {
+      await runCli(`project add --name alpha --path "${emptyRepo}"`, hostDir, {
+        ...process.env,
+        XDG_DATA_HOME: join(hostDir, "xdg-data"),
+      });
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain(
+        "existing git repository with at least one commit",
+      );
+      expect(output).toContain("git init");
+      expect(output).toContain('git commit -m "Initial commit"');
+    }
+  });
+
+  it("project select switches the CLI selected project by name from another directory", async () => {
+    const repoA = await mkdtemp(join(tmpdir(), "cli-project-a-"));
+    await initRepo(repoA);
+    await commitFile(repoA, "hello.txt", "hello", "initial commit");
+
+    const repoB = await mkdtemp(join(tmpdir(), "cli-project-b-"));
+    await initRepo(repoB);
+    await commitFile(repoB, "hello.txt", "hello", "initial commit");
+
+    const dataDir = join(repoA, "xdg-data");
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+
+    await runCli(`project add --name alpha --path "${repoA}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    await runCli(`project add --name beta --path "${repoB}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+
+    const selectResult = await runCli("project select alpha", otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    expect(selectResult.stdout).toContain("Selected Hub project alpha");
+
+    const listResult = await runCli("project list", otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    expect(listResult.stdout).toContain("alpha");
+    expect(listResult.stdout).toContain("(selected)");
+    expect(listResult.stdout).toContain("beta");
+    expect(listResult.stdout).toContain(repoA);
+    expect(listResult.stdout).toContain(repoB);
+    expect(listResult.stdout).toContain("path: valid");
+    expect(listResult.stdout).toContain("tasks: local task store missing");
+    expect(listResult.stdout).toContain("runs: none");
+  });
+
+  it("project rename and relink preserve the stable Hub project id", async () => {
+    const repoA = await mkdtemp(join(tmpdir(), "cli-project-a-"));
+    await initRepo(repoA);
+    await commitFile(repoA, "hello.txt", "hello", "initial commit");
+
+    const repoB = await mkdtemp(join(tmpdir(), "cli-project-b-"));
+    await initRepo(repoB);
+    await commitFile(repoB, "hello.txt", "hello", "initial commit");
+
+    const dataDir = join(repoA, "xdg-data");
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+
+    await runCli(`project add --name alpha --path "${repoA}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+
+    const renameResult = await runCli("project rename alpha omega", otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    expect(renameResult.stdout).toContain("Renamed Hub project alpha to omega");
+    expect(renameResult.stdout).toContain("Project id:");
+
+    const relinkResult = await runCli(
+      `project relink omega --path "${repoB}"`,
+      otherDir,
+      {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      },
+    );
+    expect(relinkResult.stdout).toContain("Relinked Hub project omega");
+    expect(relinkResult.stdout).toContain("Project id:");
+
+    const listResult = await runCli("project list", otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    expect(listResult.stdout).toContain("omega");
+    expect(listResult.stdout).toContain(repoB);
+    expect(listResult.stdout).toContain("(selected)");
+    expect(listResult.stdout).toContain("path: valid");
+  });
+
+  it("project rename rejects duplicate names with actionable guidance", async () => {
+    const repoA = await mkdtemp(join(tmpdir(), "cli-project-a-"));
+    await initRepo(repoA);
+    await commitFile(repoA, "hello.txt", "hello", "initial commit");
+
+    const repoB = await mkdtemp(join(tmpdir(), "cli-project-b-"));
+    await initRepo(repoB);
+    await commitFile(repoB, "hello.txt", "hello", "initial commit");
+
+    const dataDir = join(repoA, "xdg-data");
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+
+    await runCli(`project add --name alpha --path "${repoA}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    await runCli(`project add --name beta --path "${repoB}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+
+    try {
+      await runCli("project rename alpha beta", otherDir, {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      });
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain("already registered");
+      expect(output).toContain("archloop project list");
+    }
+  });
+
+  it("project relink rejects duplicate repo paths and invalid paths with actionable guidance", async () => {
+    const repoA = await mkdtemp(join(tmpdir(), "cli-project-a-"));
+    await initRepo(repoA);
+    await commitFile(repoA, "hello.txt", "hello", "initial commit");
+
+    const repoB = await mkdtemp(join(tmpdir(), "cli-project-b-"));
+    await initRepo(repoB);
+    await commitFile(repoB, "hello.txt", "hello", "initial commit");
+
+    const nonRepoDir = await mkdtemp(join(tmpdir(), "cli-not-a-repo-"));
+
+    const dataDir = join(repoA, "xdg-data");
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+
+    await runCli(`project add --name alpha --path "${repoA}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    await runCli(`project add --name beta --path "${repoB}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+
+    try {
+      await runCli(`project relink alpha --path "${repoB}"`, otherDir, {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      });
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain("already registered");
+      expect(output).toContain("archloop project list");
+    }
+
+    try {
+      await runCli(`project relink alpha --path "${nonRepoDir}"`, otherDir, {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      });
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain(
+        "existing git repository with at least one commit",
+      );
+      expect(output).toContain("git init");
+      expect(output).toContain('git commit -m "Initial commit"');
     }
   });
 
@@ -912,12 +1535,16 @@ process.exit(1);
     );
     await chmod(bdPath, 0o755);
 
+    const env = {
+      ...process.env,
+      XDG_DATA_HOME: join(hostDir, ".test-xdg-data"),
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+      ARCHLOOP_BD_PATH: bdPath,
+    };
+    ensureTaskBoardProjectRegistered(hostDir, env);
+
     try {
-      await runCli("tasks list", hostDir, {
-        ...process.env,
-        PATH: `${binDir}:${process.env.PATH ?? ""}`,
-        ARCHLOOP_BD_PATH: bdPath,
-      });
+      await runCli("tasks list", hostDir, env);
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       expect(cliFailureOutput(err)).toContain("archloop tasks init");
@@ -930,42 +1557,45 @@ process.exit(1);
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
 
-    const bundledBd = join(
-      process.cwd(),
-      "node_modules",
-      "@beads",
-      "bd",
-      "bin",
-      "bd",
-    );
-    await access(bundledBd);
-
-    const { stdout: initStdout } = await runCli("tasks init", hostDir, {
-      ...process.env,
-      ARCHLOOP_BD_PATH: bundledBd,
-      PATH: `${join(hostDir, "bin")}:${process.env.PATH ?? ""}`,
-    });
-    expect(initStdout).toContain("Initialized local Hub task store");
-
-    const boardJson = JSON.stringify([]);
-    const mockBdPath = join(hostDir, "bin", "bd");
-    await mkdir(join(hostDir, "bin"), { recursive: true });
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const bdPath = join(binDir, "bd");
     await writeFile(
-      mockBdPath,
-      `#!/bin/sh
-if [ "$1" = "list" ]; then
-  printf '%s\\n' '${boardJson}'
-  exit 0
-fi
-exit 1
+      bdPath,
+      `#!/usr/bin/env node
+const { mkdirSync, writeFileSync } = require("node:fs");
+const { join } = require("node:path");
+const [command] = process.argv.slice(2);
+if (command === "init") {
+  mkdirSync(".beads", { recursive: true });
+  writeFileSync(join(".beads", "metadata.json"), JSON.stringify({ backend: "dolt" }));
+  process.exit(0);
+}
+if (command === "list") {
+  process.stdout.write("[]\\n");
+  process.exit(0);
+}
+process.stderr.write("unsupported command\\n");
+process.exit(1);
 `,
     );
-    await chmod(mockBdPath, 0o755);
+    await chmod(bdPath, 0o755);
+
+    const env = {
+      ...process.env,
+      XDG_DATA_HOME: join(hostDir, ".test-xdg-data"),
+      ARCHLOOP_BD_PATH: bdPath,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+    };
+    ensureTaskBoardProjectRegistered(hostDir, env);
+
+    const { stdout: initStdout } = await runCli("tasks init", hostDir, env);
+    expect(initStdout).toContain("Initialized local Hub task store");
 
     const { stdout } = await runCli(
       "tasks list",
       hostDir,
-      withBdEnv(mockBdPath, hostDir),
+      env,
     );
     expect(stdout).toContain("Hub task board");
     expect(stdout).toContain("No Beads tasks found");
@@ -2867,6 +3497,101 @@ process.exit(1);
     } catch (err: unknown) {
       expect(cliFailureOutput(err)).toContain("dependents not in deletion set");
     }
+  });
+
+  it("tasks cleanup --dry-run previews safe managed, blocked managed, and historical unowned branches", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    const { blockedBranch, historicalBranch, env, safeBranch } =
+      await setupManagedBranchCleanupRepo(hostDir);
+
+    const { stdout } = await runCli("tasks cleanup --dry-run", hostDir, env);
+
+    expect(stdout).toContain("Hub managed branch cleanup");
+    expect(stdout).toContain("Safe managed branches (1)");
+    expect(stdout).toContain(safeBranch);
+    expect(stdout).toContain("Blocked managed branches (1)");
+    expect(stdout).toContain(blockedBranch);
+    expect(stdout).toContain(
+      "existed before Hub claimed task bd-blocked; keep it out of automatic cleanup",
+    );
+    expect(stdout).toContain("Unowned historical candidates (1)");
+    expect(stdout).toContain(historicalBranch);
+    expect(stdout).toContain("--include-unowned");
+
+    const branches = (await execAsync("git branch --list", { cwd: hostDir }))
+      .stdout;
+    expect(branches).toContain(safeBranch);
+    expect(branches).toContain(blockedBranch);
+    expect(branches).toContain(historicalBranch);
+  });
+
+  it("tasks cleanup --yes deletes safe managed branches by default and leaves historical unowned branches untouched", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    const { blockedBranch, historicalBranch, env, safeBranch } =
+      await setupManagedBranchCleanupRepo(hostDir);
+
+    const { stdout } = await runCli("tasks cleanup --yes", hostDir, env);
+
+    expect(stdout).toContain(`Deleted managed branches: ${safeBranch}`);
+    expect(stdout).toContain(blockedBranch);
+    expect(stdout).toContain("Use --include-unowned to delete");
+
+    const branches = (await execAsync("git branch --list", { cwd: hostDir }))
+      .stdout;
+    expect(branches).not.toContain(safeBranch);
+    expect(branches).toContain(blockedBranch);
+    expect(branches).toContain(historicalBranch);
+  });
+
+  it("tasks cleanup --yes --include-unowned deletes safe historical candidates when explicitly opted in", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    const { blockedBranch, historicalBranch, env, safeBranch } =
+      await setupManagedBranchCleanupRepo(hostDir);
+
+    const { stdout } = await runCli(
+      "tasks cleanup --yes --include-unowned",
+      hostDir,
+      env,
+    );
+
+    expect(stdout).toContain(`Deleted managed branches: ${safeBranch}`);
+    expect(stdout).toContain(
+      `Deleted historical branches: ${historicalBranch}`,
+    );
+    expect(stdout).toContain(blockedBranch);
+
+    const branches = (await execAsync("git branch --list", { cwd: hostDir }))
+      .stdout;
+    expect(branches).not.toContain(safeBranch);
+    expect(branches).not.toContain(historicalBranch);
+    expect(branches).toContain(blockedBranch);
+  });
+
+  it("tasks cleanup --yes --include-unowned still deletes safe historical candidates when no managed deletions are available", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    const { blockedBranch, historicalBranch, env, safeBranch } =
+      await setupManagedBranchCleanupRepo(hostDir);
+    await execAsync(`git branch -D "${safeBranch}"`, { cwd: hostDir });
+
+    const { stdout } = await runCli(
+      "tasks cleanup --yes --include-unowned",
+      hostDir,
+      env,
+    );
+
+    expect(stdout).not.toContain("Deleted managed branches:");
+    expect(stdout).toContain(
+      `Deleted historical branches: ${historicalBranch}`,
+    );
+    expect(stdout).toContain(blockedBranch);
+    expect(stdout).not.toContain(
+      "No safe branches were eligible for managed branch cleanup.",
+    );
+
+    const branches = (await execAsync("git branch --list", { cwd: hostDir }))
+      .stdout;
+    expect(branches).not.toContain(historicalBranch);
+    expect(branches).toContain(blockedBranch);
   });
 
   it("--help shows podman namespace", async () => {

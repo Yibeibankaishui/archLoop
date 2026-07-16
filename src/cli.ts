@@ -4,10 +4,10 @@ import { Effect } from "effect";
 import * as clack from "@clack/prompts";
 import { execSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { styleText } from "node:util";
 
-import { Display } from "./Display.js";
+import { Display, type DisplayService } from "./Display.js";
 import {
   buildDockerRootHostNextStepLines,
   resolveDockerUidBuildArgs,
@@ -53,6 +53,7 @@ import {
   HubAgentConfigError,
   HubAuthError,
   HubEnvError,
+  HubProjectRegistryError,
   InitError,
   ProjectStatusError,
   TaskBoardError,
@@ -79,6 +80,35 @@ import {
   resolveHubProjectStatus,
 } from "./projectStatus.js";
 import {
+  formatHubProjectListLines,
+  resolveHubProjectListProjections,
+} from "./hubProjectList.js";
+import {
+  collectHubReadinessChecks,
+  formatHubReadinessCheckLines,
+} from "./hubReadinessCheck.js";
+import {
+  collectHubProjectReadinessCheck,
+  formatHubProjectReadinessCheckLines,
+} from "./hubProjectReadinessCheck.js";
+import {
+  listHubProjects,
+  registerHubProject,
+  relinkHubProject,
+  renameHubProject,
+  readSelectedHubProject,
+  selectHubProject,
+  type HubProjectRegistryEntry,
+  type HubProjectListEntry,
+} from "./hubProjectRegistry.js";
+import { resolveHubProjectTarget } from "./hubProjectTargetResolver.js";
+import {
+  formatHubProjectProfileRecommendation,
+  recommendHubProjectProfile,
+  resolveHubProjectRegistrationRepoRoot,
+  suggestHubProjectName,
+} from "./hubProjectOnboarding.js";
+import {
   configureHubProjectDevelopmentContract,
   formatHubProjectDevelopmentContractFactsSummary,
   resolveHubProjectDevelopmentContractPath,
@@ -90,12 +120,52 @@ import {
   parseHubFlowMaxBatches,
   runHubFlow,
 } from "./hubFlowExecution.js";
+import type { HubRunEvent } from "./hubExecution.js";
+import {
+  createHubRunDisplayState,
+  formatPlainHubRunCancellation,
+  formatPlainHubRunEvent,
+  formatPlainHubRunFailure,
+  formatPlainHubRunOutcome,
+  projectHubRunOutcome,
+  projectHubRunStateOutcome,
+  reduceHubRunDisplayState,
+} from "./hubRunDisplay.js";
+import { createHubRunJsonRenderer } from "./hubRunJsonDisplay.js";
+import { createHubRunLiveDisplay } from "./hubRunLiveDisplay.js";
+import {
+  acceptsHubProposalPresentationEvent,
+  createHubProposalRunDisplayState,
+  createHubProposalRunJsonRenderer,
+  formatPlainHubProposalEvent,
+  formatPlainHubProposalOutcome,
+  projectHubProposalRunCancellation,
+  projectHubProposalRunOutcome,
+  projectHubProposalRunFailure,
+  reduceHubProposalRunDisplayState,
+} from "./hubProposalRunDisplay.js";
+import { createHubProposalRunLiveDisplay } from "./hubProposalRunLiveDisplay.js";
+import type { HubProposalPresentationEvent } from "./hubProposalSession.js";
+import {
+  createRunSignalController,
+  getRunCancellationExitCode,
+} from "./runSignal.js";
+import {
+  resolveHubRunOutputMode,
+  supportsHubRunCursorControl,
+} from "./hubRunOutputMode.js";
 import { createHubBatchPlannerInvoker } from "./hubBatchPlannerAgent.js";
 import { resolveHubBatchSelectionOptions } from "./hubBatchPlanner.js";
-import { getHubFlowDefinition, listHubFlows } from "./hubFlows.js";
+import {
+  getHubFlowDefinition,
+  listHubFlows,
+  type HubFlowDefinition,
+  type HubFlowInputSchema,
+} from "./hubFlows.js";
 import {
   formatValidatedHubFlowInputSummary,
   validateHubFlowInput,
+  type ValidatedHubFlowInput,
 } from "./hubFlowInput.js";
 import {
   handlePrdDecompositionFlowDisplay,
@@ -112,15 +182,20 @@ import type {
 import {
   formatHubTaskBoardLines,
   appendHubTaskComment,
+  cleanupHubManagedBranches,
   createHubTask,
   deleteHubTasks,
+  formatHubManagedBranchCleanupDiagnosticsLines,
+  formatHubManagedBranchCleanupLines,
   formatHubTaskCommentLines,
   formatHubTaskDetailsRows,
   loadHubTask,
   loadHubTaskBoard,
+  planHubManagedBranchCleanup,
   resolveHubTaskSelector,
   resolveHubTaskSelectors,
 } from "./taskBoard.js";
+import { evaluateHubManagedBranchCleanup } from "./hubManagedBranchCleanup.js";
 import { HUB_TRIAGE_DEFAULT_TASK_QUERY } from "./hubTriage.js";
 import { initHubTaskStore } from "./hubTaskStore.js";
 import { isTriageTaskIdInput } from "./hubTriageProposal.js";
@@ -140,6 +215,7 @@ import {
   formatHubAgentConfigShowLines,
   formatHubAgentRoleOptions,
   HUB_AGENT_ROLES,
+  listMissingHubAgentRoles,
   readHubAgentConfig,
   resolveHubAgentConfigPath,
   resolveHubAgentRoleEntry,
@@ -150,14 +226,18 @@ import {
 import {
   promptHubAgentRoleSetup,
   promptInitHubAgentConfig,
+  promptInitializeHubAgentConfig,
 } from "./hubAgentConfigPrompt.js";
 import {
+  collectHubEnvKeysForSetup,
   formatHubEnvShowLines,
   isHubEnvKnownKey,
+  normalizeHubEnvValue,
+  resolveHubEnv,
   resolveHubEnvPath,
   upsertHubEnvKey,
 } from "./hubEnv.js";
-import { promptInitHubEnv } from "./hubEnvPrompt.js";
+import { promptInitHubEnv, promptInitializeHubEnv } from "./hubEnvPrompt.js";
 import {
   ensureHubAuthDir,
   formatHubAuthShowLines,
@@ -189,6 +269,19 @@ const resolveImageName = (cliFlag: OptionalTextFlag, cwd: string): string =>
 
 const optionalTextValue = (flag: OptionalTextFlag): string | undefined =>
   flag._tag === "Some" ? flag.value : undefined;
+
+const trimOptionalText = (value: string | undefined): string | undefined => {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+};
+
+const hasInteractiveTerminal = (): boolean =>
+  process.stdin.isTTY && process.stdout.isTTY;
+
+const toProjectStatusError = (error: unknown): ProjectStatusError =>
+  new ProjectStatusError({
+    message: error instanceof Error ? error.message : String(error),
+  });
 
 const toTaskBoardError = (error: unknown): TaskBoardError =>
   new TaskBoardError({
@@ -1607,6 +1700,11 @@ const formatHubProjectStatusRows = (
   "Task board total": String(status.taskCounts.total),
 });
 
+const projectTargetOption = Options.text("project").pipe(
+  Options.withDescription("Hub project name"),
+  Options.optional,
+);
+
 const projectConfigureProjectProfileOption = Options.text(
   "project-profile",
 ).pipe(
@@ -1645,6 +1743,33 @@ const describeProjectConfigureStatus = (contract: {
 
   return "Refreshed project facts and wrote a new Hub project development contract.";
 };
+
+const resolveProjectTargetStatus = (
+  project: OptionalTextFlag,
+): Effect.Effect<
+  Awaited<ReturnType<typeof resolveHubProjectStatus>>,
+  ProjectStatusError
+> =>
+  Effect.gen(function* () {
+    const target = yield* Effect.tryPromise({
+      try: () =>
+        resolveHubProjectTarget({
+          projectSelector: optionalTextValue(project),
+          isTTY: process.stdin.isTTY === true,
+          selectProject: resolveInteractiveProjectSelection,
+        }),
+      catch: toProjectStatusError,
+    });
+
+    return yield* Effect.try({
+      try: () =>
+        resolveHubProjectStatus({
+          cwd: target.project.repoRoot,
+          hubProjectDir: target.project.hubProjectDir,
+        }),
+      catch: toProjectStatusError,
+    });
+  });
 
 const taskIdArg = Args.text({ name: "id" });
 const taskTitleArg = Args.text({ name: "title" });
@@ -1706,6 +1831,24 @@ const taskDeleteCascadeOption = Options.boolean("cascade").pipe(
   ),
   Options.withDefault(false),
 );
+const taskCleanupYesOption = Options.boolean("yes").pipe(
+  Options.withDescription(
+    "Confirm cleanup of safe managed branches without interactive prompts.",
+  ),
+  Options.withDefault(false),
+);
+const taskCleanupDryRunOption = Options.boolean("dry-run").pipe(
+  Options.withDescription(
+    "Preview managed branch cleanup without deleting any git refs.",
+  ),
+  Options.withDefault(false),
+);
+const taskCleanupIncludeUnownedOption = Options.boolean("include-unowned").pipe(
+  Options.withDescription(
+    "Also delete safe historical unowned archloop/... branches when confirming cleanup.",
+  ),
+  Options.withDefault(false),
+);
 const taskSyncYesOption = Options.boolean("yes").pipe(
   Options.withDescription(
     "Apply sync changes after previewing them. Required for non-interactive tasks sync.",
@@ -1736,6 +1879,21 @@ const taskSelectorsArg = Args.atLeast(
   ),
   1,
 );
+
+const resolveTaskCommandRepoRoot = (
+  project: OptionalTextFlag,
+): Effect.Effect<string, TaskBoardError, never> =>
+  Effect.tryPromise({
+    try: async () =>
+      (
+        await resolveHubProjectTarget({
+          projectSelector: optionalTextValue(project),
+          isTTY: process.stdin.isTTY === true,
+          selectProject: resolveInteractiveProjectSelection,
+        })
+      ).project.repoRoot,
+    catch: toTaskBoardError,
+  });
 
 const normalizeTaskOrigin = (
   value: string,
@@ -1788,34 +1946,39 @@ const resolvePrdWarningFilter = (
   );
 };
 
-const tasksInitCommand = Command.make("init", {}, () =>
-  Effect.gen(function* () {
-    const d = yield* Display;
-    const cwd = process.cwd();
-    const result = yield* Effect.try({
-      try: () => initHubTaskStore(cwd),
-      catch: toTaskBoardError,
-    });
+const tasksInitCommand = Command.make(
+  "init",
+  {
+    project: projectTargetOption,
+  },
+  ({ project }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const result = yield* Effect.try({
+        try: () => initHubTaskStore(cwd),
+        catch: toTaskBoardError,
+      });
 
-    if (result.alreadyInitialized) {
-      yield* d.status("Hub task store is already initialized.", "success");
-      return;
-    }
+      if (result.alreadyInitialized) {
+        yield* d.status("Hub task store is already initialized.", "success");
+        return;
+      }
 
-    if (result.output.trim().length > 0) {
-      yield* d.text(result.output.trim());
-    }
-    yield* d.status("Initialized local Hub task store.", "success");
-  }),
+      if (result.output.trim().length > 0) {
+        yield* d.text(result.output.trim());
+      }
+      yield* d.status("Initialized local Hub task store.", "success");
+    }),
 );
 
 const tasksListCommand = Command.make(
   "list",
-  { warning: taskWarningOption },
-  ({ warning }) =>
+  { warning: taskWarningOption, project: projectTargetOption },
+  ({ warning, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = process.cwd();
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const warningFilter = yield* resolvePrdWarningFilter(warning);
       const board = yield* Effect.try({
         try: () => loadHubTaskBoard(cwd),
@@ -1835,11 +1998,12 @@ const tasksCreateCommand = Command.make(
     origin: taskOriginOption,
     description: taskDescriptionOption,
     kind: taskKindOption,
+    project: projectTargetOption,
   },
-  ({ title, origin, description, kind }) =>
+  ({ title, origin, description, kind, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = process.cwd();
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const resolvedOrigin = yield* resolveTaskOrigin(origin);
       const kindValue = optionalTextValue(kind);
       const created = yield* Effect.try({
@@ -1862,20 +2026,23 @@ const tasksCreateCommand = Command.make(
     }),
 );
 
-const tasksShowCommand = Command.make("show", { id: taskIdArg }, ({ id }) =>
-  Effect.gen(function* () {
-    const d = yield* Display;
-    const cwd = process.cwd();
-    const task = yield* Effect.try({
-      try: () => loadHubTask(cwd, id),
-      catch: toTaskBoardError,
-    });
+const tasksShowCommand = Command.make(
+  "show",
+  { id: taskIdArg, project: projectTargetOption },
+  ({ id, project }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const task = yield* Effect.try({
+        try: () => loadHubTask(cwd, id),
+        catch: toTaskBoardError,
+      });
 
-    yield* d.summary(`Beads task ${task.id}`, formatHubTaskDetailsRows(task));
-    for (const line of formatHubTaskCommentLines(task)) {
-      yield* d.text(line);
-    }
-  }),
+      yield* d.summary(`Beads task ${task.id}`, formatHubTaskDetailsRows(task));
+      for (const line of formatHubTaskCommentLines(task)) {
+        yield* d.text(line);
+      }
+    }),
 );
 
 const triageTaskIdArg = Args.text({ name: "task-id" }).pipe(Args.optional);
@@ -1899,10 +2066,11 @@ const tasksTriageCommand = Command.make(
     taskId: triageTaskIdArg,
     query: triageQueryOption,
     approve: triageApproveOption,
+    project: projectTargetOption,
   },
-  ({ taskId, query, approve }) =>
+  ({ taskId, query, approve, project }) =>
     Effect.gen(function* () {
-      const cwd = process.cwd();
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const explicitTaskId = optionalTextValue(taskId)?.trim();
       const explicitQuery = optionalTextValue(query)?.trim();
       const yes = approve;
@@ -2028,10 +2196,11 @@ const tasksFromPrdCommand = Command.make(
     approve: prdApproveOption,
     status: prdStatusOption,
     deps: prdDepsOption,
+    project: projectTargetOption,
   },
-  ({ prdRef, approve, status, deps }) =>
+  ({ prdRef, approve, status, deps, project }) =>
     Effect.gen(function* () {
-      const cwd = process.cwd();
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const explicitHubStatusMode =
         !approve && status._tag === "Some"
           ? yield* resolvePrdHubStatusMode(status)
@@ -2059,13 +2228,14 @@ const tasksFromPrdCommand = Command.make(
 
 const runHubTaskSyncCommand = (input: {
   readonly mode: "sync" | "pull" | "push";
+  readonly cwd: string;
   readonly yes?: boolean;
   readonly dryRun?: boolean;
   readonly includeClosed?: boolean;
 }) =>
   Effect.gen(function* () {
     const d = yield* Display;
-    const cwd = process.cwd();
+    const cwd = input.cwd;
     const dryRun = input.dryRun === true;
     const shouldPreview = input.mode === "sync" || dryRun;
 
@@ -2149,9 +2319,19 @@ const tasksSyncCommand = Command.make(
     yes: taskSyncYesOption,
     dryRun: taskSyncDryRunOption,
     includeClosed: taskSyncIncludeClosedOption,
+    project: projectTargetOption,
   },
-  ({ yes, dryRun, includeClosed }) =>
-    runHubTaskSyncCommand({ mode: "sync", yes, dryRun, includeClosed }),
+  ({ yes, dryRun, includeClosed, project }) =>
+    Effect.gen(function* () {
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      return yield* runHubTaskSyncCommand({
+        mode: "sync",
+        cwd,
+        yes,
+        dryRun,
+        includeClosed,
+      });
+    }),
 );
 
 const tasksPullCommand = Command.make(
@@ -2159,34 +2339,48 @@ const tasksPullCommand = Command.make(
   {
     includeClosed: taskSyncIncludeClosedOption,
     dryRun: taskSyncDryRunOption,
+    project: projectTargetOption,
   },
-  ({ includeClosed, dryRun }) =>
-    runHubTaskSyncCommand({
-      mode: "pull",
-      includeClosed,
-      dryRun,
+  ({ includeClosed, dryRun, project }) =>
+    Effect.gen(function* () {
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      return yield* runHubTaskSyncCommand({
+        mode: "pull",
+        cwd,
+        includeClosed,
+        dryRun,
+      });
     }),
 );
 
 const tasksPushCommand = Command.make(
   "push",
-  { dryRun: taskSyncDryRunOption },
-  ({ dryRun }) => runHubTaskSyncCommand({ mode: "push", dryRun }),
+  { dryRun: taskSyncDryRunOption, project: projectTargetOption },
+  ({ dryRun, project }) =>
+    Effect.gen(function* () {
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      return yield* runHubTaskSyncCommand({
+        mode: "push",
+        cwd,
+        dryRun,
+      });
+    }),
 );
 
 const tasksCommentCommand = Command.make(
   "comment",
   {
     id: taskIdArg,
+    project: projectTargetOption,
     body: Options.text("body").pipe(
       Options.withDescription("Comment body"),
       Options.optional,
     ),
   },
-  ({ id, body }) =>
+  ({ id, body, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = process.cwd();
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const task = yield* Effect.try({
         try: () => resolveHubTaskSelector(cwd, id),
         catch: toTaskBoardError,
@@ -2223,11 +2417,11 @@ const tasksCommentCommand = Command.make(
 
 const tasksRecoverCommand = Command.make(
   "recover",
-  { id: taskIdArg },
-  ({ id }) =>
+  { id: taskIdArg, project: projectTargetOption },
+  ({ id, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = process.cwd();
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const task = yield* Effect.try({
         try: () => resolveHubTaskSelector(cwd, id),
         catch: toTaskBoardError,
@@ -2247,19 +2441,125 @@ const tasksRecoverCommand = Command.make(
     }),
 );
 
-const tasksDoctorCommand = Command.make("doctor", {}, () =>
-  Effect.gen(function* () {
-    const d = yield* Display;
-    const cwd = process.cwd();
-    const result = yield* Effect.tryPromise({
-      try: () => doctorHubTaskState({ cwd }),
-      catch: toTaskBoardError,
-    });
+const tasksDoctorCommand = Command.make(
+  "doctor",
+  { project: projectTargetOption },
+  ({ project }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const result = yield* Effect.tryPromise({
+        try: () => doctorHubTaskState({ cwd }),
+        catch: toTaskBoardError,
+      });
 
-    for (const line of formatHubTaskStateDoctorLines(result)) {
-      yield* d.text(line);
-    }
-  }),
+      for (const line of formatHubTaskStateDoctorLines(result)) {
+        yield* d.text(line);
+      }
+    }),
+);
+
+const tasksCleanupCommand = Command.make(
+  "cleanup",
+  {
+    yes: taskCleanupYesOption,
+    dryRun: taskCleanupDryRunOption,
+    includeUnowned: taskCleanupIncludeUnownedOption,
+    project: projectTargetOption,
+  },
+  ({ yes, dryRun, includeUnowned, project }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const isTTY = process.stdin.isTTY === true;
+      const evaluation = yield* Effect.tryPromise({
+        try: () => evaluateHubManagedBranchCleanup({ cwd }),
+        catch: toTaskBoardError,
+      });
+      const cleanupPlan = planHubManagedBranchCleanup(evaluation, {
+        includeUnowned,
+      });
+      const managedDeletionCount = cleanupPlan.managedBranches.length;
+      const historicalDeletionCount = cleanupPlan.historicalBranches.length;
+
+      for (const line of formatHubManagedBranchCleanupLines(evaluation, {
+        dryRun,
+        includeUnowned,
+      })) {
+        yield* d.text(line);
+      }
+
+      if (dryRun) {
+        yield* d.status("Dry run for managed branch cleanup.", "info");
+        return;
+      }
+
+      if (cleanupPlan.totalBranches === 0) {
+        yield* d.status(
+          "No safe branches were eligible for managed branch cleanup.",
+          "info",
+        );
+        return;
+      }
+
+      if (!yes && !isTTY) {
+        return yield* Effect.fail(
+          new TaskBoardError({
+            message:
+              "archloop tasks cleanup mutates git refs. Re-run with --yes in non-interactive mode, or use --dry-run to preview.",
+          }),
+        );
+      }
+
+      if (!yes && isTTY) {
+        const approved = yield* Effect.tryPromise({
+          try: async () => {
+            const message =
+              historicalDeletionCount > 0
+                ? `Delete ${managedDeletionCount} managed branch(s) and ${historicalDeletionCount} safe historical candidate(s)? Historical candidates require --include-unowned.`
+                : `Delete ${managedDeletionCount} managed branch(s)?`;
+            const result = await clack.confirm({
+              message,
+              initialValue: false,
+            });
+            if (clack.isCancel(result)) {
+              throw new TaskBoardError({
+                message: "Managed branch cleanup cancelled.",
+              });
+            }
+            return result === true;
+          },
+          catch: toTaskBoardError,
+        });
+
+        if (!approved) {
+          return yield* Effect.fail(
+            new TaskBoardError({
+              message: "Managed branch cleanup cancelled.",
+            }),
+          );
+        }
+      }
+
+      const result = yield* Effect.tryPromise({
+        try: () =>
+          cleanupHubManagedBranches({
+            cwd,
+            includeUnowned,
+          }),
+        catch: toTaskBoardError,
+      });
+
+      for (const line of formatHubManagedBranchCleanupLines(result.evaluation, {
+        includeUnowned,
+        deletedManagedBranches: result.deletedManagedBranches,
+        deletedHistoricalBranches: result.deletedHistoricalBranches,
+      })) {
+        yield* d.text(line);
+      }
+
+      yield* d.status("Completed managed branch cleanup.", "success");
+    }),
 );
 
 const tasksRepairStateCommand = Command.make(
@@ -2267,11 +2567,12 @@ const tasksRepairStateCommand = Command.make(
   {
     id: taskIdArg,
     yes: taskRepairStateYesOption,
+    project: projectTargetOption,
   },
-  ({ id, yes }) =>
+  ({ id, yes, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = process.cwd();
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const preview = yield* Effect.tryPromise({
         try: () => repairHubTaskState({ cwd, taskSelector: id }),
         catch: toTaskBoardError,
@@ -2338,11 +2639,12 @@ const tasksDeleteCommand = Command.make(
     yes: taskDeleteYesOption,
     dryRun: taskDeleteDryRunOption,
     cascade: taskDeleteCascadeOption,
+    project: projectTargetOption,
   },
-  ({ selectors, yes, dryRun, cascade }) =>
+  ({ selectors, yes, dryRun, cascade, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = process.cwd();
+      const cwd = yield* resolveTaskCommandRepoRoot(project);
       const tasks = yield* Effect.try({
         try: () => resolveHubTaskSelectors(cwd, selectors),
         catch: toTaskBoardError,
@@ -2454,46 +2756,786 @@ const tasksCommand = Command.make("tasks", {}, () =>
     tasksCommentCommand,
     tasksRecoverCommand,
     tasksDoctorCommand,
+    tasksCleanupCommand,
     tasksRepairStateCommand,
     tasksDeleteCommand,
   ]),
 );
 
-const projectStatusCommand = Command.make("status", {}, () =>
+const projectStatusCommand = Command.make(
+  "status",
+  {
+    project: projectTargetOption,
+  },
+  ({ project }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const status = yield* resolveProjectTargetStatus(project);
+      const cleanupEvaluation = yield* Effect.tryPromise({
+        try: () => evaluateHubManagedBranchCleanup({ cwd: status.repoRoot }),
+        catch: toTaskBoardError,
+      });
+
+      yield* d.summary(
+        "Hub project status",
+        formatHubProjectStatusRows(status),
+      );
+      for (const line of formatHubProjectStatusLines(
+        status,
+        formatHubManagedBranchCleanupDiagnosticsLines(cleanupEvaluation),
+      )) {
+        yield* d.text(line);
+      }
+    }),
+);
+
+const checkHubOption = Options.boolean("hub").pipe(
+  Options.withDescription(
+    "Run the Hub-wide readiness slice of archloop check.",
+  ),
+  Options.withDefault(false),
+);
+
+const checkAllProjectsOption = Options.boolean("all-projects").pipe(
+  Options.withDescription("Check every registered Hub project."),
+  Options.withDefault(false),
+);
+
+const NO_SELECTED_PROJECT_MESSAGE =
+  "No selected Hub project exists. Run `archloop project add` to register one, `archloop project select <name>` to choose one, or pass `--project <name>`.";
+
+const hubReadinessCheckFailedError = (): HubFlowError =>
+  new HubFlowError({
+    message: "Hub readiness check failed.",
+  });
+
+const runHubReadinessCheck = (
+  options: Parameters<typeof collectHubReadinessChecks>[0] = {},
+) =>
   Effect.gen(function* () {
     const d = yield* Display;
-    const cwd = process.cwd();
-    const status = yield* Effect.try({
-      try: () => resolveHubProjectStatus({ cwd }),
+    const report = yield* Effect.tryPromise({
+      try: () => collectHubReadinessChecks(options),
       catch: (error) =>
-        new ProjectStatusError({
-          message: error instanceof Error ? error.message : String(error),
-        }),
+        error instanceof Error ? error : new Error(String(error)),
     });
 
-    yield* d.summary("Hub project status", formatHubProjectStatusRows(status));
-    for (const line of formatHubProjectStatusLines(status)) {
+    for (const section of report.sections) {
+      yield* d.spinner(section.title, Effect.void);
+    }
+
+    for (const line of formatHubReadinessCheckLines(report)) {
+      yield* d.text(line);
+    }
+
+    if (report.hasErrors) {
+      return yield* Effect.fail(hubReadinessCheckFailedError());
+    }
+  });
+
+const runHubProjectReadinessCheck = (
+  project: HubProjectRegistryEntry,
+): Effect.Effect<void, Error, Display> =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const report = yield* Effect.tryPromise({
+      try: () => collectHubProjectReadinessCheck(project, { env: process.env }),
+      catch: (error) =>
+        error instanceof Error ? error : new Error(String(error)),
+    });
+
+    for (const section of report.sections) {
+      yield* d.spinner(section.title, Effect.void);
+    }
+
+    for (const line of formatHubProjectReadinessCheckLines(project, report)) {
+      yield* d.text(line);
+    }
+
+    if (report.hasErrors) {
+      return yield* Effect.fail(hubReadinessCheckFailedError());
+    }
+  });
+
+const checkCommand = Command.make(
+  "check",
+  {
+    hub: checkHubOption,
+    project: projectTargetOption,
+    allProjects: checkAllProjectsOption,
+  },
+  ({ hub, project, allProjects }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      let hasErrors = false;
+      const hasExplicitProject = project._tag === "Some";
+
+      const captureCheckFailure = (
+        effect: Effect.Effect<void, Error, Display>,
+      ): Effect.Effect<void, never, Display> =>
+        effect.pipe(
+          Effect.catchAll(() => {
+            hasErrors = true;
+            return Effect.void;
+          }),
+        );
+
+      const runProjectCheck = (
+        target: HubProjectRegistryEntry,
+        statusMessage: string,
+      ): Effect.Effect<void, never, Display> =>
+        Effect.gen(function* () {
+          yield* d.status(statusMessage, "info");
+          yield* captureCheckFailure(runHubProjectReadinessCheck(target));
+        });
+
+      if (hub && (hasExplicitProject || allProjects)) {
+        return yield* Effect.fail(
+          new HubFlowError({
+            message:
+              "`--hub` cannot be combined with `--project` or `--all-projects`.",
+          }),
+        );
+      }
+
+      if (hasExplicitProject && allProjects) {
+        return yield* Effect.fail(
+          new HubFlowError({
+            message: "`--project` and `--all-projects` are mutually exclusive.",
+          }),
+        );
+      }
+
+      const shouldRunHub = hub || (!hasExplicitProject && !allProjects);
+      if (shouldRunHub) {
+        yield* captureCheckFailure(runHubReadinessCheck({ env: process.env }));
+      }
+
+      if (hasExplicitProject) {
+        const resolved = yield* Effect.tryPromise({
+          try: () =>
+            resolveHubProjectTarget({
+              projectSelector: project.value,
+              isTTY: false,
+            }),
+          catch: toProjectStatusError,
+        });
+        yield* runProjectCheck(
+          resolved.project,
+          `Checking explicit Hub project readiness for ${resolved.project.name}.`,
+        );
+      } else if (allProjects) {
+        const targets = listHubProjects({ env: process.env });
+        if (targets.length === 0) {
+          yield* d.status("No Hub projects are registered yet.", "info");
+        } else {
+          for (const target of targets) {
+            yield* runProjectCheck(
+              target,
+              `Checking Hub project readiness for ${target.name}.`,
+            );
+          }
+        }
+      } else if (!hub) {
+        const selectedProject = readSelectedHubProject({ env: process.env });
+        if (!selectedProject) {
+          yield* d.status(NO_SELECTED_PROJECT_MESSAGE, "warn");
+        } else {
+          yield* runProjectCheck(
+            selectedProject,
+            `Checking selected Hub project readiness for ${selectedProject.name}.`,
+          );
+        }
+      }
+
+      if (hasErrors) {
+        return yield* Effect.fail(hubReadinessCheckFailedError());
+      }
+    }),
+);
+
+const initializeSkipCheckOption = Options.boolean("skip-check").pipe(
+  Options.withDescription("Skip the default quick Hub check after setup."),
+  Options.withDefault(false),
+);
+
+const confirmInitializeConfigChange = (
+  message: string,
+): Effect.Effect<boolean, InitError> =>
+  Effect.tryPromise({
+    try: async () => {
+      const result = await clack.confirm({
+        message,
+        initialValue: false,
+      });
+      if (clack.isCancel(result)) {
+        throw new InitError({ message: "Hub initialization cancelled." });
+      }
+      return result === true;
+    },
+    catch: (error) =>
+      error instanceof InitError
+        ? error
+        : new InitError({
+            message: error instanceof Error ? error.message : String(error),
+          }),
+  });
+
+const listMissingInitializeHubEnvKeys = (): string[] => {
+  const existing = resolveHubEnv({ env: process.env });
+  return collectHubEnvKeysForSetup({ env: process.env }).filter(
+    (key) => normalizeHubEnvValue(existing[key]).length === 0,
+  );
+};
+
+const runInitializeHubAgentConfig = (): Effect.Effect<
+  void,
+  HubAgentConfigError | InitError,
+  Display
+> =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const config = yield* Effect.try({
+      try: () => readHubAgentConfig({ env: process.env }),
+      catch: toHubAgentConfigError,
+    });
+    const missingRoles = listMissingHubAgentRoles(config, HUB_AGENT_ROLES);
+
+    if (missingRoles.length > 0) {
+      yield* d.status(
+        `Missing Hub agent roles: ${missingRoles.join(", ")}. Starting guided setup.`,
+        "info",
+      );
+      yield* Effect.tryPromise({
+        try: () => promptInitializeHubAgentConfig(),
+        catch: toHubAgentConfigError,
+      });
+      return;
+    }
+
+    const shouldChange = yield* confirmInitializeConfigChange(
+      "Existing Hub agent roles found. Change provider/model settings now?",
+    );
+    if (shouldChange) {
+      yield* Effect.tryPromise({
+        try: () => promptInitHubAgentConfig(),
+        catch: toHubAgentConfigError,
+      });
+      return;
+    }
+
+    yield* d.status("Keeping existing Hub agent role settings.", "info");
+  });
+
+const runInitializeHubEnv = (): Effect.Effect<
+  void,
+  HubEnvError | InitError,
+  Display
+> =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const missingKeys = listMissingInitializeHubEnvKeys();
+
+    if (missingKeys.length > 0) {
+      yield* d.status(
+        `Missing Hub env values: ${missingKeys.join(", ")}. Starting guided setup.`,
+        "info",
+      );
+      yield* Effect.tryPromise({
+        try: () => promptInitializeHubEnv(),
+        catch: toHubEnvError,
+      });
+      return;
+    }
+
+    const shouldChange = yield* confirmInitializeConfigChange(
+      "Existing Hub env values found. Change shared env credentials now?",
+    );
+    if (shouldChange) {
+      yield* Effect.tryPromise({
+        try: () => promptInitHubEnv(),
+        catch: toHubEnvError,
+      });
+      return;
+    }
+
+    yield* d.status("Keeping existing Hub env values.", "info");
+  });
+
+const initializeCommand = Command.make(
+  "initialize",
+  {
+    skipCheck: initializeSkipCheckOption,
+  },
+  ({ skipCheck }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+
+      if (!hasInteractiveTerminal()) {
+        return yield* Effect.fail(
+          new InitError({
+            message:
+              "Interactive Hub initialization requires a TTY. Use `archloop agent-config set-role`, `archloop env set`, and `archloop auth login` in scripts.",
+          }),
+        );
+      }
+
+      yield* d.intro("Initialize archLoop Hub");
+      yield* d.status(
+        "Configure shared Hub agent roles, env values, and auth guidance without touching any Hub project.",
+        "info",
+      );
+
+      yield* runInitializeHubAgentConfig();
+      yield* runInitializeHubEnv();
+
+      for (const line of formatHubAuthShowLines()) {
+        yield* d.text(line);
+      }
+
+      if (skipCheck) {
+        yield* d.status("Skipped the quick Hub check.", "info");
+      } else {
+        yield* d.text(
+          "Quick Hub check may make a small provider/model call. Run `archloop initialize --skip-check` to skip it.",
+        );
+        yield* runHubReadinessCheck({ env: process.env });
+      }
+
+      yield* d.status("Hub initialization complete.", "success");
+      yield* d.text("archloop project add");
+    }),
+);
+
+const toHubProjectRegistryError = (error: unknown): HubProjectRegistryError =>
+  error instanceof HubProjectRegistryError
+    ? error
+    : new HubProjectRegistryError({
+        message: error instanceof Error ? error.message : String(error),
+      });
+
+const projectAddNameOption = Options.text("name").pipe(
+  Options.withDescription("User-facing Hub project name"),
+  Options.optional,
+);
+
+const projectAddPathOption = Options.text("path").pipe(
+  Options.withDescription("Path to an existing git repository"),
+  Options.optional,
+);
+
+const projectAddProfileOption = Options.text("project-profile").pipe(
+  Options.withDescription(
+    "Project profile to use for the Hub project development contract",
+  ),
+  Options.optional,
+);
+
+const projectSelectNameArg = Args.text({ name: "name" }).pipe(
+  Args.withDescription("Hub project name"),
+  Args.optional,
+);
+
+const projectRenameProjectArg = Args.text({ name: "project" }).pipe(
+  Args.withDescription("Existing Hub project name or id"),
+);
+
+const projectRenameNameArg = Args.text({ name: "new-name" }).pipe(
+  Args.withDescription("New user-facing Hub project name"),
+);
+
+const projectRelinkProjectArg = Args.text({ name: "project" }).pipe(
+  Args.withDescription("Existing Hub project name or id"),
+);
+
+const projectRelinkPathOption = Options.text("path").pipe(
+  Options.withDescription("New path to the existing git repository"),
+);
+
+const resolveInteractiveProjectName = async (
+  initialValue: string,
+): Promise<string> => {
+  const prompted = await clack.text({
+    message: "Hub project name",
+    initialValue,
+    validate: (input) => {
+      const trimmed = input?.trim() ?? "";
+      return trimmed.length === 0 ? "Project name is required" : undefined;
+    },
+  });
+  if (clack.isCancel(prompted)) {
+    throw new HubProjectRegistryError({
+      message: "Project registration cancelled.",
+    });
+  }
+  return String(prompted).trim();
+};
+
+const resolveInteractiveProjectPath = async (): Promise<string> => {
+  const prompted = await clack.text({
+    message: "Repo path",
+    validate: (input) => {
+      const trimmed = input?.trim() ?? "";
+      return trimmed.length === 0 ? "Repo path is required" : undefined;
+    },
+  });
+  if (clack.isCancel(prompted)) {
+    throw new HubProjectRegistryError({
+      message: "Project registration cancelled.",
+    });
+  }
+  return String(prompted).trim();
+};
+
+const resolveInteractiveProjectSelection = async (
+  projects: readonly HubProjectListEntry[],
+): Promise<string> => {
+  const result = await clack.select({
+    message: "Select a Hub project:",
+    options: projects.map((project) => ({
+      value: project.name,
+      label: project.name,
+      hint: project.repoRoot,
+    })),
+  });
+  if (clack.isCancel(result)) {
+    throw new HubProjectRegistryError({
+      message: "Project selection cancelled.",
+    });
+  }
+  return String(result);
+};
+
+const resolveInteractiveProjectProfile = async (
+  initialValue: string,
+): Promise<string> => {
+  const result = await clack.select({
+    message: "Select a project profile:",
+    initialValue,
+    options: listProjectProfiles().map((profile) => ({
+      value: profile.name,
+      label: profile.label,
+      hint: profile.description,
+    })),
+  });
+  if (clack.isCancel(result)) {
+    throw new HubProjectRegistryError({
+      message: "Project profile selection cancelled.",
+    });
+  }
+  return String(result);
+};
+
+const resolveProjectAddProfile = (
+  repoRoot: string,
+  projectProfile: string | undefined,
+  display: DisplayService,
+): Effect.Effect<string, HubProjectRegistryError> =>
+  Effect.gen(function* () {
+    const profileRecommendation = recommendHubProjectProfile(repoRoot);
+    if (projectProfile && projectProfile.length > 0) {
+      return projectProfile;
+    }
+
+    if (!hasInteractiveTerminal()) {
+      return profileRecommendation.projectProfileName;
+    }
+
+    yield* display.text(
+      formatHubProjectProfileRecommendation(profileRecommendation),
+    );
+
+    return yield* Effect.tryPromise({
+      try: () =>
+        resolveInteractiveProjectProfile(
+          profileRecommendation.projectProfileName,
+        ),
+      catch: toHubProjectRegistryError,
+    });
+  });
+
+const confirmProjectAddTaskStoreInitialization = async (): Promise<boolean> => {
+  const response = await clack.confirm({
+    message: "Initialize the local task store now?",
+    initialValue: true,
+  });
+  return clack.isCancel(response) ? false : response === true;
+};
+
+const initializeProjectAddTaskStore = (
+  display: DisplayService,
+  repoRoot: string,
+): Effect.Effect<boolean> =>
+  Effect.gen(function* () {
+    try {
+      const result = initHubTaskStore(repoRoot);
+      const output = result.output.trim();
+      if (output.length > 0) {
+        yield* display.text(output);
+      }
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      yield* display.status(
+        `Skipped local task store initialization: ${message}`,
+        "warn",
+      );
+      return false;
+    }
+  });
+
+const projectAddCommand = Command.make(
+  "add",
+  {
+    name: projectAddNameOption,
+    path: projectAddPathOption,
+    projectProfile: projectAddProfileOption,
+  },
+  ({ name, path, projectProfile }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      let projectName = optionalTextValue(name)?.trim() ?? "";
+      let repoPath = optionalTextValue(path)?.trim() ?? "";
+      let selectedProjectProfile = optionalTextValue(projectProfile)?.trim();
+
+      if (projectName.length === 0 || repoPath.length === 0) {
+        if (!hasInteractiveTerminal()) {
+          return yield* Effect.fail(
+            new HubProjectRegistryError({
+              message:
+                "archloop project add requires --name and --path in non-interactive mode.",
+            }),
+          );
+        }
+      }
+
+      if (repoPath.length === 0) {
+        repoPath = yield* Effect.tryPromise({
+          try: () => resolveInteractiveProjectPath(),
+          catch: toHubProjectRegistryError,
+        });
+      }
+
+      const repoRoot = yield* Effect.try({
+        try: () => resolveHubProjectRegistrationRepoRoot(repoPath),
+        catch: toHubProjectRegistryError,
+      });
+
+      if (projectName.length === 0) {
+        projectName = yield* Effect.tryPromise({
+          try: () =>
+            resolveInteractiveProjectName(suggestHubProjectName(repoRoot)),
+          catch: toHubProjectRegistryError,
+        });
+      }
+
+      selectedProjectProfile = yield* resolveProjectAddProfile(
+        repoRoot,
+        selectedProjectProfile,
+        d,
+      );
+
+      const result = yield* Effect.try({
+        try: () =>
+          registerHubProject({
+            repoPath,
+            projectName,
+            projectProfileName: selectedProjectProfile,
+            initializeTaskStore: false,
+          }),
+        catch: toHubProjectRegistryError,
+      });
+
+      let taskStoreInitialized = result.taskStoreInitialized;
+      if (hasInteractiveTerminal()) {
+        const shouldInitializeTaskStore = yield* Effect.tryPromise({
+          try: () => confirmProjectAddTaskStoreInitialization(),
+          catch: toHubProjectRegistryError,
+        });
+        if (shouldInitializeTaskStore) {
+          taskStoreInitialized = yield* initializeProjectAddTaskStore(
+            d,
+            result.project.repoRoot,
+          );
+        }
+      }
+
+      yield* d.summary("Hub project registered", {
+        Name: result.project.name,
+        "Project id": result.project.id,
+        "Repo root": result.project.repoRoot,
+        "Hub project dir": result.project.hubProjectDir,
+        "Project profile": result.project.projectProfile,
+        "Hub project development contract":
+          result.projectDevelopmentContractPath,
+        "Task store initialized": taskStoreInitialized ? "yes" : "no",
+        Selected: result.project.name,
+      });
+      yield* d.status(
+        `Registered Hub project ${result.project.name} and selected it for this CLI.`,
+        "success",
+      );
+      if (!taskStoreInitialized) {
+        yield* d.text(
+          "Run `archloop tasks init` in this repository later to initialize the local task store.",
+        );
+      }
+    }),
+);
+
+const projectListCommand = Command.make("list", {}, () =>
+  Effect.gen(function* () {
+    const d = yield* Display;
+    const projects = yield* Effect.try({
+      try: () => listHubProjects(),
+      catch: toHubProjectRegistryError,
+    });
+
+    if (projects.length === 0) {
+      yield* d.status("No Hub projects registered yet.", "info");
+      yield* d.text("Run `archloop project add` to register an existing repo.");
+      return;
+    }
+
+    const projections = yield* Effect.try({
+      try: () => resolveHubProjectListProjections(projects),
+      catch: toHubProjectRegistryError,
+    });
+
+    yield* d.summary("Registered Hub projects", {
+      Projects: String(projects.length),
+      Selected: projects.find((project) => project.selected)?.name ?? "none",
+    });
+
+    for (const line of formatHubProjectListLines(projections)) {
       yield* d.text(line);
     }
   }),
 );
 
+const projectSelectCommand = Command.make(
+  "select",
+  {
+    name: projectSelectNameArg,
+  },
+  ({ name }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      let projectName = optionalTextValue(name)?.trim();
+
+      if (!projectName) {
+        const projects = yield* Effect.try({
+          try: () => listHubProjects(),
+          catch: toHubProjectRegistryError,
+        });
+        if (projects.length === 0) {
+          return yield* Effect.fail(
+            new HubProjectRegistryError({
+              message:
+                "No Hub projects are registered yet. Run `archloop project add` first.",
+            }),
+          );
+        }
+        if (!hasInteractiveTerminal()) {
+          return yield* Effect.fail(
+            new HubProjectRegistryError({
+              message:
+                "archloop project select requires a project name in non-interactive mode.",
+            }),
+          );
+        }
+
+        projectName = yield* Effect.tryPromise({
+          try: () => resolveInteractiveProjectSelection(projects),
+          catch: toHubProjectRegistryError,
+        });
+      }
+
+      const project = yield* Effect.try({
+        try: () => selectHubProject({ projectSelector: projectName }),
+        catch: toHubProjectRegistryError,
+      });
+      yield* d.status(`Selected Hub project ${project.name}.`, "success");
+    }),
+);
+
+const projectRenameCommand = Command.make(
+  "rename",
+  {
+    project: projectRenameProjectArg,
+    newName: projectRenameNameArg,
+  },
+  ({ project, newName }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const result = yield* Effect.try({
+        try: () =>
+          renameHubProject({
+            projectSelector: project,
+            newProjectName: newName,
+            env: process.env,
+          }),
+        catch: toHubProjectRegistryError,
+      });
+
+      yield* d.summary("Hub project renamed", {
+        "Project id": result.project.id,
+        "Previous name": result.previousProjectName,
+        "New name": result.project.name,
+        "Repo root": result.project.repoRoot,
+        "Hub project dir": result.project.hubProjectDir,
+        Selected: result.project.name,
+      });
+      yield* d.status(
+        `Renamed Hub project ${result.previousProjectName} to ${result.project.name}.`,
+        "success",
+      );
+    }),
+);
+
+const projectRelinkCommand = Command.make(
+  "relink",
+  {
+    project: projectRelinkProjectArg,
+    path: projectRelinkPathOption,
+  },
+  ({ project, path }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const result = yield* Effect.try({
+        try: () =>
+          relinkHubProject({
+            projectSelector: project,
+            repoPath: path,
+            env: process.env,
+          }),
+        catch: toHubProjectRegistryError,
+      });
+
+      yield* d.summary("Hub project relinked", {
+        "Project id": result.project.id,
+        "Previous repo root": result.previousRepoRoot,
+        "New repo root": result.project.repoRoot,
+        "Hub project dir": result.project.hubProjectDir,
+        Selected: result.project.name,
+      });
+      yield* d.status(
+        `Relinked Hub project ${result.project.name} to ${result.project.repoRoot}.`,
+        "success",
+      );
+    }),
+);
+
 const projectConfigureCommand = Command.make(
   "configure",
   {
+    project: projectTargetOption,
     projectProfile: projectConfigureProjectProfileOption,
   },
-  ({ projectProfile }) =>
+  ({ project, projectProfile }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = process.cwd();
-      const status = yield* Effect.try({
-        try: () => resolveHubProjectStatus({ cwd }),
-        catch: (error) =>
-          new ProjectStatusError({
-            message: error instanceof Error ? error.message : String(error),
-          }),
-      });
+      const status = yield* resolveProjectTargetStatus(project);
 
       const availableProjectProfiles = formatProjectProfileNames();
       let selectedProjectProfile: string;
@@ -2511,25 +3553,11 @@ const projectConfigureCommand = Command.make(
           );
         }
 
-        const selected = yield* Effect.promise(() =>
-          clack.select({
-            message: "Select a project profile:",
-            initialValue: DEFAULT_PROJECT_PROFILE_NAME,
-            options: listProjectProfiles().map((profile) => ({
-              value: profile.name,
-              label: profile.label,
-              hint: profile.description,
-            })),
-          }),
-        );
-        if (clack.isCancel(selected)) {
-          yield* Effect.fail(
-            new ProjectStatusError({
-              message: "Project profile selection cancelled.",
-            }),
-          );
-        }
-        selectedProjectProfile = selected as string;
+        selectedProjectProfile = yield* Effect.tryPromise({
+          try: () =>
+            resolveInteractiveProjectProfile(DEFAULT_PROJECT_PROFILE_NAME),
+          catch: toProjectStatusError,
+        });
       }
 
       const contract = yield* Effect.try({
@@ -2539,10 +3567,7 @@ const projectConfigureCommand = Command.make(
             hubProjectDir: status.hubProjectDir,
             projectProfileName: selectedProjectProfile,
           }),
-        catch: (error) =>
-          new ProjectStatusError({
-            message: error instanceof Error ? error.message : String(error),
-          }),
+        catch: toProjectStatusError,
       });
 
       yield* d.summary("Hub project development contract", {
@@ -2572,7 +3597,15 @@ const projectCommand = Command.make("project", {}, () =>
     );
   }),
 ).pipe(
-  Command.withSubcommands([projectStatusCommand, projectConfigureCommand]),
+  Command.withSubcommands([
+    projectAddCommand,
+    projectListCommand,
+    projectSelectCommand,
+    projectRenameCommand,
+    projectRelinkCommand,
+    projectStatusCommand,
+    projectConfigureCommand,
+  ]),
 );
 
 const getHubFlowIds = (): string =>
@@ -2582,6 +3615,7 @@ const getHubFlowIds = (): string =>
 
 const flowOption = Options.text("flow").pipe(
   Options.withDescription(`Hub flow id (${getHubFlowIds()})`),
+  Options.optional,
 );
 
 const flowInputOption = Options.text("input").pipe(
@@ -2618,6 +3652,273 @@ const flowMaxBatchesOption = Options.text("max-batches").pipe(
   ),
   Options.optional,
 );
+
+const flowOutputOption = Options.choice("output", ["auto", "plain", "json"] as [
+  "auto",
+  "plain",
+  "json",
+]).pipe(
+  Options.withDescription(
+    "Run output mode (auto for a live TTY view with plain fallback, plain for deterministic text, json for versioned JSONL)",
+  ),
+  Options.optional,
+);
+
+const flowNoColorOption = Options.boolean("no-color").pipe(
+  Options.withDescription(
+    "Disable color while preserving live terminal labels and symbols.",
+  ),
+  Options.withDefault(false),
+);
+
+const runProjectArg = Args.text({ name: "project" }).pipe(
+  Args.withDescription(
+    "Hub project name or legacy repo path (use . temporarily for the current repo)",
+  ),
+  Args.optional,
+);
+
+const runProjectOption = Options.text("project").pipe(
+  Options.withDescription("Hub project name"),
+  Options.optional,
+);
+
+const isLegacyRunProjectTarget = (value: string): boolean => {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return false;
+  }
+
+  return (
+    trimmed === "." ||
+    trimmed === ".." ||
+    trimmed.startsWith("./") ||
+    trimmed.startsWith("../") ||
+    trimmed.startsWith("~") ||
+    isAbsolute(trimmed) ||
+    trimmed.includes("/") ||
+    trimmed.includes("\\")
+  );
+};
+
+const resolveInteractiveRunFlowSelection = async (
+  flows: ReturnType<typeof listHubFlows>,
+): Promise<string> => {
+  const result = await clack.select({
+    message: "Select a Hub flow:",
+    options: flows.map((flow) => ({
+      value: flow.id,
+      label: flow.id,
+      hint: flow.description,
+    })),
+  });
+  if (clack.isCancel(result)) {
+    throw new HubFlowError({
+      message: "Flow selection cancelled.",
+    });
+  }
+
+  return String(result);
+};
+
+const resolveRunFlowDefinition = async (
+  flowId: string | undefined,
+  isInteractive: boolean,
+): Promise<HubFlowDefinition> => {
+  const requireFlowDefinition = (value: string): HubFlowDefinition => {
+    const flowDefinition = getHubFlowDefinition(value);
+    if (!flowDefinition) {
+      throw new HubFlowError({
+        message: `Unknown Hub flow "${value}". Available flows: ${getHubFlowIds()}`,
+      });
+    }
+    return flowDefinition;
+  };
+
+  if (flowId) {
+    return requireFlowDefinition(flowId);
+  }
+
+  if (!isInteractive) {
+    throw new HubFlowError({
+      message:
+        "No Hub flow was provided. Run `archloop run --flow <id>`, `archloop run <project-name> --flow <id>`, or `archloop run --project <name> --flow <id>`.",
+    });
+  }
+
+  return requireFlowDefinition(
+    await resolveInteractiveRunFlowSelection(listHubFlows()),
+  );
+};
+
+const promptRequiredRunFlowInput = async (
+  flowInput: HubFlowInputSchema,
+): Promise<string> => {
+  const promptedInput = await clack.text({
+    message: flowInput.label,
+    validate: (value) => {
+      const trimmed = value?.trim() ?? "";
+      return trimmed.length === 0
+        ? `${flowInput.label} is required`
+        : undefined;
+    },
+  });
+  if (clack.isCancel(promptedInput)) {
+    throw new HubFlowError({
+      message: "Flow input selection cancelled.",
+    });
+  }
+
+  return String(promptedInput).trim();
+};
+
+const resolveRunFlowInput = async ({
+  flowDefinition,
+  cwd,
+  rawInput,
+  isInteractive,
+}: {
+  readonly flowDefinition: HubFlowDefinition;
+  readonly cwd: string;
+  readonly rawInput: string | undefined;
+  readonly isInteractive: boolean;
+}): Promise<ValidatedHubFlowInput | undefined> => {
+  if (rawInput && !flowDefinition.input) {
+    throw new HubFlowError({
+      message: `Hub flow "${flowDefinition.id}" does not accept --input.`,
+    });
+  }
+
+  const flowInput = flowDefinition.input;
+  if (!flowInput) {
+    return undefined;
+  }
+
+  let resolvedInput = rawInput;
+  if (resolvedInput === undefined && flowInput.required && isInteractive) {
+    resolvedInput = await promptRequiredRunFlowInput(flowInput);
+  }
+
+  return validateHubFlowInput(flowDefinition.id, {
+    cwd,
+    rawInput: resolvedInput,
+  });
+};
+
+type RunProjectResolution = {
+  readonly repoRoot: string;
+  readonly targetProjectName?: string;
+  readonly legacyProjectTarget?: string;
+};
+
+const resolveRunProjectTarget = ({
+  projectFlag,
+  positionalProject,
+  isInteractive,
+  display,
+  showLegacyGuidance,
+}: {
+  readonly projectFlag: string | undefined;
+  readonly positionalProject: string | undefined;
+  readonly isInteractive: boolean;
+  readonly display: DisplayService;
+  readonly showLegacyGuidance: boolean;
+}): Effect.Effect<RunProjectResolution, HubFlowError> =>
+  Effect.gen(function* () {
+    const legacyProjectTarget =
+      projectFlag === undefined &&
+      positionalProject !== undefined &&
+      isLegacyRunProjectTarget(positionalProject)
+        ? positionalProject
+        : undefined;
+
+    if (legacyProjectTarget) {
+      const repoRoot = yield* Effect.try({
+        try: () => resolveGitRepoRoot(legacyProjectTarget),
+        catch: toHubFlowError,
+      });
+      if (showLegacyGuidance) {
+        yield* display.status(
+          "Legacy path target detected. Run `archloop project add` and `archloop project select <name>` to target this repo by Hub project name next time.",
+          "warn",
+        );
+      }
+      return {
+        repoRoot,
+        legacyProjectTarget,
+      };
+    }
+
+    const target = yield* Effect.tryPromise({
+      try: () =>
+        resolveHubProjectTarget({
+          projectSelector: projectFlag ?? positionalProject,
+          isTTY: isInteractive,
+          selectProject: resolveInteractiveProjectSelection,
+        }),
+      catch: toHubFlowError,
+    });
+
+    return {
+      repoRoot: target.project.repoRoot,
+      targetProjectName: target.project.name,
+    };
+  });
+
+const buildRunPlanSummaryRows = ({
+  repoRoot,
+  flowDefinition,
+  targetProjectName,
+  legacyProjectTarget,
+  validatedInput,
+}: {
+  readonly repoRoot: string;
+  readonly flowDefinition: HubFlowDefinition;
+  readonly targetProjectName?: string;
+  readonly legacyProjectTarget?: string;
+  readonly validatedInput?: ValidatedHubFlowInput;
+}): Record<string, string> => {
+  const rows: Record<string, string> = {
+    "Repository root": repoRoot,
+    "Hub flow": flowDefinition.id,
+  };
+  if (targetProjectName) {
+    rows["Hub project"] = targetProjectName;
+  }
+  if (legacyProjectTarget) {
+    rows["Legacy path target"] = legacyProjectTarget;
+  }
+  if (validatedInput) {
+    rows["Flow input"] = formatValidatedHubFlowInputSummary(validatedInput);
+  }
+  return rows;
+};
+
+const confirmRunPlan = (): Effect.Effect<boolean, HubFlowError> =>
+  Effect.gen(function* () {
+    const confirmed = yield* Effect.tryPromise({
+      try: () =>
+        clack.confirm({
+          message: "Run this Hub flow now?",
+          initialValue: true,
+        }),
+      catch: toHubFlowError,
+    });
+    return !clack.isCancel(confirmed) && confirmed === true;
+  });
+
+const requireProposalRunInput = (
+  flowDefinition: HubFlowDefinition,
+  validatedInput: ValidatedHubFlowInput | undefined,
+): ValidatedHubFlowInput => {
+  if (validatedInput) {
+    return validatedInput;
+  }
+
+  throw new HubFlowError({
+    message: `Hub flow "${flowDefinition.id}" requires flow input.`,
+  });
+};
 
 const toHubAgentConfigError = (error: unknown): HubAgentConfigError =>
   error instanceof HubAgentConfigError
@@ -3026,33 +4327,133 @@ const toHubFlowError = (error: unknown): HubFlowError =>
         message: error instanceof Error ? error.message : String(error),
       });
 
+const isHubRunCancellationError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const candidate = error as {
+    readonly name?: unknown;
+    readonly code?: unknown;
+    readonly _tag?: unknown;
+  };
+  return (
+    candidate.name === "AbortError" ||
+    candidate.code === "ABORT_ERR" ||
+    candidate._tag === "InterruptedException"
+  );
+};
+
+const formatEarlyHubRunJsonFailure = (input: {
+  readonly flowId: string;
+  readonly hubProject?: string;
+  readonly error: unknown;
+}): string => {
+  const rawDiagnostic =
+    input.error instanceof Error ? input.error.message : String(input.error);
+  const diagnostic =
+    rawDiagnostic
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.length > 0)
+      ?.slice(0, 240) ?? "Run failed.";
+  return JSON.stringify({
+    schemaVersion: 1,
+    eventId: "unknown:output:1",
+    sequence: 1,
+    timestamp: new Date().toISOString(),
+    type: "run_failed",
+    runId: "unknown",
+    flowId: input.flowId,
+    ...(input.hubProject ? { hubProject: input.hubProject } : {}),
+    outcome: "failed",
+    summary: "Run failed",
+    diagnostic,
+    exitCode: 1,
+    logs: "",
+  });
+};
+
 const runCommand = Command.make(
   "run",
   {
-    project: Args.text({ name: "project" }).pipe(
-      Args.withDescription(
-        "Path to the git repository (use . for current repo)",
-      ),
-    ),
+    projectPath: runProjectArg,
+    project: runProjectOption,
     flow: flowOption,
     input: flowInputOption,
     yes: flowYesOption,
     batchStrategy: flowBatchStrategyOption,
     maxTasks: flowMaxTasksOption,
     maxBatches: flowMaxBatchesOption,
+    output: flowOutputOption,
+    noColor: flowNoColorOption,
   },
-  ({ project, flow, input, yes, batchStrategy, maxTasks, maxBatches }) =>
+  ({
+    projectPath,
+    project,
+    flow,
+    input,
+    yes,
+    batchStrategy,
+    maxTasks,
+    maxBatches,
+    output,
+    noColor,
+  }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const projectDir = project.trim().length > 0 ? project : ".";
-      const flowDefinition = getHubFlowDefinition(flow);
-      if (!flowDefinition) {
-        return yield* Effect.fail(
-          new HubFlowError({
-            message: `Unknown Hub flow "${flow}". Available flows: ${getHubFlowIds()}`,
-          }),
-        );
-      }
+      const outputMode = output._tag === "Some" ? output.value : "auto";
+      const isPlainOutput = outputMode === "plain";
+      const isJsonOutput = outputMode === "json";
+      const isMachineOutput = isPlainOutput || isJsonOutput;
+      const autoOutputResolution =
+        outputMode === "auto"
+          ? resolveHubRunOutputMode({
+              isTTY: process.stdout.isTTY,
+              columns: process.stdout.columns,
+              rows: process.stdout.rows,
+              colorEnabled: !noColor,
+              cursorControl: supportsHubRunCursorControl(process.env),
+              env: process.env,
+            })
+          : undefined;
+      const autoDisablesPrompts =
+        autoOutputResolution?.mode === "plain" &&
+        autoOutputResolution.reason === "ci";
+      const isInteractive =
+        hasInteractiveTerminal() && !isMachineOutput && !autoDisablesPrompts;
+      const projectFlag = trimOptionalText(optionalTextValue(project));
+      const positionalProject = trimOptionalText(
+        optionalTextValue(projectPath),
+      );
+      const { repoRoot, targetProjectName, legacyProjectTarget } =
+        yield* resolveRunProjectTarget({
+          projectFlag,
+          positionalProject,
+          isInteractive,
+          display: d,
+          showLegacyGuidance: !isMachineOutput,
+        });
+      const flowDefinition = yield* Effect.tryPromise({
+        try: () =>
+          resolveRunFlowDefinition(
+            trimOptionalText(optionalTextValue(flow)),
+            isInteractive,
+          ),
+        catch: toHubFlowError,
+      });
+      const usesTaskBoardOutput = flowDefinition.kind === "task-board";
+      const usesStructuredRunOutput =
+        usesTaskBoardOutput || flowDefinition.kind === "proposal";
+      let activeTaskBoardOutput: "live" | "plain" | "json" | undefined =
+        usesStructuredRunOutput
+          ? isJsonOutput
+            ? "json"
+            : isPlainOutput
+              ? "plain"
+              : autoOutputResolution?.mode
+          : undefined;
+      const suppressDecoratedTaskBoardOutput =
+        activeTaskBoardOutput !== undefined;
 
       const batchSelectionOptions = yield* Effect.try({
         try: () =>
@@ -3079,84 +4480,591 @@ const runCommand = Command.make(
         );
       }
 
-      const repoRoot = yield* Effect.try({
-        try: () => resolveGitRepoRoot(projectDir),
+      const rawInput = optionalTextValue(input);
+      const validatedInput = yield* Effect.tryPromise({
+        try: () =>
+          resolveRunFlowInput({
+            flowDefinition,
+            cwd: repoRoot,
+            rawInput,
+            isInteractive,
+          }),
         catch: toHubFlowError,
       });
-
-      const rawInput = optionalTextValue(input);
-      if (rawInput && !flowDefinition.input) {
-        return yield* Effect.fail(
-          new HubFlowError({
-            message: `Hub flow "${flow}" does not accept --input.`,
-          }),
-        );
-      }
-
-      if (flowDefinition.input) {
-        const validatedInput = yield* Effect.try({
-          try: () =>
-            validateHubFlowInput(flowDefinition.id, {
-              cwd: repoRoot,
-              rawInput,
-            }),
-          catch: toHubFlowError,
-        });
+      if (
+        validatedInput &&
+        (!suppressDecoratedTaskBoardOutput || isInteractive)
+      ) {
         yield* d.status(
           formatValidatedHubFlowInputSummary(validatedInput),
           "info",
         );
+      }
 
-        if (flowDefinition.kind === "proposal") {
-          const execution = yield* Effect.tryPromise({
-            try: () =>
-              runHubProposalFlowFromCli({
-                cwd: repoRoot,
-                validatedInput,
-                yes,
-                isTTY: process.stdin.isTTY,
-              }),
-            catch: toHubFlowError,
-          });
+      if (!suppressDecoratedTaskBoardOutput || isInteractive) {
+        yield* d.summary(
+          "Hub run plan",
+          buildRunPlanSummaryRows({
+            repoRoot,
+            flowDefinition,
+            targetProjectName,
+            legacyProjectTarget,
+            validatedInput,
+          }),
+        );
+      }
 
-          if (execution.flowId === "prd-decomposition") {
-            yield* handlePrdDecompositionFlowDisplay(
-              execution.result,
-              (message) => new HubFlowError({ message }),
-            );
-            return;
-          }
-
-          yield* handleTriageProposalFlowDisplay(
-            execution.result,
-            (message) => new HubFlowError({ message }),
-          );
+      if (isInteractive && !yes) {
+        const confirmed = yield* confirmRunPlan();
+        if (!confirmed) {
+          process.exitCode = 130;
+          yield* d.status("Run cancelled.", "warn");
           return;
         }
       }
 
-      const result = yield* Effect.tryPromise({
-        try: () =>
-          runHubFlow({
-            flowId: flowDefinition.id,
+      if (flowDefinition.kind === "proposal") {
+        let proposalDisplayState = createHubProposalRunDisplayState({
+          hubProjectName: targetProjectName ?? legacyProjectTarget ?? repoRoot,
+          flowId: flowDefinition.id,
+        });
+        const proposalJsonRenderer =
+          activeTaskBoardOutput === "json"
+            ? createHubProposalRunJsonRenderer({
+                hubProjectName:
+                  targetProjectName ?? legacyProjectTarget ?? repoRoot,
+                flowId: flowDefinition.id,
+              })
+            : undefined;
+        let proposalLiveDisplay =
+          activeTaskBoardOutput === "live" &&
+          autoOutputResolution?.mode === "live"
+            ? createHubProposalRunLiveDisplay({
+                terminal: {
+                  write: (chunk) => {
+                    process.stdout.write(chunk);
+                  },
+                },
+                clock: { now: () => Date.now() },
+                startedAt: Date.now(),
+                columns: process.stdout.columns ?? 0,
+                rows: process.stdout.rows,
+                color: autoOutputResolution.color,
+              })
+            : undefined;
+        const proposalPlainHistory: string[] = [];
+        let proposalLiveRefresh: ReturnType<typeof setInterval> | undefined;
+        let resizeProposalLiveDisplay: (() => void) | undefined;
+        const stopProposalLiveRuntime = (): void => {
+          if (proposalLiveRefresh) {
+            clearInterval(proposalLiveRefresh);
+            proposalLiveRefresh = undefined;
+          }
+          if (resizeProposalLiveDisplay) {
+            process.stdout.off("resize", resizeProposalLiveDisplay);
+            resizeProposalLiveDisplay = undefined;
+          }
+        };
+        const flushProposalPlainHistory = (): void => {
+          for (const line of proposalPlainHistory) {
+            Effect.runSync(d.plain(line));
+          }
+          proposalPlainHistory.length = 0;
+        };
+        const fallbackProposalLiveToPlain = (): void => {
+          try {
+            proposalLiveDisplay?.dispose();
+          } catch {
+            // Process-level cleanup remains the final fallback.
+          }
+          proposalLiveDisplay = undefined;
+          stopProposalLiveRuntime();
+          activeTaskBoardOutput = "plain";
+          flushProposalPlainHistory();
+        };
+        if (proposalLiveDisplay) {
+          proposalLiveRefresh = setInterval(() => {
+            try {
+              if (proposalLiveDisplay?.refresh() === false) {
+                fallbackProposalLiveToPlain();
+              }
+            } catch {
+              fallbackProposalLiveToPlain();
+            }
+          }, 1_000);
+          proposalLiveRefresh.unref();
+          resizeProposalLiveDisplay = () => {
+            try {
+              if (
+                proposalLiveDisplay?.resize(
+                  process.stdout.columns ?? 0,
+                  process.stdout.rows,
+                )
+              ) {
+                return;
+              }
+            } catch {
+              // Fall through to deterministic plain output.
+            }
+            fallbackProposalLiveToPlain();
+          };
+          process.stdout.on("resize", resizeProposalLiveDisplay);
+        }
+        const onPresentationEvent = (
+          event: HubProposalPresentationEvent,
+        ): void => {
+          if (
+            !acceptsHubProposalPresentationEvent(proposalDisplayState, event)
+          ) {
+            return;
+          }
+          proposalDisplayState = reduceHubProposalRunDisplayState(
+            proposalDisplayState,
+            event,
+          );
+          if (activeTaskBoardOutput === "json") {
+            Effect.runSync(d.plain(proposalJsonRenderer!.event(event)));
+            return;
+          }
+          const line = formatPlainHubProposalEvent(
+            event,
+            proposalDisplayState.hubProjectName,
+          );
+          if (activeTaskBoardOutput === "live") {
+            proposalPlainHistory.push(line);
+            try {
+              if (proposalLiveDisplay?.update(proposalDisplayState) === false) {
+                fallbackProposalLiveToPlain();
+              }
+            } catch {
+              fallbackProposalLiveToPlain();
+            }
+            return;
+          }
+          Effect.runSync(d.plain(line));
+        };
+        const proposalRunSignal = createRunSignalController();
+        const proposalAttempt = yield* Effect.promise(() =>
+          runHubProposalFlowFromCli({
             cwd: repoRoot,
-            implementer: createHubFlowRunImplementer({
-              cwd: repoRoot,
-              env: process.env,
-            }),
-            reviewer: flowDefinition.hasReviewer
-              ? createHubFlowRunReviewer({ cwd: repoRoot, env: process.env })
-              : undefined,
-            batchStrategy: batchSelectionOptions.batchStrategy,
-            maxTasks: batchSelectionOptions.maxTasks,
-            maxBatches: flowMaxBatches,
-            batchPlanner:
-              batchSelectionOptions.batchStrategy === "planned"
-                ? createHubBatchPlannerInvoker({ env: process.env })
-                : undefined,
-          }),
-        catch: toHubFlowError,
+            validatedInput: requireProposalRunInput(
+              flowDefinition,
+              validatedInput,
+            ),
+            yes,
+            isTTY: process.stdin.isTTY,
+            interactive: isInteractive,
+            showDecoratedOutput: false,
+            onPresentationEvent,
+            beforePrompt: () => {
+              try {
+                proposalLiveDisplay?.suspend();
+              } catch {
+                fallbackProposalLiveToPlain();
+              }
+            },
+            afterPrompt: () => {
+              try {
+                if (proposalLiveDisplay?.resume() === false) {
+                  fallbackProposalLiveToPlain();
+                }
+              } catch {
+                fallbackProposalLiveToPlain();
+              }
+            },
+            signal: proposalRunSignal.signal,
+          })
+            .then(
+              (result) => ({ _tag: "Success" as const, result }),
+              (error: unknown) =>
+                isHubRunCancellationError(error)
+                  ? ({ _tag: "Cancelled" as const, error } as const)
+                  : ({ _tag: "Failure" as const, error } as const),
+            )
+            .finally(proposalRunSignal.dispose),
+        );
+        if (proposalAttempt._tag === "Cancelled") {
+          const cancellation = projectHubProposalRunCancellation(
+            proposalDisplayState,
+            getRunCancellationExitCode(proposalAttempt.error),
+          );
+          process.exitCode = cancellation.exitCode;
+          stopProposalLiveRuntime();
+          if (activeTaskBoardOutput === "live") {
+            try {
+              proposalLiveDisplay?.finalize(proposalDisplayState, cancellation);
+              return;
+            } catch {
+              fallbackProposalLiveToPlain();
+            }
+          }
+          if (activeTaskBoardOutput === "json") {
+            yield* d.plain(
+              proposalJsonRenderer!.outcome(proposalDisplayState, cancellation),
+            );
+            return;
+          }
+          yield* d.plain(
+            formatPlainHubProposalOutcome(proposalDisplayState, cancellation),
+          );
+          return;
+        }
+        if (proposalAttempt._tag === "Failure") {
+          const failure = projectHubProposalRunFailure(
+            proposalDisplayState,
+            proposalAttempt.error,
+          );
+          process.exitCode = 1;
+          stopProposalLiveRuntime();
+          if (activeTaskBoardOutput === "json") {
+            yield* d.plain(
+              proposalJsonRenderer!.failure(
+                proposalDisplayState,
+                proposalAttempt.error,
+              ),
+            );
+            return;
+          }
+          if (activeTaskBoardOutput === "live") {
+            try {
+              proposalLiveDisplay?.finalize(proposalDisplayState, failure);
+              return;
+            } catch {
+              fallbackProposalLiveToPlain();
+            }
+          }
+          yield* d.plain(
+            formatPlainHubProposalOutcome(proposalDisplayState, failure),
+          );
+          return;
+        }
+        const outcome = projectHubProposalRunOutcome(proposalDisplayState);
+        process.exitCode = outcome.exitCode;
+        if (activeTaskBoardOutput === "live") {
+          try {
+            proposalLiveDisplay?.finalize(proposalDisplayState, outcome);
+            stopProposalLiveRuntime();
+            return;
+          } catch {
+            fallbackProposalLiveToPlain();
+          }
+        }
+        if (activeTaskBoardOutput === "json") {
+          stopProposalLiveRuntime();
+          yield* d.plain(
+            proposalJsonRenderer!.outcome(proposalDisplayState, outcome),
+          );
+          return;
+        }
+        yield* d.plain(
+          formatPlainHubProposalOutcome(proposalDisplayState, outcome),
+        );
+        stopProposalLiveRuntime();
+        return;
+      }
+
+      let displayState = createHubRunDisplayState({
+        hubProjectName: targetProjectName ?? legacyProjectTarget ?? repoRoot,
+        flowId: flowDefinition.id,
       });
+      const jsonRenderer = isJsonOutput
+        ? createHubRunJsonRenderer({
+            hubProjectName:
+              targetProjectName ?? legacyProjectTarget ?? repoRoot,
+            flowId: flowDefinition.id,
+          })
+        : undefined;
+      const plainHistory: string[] = [];
+      const seenPlainSourceEventIds = new Set<string>();
+      const plainSourceSequences = new Map<string, number>();
+      let plainHistoryFlushed = false;
+      const acceptsPlainSourceEvent = (event: HubRunEvent): boolean => {
+        if (seenPlainSourceEventIds.has(event.eventId)) {
+          return false;
+        }
+        seenPlainSourceEventIds.add(event.eventId);
+        const scope =
+          "taskId" in event
+            ? `${event.runId}:task:${event.taskId}`
+            : "batchId" in event
+              ? `${event.runId}:batch:${event.batchId}`
+              : `${event.runId}:run`;
+        const currentSequence = plainSourceSequences.get(scope);
+        if (
+          currentSequence !== undefined &&
+          event.sequence <= currentSequence
+        ) {
+          return false;
+        }
+        plainSourceSequences.set(scope, event.sequence);
+        return true;
+      };
+      const flushPlainHistory = (): void => {
+        if (plainHistoryFlushed) {
+          return;
+        }
+        for (const line of plainHistory) {
+          Effect.runSync(d.plain(line));
+        }
+        plainHistory.length = 0;
+        plainHistoryFlushed = true;
+      };
+      let liveDisplay =
+        activeTaskBoardOutput === "live" &&
+        autoOutputResolution?.mode === "live"
+          ? createHubRunLiveDisplay({
+              terminal: {
+                write: (chunk) => {
+                  process.stdout.write(chunk);
+                },
+              },
+              clock: { now: () => Date.now() },
+              startedAt: Date.now(),
+              columns: process.stdout.columns ?? 0,
+              rows: process.stdout.rows,
+              color: autoOutputResolution.color,
+            })
+          : undefined;
+      let liveRefresh: ReturnType<typeof setInterval> | undefined;
+      let resizeLiveDisplay: (() => void) | undefined;
+      const stopLiveRuntime = (): void => {
+        if (liveRefresh) {
+          clearInterval(liveRefresh);
+          liveRefresh = undefined;
+        }
+        if (resizeLiveDisplay) {
+          process.stdout.off("resize", resizeLiveDisplay);
+          resizeLiveDisplay = undefined;
+        }
+      };
+      const fallbackLiveToPlain = (): void => {
+        try {
+          liveDisplay?.dispose();
+        } catch {
+          // Process-level terminal cleanup remains the final fallback.
+        }
+        stopLiveRuntime();
+        flushPlainHistory();
+        liveDisplay = undefined;
+        activeTaskBoardOutput = "plain";
+      };
+      if (liveDisplay) {
+        liveRefresh = setInterval(() => {
+          try {
+            if (liveDisplay?.refresh() === false) {
+              fallbackLiveToPlain();
+            }
+          } catch {
+            fallbackLiveToPlain();
+          }
+        }, 1_000);
+        liveRefresh.unref();
+        resizeLiveDisplay = () => {
+          try {
+            if (
+              liveDisplay?.resize(
+                process.stdout.columns ?? 0,
+                process.stdout.rows,
+              )
+            ) {
+              return;
+            }
+          } catch {
+            // Fall through to deterministic plain output.
+          }
+          fallbackLiveToPlain();
+        };
+        process.stdout.on("resize", resizeLiveDisplay);
+      }
+      const cleanupLiveDisplay = (): void => {
+        stopLiveRuntime();
+        try {
+          liveDisplay?.dispose();
+        } catch {
+          // setupTerminalCleanup() restores the cursor on process exit.
+        }
+        liveDisplay = undefined;
+      };
+      const taskBoardRunSignal = createRunSignalController();
+      const runAttempt = yield* Effect.promise(() =>
+        runHubFlow({
+          flowId: flowDefinition.id,
+          cwd: repoRoot,
+          signal: taskBoardRunSignal.signal,
+          implementer: createHubFlowRunImplementer({
+            cwd: repoRoot,
+            env: process.env,
+            showAgentStartup: !suppressDecoratedTaskBoardOutput,
+          }),
+          reviewer: flowDefinition.hasReviewer
+            ? createHubFlowRunReviewer({
+                cwd: repoRoot,
+                env: process.env,
+                showAgentStartup: !suppressDecoratedTaskBoardOutput,
+              })
+            : undefined,
+          batchStrategy: batchSelectionOptions.batchStrategy,
+          maxTasks: batchSelectionOptions.maxTasks,
+          maxBatches: flowMaxBatches,
+          batchPlanner:
+            batchSelectionOptions.batchStrategy === "planned"
+              ? createHubBatchPlannerInvoker({
+                  env: process.env,
+                  signal: taskBoardRunSignal.signal,
+                })
+              : undefined,
+          onEvent: suppressDecoratedTaskBoardOutput
+            ? (event) => {
+                const nextDisplayState = reduceHubRunDisplayState(
+                  displayState,
+                  event,
+                );
+                if (activeTaskBoardOutput === "json") {
+                  displayState = nextDisplayState;
+                  const line = jsonRenderer?.event(event);
+                  if (line !== undefined) {
+                    Effect.runSync(d.plain(line));
+                  }
+                  return;
+                }
+                const acceptedPlainEvent = acceptsPlainSourceEvent(event);
+                if (activeTaskBoardOutput === "live") {
+                  displayState = nextDisplayState;
+                  if (acceptedPlainEvent && event.type !== "run_completed") {
+                    plainHistory.push(
+                      formatPlainHubRunEvent(event, displayState),
+                    );
+                  }
+                  try {
+                    if (liveDisplay?.update(displayState) === false) {
+                      fallbackLiveToPlain();
+                    }
+                  } catch {
+                    fallbackLiveToPlain();
+                  }
+                  return;
+                }
+                if (!acceptedPlainEvent) {
+                  return;
+                }
+                displayState = nextDisplayState;
+                if (event.type === "run_completed") {
+                  return;
+                }
+                Effect.runSync(
+                  d.plain(formatPlainHubRunEvent(event, displayState)),
+                );
+              }
+            : undefined,
+        })
+          .then(
+            (result) => ({ _tag: "Success" as const, result }),
+            (error: unknown) =>
+              isHubRunCancellationError(error)
+                ? ({ _tag: "Cancelled" as const, error } as const)
+                : ({ _tag: "Failure" as const, error } as const),
+          )
+          .finally(taskBoardRunSignal.dispose),
+      );
+      if (runAttempt._tag === "Cancelled") {
+        process.exitCode = getRunCancellationExitCode(runAttempt.error);
+        if (activeTaskBoardOutput === "live") {
+          let finalized = false;
+          try {
+            liveDisplay?.cancel(displayState);
+            finalized = true;
+          } catch {
+            fallbackLiveToPlain();
+          } finally {
+            cleanupLiveDisplay();
+          }
+          if (finalized) {
+            return;
+          }
+        }
+        if (activeTaskBoardOutput === "json") {
+          for (const line of jsonRenderer!.cancellation(
+            displayState,
+            getRunCancellationExitCode(runAttempt.error),
+          )) {
+            yield* d.plain(line);
+          }
+        } else if (activeTaskBoardOutput === "plain") {
+          yield* d.plain(formatPlainHubRunCancellation(displayState));
+        } else {
+          yield* d.status("Run cancelled.", "warn");
+        }
+        cleanupLiveDisplay();
+        return;
+      }
+      if (runAttempt._tag === "Failure") {
+        if (activeTaskBoardOutput === "json") {
+          process.exitCode = 1;
+          yield* d.plain(jsonRenderer!.failure(displayState, runAttempt.error));
+          cleanupLiveDisplay();
+          return;
+        }
+        if (activeTaskBoardOutput === "plain") {
+          process.exitCode = 1;
+          yield* d.plain(
+            formatPlainHubRunFailure(displayState, runAttempt.error),
+          );
+          cleanupLiveDisplay();
+          return;
+        }
+        if (activeTaskBoardOutput === "live") {
+          try {
+            liveDisplay?.finalize(
+              displayState,
+              projectHubRunStateOutcome(displayState, {
+                outcome: "failed",
+                summary: "Run failed",
+                exitCode: 1,
+              }),
+            );
+          } catch {
+            fallbackLiveToPlain();
+          } finally {
+            cleanupLiveDisplay();
+          }
+        }
+        cleanupLiveDisplay();
+        return yield* Effect.fail(toHubFlowError(runAttempt.error));
+      }
+      const result = runAttempt.result;
+      const outcome = projectHubRunOutcome(result);
+      process.exitCode = outcome.exitCode;
+
+      if (activeTaskBoardOutput === "live") {
+        let finalized = false;
+        try {
+          liveDisplay?.finalize(displayState, outcome);
+          finalized = true;
+        } catch {
+          fallbackLiveToPlain();
+        } finally {
+          cleanupLiveDisplay();
+        }
+        if (finalized) {
+          return;
+        }
+      }
+
+      if (activeTaskBoardOutput === "json") {
+        for (const line of jsonRenderer!.outcome(result, outcome)) {
+          yield* d.plain(line);
+        }
+        cleanupLiveDisplay();
+        return;
+      }
+
+      if (activeTaskBoardOutput === "plain") {
+        for (const line of formatPlainHubRunOutcome(result, outcome)) {
+          yield* d.plain(line);
+        }
+        cleanupLiveDisplay();
+        return;
+      }
 
       for (const line of formatHubFlowResultLines(result)) {
         yield* d.status(line, "info");
@@ -3178,7 +5086,26 @@ const runCommand = Command.make(
       } else {
         yield* d.status("Hub flow completed.", "success");
       }
-    }),
+    }).pipe(
+      Effect.catchAll((error) => {
+        if (output._tag !== "Some" || output.value !== "json") {
+          return Effect.fail(error);
+        }
+        return Effect.gen(function* () {
+          const d = yield* Display;
+          process.exitCode = 1;
+          yield* d.plain(
+            formatEarlyHubRunJsonFailure({
+              flowId: trimOptionalText(optionalTextValue(flow)) ?? "unknown",
+              hubProject:
+                trimOptionalText(optionalTextValue(project)) ??
+                trimOptionalText(optionalTextValue(projectPath)),
+              error,
+            }),
+          );
+        });
+      }),
+    ),
 );
 
 // --- Docker namespace command ---
@@ -3278,7 +5205,9 @@ const rootCommand = Command.make("archloop", {}, () =>
 
 export const archloop = rootCommand.pipe(
   Command.withSubcommands([
+    initializeCommand,
     initCommand,
+    checkCommand,
     runCommand,
     tasksCommand,
     projectCommand,

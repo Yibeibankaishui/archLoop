@@ -37,6 +37,17 @@ const initRepo = async (dir: string) => {
   await execAsync('git config user.name "Test"', { cwd: dir });
 };
 
+const commitFile = async (
+  dir: string,
+  name: string,
+  content: string,
+  message: string,
+) => {
+  await writeFile(join(dir, name), content);
+  await execAsync(`git add "${name}"`, { cwd: dir });
+  await execAsync(`git commit -m "${message}"`, { cwd: dir });
+};
+
 const writeMockBdDelete = async (
   repoDir: string,
   initialTasks: { id: string; title: string; status: string }[],
@@ -508,6 +519,7 @@ describe("task lifecycle transitions", () => {
   it("claims ready tasks by aligning Beads status, labels, metadata, and projection", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "taskboard-claim-"));
     await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
     seedHubTaskStore(repoDir);
 
     const binDir = join(repoDir, "bin");

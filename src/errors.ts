@@ -90,10 +90,33 @@ export class ProjectStatusError extends Data.TaggedError("ProjectStatusError")<{
   readonly message: string;
 }> {}
 
+/** Hub project registry or selection operation failed */
+export class HubProjectRegistryError extends Data.TaggedError(
+  "HubProjectRegistryError",
+)<{
+  readonly message: string;
+}> {}
+
 /** Hub task board operation failed */
 export class TaskBoardError extends Data.TaggedError("TaskBoardError")<{
   readonly message: string;
 }> {}
+
+/** A user cancelled an interactive proposal prompt. */
+export class ProposalPromptCancelledError extends Data.TaggedError(
+  "ProposalPromptCancelledError",
+)<{
+  readonly message: string;
+}> {}
+
+export const isProposalPromptCancelledError = (
+  error: unknown,
+): error is ProposalPromptCancelledError =>
+  error instanceof ProposalPromptCancelledError ||
+  (typeof error === "object" &&
+    error !== null &&
+    (error as { readonly _tag?: unknown })._tag ===
+      "ProposalPromptCancelledError");
 
 /** Hub flow execution failed */
 export class HubFlowError extends Data.TaggedError("HubFlowError")<{

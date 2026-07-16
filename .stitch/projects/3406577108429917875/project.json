@@ -1,0 +1,35 @@
+{
+  "name": "projects/3406577108429917875",
+  "projectId": "3406577108429917875",
+  "title": "archLoop Hub Control Plane",
+  "visibility": "PRIVATE",
+  "origin": "STITCH",
+  "projectType": "TEXT_TO_UI_PRO",
+  "deviceType": "DESKTOP",
+  "createTime": "2026-06-23T10:58:06.503875Z",
+  "updateTime": "2026-06-23T10:59:30.486065Z",
+  "metadata": {
+    "userRole": "OWNER"
+  },
+  "thumbnailScreenshot": {
+    "name": "projects/3406577108429917875/files/7213b05fd2c842c2855156f0af728851",
+    "downloadUrl": "https://lh3.googleusercontent.com/aida/AP1WRLvDI_Kkl9GXLY1t_WtlPm7g1fVrzSbYPDiffGqQZrOMbMY56OfQdEcDZaIRhvDW8V7uZLFpIAQtV1zPUhGMJE_P9hwCD_nT4d8w2h3MFqWRy5SxXiYKmUnybnfXjiwSXODzNKyNPGk5Gtq5eMFJ6W3m_AgeCZ0CLJNjxroAatBw8y4x7P8sgYw7MFcRNDvYwP9VXbaK_nZ22cfE0ImKLMGabinEv2Vq7l3MtDH1fD0o7fkS82YXlSu_Uw"
+  },
+  "designThemeSummary": {
+    "bodyFont": "INTER",
+    "bodyFontFamily": "Inter",
+    "headlineFont": "GEIST",
+    "headlineFontFamily": "Geist",
+    "labelFont": "JETBRAINS_MONO",
+    "labelFontFamily": "Jetbrains Mono",
+    "colorMode": "LIGHT",
+    "colorVariant": "FIDELITY",
+    "customColor": "#0f172a",
+    "overrideNeutralColor": "#64748b",
+    "overridePrimaryColor": "#0f172a",
+    "overrideSecondaryColor": "#3b82f6",
+    "roundness": "ROUND_FOUR",
+    "spacingScale": 2
+  },
+  "screenInstances": []
+}

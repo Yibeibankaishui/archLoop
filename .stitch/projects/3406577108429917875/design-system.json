@@ -1,0 +1,28 @@
+{
+  "name": "assets/93bb37dbdd734b1b85011ae95314c48c",
+  "version": "1",
+  "displayName": "Autonomous Engineering Control Plane",
+  "theme": {
+    "bodyFont": "INTER",
+    "bodyFontFamily": "Inter",
+    "headlineFont": "GEIST",
+    "headlineFontFamily": "Geist",
+    "labelFont": "JETBRAINS_MONO",
+    "labelFontFamily": "Jetbrains Mono",
+    "colorMode": "LIGHT",
+    "colorVariant": "FIDELITY",
+    "customColor": "#0f172a",
+    "overrideNeutralColor": "#64748b",
+    "overridePrimaryColor": "#0f172a",
+    "overrideSecondaryColor": "#3b82f6",
+    "roundness": "ROUND_FOUR",
+    "spacingScale": 2
+  },
+  "styleGuidelinesSummary": [
+    "Reliable Automated Engineer persona",
+    "Corporate/Modern and minimalist operational UI",
+    "Fluid multi-pane desktop layout",
+    "Low-contrast outlines and tonal hierarchy",
+    "Compact buttons, status chips, tables, timelines, inspector drawers, and resizable panes"
+  ]
+}

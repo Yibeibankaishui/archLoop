@@ -2,6 +2,10 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import {
+  evaluateHubManagedBranchCleanup,
+  findHubManagedBranchCleanupCandidate,
+} from "./hubManagedBranchCleanup.js";
+import {
   createHubFlowRunVerifier,
   type HubFlowMerger,
   type HubFlowVerifier,
@@ -160,6 +164,22 @@ const appendRecoveryComment = (
   );
 };
 
+const recordRecoveryResult = (
+  input: RecoverHubTaskInput,
+  result: RecoverHubTaskResult,
+  summary = result.summary,
+): RecoverHubTaskResult => {
+  appendRecoveryComment(input, summary);
+  if (summary === result.summary) {
+    return result;
+  }
+
+  return {
+    ...result,
+    summary,
+  };
+};
+
 export const isBranchMergedIntoHead = async (
   cwd: string,
   branch: string,
@@ -195,6 +215,10 @@ export const hasBranchUnmergedWork = async (
 const resolveTaskBranch = (task: HubTaskProjection): string =>
   task.claim?.branch ?? resolveHubTaskBranch(task.id, task.title);
 
+const deleteGitBranch = async (cwd: string, branch: string): Promise<void> => {
+  await execFileAsync("git", ["branch", "-d", branch], { cwd });
+};
+
 const defaultCloseFailedRecoveryCloser: HubTaskCloser = async (closeInput) =>
   completeCloseFailedRecovery(closeInput).task;
 
@@ -211,7 +235,6 @@ const recoverToTargetStatus = (
     metadata: task.metadata,
     env: input.env,
   });
-  appendRecoveryComment(input, summary);
 
   return {
     outcome: "recovered_failed",
@@ -267,15 +290,46 @@ const recoverCloseFailedTask = async (
   });
 
   const summary = `Recovered close_failed task after confirming ${branch} is already merged, rerunning verification, and retrying local Beads close.`;
-  appendRecoveryComment(input, summary);
-
-  return {
+  return recordRecoveryResult(input, {
     outcome: "recovered_close_failed",
     priorStatus: task.hubStatus,
     hubStatus: closedTask.hubStatus,
     summary,
     task: closedTask,
-  };
+  });
+};
+
+const attemptRecoveryCleanup = async (
+  input: RecoverHubTaskInput,
+  branch: string,
+): Promise<string> => {
+  const evaluation = await evaluateHubManagedBranchCleanup({
+    cwd: input.cwd,
+    env: input.env,
+  });
+  const candidate = findHubManagedBranchCleanupCandidate(evaluation, branch);
+
+  if (!candidate) {
+    return `Cleanup skipped for ${branch}: branch is missing.`;
+  }
+
+  if (candidate.ownership === undefined) {
+    return `Cleanup skipped for ${branch}: branch has no Hub-managed ownership record.`;
+  }
+
+  if (candidate.skipReasons.length > 0) {
+    return `Cleanup skipped for ${branch}: ${candidate.skipReasons
+      .map((detail) => detail.message)
+      .join("; ")}`;
+  }
+
+  try {
+    await deleteGitBranch(input.cwd, branch);
+    return `Deleted safe managed branch ${branch} after recovery.`;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return `Cleanup failed for ${branch}: ${message}`;
+  }
 };
 
 const recoverGenericFailedTask = async (
@@ -284,14 +338,11 @@ const recoverGenericFailedTask = async (
   failureReason: HubFailureReason | undefined,
 ): Promise<RecoverHubTaskResult> => {
   const branch = resolveTaskBranch(task);
-  const branchHasWork =
-    task.claim !== undefined &&
-    (await (input.branchHasUnmergedWork ?? hasBranchUnmergedWork)(
-      input.cwd,
-      branch,
-    ));
+  const branchHasWork = await (
+    input.branchHasUnmergedWork ?? hasBranchUnmergedWork
+  )(input.cwd, branch);
 
-  if (branchHasWork) {
+  if (branchHasWork && task.claim !== undefined) {
     const targetStatus = "waiting_for_merge";
     const summary = `Moved failed task from failed to waiting_for_merge because ${branch} has existing unmerged work.`;
     const updatedTask = updateHubTaskStatus({
@@ -301,23 +352,27 @@ const recoverGenericFailedTask = async (
       metadata: { ...task.metadata },
       env: input.env,
     });
-    appendRecoveryComment(input, summary);
-
-    return {
+    return recordRecoveryResult(input, {
       outcome: "recovered_failed",
       priorStatus: task.hubStatus,
       hubStatus: updatedTask.hubStatus,
       summary,
       task: updatedTask,
-    };
+    });
   }
 
   const targetStatus = resolveFailedRecoveryTarget(task, failureReason);
-  return recoverToTargetStatus(
+  const recovered = recoverToTargetStatus(
     input,
     task,
     targetStatus,
     `Moved failed task from failed to ${targetStatus} and cleared execution failure metadata.`,
+  );
+  const cleanupSummary = await attemptRecoveryCleanup(input, branch);
+  return recordRecoveryResult(
+    input,
+    recovered,
+    `${recovered.summary} ${cleanupSummary}`,
   );
 };
 
@@ -333,15 +388,13 @@ const releaseStaleClaim = (
     env: input.env,
   });
   const summary = `Released stale claim metadata while keeping hub status ${task.hubStatus}.`;
-  appendRecoveryComment(input, summary);
-
-  return {
+  return recordRecoveryResult(input, {
     outcome: "released_claim",
     priorStatus: task.hubStatus,
     hubStatus: updatedTask.hubStatus,
     summary,
     task: updatedTask,
-  };
+  });
 };
 
 const recoverStaleExecutionStatus = (
@@ -349,12 +402,13 @@ const recoverStaleExecutionStatus = (
   task: HubTaskProjection,
 ): RecoverHubTaskResult => {
   const targetStatus = resolveFailedRecoveryTarget(task, undefined);
-  return recoverToTargetStatus(
+  const result = recoverToTargetStatus(
     input,
     task,
     targetStatus,
     `Reset stale execution status ${task.hubStatus} to ${targetStatus} and released claim metadata.`,
   );
+  return recordRecoveryResult(input, result);
 };
 
 export const recoverHubTask = async (

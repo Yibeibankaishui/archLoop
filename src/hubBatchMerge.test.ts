@@ -184,6 +184,30 @@ const createMergeContext = (
   return context;
 };
 
+const seedTaskClaimEvent = (
+  context: ReturnType<typeof createMergeContext>,
+  input: {
+    readonly batchId: string;
+    readonly taskId: string;
+    readonly branch: string;
+    readonly claim: Record<string, unknown>;
+  },
+): void => {
+  writeFileSync(
+    join(context.runDir, "events", "task.jsonl"),
+    `${JSON.stringify({
+      type: "task_claimed",
+      runId: context.runId,
+      batchId: input.batchId,
+      taskId: input.taskId,
+      branch: input.branch,
+      createdAt: "2026-06-12T10:05:00.000Z",
+      status: "implementing",
+      claim: input.claim,
+    })}\n`,
+  );
+};
+
 const successMerger: HubFlowMerger = async () => ({ outcome: "success" });
 const successVerifier: HubFlowVerifier = async () => ({ outcome: "success" });
 const branchReadyInspector: HubMergeBranchInspector = async () => ({
@@ -247,6 +271,13 @@ describe("runHubBatchMerge", () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-merge-success-"));
     await initRepo(repoDir);
     await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+    const branch = "archloop/bd-72-merge-task";
+    await execAsync(`git checkout -b "${branch}"`, { cwd: repoDir });
+    await commitFile(repoDir, "feature.txt", "feature", "feature commit");
+    await execAsync("git checkout main", { cwd: repoDir });
+    const { stdout: baseHead } = await execAsync("git rev-parse HEAD", {
+      cwd: repoDir,
+    });
 
     const batchId = "batch-success";
     const stateFile = join(repoDir, "bd-state.json");
@@ -261,8 +292,10 @@ describe("runHubBatchMerge", () => {
           claim: {
             runId: "run-merge-test",
             batchId,
-            branch: "archloop/bd-72-merge-task",
+            branch,
             claimedAt: "2026-06-12T10:00:00Z",
+            baseHead: baseHead.trim(),
+            branchExistedBeforeClaim: false,
           },
         },
       },
@@ -270,6 +303,19 @@ describe("runHubBatchMerge", () => {
 
     const hubProjectDir = join(repoDir, "data", "archloop", "hub");
     const context = createMergeContext(repoDir, batchId, hubProjectDir);
+    seedTaskClaimEvent(context, {
+      batchId,
+      taskId: "bd-72",
+      branch,
+      claim: {
+        runId: "run-merge-test",
+        batchId,
+        branch,
+        claimedAt: "2026-06-12T10:00:00Z",
+        baseHead: baseHead.trim(),
+        branchExistedBeforeClaim: false,
+      },
+    });
 
     const result = await runHubBatchMerge({
       flowId: "no-review",
@@ -290,6 +336,10 @@ describe("runHubBatchMerge", () => {
         taskId: "bd-72",
         outcome: "merged",
         hubStatus: "done",
+        cleanup: expect.objectContaining({
+          outcome: "skipped",
+          reasonCodes: ["unmerged_work"],
+        }),
       }),
     ]);
 
@@ -298,12 +348,18 @@ describe("runHubBatchMerge", () => {
     ) as MockBeadsTask[];
     expect(finalState[0]?.status).toBe("closed");
     expect(finalState[0]?.labels).toContain("done");
+    await expect(
+      execAsync(`git show-ref --verify --quiet refs/heads/${branch}`, {
+        cwd: repoDir,
+      }),
+    ).resolves.toMatchObject({ stdout: "", stderr: "" });
 
     const taskEvents = await readJsonl(
       join(context.runDir, "events", "task.jsonl"),
     );
     expect(taskEvents.map((event) => (event as { type: string }).type)).toEqual(
       [
+        "task_claimed",
         "merge_started",
         "merge_succeeded",
         "verification_started",
@@ -311,6 +367,7 @@ describe("runHubBatchMerge", () => {
         "task_close_started",
         "task_closed",
         "task_status_advanced",
+        "task_branch_cleanup",
       ],
     );
 
@@ -326,6 +383,222 @@ describe("runHubBatchMerge", () => {
     ]);
     expect(formatHubBatchMergeResultLines(result).join("\n")).toContain(
       "bd-72: merged -> done",
+    );
+  });
+
+  it("deletes a safe managed branch after close and records cleanup events", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-merge-cleanup-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const branch = "archloop/bd-safe-cleanup";
+    await execAsync(`git checkout -b "${branch}"`, { cwd: repoDir });
+    await commitFile(repoDir, "feature.txt", "feature", "feature commit");
+    await execAsync("git checkout main", { cwd: repoDir });
+    const { stdout: baseHead } = await execAsync("git rev-parse HEAD", {
+      cwd: repoDir,
+    });
+
+    const batchId = "batch-safe-cleanup";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-safe-cleanup",
+        title: "Safe cleanup task",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch,
+            claimedAt: "2026-06-12T10:00:00Z",
+            baseHead: baseHead.trim(),
+            branchExistedBeforeClaim: false,
+          },
+        },
+      },
+    ]);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "archloop", "hub"),
+    );
+    seedTaskClaimEvent(context, {
+      batchId,
+      taskId: "bd-safe-cleanup",
+      branch,
+      claim: {
+        runId: "run-merge-test",
+        batchId,
+        branch,
+        claimedAt: "2026-06-12T10:00:00Z",
+        baseHead: baseHead.trim(),
+        branchExistedBeforeClaim: false,
+      },
+    });
+
+    const result = await runHubBatchMerge({
+      flowId: "no-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger: createHubFlowRunMerger({ cwd: repoDir }),
+      verifier: successVerifier,
+      worktreeInspector: cleanWorktreeInspector,
+    });
+
+    expect(result.batchStatus).toBe("done");
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        taskId: "bd-safe-cleanup",
+        outcome: "merged",
+        hubStatus: "done",
+        cleanup: expect.objectContaining({
+          outcome: "deleted",
+        }),
+      }),
+    ]);
+    await expect(
+      execAsync(`git show-ref --verify --quiet refs/heads/${branch}`, {
+        cwd: repoDir,
+      }),
+    ).rejects.toThrow();
+
+    const taskEvents = await readJsonl(
+      join(context.runDir, "events", "task.jsonl"),
+    );
+    expect(taskEvents.at(-1)).toMatchObject({
+      type: "task_branch_cleanup",
+      cleanup: {
+        policy: "safe_managed",
+        outcome: "deleted",
+      },
+    });
+    expect(formatHubBatchMergeResultLines(result).join("\n")).toContain(
+      "bd-safe-cleanup: merged -> done; cleanup deleted",
+    );
+  });
+
+  it("records cleanup failures without corrupting the merged task lifecycle", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-batch-merge-cleanup-fail-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const branch = "archloop/bd-cleanup-failure";
+    await execAsync(`git checkout -b "${branch}"`, { cwd: repoDir });
+    await commitFile(repoDir, "feature.txt", "feature", "feature commit");
+    await execAsync("git checkout main", { cwd: repoDir });
+    const { stdout: baseHead } = await execAsync("git rev-parse HEAD", {
+      cwd: repoDir,
+    });
+
+    const batchId = "batch-cleanup-failure";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-cleanup-failure",
+        title: "Cleanup failure task",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch,
+            claimedAt: "2026-06-12T10:00:00Z",
+            baseHead: baseHead.trim(),
+            branchExistedBeforeClaim: false,
+          },
+        },
+      },
+    ]);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "archloop", "hub"),
+    );
+    seedTaskClaimEvent(context, {
+      batchId,
+      taskId: "bd-cleanup-failure",
+      branch,
+      claim: {
+        runId: "run-merge-test",
+        batchId,
+        branch,
+        claimedAt: "2026-06-12T10:00:00Z",
+        baseHead: baseHead.trim(),
+        branchExistedBeforeClaim: false,
+      },
+    });
+
+    const result = await runHubBatchMerge({
+      flowId: "no-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger: createHubFlowRunMerger({ cwd: repoDir }),
+      verifier: successVerifier,
+      branchCleanup: async () => ({
+        outcome: "failed",
+        reasonCodes: ["simulated_cleanup_failure"],
+        diagnosticSummary: "cleanup failed",
+        diagnostics: {
+          details: {
+            branch,
+          },
+        },
+      }),
+      worktreeInspector: cleanWorktreeInspector,
+    });
+
+    expect(result.batchStatus).toBe("done");
+    expect(result.results[0]).toMatchObject({
+      taskId: "bd-cleanup-failure",
+      outcome: "merged",
+      hubStatus: "done",
+      cleanup: expect.objectContaining({
+        outcome: "failed",
+        reasonCodes: ["simulated_cleanup_failure"],
+        diagnosticSummary: "cleanup failed",
+      }),
+    });
+    await expect(
+      execAsync(`git show-ref --verify --quiet refs/heads/${branch}`, {
+        cwd: repoDir,
+      }),
+    ).resolves.toMatchObject({ stdout: "", stderr: "" });
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(finalState[0]?.status).toBe("closed");
+    expect(finalState[0]?.labels).toContain("done");
+
+    const taskEvents = await readJsonl(
+      join(context.runDir, "events", "task.jsonl"),
+    );
+    expect(taskEvents.at(-1)).toMatchObject({
+      type: "task_branch_cleanup",
+      cleanup: {
+        policy: "safe_managed",
+        outcome: "failed",
+        reasonCodes: ["simulated_cleanup_failure"],
+        diagnosticSummary: "cleanup failed",
+      },
+    });
+    expect(formatHubBatchMergeResultLines(result).join("\n")).toContain(
+      "bd-cleanup-failure: merged -> done; cleanup failed: cleanup failed",
     );
   });
 
@@ -953,11 +1226,16 @@ describe("runHubBatchMerge", () => {
     );
   });
 
-  it("blocks merge preflight when the source worktree has dirty source files", async () => {
+  it("blocks merge preflight when dirty source files overlap the task branch", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-merge-dirty-"));
     await initRepo(repoDir);
-    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
-    await writeFile(join(repoDir, "dirty-source.txt"), "uncommitted");
+    await commitFile(repoDir, "shared.txt", "base\n", "initial commit");
+
+    const branch = "archloop/bd-dirty-overlap";
+    await execAsync(`git checkout -b "${branch}"`, { cwd: repoDir });
+    await commitFile(repoDir, "shared.txt", "branch\n", "branch edit");
+    await execAsync("git checkout main", { cwd: repoDir });
+    await writeFile(join(repoDir, "shared.txt"), "local uncommitted\n");
 
     const batchId = "batch-dirty";
     const stateFile = join(repoDir, "bd-state.json");
@@ -972,7 +1250,7 @@ describe("runHubBatchMerge", () => {
           claim: {
             runId: "run-merge-test",
             batchId,
-            branch: "branch-dirty",
+            branch,
             claimedAt: "2026-06-12T10:00:00Z",
           },
         },
@@ -998,7 +1276,6 @@ describe("runHubBatchMerge", () => {
         return { outcome: "success" };
       },
       verifier: successVerifier,
-      branchInspector: branchReadyInspector,
     });
 
     expect(mergeCalls).toBe(0);
@@ -1009,14 +1286,17 @@ describe("runHubBatchMerge", () => {
         taskId: "bd-dirty",
         decision: "blocked",
         reason: "dirty_worktree",
-        message: expect.stringContaining("dirty-source.txt"),
+        branch,
+        blockingPaths: ["shared.txt"],
+        message: expect.stringContaining("shared.txt"),
       }),
     );
     const summary = formatHubBatchMergeResultLines(result).join("\n");
     expect(summary).toContain(
-      "Git safety gate: commit, stash, or revert dirty source files",
+      `Git safety gate: dirty source files would be overwritten or conflict with ${branch}`,
     );
-    expect(summary).toContain("dirty-source.txt");
+    expect(summary).toContain("shared.txt");
+    expect(summary).toContain("commit, stash, or discard dirty source files");
     expect(summary).toContain("then rerun the same flow so the batch resumes.");
   });
 
@@ -1091,6 +1371,98 @@ describe("runHubBatchMerge", () => {
     expect(formatHubBatchMergeResultLines(result).join("\n")).toContain(
       "task-store dirty: .beads/issues.jsonl, .beads/interactions.jsonl",
     );
+  });
+
+  it("merges through a clean integration worktree when dirty source files do not overlap the task branch", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-batch-merge-dirty-compatible-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "base.txt", "base\n", "initial commit");
+
+    const branch = "archloop/bd-dirty-compatible";
+    await execAsync(`git checkout -b "${branch}"`, { cwd: repoDir });
+    await commitFile(repoDir, "feature.txt", "feature\n", "feature commit");
+    await execAsync("git checkout main", { cwd: repoDir });
+    await writeFile(join(repoDir, "notes.txt"), "local notes\n");
+    await mkdir(join(repoDir, ".archloop"), { recursive: true });
+    const verifyCwdPath = join(repoDir, "verify-cwd.txt");
+    await writeFile(
+      join(repoDir, ".archloop", "verify.sh"),
+      `#!/bin/sh
+{
+  pwd
+  cat feature.txt
+  if [ -e notes.txt ]; then echo notes-present; else echo notes-absent; fi
+} > ${JSON.stringify(verifyCwdPath)}
+test -f feature.txt
+test ! -f notes.txt
+`,
+    );
+    await chmod(join(repoDir, ".archloop", "verify.sh"), 0o755);
+
+    const batchId = "batch-dirty-compatible";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-dirty-compatible",
+        title: "Dirty compatible task",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch,
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "archloop", "hub"),
+    );
+    const result = await runHubBatchMerge({
+      flowId: "no-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger: createHubFlowRunMerger({ cwd: repoDir }),
+      verifier: createHubFlowRunVerifier({ cwd: repoDir }),
+    });
+
+    expect(result.batchStatus).toBe("done");
+    expect(result.selectedTaskIds).toEqual(["bd-dirty-compatible"]);
+    expect(result.selectionDiagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-dirty-compatible",
+        decision: "selected",
+        reason: "selected",
+      }),
+    );
+    const [verificationCwd, verifiedFeature, verifiedNotes] = (
+      await readFile(verifyCwdPath, "utf-8")
+    )
+      .trim()
+      .split(/\r?\n/);
+    expect(verificationCwd).not.toBe(repoDir);
+    expect(verifiedFeature).toBe("feature");
+    expect(verifiedNotes).toBe("notes-absent");
+    await expect(readFile(join(repoDir, "feature.txt"), "utf-8")).resolves.toBe(
+      "feature\n",
+    );
+    await expect(readFile(join(repoDir, "notes.txt"), "utf-8")).resolves.toBe(
+      "local notes\n",
+    );
+    await expect(
+      execAsync("git status --short -- notes.txt", { cwd: repoDir }),
+    ).resolves.toMatchObject({ stdout: "?? notes.txt\n" });
   });
 
   it("blocks task branches that include Beads runtime/export files in their diff", async () => {
@@ -1238,6 +1610,8 @@ describe("runHubBatchMerge", () => {
         outcome: "verification_failed",
         hubStatus: "failed",
         failureReason: "verification_failure",
+        diagnosticSummary: "verification failed",
+        logPath: join(context.runDir, "events", "task.jsonl"),
       }),
       expect.objectContaining({
         taskId: "bd-second",

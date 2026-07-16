@@ -2,9 +2,63 @@ import { describe, expect, it, vi } from "vitest";
 
 import * as hubPrdDecomposition from "./hubPrdDecomposition.js";
 import * as hubTriageProposalCli from "./hubTriageProposalCli.js";
-import { runHubProposalFlowFromCli } from "./hubProposalFlowCli.js";
+import {
+  runHubProposalFlowFromCli,
+  runPrdDecompositionProposalFlowFromCli,
+} from "./hubProposalFlowCli.js";
 
 describe("runHubProposalFlowFromCli", () => {
+  it("keeps interactive prompts while suppressing raw agent messages in structured output", async () => {
+    const runPrd = vi
+      .spyOn(hubPrdDecomposition, "runPrdDecompositionFlow")
+      .mockResolvedValue({
+        outcome: "cancelled",
+        runId: "run-live",
+        runDir: "/tmp/run-live",
+        phase: "approval",
+      });
+
+    await runPrdDecompositionProposalFlowFromCli({
+      cwd: "/tmp/repo",
+      prdRef: "docs/prd/feature.md",
+      yes: false,
+      interactive: true,
+      showDecoratedOutput: false,
+      isTTY: true,
+    });
+
+    const interaction = runPrd.mock.calls[0]?.[0].interaction;
+    expect(interaction?.requestRefinement).toBeTypeOf("function");
+    expect(interaction?.requestApproval).toBeTypeOf("function");
+    expect(interaction?.onAssistantMessage).toBeUndefined();
+  });
+
+  it("disables agent-role prompts when explicit output makes the proposal run non-interactive", async () => {
+    const runPrd = vi
+      .spyOn(hubPrdDecomposition, "runPrdDecompositionFlow")
+      .mockResolvedValue({
+        outcome: "cancelled",
+        runId: "run-machine",
+        runDir: "/tmp/run-machine",
+        phase: "approval",
+      });
+
+    await runPrdDecompositionProposalFlowFromCli({
+      cwd: "/tmp/repo",
+      prdRef: "docs/prd/feature.md",
+      yes: true,
+      interactive: false,
+      showDecoratedOutput: false,
+      isTTY: true,
+    });
+
+    expect(runPrd.mock.calls[0]?.[0]).toMatchObject({
+      interaction: undefined,
+      configureHubAgentRole: undefined,
+      isTTY: false,
+    });
+  });
+
   it("dispatches prd-decomposition input to the shared proposal flow runner", async () => {
     const runPrd = vi
       .spyOn(hubPrdDecomposition, "runPrdDecompositionFlow")

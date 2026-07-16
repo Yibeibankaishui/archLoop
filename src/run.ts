@@ -188,6 +188,8 @@ export type LoggingOption =
   | {
       readonly type: "file";
       readonly path: string;
+      /** Whether to print the direct agent-started and log-tail hint. Defaults to true. */
+      readonly showStartup?: boolean;
       /**
        * Optional callback invoked for each agent stream event (text chunk or
        * tool call) in addition to being written to the log file. Intended for
@@ -455,12 +457,14 @@ export async function run(
   const displayLayer =
     resolvedLogging.type === "file"
       ? (() => {
-          printFileDisplayStartup({
-            logPath: resolvedLogging.path,
-            agentName: options.name,
-            branch: resolvedBranch,
-            hostRepoDir,
-          });
+          if (resolvedLogging.showStartup !== false) {
+            printFileDisplayStartup({
+              logPath: resolvedLogging.path,
+              agentName: options.name,
+              branch: resolvedBranch,
+              hostRepoDir,
+            });
+          }
           return Layer.provide(
             FileDisplay.layer(resolvedLogging.path),
             NodeFileSystem.layer,

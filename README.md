@@ -37,6 +37,11 @@ archLoop bundles a pinned Beads runtime via `@beads/bd@1.0.4`, so Hub and
 Beads-backed commands can use the packaged `bd` binary without a separate
 system install. Set `ARCHLOOP_BD_PATH` to override the binary path if needed.
 
+If you are onboarding Hub projects, start with `archloop initialize`, then use
+`archloop project add`, `archloop project list`, `archloop project select`,
+`archloop check`, and selected-project `archloop run --flow ...`. The steps
+below describe the legacy repo-local scaffold path for `.archloop/`.
+
 2. Run `archloop init`. This scaffolds a `.archloop` directory with all the files needed.
 
 ```bash
@@ -761,7 +766,7 @@ Optional **no-sandbox only** add-on for WeChat Developer Tools / MCP runtime deb
 
 ### `archloop init`
 
-Scaffolds the `.archloop/` config directory and optionally builds the sandbox image. This is the first command you run in a new repo. Interactive init asks for a capability pack (first), default scaffold agent, installed runtimes, sandbox provider, backlog manager, optional capability add-ons (when the pack exposes them), workflow template, and Project profile. Init now offers `docker` and `no-sandbox`: choosing `docker` follows the normal image-build flow, while choosing `no-sandbox` skips image build during init and rewrites the scaffolded `main.mts` or `main.ts` to call `noSandbox()`. After scaffold (and before optional image build), init also points selected tools such as GitHub Issues, Codex, and Cursor toward env keys or Hub-owned auth sessions under the archLoop user data directory. When you select the `miniprogram` capability pack, init may also offer project-local `miniprogram-ci` installation and writes Mini Program verification scaffold files.
+Scaffolds the `.archloop/` config directory and optionally builds the sandbox image. This is the legacy repo-local scaffold command, not the Hub-wide onboarding entry point. Interactive init asks for a capability pack (first), default scaffold agent, installed runtimes, sandbox provider, backlog manager, optional capability add-ons (when the pack exposes them), workflow template, and Project profile. Init now offers `docker` and `no-sandbox`: choosing `docker` follows the normal image-build flow, while choosing `no-sandbox` skips image build during init and rewrites the scaffolded `main.mts` or `main.ts` to call `noSandbox()`. After scaffold (and before optional image build), init also points selected tools such as GitHub Issues, Codex, and Cursor toward env keys or Hub-owned auth sessions under the archLoop user data directory. When you select the `miniprogram` capability pack, init may also offer project-local `miniprogram-ci` installation and writes Mini Program verification scaffold files.
 
 Think of the init agent choices as two layers:
 
@@ -851,21 +856,57 @@ Existing single-runtime projects remain valid. `archloop init` does not automati
 
 ### `archloop project status`
 
-Reports the canonical git repo root, the archLoop user data directory, the Hub project directory, the selected Hub project profile, the Hub project development contract path, whether `bd` is available, and a CLI-first Hub task board summary. It works from any git repository, even if you have not run `archloop init` yet.
+Reports the selected Hub project by default, or an explicit `--project <name>` target when provided. In a TTY, if no project is selected yet, archLoop opens the Hub project picker; in non-interactive mode it requires a selected project or an explicit target.
 
-The summary includes task counts by Hub status, active runs and batch statuses, failed tasks with failure reason and suggested next action, sync state counts such as `push_pending` or `conflict`, recent Hub events, and paths to Hub run directories for full logs and artifacts. Output remains useful when Beads is unavailable, there are no tasks, no active runs, or GitHub sync is not configured.
+The summary includes the canonical git repo root, the archLoop user data directory, the Hub project directory, the selected Hub project profile, the Hub project development contract path, whether `bd` is available, a CLI-first Hub task board summary, and managed branch cleanup diagnostics so you can see safe candidates, blocked reasons, and historical unowned preservation rules without opening run logs. It still works from any directory once a Hub project has been selected or explicitly targeted, even if you have not run `archloop init` in the target repo.
+
+The summary includes task counts by Hub status, active runs and batch statuses, failed tasks with failure reason and suggested next action, sync state counts such as `push_pending` or `conflict`, recent Hub events, paths to Hub run directories for full logs and artifacts, and managed branch cleanup diagnostics with next actions for safe candidates and blocked branches. Output remains useful when Beads is unavailable, there are no tasks, no active runs, or GitHub sync is not configured.
 
 archLoop resolves the user data directory from `XDG_DATA_HOME` when it is set and falls back to `~/.local/share/archloop`.
 
+### `archloop check [--hub] [--project <name>] [--all-projects]`
+
+Runs Hub readiness from any directory. By default, `archloop check` runs the Hub-wide slice plus the CLI selected Hub project when one exists. `--hub` limits the command to Hub-wide checks only, `--project <name>` checks one explicit Hub project, and `--all-projects` checks every registered project.
+
+The Hub-wide slice validates agent role completeness, Hub env/auth presence, configured provider references, provider CLI availability, and grouped provider/model smoke checks through the same provider path used by Hub flow execution. The project slice validates repo path existence, git repository validity, initial commit presence, development contract state, local task store state, ready/failed task summary, active run presence, and flow readiness signals.
+
+It renders visible progress while it runs, deduplicates smoke checks by provider, model, and options, and lists the roles covered by each smoke check. Missing selected projects are warnings with exact `archloop project add` and `archloop project select` guidance; blocking project failures such as a missing repo path return a non-zero exit code when that project is the requested target.
+
+### `archloop initialize [--skip-check]`
+
+Runs the Hub-wide first-run and repair setup. It configures shared Hub agent roles, shared env values, and auth guidance without touching any Hub project. Missing role or env settings are repaired through guided prompts. When existing settings are already complete, reruns explicitly ask whether you want to change agent provider/model settings and shared env credentials; declining keeps the current configuration and continues to the quick check. By default it explains that the quick Hub check may make a small provider/model call, runs that check, and then ends by telling you to run `archloop project add`. Pass `--skip-check` to skip the quick check when you intentionally do not want the provider smoke call.
+
 ### `archloop project configure`
 
-Creates or updates the Hub project development contract for the current repository. Pass `--project-profile <profile>` to choose the profile explicitly; supported profiles reuse the init registry (`generic`, `node`, `python`, `cpp`). In an interactive terminal, omit the flag to pick a profile from a prompt. The contract is written as pretty-printed JSON to the Hub project assets directory under `development-contract.json`.
+Creates or updates the Hub project development contract for the selected Hub project. Pass `--project <name>` to target a specific project explicitly, and `--project-profile <profile>` to choose the profile explicitly; supported profiles reuse the init registry (`generic`, `node`, `python`, `cpp`). In an interactive terminal, omitting `--project` opens the Hub project picker when no project is selected, and omitting `--project-profile` picks a profile from a prompt. The contract is written as pretty-printed JSON to the Hub project assets directory under `development-contract.json`.
 
 `project configure` refreshes advisory project facts such as manifests, lockfiles, build files, and configured scripts on every run. Re-running with the same profile preserves any user-edited `setup`, `verify`, and `context` sections while updating the fact snapshot and timestamps. Changing the profile writes a timestamped backup of the previous contract before replacing it.
 
 `project configure` reports the Hub project directory, the selected project profile, the refreshed fact summary, whether user-edited sections were preserved, and any backup path after writing. `project status` shows the same path and profile when the contract already exists, and the generic profile is the fallback when no profile-specific contract has been created yet.
 
 If `archloop run --flow` reaches a repository without a development contract, Hub creates the generic contract first, reports that fallback in the run output, and keeps going. Use `project configure` afterward to write the project-specific contract you actually want Hub flows to consume.
+
+### `archloop project add`
+
+Registers an existing git repo as a Hub project from any directory. Pass `--name <name>` and `--path <repo-path>` in scripts; in a TTY, archLoop prompts for a repo path and Hub project name when they are missing, suggests a repo-derived project name, recommends a project profile from repo signals, and defaults the local task-store prompt to yes.
+
+Successful registration writes the Hub project registry entry, creates the project Hub assets directory, refreshes the Hub project development contract, reports its path, and records the new project as the CLI selected Hub project. If task-store initialization is accepted, archLoop runs `archloop tasks init` for that repo after registration; declining it still leaves the project registered and selected.
+
+### `archloop project list`
+
+Lists registered Hub projects from the shared registry, marks the selected project, and shows each project's repo path, project profile, path validity, local task-store readiness labels, ready/failed/total counts when available, and active run count. The command works from any directory because it reads the shared registry rather than inferring a project from `cwd`.
+
+### `archloop project select [<name>]`
+
+Sets the CLI selected Hub project by name. If no name is provided in a TTY, archLoop opens an interactive picker; in non-interactive mode the name is required. Selection is stored outside the target repo, so it remains available from any directory and does not depend on the current working directory.
+
+### `archloop project rename <project> <new-name>`
+
+Renames an existing Hub project without changing its stable Hub project id. Pass the existing Hub project name or id as the first argument and the new user-facing name as the second argument. Duplicate names are rejected with guidance to inspect `archloop project list` and choose a different name.
+
+### `archloop project relink <project> --path <repo-path>`
+
+Updates an existing Hub project to point at a new host repo path without changing its stable Hub project id. The new path must be an existing git repository with at least one commit, and paths already registered to another Hub project are rejected with guidance to inspect `archloop project list` and choose a different path.
 
 ### `archloop agent-config path`
 
@@ -893,7 +934,7 @@ Prints the Hub-wide env file path under the archLoop user data directory. Hub fl
 
 ### `archloop env show`
 
-Displays configured Hub env keys with masked values. `process.env` overrides file values at runtime. Empty known keys include a short acquisition hint and a pointer to `archloop env init`.
+Displays configured Hub env keys with masked values. `process.env` overrides file values at runtime. Empty known keys include a short acquisition hint and a pointer to `archloop env init`. Placeholder strings such as `undefined` and `null` are treated as empty values, so they do not satisfy readiness checks.
 
 ### `archloop env init`
 
@@ -926,6 +967,7 @@ Runs `gh auth login --insecure-storage` with `GH_CONFIG_DIR` set to archLoop's H
 ### `archloop tasks list`
 
 Shows the Hub task board grouped by canonical Hub task status from Beads data in the current git repository. Use it to inspect inbox, ready, blocked, implementation, review, merge, done, failure, and sync-conflict buckets. Each displayed task includes a 1-based list number that can be used as a task selector in follow-up commands.
+Task commands target the selected Hub project by default and accept `--project <name>` for an explicit override.
 
 ### `archloop tasks show <task-selector>`
 
@@ -971,13 +1013,13 @@ Appends a readable Beads comment to the task without changing its status. Pass t
 
 ### `archloop tasks recover <task-selector>`
 
-Repairs failed or stale Hub execution state for a single Beads task. Recovery is the explicit command allowed to release stale claim metadata, reset abandoned execution statuses such as `implementing` or `reviewing`, and move recoverable `failed` tasks back to an appropriate collaboration state (`ready_for_agent`, `ready_for_human`, `blocked`, or `wontfix`). If a failed task still has unmerged work on its claimed task branch, recovery moves it back to `waiting_for_merge` instead of rerunning implementation. For `failed(close_failed)`, recovery checks whether the task branch is already merged into `HEAD`, reruns verification, retries local Beads close, and marks the task `done` without repeating merge. When a failed task has a stale worktree lease but preserved branch work, recovery clears the stale lease metadata path and prepares retry from the preserved worktree without deleting uncommitted changes. Each recovery appends a concise Beads comment starting with `> *This was generated by archLoop during task recovery.*`.
+Repairs failed or stale Hub execution state for a single Beads task. Recovery is the explicit command allowed to release stale claim metadata, reset abandoned execution statuses such as `implementing` or `reviewing`, and move recoverable `failed` tasks back to an appropriate collaboration state (`ready_for_agent`, `ready_for_human`, `blocked`, or `wontfix`). If a failed task still has unmerged work on its claimed task branch, recovery moves it back to `waiting_for_merge` instead of rerunning implementation and keeps that branch intact for retry. When a failed task has no remaining branch work and still owns a safe Hub-managed branch, recovery performs best-effort non-force cleanup with `git branch -d`; active worktree leases, checked-out worktrees, dirty preserved worktrees, and preexisting branch ownership block deletion with diagnostics that are included in the recovery comment. For `failed(close_failed)`, recovery checks whether the task branch is already merged into `HEAD`, reruns verification, retries local Beads close, and marks the task `done` without repeating merge. When a failed task has a stale worktree lease but preserved branch work, recovery clears the stale lease metadata path and prepares retry from the preserved worktree without deleting uncommitted changes. Each recovery appends a concise Beads comment starting with `> *This was generated by archLoop during task recovery.*`.
 
 ### `archloop tasks doctor`
 
-Audits local Beads task-board state against Hub run events and git branch/worktree state without mutating Beads, git, or remote GitHub Issues. It reports multiple archLoop status labels, stale `metadata.hubStatus`, missing execution claim fields, failed tasks that still have branch work, merge-ready run history that is not selectable for merge, terminal tasks that still carry execution claim metadata, dirty source worktree gates, worktree lease claim/occupancy mismatches (active execution, stale lease with failed claim, active lease without claim), and task state that still needs `archloop tasks push`.
+Audits local Beads task-board state against Hub run events and git branch/worktree state without mutating Beads, git, or remote GitHub Issues. It reports multiple archLoop status labels, stale `metadata.hubStatus`, missing execution claim fields, failed tasks that still have branch work, merge-ready run history that is not selectable for merge, terminal tasks that still carry execution claim metadata, dirty source worktree gates, worktree lease claim/occupancy mismatches (active execution, stale lease with failed claim, active lease without claim), task state that still needs `archloop tasks push`, and managed branch cleanup diagnostics for safe candidates, blocked branches, and historical unowned preservation rules.
 
-Doctor output includes the next action for each finding: rerun the flow, recover a failed task, repair local state, or push task sync. Dirty source files are a Git safety gate, not repairable Beads task-state pollution; commit, stash, or revert them, then rerun the same flow so the batch resumes.
+Doctor output includes the next action for each finding: rerun the flow, recover a failed task, repair local state, push task sync, or clean up managed branches with `archloop tasks cleanup --yes` or `--include-unowned` when appropriate. Dirty source files are a Git safety warning, not repairable Beads task-state pollution. If a later `run --flow` needs to land merge-ready branch work that overlaps those dirty files, commit, stash, or discard the listed blocking files, then rerun the same flow so the batch resumes.
 
 ### `archloop tasks repair-state <task-selector>`
 
@@ -985,17 +1027,21 @@ Previews local Beads mutations that would repair task-state pollution for one ta
 
 Repair uses the same canonical task transition path as normal Hub lifecycle changes, preserving user custom labels while rewriting only archLoop-managed status labels and metadata. It can restore the QA incident shape where Hub events show `task_review_succeeded`, branch work is still unmerged, but Beads labels/metadata or claim fields are stale, moving the task back to `waiting_for_merge` with the correct claim. Failed agent attempts with `commitCount=0` and no branch work are not promoted by repair-state; use normal recovery policy for failed tasks.
 
+### `archloop tasks cleanup`
+
+Previews and confirms cleanup of Hub-managed task branches. By default, archLoop only deletes safe managed branches that are already merged and proven to be Hub-owned. Historical unowned `archloop/...` branches remain listed as candidates but are preserved unless you pass `--include-unowned`. Use `--dry-run` to preview without deleting any git refs.
+
 ### `archloop tasks delete <task-selector> [task-selector...]`
 
 Permanently deletes one or more local Beads tasks. This is destructive removal, not lifecycle close: Hub merge/triage/recovery use close to mark work done locally while keeping the Beads record. Delete removes the task from Beads and does not delete remote GitHub issues.
 
 Task selectors match `tasks show` and `tasks comment` (Beads id, exact title, or `tasks list` number). Pass multiple selectors in one command to batch-delete. In a TTY, archLoop previews with Beads dry-run output and asks for confirmation. In non-interactive mode, pass `--yes` to confirm or `--dry-run` to preview only. `--cascade` passes through to Beads to recursively delete dependent tasks when a blocker would otherwise fail deletion.
 
-### `archloop run <project> --flow <id>`
+### `archloop run [<project> | --project <name>] --flow <id>`
 
-Runs a Hub-owned flow against the Beads task board in the target git repository. Use `.` for the current repository. Hub flows use bundled prompts from archLoop itself, not repo-local `.archloop/` prompt files.
+Runs a Hub-owned flow against the selected Hub project by default. In a TTY, archLoop opens the Hub project picker when no project is selected and opens a flow picker when `--flow` is omitted. Hub flows use bundled prompts from archLoop itself, not repo-local `.archloop/` prompt files. Legacy path calls like `archloop run . --flow with-review` still work temporarily and print migration guidance toward `archloop project add` / `archloop project select`.
 
-The first available task-board flows are `no-review` and `with-review`. Proposal flows `prd-decomposition` and `triage` run through the shared proposal session runtime: `archloop run . --flow prd-decomposition --input <prd-ref>` and `archloop run . --flow triage --input <task-id|statuses>` execute end-to-end. Task-board flow implementers now read the Hub project development contract before prompting the agent; if no contract exists, `run --flow` creates a generic fallback contract, reports how to specialize it with `archloop project configure --project-profile <profile>`, and then continues. The matching `archloop tasks` shortcuts remain the recommended entry points.
+The first available task-board flows are `no-review` and `with-review`. Proposal flows `prd-decomposition` and `triage` run through the shared proposal session runtime: `archloop run --flow prd-decomposition --input <prd-ref>` and `archloop run --flow triage --input <task-id|statuses>` execute end-to-end. Task-board flow implementers now read the Hub project development contract before prompting the agent; if no contract exists, `run --flow` creates a generic fallback contract, reports how to specialize it with `archloop project configure [--project <name>] --project-profile <profile>`, and then continues. The matching `archloop tasks` shortcuts remain the recommended entry points.
 
 When `--flow` targets `prd-decomposition` or `triage`, archLoop runs the same agent-driven proposal path as the task shortcut: no-sandbox execution, Hub-wide role config, structured output validation, proposal artifacts in the Hub run directory, mutation detection before apply, and local-only Beads writes. Remote issue updates remain outside proposal flows and happen through explicit `archloop tasks pull`, `tasks push`, or confirmed `tasks sync`.
 
@@ -1003,7 +1049,13 @@ The `no-review` flow reads the Beads ready queue, selects a batch of eligible `r
 
 The `with-review` flow adds a reviewer stage after implementation: successful work moves to `reviewing`, the reviewer receives the task branch and diff/commit context from orchestration, and completed review advances the task to `waiting_for_merge`. Selected task pipelines run in parallel within each batch; each task's reviewer starts after that task's implementation succeeds. After each successful batch, Hub reloads the ready queue and continues with the next batch until the queue is empty or `--max-batches` is reached. Review failures move tasks to `failed` with a failure reason.
 
-Hub flow runs now also write a run-level completion event and the CLI summary reports aggregate completed batches, completed tasks, and the stop reason for the execution slice. The stop reason is one of `no_ready_tasks`, `max_batches_reached`, or `batch_failed`: the first two are successful exits, and `batch_failed` means the flow stopped for recovery.
+Hub flow runs also write a run-level completion event. User-facing task-board outcomes are `completed`, `completed_with_failures`, `failed`, or `cancelled`, with completed, failed, blocked, skipped, and ready-to-merge task counts where applicable. `no_ready_tasks` with no completed batch is shown as `Nothing to run`; reaching `--max-batches` is a successful bounded completion. Those successful outcomes exit `0`, blocking or completed-with-failures outcomes exit nonzero, and user cancellation exits `130`.
+
+Hub runs default to `--output auto`. A capable interactive TTY gets a bounded live view with a shared compact run header, elapsed time, durable logs, and final outcome. Task-board flows render stable current-batch task rows and completed-batch scrollback; `prd-decomposition` and `triage` render proposal phases for input preparation, draft, optional refinement, finalization, mutation detection, approval, validation, and apply. The renderer never enters the alternate screen and does not show raw agent prose, tool arguments, percentages, or ETA claims. It suspends around proposal prompts, switches between wide and stacked layouts as the terminal resizes, restores the cursor on success, failure, cancellation, and abnormal cleanup, and falls back to plain output for redirected stdout, CI, `TERM=dumb`, unsupported cursor control, or unsafe terminal width or height. In the live view, `NO_COLOR` or `--no-color` removes color without removing textual labels or status symbols.
+
+For deterministic CI or redirected logs, Hub flows use plain output automatically and also accept explicit `--output plain`. Plain mode writes append-only physical lines with stable field ordering, escaped values, and no ANSI cursor rewriting. Task-board records retain task stages, five outcome counts, diagnostics, logs, and recovery actions. Proposal records expose only canonical phase/status transitions and applied, skipped, and dependency counts; final outcomes distinguish `applied`, `no_change`, `cancelled`, `validation_failed`, `mutation_failed`, and `failed`. Mutation and validation failures include concise diagnostics, logs, and a same-flow recovery command. Explicit plain/JSON modes are non-interactive, so proposal writes require `--yes`; auto TTY mode keeps refinement, status, approval, and guarded apply prompts. Agent prose, tool arguments, and direct agent-startup decoration stay out of projected output and remain available in the Hub run directory.
+
+For automation, use `archloop run --flow <id> --output json`. JSON mode writes JSONL to stdout: every physical line is one schema version `1` object, normal lifecycle failures remain JSON, and prompts, human status text, ANSI control sequences, agent startup text, and raw agent output are excluded. Records have `schemaVersion`, output `eventId` / `sequence`, `timestamp`, `type`, `runId`, and `flowId`; source-backed lifecycle records also include `sourceEventId` / `sourceSequence`. Task-board outcomes retain task attention and five task counts. Proposal `proposal_phase` records expose phase/status and safe counts, while `run_completed` uses the proposal outcomes listed above; Ctrl+C cancellation exits `130`, SIGTERM preserves exit `143`, validation/mutation/general failure exits nonzero, and applied/no-change exits `0`. JSON string escaping keeps whitespace, newlines, quotes, paths, and diagnostics inside one record. The schema is additive within version `1`; consumers should ignore unknown fields.
 
 Task-board flows treat `ready_for_agent` as the **candidate pool**, not the automatic execution set. The **selected flow batch** is the subset chosen by the configured batch strategy before claim. Selected batch tasks run concurrently through implementation and any per-branch review; the merge phase waits for them and remains serialized. After each successful batch, Hub refreshes the ready queue and can start another batch until the flow exhausts the queue or hits `--max-batches`. If the planned batch planner returns a valid empty selection, Hub treats that as no safe batch for the current base and stops without claiming a conservative fallback task. By default, `no-review` and `with-review` use the `planned` strategy with a maximum of **3** tasks per batch. Override with `--batch-strategy`, `--max-tasks`, and `--max-batches`:
 
@@ -1016,13 +1068,13 @@ Task-board flows treat `ready_for_agent` as the **candidate pool**, not the auto
 Hub batch planner candidates expose only structured blocker state to the planner. `openBlockers=[]` and `unknownBlockers=[]` mean the candidate is unblocked, even if the task body still contains stale `## Blocked by` prose. The planner does not infer blockers from raw description text.
 If the planner returns an `explicit_blocker` deferral for a candidate with no live `openBlockers`, no `unknownBlockers`, and no dependency on a selected task, Hub rejects that deferral, recovers the safe candidate up to `maxTasks`, and records `invalid_explicit_blocker_deferral` in the batch event/CLI diagnostics.
 
-If a later `archloop run . --flow <id>` finds an unfinished previous batch for the same flow with tasks still in `waiting_for_merge`, it creates a fresh Hub run directory for the retry and resumes that old batch's merge selection by its original batch id before planning or claiming new `ready_for_agent` tasks. Ready tasks that exist at the same time stay unclaimed until the resumed merge batch completes. If that resumed merge selection is blocked by stale or inconsistent state, Hub stops the flow with `batch_failed` instead of falling through to a fresh queue scan. Failed, stale, or inconsistent task states are reported with explicit recovery or repair guidance instead of being automatically modified.
+At `archloop run --flow <id>` startup, Hub warns early when the source worktree has dirty source files. If the same flow has an unfinished previous batch with tasks still in `waiting_for_merge`, the run creates a fresh Hub run directory for the retry and resumes that old batch's merge selection by its original batch id before planning or claiming new `ready_for_agent` tasks. Ready tasks that exist at the same time stay unclaimed until the resumed merge batch completes. When the host worktree is dirty, Hub checks whether the pending merge-ready branches would touch the same paths and lists exact blocking files before any fresh tasks are claimed. If that resumed merge selection is blocked by stale state, inconsistent state, or dirty-file overlap, Hub stops the flow with `batch_failed` instead of falling through to a fresh queue scan. Failed, stale, or inconsistent task states are reported with explicit recovery or repair guidance instead of being automatically modified.
 
 After implementation and review complete, Hub evaluates all merge candidates and records selected/skipped/blocked reasons in batch events and CLI output. It selects tasks only when they are `waiting_for_merge`, belong to the current batch, have claim branch metadata, and the branch still has unmerged work. Status mismatches, batch mismatches, missing claims, missing branches, and branches with no unmerged work are explained before merge starts. If Hub run events show a task reached merge-ready state but the Beads projection is stale or missing claim fields while branch work still exists, merge selection reports `state_inconsistent` with the projected status, claim drift, branch, and an explicit `archloop tasks repair-state <selector>` repair hint instead of silently skipping it.
 
-Before merging, Hub preflights the source worktree. Dirty source files block the merge as a Git safety gate with a summary telling you to commit, stash, or revert the listed files and rerun the same flow so the batch resumes. Dirty Beads runtime/export files such as `.beads/issues.jsonl` and `.beads/interactions.jsonl` are classified separately and do not block by themselves, because Hub task-board state is local task-store state. If a task branch changes `.beads/` runtime/export files, that branch is blocked before merge; use `archloop tasks pull` / `push` / `sync` for remote task exchange instead of carrying Beads local state through code branches.
+Before merging, Hub preflights the source worktree. Dirty source files that do not overlap the files a selected branch would land do not block the batch: Hub verifies the merge in a clean integration worktree/branch, then lands it back only if the host dirty paths still do not overlap. If dirty files would be overwritten or conflict with the merge result, the task remains `waiting_for_merge` and CLI output lists the blocking files with the remediation: commit, stash, or discard those files, then rerun the same `archloop run --flow <id>` command. archLoop will resume the waiting merge batch before claiming new work. Dirty Beads runtime/export files such as `.beads/issues.jsonl` and `.beads/interactions.jsonl` are classified separately and do not block by themselves, because Hub task-board state is local task-store state. If a task branch changes `.beads/` runtime/export files, that branch is blocked before merge; use `archloop tasks pull` / `push` / `sync` for remote task exchange instead of carrying Beads local state through code branches.
 
-Hub moves selected tasks to `merging`, merges each branch with per-task events, runs verification after each merge, and closes the local Beads task only when merge, verification, and close all succeed. Clean merges use Git directly. When Git reports a merge conflict, Hub invokes the configured `merge` agent role to resolve the conflicted worktree, then checks that no unmerged files or unfinished merge state remain before continuing to verification and task close. Generic merge failures, unresolved merge conflicts, verification failures, or close failures stop the selected batch: the current task becomes `failed`, unprocessed selected tasks return to `waiting_for_merge`, and the batch becomes `partial_failed`. Merge failures preserve a concise Git diagnostic summary in task/batch events and in CLI output so you can decide whether to configure the merge role, clean the worktree, resolve a conflict, or retry.
+Hub moves selected tasks to `merging`, merges each branch with per-task events, runs verification after each merge, and closes the local Beads task only when merge, verification, and close all succeed. After a successful close, Hub attempts best-effort cleanup of the safe managed task branch with non-force `git branch -d`; cleanup failures emit cleanup events and warnings but do not change the task out of `done`. Clean merges use Git directly. When Git reports a merge conflict, Hub invokes the configured `merge` agent role to resolve the conflicted worktree, then checks that no unmerged files or unfinished merge state remain before continuing to verification and task close. Generic merge failures, unresolved merge conflicts, verification failures, close failures, or dirty-overlap landing failures stop the selected batch: the current task becomes `failed` only for true merge/verification/close failures, while dirty-overlap blocks keep affected tasks in `waiting_for_merge`. Unprocessed selected tasks return to `waiting_for_merge`, and the batch becomes `partial_failed` or stops as `batch_failed` depending on where the failure happened. Merge and dirty-overlap failures preserve a concise Git diagnostic summary in task/batch events and in CLI output so you can decide whether to configure the merge role, clean the blocking files, resolve a conflict, or retry.
 
 | Option             | Required | Description                                                                                                                     |
 | ------------------ | -------- | ------------------------------------------------------------------------------------------------------------------------------- |
@@ -1031,6 +1083,8 @@ Hub moves selected tasks to `merging`, merges each branch with per-task events, 
 | `--batch-strategy` | No       | Task-board batch selection strategy (`planned`, `limited`, `conservative`; default `planned`)                                   |
 | `--max-tasks`      | No       | Maximum tasks to select for a task-board batch (1–10; default `3`)                                                              |
 | `--max-batches`    | No       | Maximum task-board batches to complete in one run (positive integer; unlimited by default)                                      |
+| `--output <mode>`  | No       | `auto` (default) for live TTY output with plain fallback, `plain` for deterministic text, or `json` for stdout-pure JSONL       |
+| `--no-color`       | No       | Disable live-view color while retaining labels and symbols                                                                      |
 
 Hub flow runs write run, batch, task, and run-completion event records into the Hub run directory under the archLoop user data directory. The task board uses that run history to keep claims and execution progress separate from normal Beads task status.
 

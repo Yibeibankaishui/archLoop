@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -12,6 +14,12 @@ import {
   type HubTaskClaimMetadata,
 } from "./hubExecution.js";
 import { readHubAgentConfig } from "./hubAgentConfig.js";
+import {
+  evaluateHubManagedBranchCleanup,
+  findHubManagedBranchCleanupCandidate,
+  type HubManagedBranchCleanupCandidate,
+  type HubManagedBranchCleanupSkipDetail,
+} from "./hubManagedBranchCleanup.js";
 import { resolveHubAgentProvider } from "./hubProposalAgent.js";
 import { run } from "./run.js";
 import { noSandbox } from "./sandboxes/no-sandbox.js";
@@ -62,7 +70,28 @@ export interface HubMergeTaskResult {
   readonly outcome: "success" | "merge_conflict" | "failed";
   readonly message?: string;
   readonly diagnostics?: HubMergeDiagnostics;
+  readonly integration?: HubMergeIntegration;
 }
+
+export interface HubMergeIntegration {
+  readonly cwd: string;
+  readonly finalize: () => Promise<void>;
+  readonly cleanup: () => Promise<void>;
+}
+
+export interface HubBranchCleanupResult {
+  readonly outcome: "deleted" | "skipped" | "failed";
+  readonly reasonCodes?: readonly string[];
+  readonly diagnosticSummary?: string;
+  readonly diagnostics?: HubMergeDiagnostics;
+}
+
+export type HubTaskBranchCleanup = (input: {
+  readonly cwd: string;
+  readonly runDir: string;
+  readonly branch: string;
+  readonly env?: NodeJS.ProcessEnv;
+}) => Promise<HubBranchCleanupResult>;
 
 export type HubFlowMerger = (
   input: HubMergeTaskInput,
@@ -129,6 +158,7 @@ export interface HubBatchMergeSelectionDiagnostic {
   readonly message?: string;
   readonly taskStoreDirtyFiles?: readonly string[];
   readonly taskStoreBranchFiles?: readonly string[];
+  readonly blockingPaths?: readonly string[];
   readonly observedProjectedStatus?: HubTaskStatus;
   readonly missingClaimFields?: readonly string[];
   readonly staleClaimFields?: Readonly<Record<string, string>>;
@@ -165,6 +195,7 @@ export interface RunHubBatchMergeInput {
   readonly merger: HubFlowMerger;
   readonly verifier: HubFlowVerifier;
   readonly closer?: HubTaskCloser;
+  readonly branchCleanup?: HubTaskBranchCleanup;
   readonly branchInspector?: HubMergeBranchInspector;
   readonly worktreeInspector?: HubMergeWorktreeInspector;
   readonly env?: NodeJS.ProcessEnv;
@@ -185,6 +216,8 @@ export interface HubBatchMergeTaskResult {
   readonly failureReason?: HubFailureReason;
   readonly diagnosticSummary?: string;
   readonly diagnostics?: HubMergeDiagnostics;
+  readonly logPath?: string;
+  readonly cleanup?: HubBranchCleanupResult;
 }
 
 export interface RunHubBatchMergeResult {
@@ -195,6 +228,10 @@ export interface RunHubBatchMergeResult {
   readonly batchStatus: "done" | "partial_failed" | "skipped";
   readonly results: readonly HubBatchMergeTaskResult[];
 }
+
+type HubManagedBranchCleanupEvaluation = Awaited<
+  ReturnType<typeof evaluateHubManagedBranchCleanup>
+>;
 
 const resolveBranch = (task: HubTaskProjection): string =>
   task.claim?.branch ?? resolveHubTaskBranch(task.id, task.title);
@@ -243,6 +280,8 @@ const toBatchMergeTaskResult = (
   failureReason?: HubFailureReason,
   diagnosticSummary?: string,
   diagnostics?: HubMergeDiagnostics,
+  cleanup?: HubBranchCleanupResult,
+  logPath?: string,
 ): HubBatchMergeTaskResult => ({
   taskId: task.id,
   title: task.title,
@@ -252,6 +291,8 @@ const toBatchMergeTaskResult = (
   ...(failureReason === undefined ? {} : { failureReason }),
   ...(diagnosticSummary === undefined ? {} : { diagnosticSummary }),
   ...(diagnostics === undefined ? {} : { diagnostics }),
+  ...(cleanup === undefined ? {} : { cleanup }),
+  ...(logPath === undefined ? {} : { logPath }),
 });
 
 const recordBatchMergeCompleted = (
@@ -280,6 +321,65 @@ const recordBatchMergeCompleted = (
         }
       : {}),
   });
+};
+
+const cleanupReasonCodes = (
+  reasons: readonly HubManagedBranchCleanupSkipDetail[],
+): readonly string[] => reasons.map((reason) => reason.reason);
+
+const skippedCleanupResult = (
+  evaluation: HubManagedBranchCleanupEvaluation,
+  branch: string,
+): HubBranchCleanupResult => {
+  const candidate = findHubManagedBranchCleanupCandidate(evaluation, branch);
+  return {
+    outcome: "skipped",
+    reasonCodes: candidate
+      ? cleanupReasonCodes(candidate.skipReasons)
+      : ["branch_not_tracked"],
+  };
+};
+
+const deleteTaskBranch = async (input: {
+  readonly cwd: string;
+  readonly branch: string;
+  readonly env?: NodeJS.ProcessEnv;
+}): Promise<HubBranchCleanupResult> => {
+  try {
+    await execFileAsync("git", ["branch", "-d", input.branch], {
+      cwd: input.cwd,
+      ...(input.env ? { env: input.env } : {}),
+    });
+    return { outcome: "deleted" };
+  } catch (error) {
+    const diagnostics = compactDiagnostics(extractErrorDiagnostics(error));
+    return {
+      outcome: "failed",
+      reasonCodes: ["git_delete_failed"],
+      diagnosticSummary:
+        formatMergeDiagnosticSummary(diagnostics) ??
+        errorMessage(error) ??
+        `Failed to delete ${input.branch}`,
+      ...(diagnostics ? { diagnostics } : {}),
+    };
+  }
+};
+
+const defaultHubTaskBranchCleanup: HubTaskBranchCleanup = async (input) => {
+  const hubProjectDir = join(input.runDir, "..", "..");
+  const evaluation = await evaluateHubManagedBranchCleanup({
+    cwd: input.cwd,
+    env: input.env,
+    hubProjectDir,
+  });
+  const safeCandidate = evaluation.managedSafeCandidates.find(
+    (candidate) => candidate.branch === input.branch,
+  );
+  if (!safeCandidate) {
+    return skippedCleanupResult(evaluation, input.branch);
+  }
+
+  return deleteTaskBranch(input);
 };
 
 const errorMessage = (error: unknown): string => {
@@ -341,6 +441,59 @@ const buildMergeDiagnostics = (
     ...result.diagnostics,
     message: result.diagnostics?.message ?? result.message,
   });
+
+const recordTaskBranchCleanup = (
+  input: RunHubBatchMergeInput,
+  task: HubTaskProjection,
+  branch: string,
+  cleanup: HubBranchCleanupResult,
+  createdAt: string,
+): void => {
+  appendHubTaskEvent(input.runDir, {
+    type: "task_branch_cleanup",
+    runId: input.runId,
+    batchId: input.batchId,
+    taskId: task.id,
+    branch,
+    createdAt,
+    status: "done",
+    claim: task.claim,
+    cleanup: {
+      policy: "safe_managed",
+      outcome: cleanup.outcome,
+      ...(cleanup.reasonCodes === undefined
+        ? {}
+        : { reasonCodes: cleanup.reasonCodes }),
+      ...(cleanup.diagnosticSummary === undefined
+        ? {}
+        : { diagnosticSummary: cleanup.diagnosticSummary }),
+      ...(cleanup.diagnostics === undefined
+        ? {}
+        : { diagnostics: cleanup.diagnostics }),
+    },
+  });
+};
+
+const runTaskBranchCleanup = async (
+  input: RunHubBatchMergeInput,
+  branch: string,
+): Promise<HubBranchCleanupResult> => {
+  try {
+    return await (input.branchCleanup ?? defaultHubTaskBranchCleanup)({
+      cwd: input.cwd,
+      runDir: input.runDir,
+      branch,
+      env: input.env,
+    });
+  } catch (error) {
+    return {
+      outcome: "failed",
+      reasonCodes: ["cleanup_executor_threw"],
+      diagnosticSummary: errorMessage(error),
+      diagnostics: compactDiagnostics(extractErrorDiagnostics(error)),
+    };
+  }
+};
 
 const firstDiagnosticLine = (value: string | undefined): string | undefined =>
   value
@@ -447,6 +600,29 @@ const defaultBranchInspector: HubMergeBranchInspector = async (branch, cwd) => {
 
 const normalizeGitPath = (path: string): string => path.replace(/\\/g, "/");
 
+const gitPathsOverlap = (left: string, right: string): boolean => {
+  const normalizedLeft = normalizeGitPath(left);
+  const normalizedRight = normalizeGitPath(right);
+  return (
+    normalizedLeft === normalizedRight ||
+    normalizedLeft.startsWith(`${normalizedRight}/`) ||
+    normalizedRight.startsWith(`${normalizedLeft}/`)
+  );
+};
+
+const collectOverlappingGitPaths = (
+  dirtyFiles: readonly string[],
+  changedFiles: readonly string[],
+): readonly string[] =>
+  dirtyFiles.filter((dirtyFile) =>
+    changedFiles.some((changedFile) => gitPathsOverlap(dirtyFile, changedFile)),
+  );
+
+const formatDirtyWorktreeRemediation = (
+  dirtyFiles: readonly string[],
+): string =>
+  `commit, stash, or discard dirty source files (${dirtyFiles.join(", ")}), then rerun the same flow so the batch resumes.`;
+
 const isTaskStoreRuntimePath = (path: string): boolean => {
   const normalized = normalizeGitPath(path);
   return normalized === ".beads" || normalized.startsWith(".beads/");
@@ -495,6 +671,8 @@ const defaultWorktreeInspector: HubMergeWorktreeInspector = async (cwd) => {
   };
 };
 
+export const inspectHubMergeWorktreeState = defaultWorktreeInspector;
+
 const buildSelectionDiagnostic = (
   task: HubTaskProjection,
   input: Pick<
@@ -505,6 +683,7 @@ const buildSelectionDiagnostic = (
     | "message"
     | "taskStoreDirtyFiles"
     | "taskStoreBranchFiles"
+    | "blockingPaths"
     | "observedProjectedStatus"
     | "missingClaimFields"
     | "staleClaimFields"
@@ -780,12 +959,35 @@ const evaluateHubBatchMergeSelection = async (input: {
     }
 
     if (input.worktreeState.dirtySourceFiles.length > 0) {
+      const branchChangedFiles = branchState.changedFiles;
+      const overlappingDirtyFiles = branchChangedFiles
+        ? collectOverlappingGitPaths(
+            input.worktreeState.dirtySourceFiles,
+            branchChangedFiles,
+          )
+        : input.worktreeState.dirtySourceFiles;
+      if (overlappingDirtyFiles.length === 0) {
+        selectedTasks.push(task);
+        diagnostics.push(
+          buildSelectionDiagnostic(task, {
+            decision: "selected",
+            reason: "selected",
+            branch,
+            message: `Branch ${branch} has unmerged work. Source worktree is dirty (${input.worktreeState.dirtySourceFiles.join(", ")}), but those files do not overlap this branch; Hub will merge and verify in a clean integration worktree before landing.`,
+          }),
+        );
+        continue;
+      }
+
       diagnostics.push(
         buildSelectionDiagnostic(task, {
           decision: "blocked",
           reason: "dirty_worktree",
           branch,
-          message: `Git safety gate: commit, stash, or revert dirty source files (${input.worktreeState.dirtySourceFiles.join(", ")}), then rerun the same flow so the batch resumes.`,
+          blockingPaths: overlappingDirtyFiles,
+          message: branchChangedFiles
+            ? `Git safety gate: dirty source files would be overwritten or conflict with ${branch} (${overlappingDirtyFiles.join(", ")}). ${formatDirtyWorktreeRemediation(overlappingDirtyFiles)}`
+            : `Git safety gate: unable to prove ${branch} is safe against dirty source files. ${formatDirtyWorktreeRemediation(overlappingDirtyFiles)}`,
         }),
       );
       continue;
@@ -875,6 +1077,8 @@ const processMergeTask = async (
     );
   }
 
+  const mergeIntegration = mergeResult.integration;
+
   appendMergeProgressEvent(input, {
     type: "merge_succeeded",
     taskId: task.id,
@@ -896,15 +1100,19 @@ const processMergeTask = async (
     taskId: task.id,
     title: task.title,
     branch,
-    cwd: input.cwd,
+    cwd: mergeIntegration?.cwd ?? input.cwd,
     runDir: input.runDir,
   });
   const verifyFinishedAt = new Date().toISOString();
 
   if (verifyResult.outcome !== "success") {
+    await mergeIntegration?.cleanup().catch(() => undefined);
+    const diagnosticSummary = verifyResult.message;
+    const logPath = resolveHubRunEventsPaths(input.runDir).taskEventsPath;
     const lifecycleResult = recordVerificationFailure({
       ...lifecycleBase,
       createdAt: verifyFinishedAt,
+      diagnosticSummary,
     });
 
     return toBatchMergeTaskResult(
@@ -913,7 +1121,39 @@ const processMergeTask = async (
       "verification_failed",
       lifecycleResult.hubStatus,
       lifecycleResult.failureReason,
+      diagnosticSummary,
+      undefined,
+      undefined,
+      logPath,
     );
+  }
+
+  if (mergeIntegration) {
+    try {
+      await mergeIntegration.finalize();
+    } catch (error) {
+      await mergeIntegration.cleanup().catch(() => undefined);
+      const diagnostics = compactDiagnostics(extractErrorDiagnostics(error));
+      const diagnosticSummary = formatMergeDiagnosticSummary(diagnostics);
+      const lifecycleResult = recordMergeFailure({
+        ...lifecycleBase,
+        failureReason: "merge_failed",
+        createdAt: new Date().toISOString(),
+        diagnosticSummary,
+        diagnostics,
+      });
+
+      return toBatchMergeTaskResult(
+        task,
+        branch,
+        "merge_failed",
+        lifecycleResult.hubStatus,
+        "merge_failed",
+        diagnosticSummary,
+        diagnostics,
+      );
+    }
+    await mergeIntegration.cleanup().catch(() => undefined);
   }
 
   appendMergeProgressEvent(input, {
@@ -938,12 +1178,24 @@ const processMergeTask = async (
       createdAt: verifyFinishedAt,
       closer: input.closer,
     });
+    const cleanupResult = await runTaskBranchCleanup(input, branch);
+    recordTaskBranchCleanup(
+      input,
+      task,
+      branch,
+      cleanupResult,
+      new Date().toISOString(),
+    );
 
     return toBatchMergeTaskResult(
       task,
       branch,
       "merged",
       lifecycleResult.hubStatus,
+      undefined,
+      undefined,
+      undefined,
+      cleanupResult,
     );
   } catch {
     const closeFailedAt = new Date().toISOString();
@@ -1249,144 +1501,282 @@ export const createHubMergeConflictResolver = (options: {
   };
 };
 
+const runGitMergeInCwd = async (options: {
+  readonly input: HubMergeTaskInput;
+  readonly cwd: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly conflictResolver?: HubMergeConflictResolver;
+}): Promise<HubMergeTaskResult> => {
+  const { input } = options;
+  try {
+    await execFileAsync(
+      "git",
+      ["merge", "--no-ff", input.branch, "-m", `Merge ${input.branch}`],
+      { cwd: options.cwd },
+    );
+    return { outcome: "success" };
+  } catch (error) {
+    const diagnostics = compactDiagnostics(extractErrorDiagnostics(error));
+    if (isMergeConflict(error, diagnostics)) {
+      const conflictedFiles = await listUnmergedFiles(options.cwd);
+      const gitStatus = await readGitStatusShort(options.cwd);
+      const baseBranch = await readCurrentBranch(options.cwd);
+      const conflictStartedAt = new Date().toISOString();
+      appendHubTaskEvent(input.runDir, {
+        type: "merge_conflict_resolution_started",
+        runId: input.runId,
+        batchId: input.batchId,
+        taskId: input.taskId,
+        branch: input.branch,
+        createdAt: conflictStartedAt,
+        status: "merging",
+        diagnostics: {
+          ...diagnostics,
+          details: {
+            ...diagnostics?.details,
+            conflictedFiles,
+            gitStatus,
+            baseBranch,
+          },
+        },
+      });
+
+      const resolver =
+        options.conflictResolver ??
+        createHubMergeConflictResolver({
+          cwd: options.cwd,
+          env: options.env,
+        });
+      const resolution = await resolver({
+        ...input,
+        cwd: options.cwd,
+        diagnostics,
+        conflictedFiles,
+        gitStatus,
+        baseBranch,
+      });
+      const conflictFinishedAt = new Date().toISOString();
+
+      const remainingConflicts = await listUnmergedFiles(options.cwd);
+      const mergeStillInProgress = await isMergeInProgress(options.cwd);
+
+      if (
+        resolution.outcome === "success" &&
+        remainingConflicts.length === 0 &&
+        !mergeStillInProgress
+      ) {
+        appendHubTaskEvent(input.runDir, {
+          type: "merge_conflict_resolution_succeeded",
+          runId: input.runId,
+          batchId: input.batchId,
+          taskId: input.taskId,
+          branch: input.branch,
+          createdAt: conflictFinishedAt,
+          status: "merging",
+        });
+        return { outcome: "success" };
+      }
+
+      const guardMessage =
+        resolution.outcome === "success" && remainingConflicts.length > 0
+          ? `Merge agent left unresolved conflicts: ${remainingConflicts.join(", ")}`
+          : resolution.outcome === "success" && mergeStillInProgress
+            ? "Merge agent resolved files but left the merge commit unfinished."
+            : resolution.message;
+      const resolutionDiagnostics = compactDiagnostics({
+        ...diagnostics,
+        ...resolution.diagnostics,
+        message: guardMessage ?? resolution.diagnostics?.message,
+        details: {
+          ...diagnostics?.details,
+          ...resolution.diagnostics?.details,
+          conflictedFiles,
+          gitStatus,
+          baseBranch,
+          ...(remainingConflicts.length > 0 ? { remainingConflicts } : {}),
+          ...(mergeStillInProgress ? { mergeStillInProgress } : {}),
+        },
+      });
+      appendHubTaskEvent(input.runDir, {
+        type: "merge_conflict_resolution_failed",
+        runId: input.runId,
+        batchId: input.batchId,
+        taskId: input.taskId,
+        branch: input.branch,
+        createdAt: conflictFinishedAt,
+        status: "failed",
+        failureReason: "merge_conflict",
+        diagnostics: resolutionDiagnostics,
+        diagnosticSummary: formatMergeDiagnosticSummary(resolutionDiagnostics),
+      });
+
+      return {
+        outcome: "merge_conflict",
+        message:
+          guardMessage ??
+          (error instanceof Error ? error.message : String(error)),
+        diagnostics: resolutionDiagnostics,
+      };
+    }
+
+    return {
+      outcome: "failed",
+      message: error instanceof Error ? error.message : String(error),
+      diagnostics,
+    };
+  }
+};
+
+const readGitRevision = async (
+  cwd: string,
+  revision: string,
+): Promise<string> =>
+  (await readGitStdout(cwd, ["rev-parse", revision])).trim();
+
+const listChangedFilesBetween = async (
+  cwd: string,
+  baseRevision: string,
+  targetRevision: string,
+): Promise<readonly string[]> =>
+  (
+    await readGitStdout(cwd, [
+      "diff",
+      "--name-only",
+      baseRevision,
+      targetRevision,
+    ])
+  )
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+const runGitMergeInCleanIntegrationWorktree = async (options: {
+  readonly input: HubMergeTaskInput;
+  readonly cwd: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly conflictResolver?: HubMergeConflictResolver;
+}): Promise<HubMergeTaskResult> => {
+  const integrationCwd = await mkdtemp(join(tmpdir(), "archloop-hub-merge-"));
+  let cleanupStarted = false;
+  const cleanup = async (): Promise<void> => {
+    if (cleanupStarted) {
+      return;
+    }
+    cleanupStarted = true;
+    try {
+      await execFileAsync(
+        "git",
+        ["worktree", "remove", "--force", integrationCwd],
+        {
+          cwd: options.cwd,
+        },
+      );
+    } catch {
+      await rm(integrationCwd, { recursive: true, force: true });
+      await execFileAsync("git", ["worktree", "prune"], {
+        cwd: options.cwd,
+      }).catch(() => undefined);
+    }
+  };
+
+  try {
+    await execFileAsync(
+      "git",
+      ["worktree", "add", "--detach", integrationCwd, "HEAD"],
+      { cwd: options.cwd },
+    );
+
+    const mergeResult = await runGitMergeInCwd({
+      input: options.input,
+      cwd: integrationCwd,
+      env: options.env,
+      conflictResolver: options.conflictResolver,
+    });
+
+    if (mergeResult.outcome !== "success") {
+      await cleanup();
+      return mergeResult;
+    }
+
+    const integrationHead = await readGitRevision(integrationCwd, "HEAD");
+    const finalize = async (): Promise<void> => {
+      const changedFiles = await listChangedFilesBetween(
+        options.cwd,
+        "HEAD",
+        integrationHead,
+      );
+      const currentWorktreeState = await inspectHubMergeWorktreeState(
+        options.cwd,
+      );
+      const overlappingDirtyFiles = collectOverlappingGitPaths(
+        currentWorktreeState.dirtySourceFiles,
+        changedFiles,
+      );
+      if (overlappingDirtyFiles.length > 0) {
+        throw new Error(
+          `Git safety gate: dirty source files would be overwritten or conflict with the verified merge (${overlappingDirtyFiles.join(", ")}). ${formatDirtyWorktreeRemediation(overlappingDirtyFiles)}`,
+        );
+      }
+
+      await execFileAsync("git", ["merge", "--ff-only", integrationHead], {
+        cwd: options.cwd,
+      });
+    };
+
+    return {
+      outcome: "success",
+      integration: {
+        cwd: integrationCwd,
+        finalize,
+        cleanup,
+      },
+    };
+  } catch (error) {
+    await cleanup().catch(() => undefined);
+    return {
+      outcome: "failed",
+      message: error instanceof Error ? error.message : String(error),
+      diagnostics: compactDiagnostics(extractErrorDiagnostics(error)),
+    };
+  }
+};
+
 export const createHubFlowRunMerger = (options: {
   readonly cwd: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly conflictResolver?: HubMergeConflictResolver;
 }): HubFlowMerger => {
   return async (input) => {
-    try {
-      await execFileAsync(
-        "git",
-        ["merge", "--no-ff", input.branch, "-m", `Merge ${input.branch}`],
-        { cwd: options.cwd },
-      );
-      return { outcome: "success" };
-    } catch (error) {
-      const diagnostics = compactDiagnostics(extractErrorDiagnostics(error));
-      if (isMergeConflict(error, diagnostics)) {
-        const conflictedFiles = await listUnmergedFiles(options.cwd);
-        const gitStatus = await readGitStatusShort(options.cwd);
-        const baseBranch = await readCurrentBranch(options.cwd);
-        const conflictStartedAt = new Date().toISOString();
-        appendHubTaskEvent(input.runDir, {
-          type: "merge_conflict_resolution_started",
-          runId: input.runId,
-          batchId: input.batchId,
-          taskId: input.taskId,
-          branch: input.branch,
-          createdAt: conflictStartedAt,
-          status: "merging",
-          diagnostics: {
-            ...diagnostics,
-            details: {
-              ...diagnostics?.details,
-              conflictedFiles,
-              gitStatus,
-              baseBranch,
-            },
-          },
-        });
-
-        const resolver =
-          options.conflictResolver ??
-          createHubMergeConflictResolver({
-            cwd: options.cwd,
-            env: options.env,
-          });
-        const resolution = await resolver({
-          ...input,
-          diagnostics,
-          conflictedFiles,
-          gitStatus,
-          baseBranch,
-        });
-        const conflictFinishedAt = new Date().toISOString();
-
-        const remainingConflicts = await listUnmergedFiles(options.cwd);
-        const mergeStillInProgress = await isMergeInProgress(options.cwd);
-
-        if (
-          resolution.outcome === "success" &&
-          remainingConflicts.length === 0 &&
-          !mergeStillInProgress
-        ) {
-          appendHubTaskEvent(input.runDir, {
-            type: "merge_conflict_resolution_succeeded",
-            runId: input.runId,
-            batchId: input.batchId,
-            taskId: input.taskId,
-            branch: input.branch,
-            createdAt: conflictFinishedAt,
-            status: "merging",
-          });
-          return { outcome: "success" };
-        }
-
-        const guardMessage =
-          resolution.outcome === "success" && remainingConflicts.length > 0
-            ? `Merge agent left unresolved conflicts: ${remainingConflicts.join(", ")}`
-            : resolution.outcome === "success" && mergeStillInProgress
-              ? "Merge agent resolved files but left the merge commit unfinished."
-              : resolution.message;
-        const resolutionDiagnostics = compactDiagnostics({
-          ...diagnostics,
-          ...resolution.diagnostics,
-          message: guardMessage ?? resolution.diagnostics?.message,
-          details: {
-            ...diagnostics?.details,
-            ...resolution.diagnostics?.details,
-            conflictedFiles,
-            gitStatus,
-            baseBranch,
-            ...(remainingConflicts.length > 0 ? { remainingConflicts } : {}),
-            ...(mergeStillInProgress ? { mergeStillInProgress } : {}),
-          },
-        });
-        appendHubTaskEvent(input.runDir, {
-          type: "merge_conflict_resolution_failed",
-          runId: input.runId,
-          batchId: input.batchId,
-          taskId: input.taskId,
-          branch: input.branch,
-          createdAt: conflictFinishedAt,
-          status: "failed",
-          failureReason: "merge_conflict",
-          diagnostics: resolutionDiagnostics,
-          diagnosticSummary: formatMergeDiagnosticSummary(
-            resolutionDiagnostics,
-          ),
-        });
-
-        return {
-          outcome: "merge_conflict",
-          message:
-            guardMessage ??
-            (error instanceof Error ? error.message : String(error)),
-          diagnostics: resolutionDiagnostics,
-        };
-      }
-
-      return {
-        outcome: "failed",
-        message: error instanceof Error ? error.message : String(error),
-        diagnostics,
-      };
+    const worktreeState = await inspectHubMergeWorktreeState(options.cwd);
+    if (worktreeState.dirtySourceFiles.length === 0) {
+      return runGitMergeInCwd({
+        input,
+        cwd: options.cwd,
+        env: options.env,
+        conflictResolver: options.conflictResolver,
+      });
     }
+
+    return runGitMergeInCleanIntegrationWorktree({
+      input,
+      cwd: options.cwd,
+      env: options.env,
+      conflictResolver: options.conflictResolver,
+    });
   };
 };
 
 export const createHubFlowRunVerifier = (options: {
   readonly cwd: string;
 }): HubFlowVerifier => {
-  return async () => {
+  return async (input) => {
     const verifyScript = join(options.cwd, ".archloop", "verify.sh");
     if (!existsSync(verifyScript)) {
       return { outcome: "success" };
     }
 
     try {
-      await execFileAsync(verifyScript, [], { cwd: options.cwd });
+      await execFileAsync(verifyScript, [], { cwd: input.cwd });
       return { outcome: "success" };
     } catch (error) {
       return {
@@ -1395,6 +1785,31 @@ export const createHubFlowRunVerifier = (options: {
       };
     }
   };
+};
+
+const formatCleanupResultSuffix = (
+  cleanup: HubBranchCleanupResult | undefined,
+): string => {
+  if (!cleanup) {
+    return "";
+  }
+
+  if (cleanup.outcome === "deleted") {
+    return "; cleanup deleted";
+  }
+
+  if (cleanup.outcome === "skipped") {
+    const reasons =
+      cleanup.reasonCodes && cleanup.reasonCodes.length > 0
+        ? ` (${cleanup.reasonCodes.join(", ")})`
+        : "";
+    return `; cleanup skipped${reasons}`;
+  }
+
+  const summary = cleanup.diagnosticSummary
+    ? `: ${cleanup.diagnosticSummary}`
+    : "";
+  return `; cleanup failed${summary}`;
 };
 
 export const formatHubBatchMergeResultLines = (
@@ -1428,8 +1843,9 @@ export const formatHubBatchMergeResultLines = (
     const diagnosticSuffix = taskResult.diagnosticSummary
       ? `; ${taskResult.diagnosticSummary}`
       : "";
+    const cleanupSuffix = formatCleanupResultSuffix(taskResult.cleanup);
     lines.push(
-      `  ${taskResult.taskId}: ${taskResult.outcome} -> ${taskResult.hubStatus}${diagnosticSuffix}`,
+      `  ${taskResult.taskId}: ${taskResult.outcome} -> ${taskResult.hubStatus}${diagnosticSuffix}${cleanupSuffix}`,
     );
   }
 

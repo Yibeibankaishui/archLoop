@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+
+<html class="light" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=JetBrains+Mono:wght@450;500&amp;family=Geist:wght@600;700;800&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-primary-fixed": "#131b2e",
+                        "secondary": "#0058be",
+                        "on-primary-fixed-variant": "#3f465c",
+                        "surface-bright": "#f8f9ff",
+                        "on-tertiary-fixed-variant": "#574425",
+                        "tertiary-container": "#271901",
+                        "primary": "#000000",
+                        "inverse-surface": "#213145",
+                        "secondary-fixed": "#d8e2ff",
+                        "on-secondary-fixed": "#001a42",
+                        "on-secondary-container": "#fefcff",
+                        "surface": "#f8f9ff",
+                        "on-secondary": "#ffffff",
+                        "surface-container-high": "#dce9ff",
+                        "surface-container-lowest": "#ffffff",
+                        "surface-container-low": "#eff4ff",
+                        "tertiary-fixed": "#fcdeb5",
+                        "surface-container": "#e5eeff",
+                        "primary-fixed": "#dae2fd",
+                        "outline": "#76777d",
+                        "inverse-on-surface": "#eaf1ff",
+                        "surface-variant": "#d3e4fe",
+                        "error": "#ba1a1a",
+                        "tertiary-fixed-dim": "#dec29a",
+                        "background": "#f8f9ff",
+                        "secondary-container": "#2170e4",
+                        "inverse-primary": "#bec6e0",
+                        "on-tertiary-container": "#98805d",
+                        "secondary-fixed-dim": "#adc6ff",
+                        "on-tertiary-fixed": "#271901",
+                        "surface-dim": "#cbdbf5",
+                        "primary-fixed-dim": "#bec6e0",
+                        "primary-container": "#131b2e",
+                        "on-background": "#0b1c30",
+                        "error-container": "#ffdad6",
+                        "surface-container-highest": "#d3e4fe",
+                        "on-error-container": "#93000a",
+                        "on-primary-container": "#7c839b",
+                        "outline-variant": "#c6c6cd",
+                        "on-surface-variant": "#45464d",
+                        "on-secondary-fixed-variant": "#004395",
+                        "on-primary": "#ffffff",
+                        "on-tertiary": "#ffffff",
+                        "tertiary": "#000000",
+                        "surface-tint": "#565e74",
+                        "on-error": "#ffffff",
+                        "on-surface": "#0b1c30"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "base": "4px",
+                        "stack-xs": "4px",
+                        "gutter": "1px",
+                        "panel-padding": "12px",
+                        "stack-md": "16px",
+                        "container-max": "100%",
+                        "stack-sm": "8px"
+                    },
+                    "fontFamily": {
+                        "mono-sm": ["JetBrains Mono"],
+                        "label-caps": ["Geist"],
+                        "mono-md": ["JetBrains Mono"],
+                        "body-md": ["Inter"],
+                        "body-sm": ["Inter"],
+                        "display-sm": ["Geist"],
+                        "headline-sm": ["Geist"]
+                    },
+                    "fontSize": {
+                        "mono-sm": ["11px", {"lineHeight": "14px", "fontWeight": "450"}],
+                        "label-caps": ["10px", {"lineHeight": "12px", "letterSpacing": "0.05em", "fontWeight": "700"}],
+                        "mono-md": ["13px", {"lineHeight": "18px", "fontWeight": "450"}],
+                        "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "body-sm": ["12px", {"lineHeight": "16px", "fontWeight": "400"}],
+                        "display-sm": ["24px", {"lineHeight": "32px", "letterSpacing": "-0.02em", "fontWeight": "600"}],
+                        "headline-sm": ["18px", {"lineHeight": "24px", "fontWeight": "600"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 20;
+            vertical-align: middle;
+        }
+        body {
+            background-color: #f8f9ff;
+            color: #0b1c30;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #c6c6cd;
+            border-radius: 2px;
+        }
+    </style>
+</head>
+<body class="font-body-md text-body-md overflow-hidden">
+<!-- SideNavBar Shell -->
+<aside class="fixed left-0 top-0 h-full z-50 h-screen w-16 flex flex-col items-center border-r border-outline-variant bg-surface-container-lowest dark:bg-on-primary-container">
+<div class="py-6 flex flex-col items-center gap-8 w-full">
+<div class="font-display-sm text-display-sm font-bold text-primary dark:text-primary-fixed-dim">aL</div>
+<nav class="flex flex-col items-center w-full gap-2">
+<!-- Overview: Active -->
+<a class="w-12 h-12 flex items-center justify-center rounded transition-colors border-l-2 border-secondary bg-surface-container-high dark:bg-secondary-container text-secondary dark:text-on-secondary-container" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+</a>
+<a class="w-12 h-12 flex items-center justify-center rounded transition-colors text-on-surface-variant dark:text-on-primary-container hover:bg-surface-container" href="#">
+<span class="material-symbols-outlined" data-icon="view_kanban">view_kanban</span>
+</a>
+<a class="w-12 h-12 flex items-center justify-center rounded transition-colors text-on-surface-variant dark:text-on-primary-container hover:bg-surface-container" href="#">
+<span class="material-symbols-outlined" data-icon="play_circle">play_circle</span>
+</a>
+<a class="w-12 h-12 flex items-center justify-center rounded transition-colors text-on-surface-variant dark:text-on-primary-container hover:bg-surface-container" href="#">
+<span class="material-symbols-outlined" data-icon="description">description</span>
+</a>
+<a class="w-12 h-12 flex items-center justify-center rounded transition-colors text-on-surface-variant dark:text-on-primary-container hover:bg-surface-container" href="#">
+<span class="material-symbols-outlined" data-icon="sync">sync</span>
+</a>
+<div class="h-px w-8 bg-outline-variant my-2"></div>
+<a class="w-12 h-12 flex items-center justify-center rounded transition-colors text-on-surface-variant dark:text-on-primary-container hover:bg-surface-container" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+</a>
+<a class="w-12 h-12 flex items-center justify-center rounded transition-colors text-on-surface-variant dark:text-on-primary-container hover:bg-surface-container" href="#">
+<span class="material-symbols-outlined" data-icon="biotech">biotech</span>
+</a>
+</nav>
+</div>
+<div class="mt-auto mb-6">
+<div class="w-8 h-8 bg-surface-container rounded-full flex items-center justify-center border border-outline-variant overflow-hidden">
+<img class="w-full h-full object-cover" data-alt="Close-up architectural studio profile picture, featuring a high-contrast black and white portrait of a lead software engineer in a minimal corporate office setting. The aesthetic is clean and professional with soft directional lighting that emphasizes structured and reliable design." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCwVYqgwHs6ky1NWyvwFinRYPHnNFLcG0TDVdKN1pEk9secZ8vV-mCt7MqWgkkNTBZmy7mss6uhUvHPMJO1Xsd8gMFOxWt41G7EhZv0eytzGhpXahTyKoqz8ASTINK95_EjE1JMwo_KzlvNKf5wS6mgyufayvYQxXbxQjBZ4_G2IKvYZk66jEa-U0XbxiJany1pOEgekfhxkB1SSV-oqKkcaAfgY0pIyFeoT4w1oWw7ED6dYSrWKPyESKFJFf8hRvd9cbJ-jvPNOm4"/>
+</div>
+</div>
+</aside>
+<!-- Main Wrapper -->
+<div class="ml-16 h-screen flex flex-col">
+<!-- TopAppBar -->
+<header class="flex justify-between items-center w-full px-panel-padding h-12 bg-surface dark:bg-on-primary-container border-b border-outline-variant dark:border-outline shrink-0">
+<div class="flex items-center gap-6">
+<h1 class="font-headline-sm text-headline-sm font-bold text-primary dark:text-primary-fixed-dim">archLoop Hub</h1>
+<nav class="flex gap-4">
+<a class="text-secondary dark:text-secondary-fixed-dim font-bold border-b-2 border-secondary font-body-md text-body-md py-2" href="#">Project</a>
+<a class="text-on-surface-variant dark:text-outline-variant hover:text-secondary py-2 font-body-md text-body-md transition-all duration-200" href="#">Run</a>
+<a class="text-on-surface-variant dark:text-outline-variant hover:text-secondary py-2 font-body-md text-body-md transition-all duration-200" href="#">Batch</a>
+</nav>
+</div>
+<div class="flex items-center gap-3">
+<div class="flex items-center gap-1">
+<button class="h-8 px-3 rounded text-on-surface-variant hover:bg-surface-container flex items-center gap-1 font-body-sm text-body-sm transition-all">
+<span class="material-symbols-outlined text-[18px]" data-icon="sync">sync</span>
+                        Sync
+                    </button>
+<button class="h-8 px-4 rounded bg-primary text-on-primary hover:opacity-90 font-body-sm text-body-sm font-bold transition-all">
+                        Run Flow
+                    </button>
+</div>
+<div class="w-px h-6 bg-outline-variant mx-1"></div>
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer p-1 hover:bg-surface-container rounded" data-icon="notifications">notifications</span>
+<span class="material-symbols-outlined text-on-surface-variant cursor-pointer p-1 hover:bg-surface-container rounded" data-icon="help_outline">help_outline</span>
+</div>
+</header>
+<!-- Notification Banner (Pending State) -->
+<div class="bg-secondary-container text-on-secondary-container px-panel-padding py-2 flex items-center justify-between">
+<div class="flex items-center gap-2 font-body-sm text-body-sm">
+<span class="material-symbols-outlined text-[16px]" data-icon="cloud_sync">cloud_sync</span>
+<span>8 tasks pending synchronization to remote registry.</span>
+</div>
+<button class="font-label-caps text-label-caps bg-on-secondary-container text-secondary px-2 py-1 rounded">SYNC NOW</button>
+</div>
+<!-- Main Content Area: Split Pane -->
+<main class="flex-1 overflow-hidden flex">
+<!-- Left Pane: Health & Stats -->
+<section class="w-[450px] border-r border-outline-variant flex flex-col bg-surface-container-low overflow-y-auto custom-scrollbar">
+<!-- Project Registration Info -->
+<div class="p-panel-padding border-b border-outline-variant bg-white">
+<div class="flex items-center justify-between mb-stack-md">
+<div>
+<p class="font-label-caps text-label-caps text-on-surface-variant mb-1 uppercase">Repo Root</p>
+<p class="font-mono-md text-mono-md text-primary">/Users/archloop/hub-prod/engine-v2</p>
+</div>
+<div class="flex gap-2">
+<span class="inline-flex items-center gap-1.5 px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-100 font-mono-sm text-mono-sm">
+<span class="w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
+                                Healthy
+                            </span>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-stack-md">
+<div>
+<p class="font-label-caps text-label-caps text-on-surface-variant mb-1">REGISTRATION</p>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-secondary" data-icon="check_circle">check_circle</span>
+<span class="font-body-sm text-body-sm">Registered v1.0.4</span>
+</div>
+</div>
+<div>
+<p class="font-label-caps text-label-caps text-on-surface-variant mb-1">TASK STORE</p>
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[16px] text-secondary" data-icon="database">database</span>
+<span class="font-body-sm text-body-sm">Initialized (SQLite)</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Critical Warning Section -->
+<div class="p-panel-padding bg-error-container/20 border-b border-error/20">
+<div class="flex items-start gap-3">
+<span class="material-symbols-outlined text-error" data-icon="warning">warning</span>
+<div class="flex-1">
+<h3 class="font-body-sm text-body-sm font-bold text-error">Warning: 3 Failed Tasks</h3>
+<p class="font-body-sm text-body-sm text-on-surface-variant mb-stack-md">Process terminated in batch <span class="font-mono-sm">#BT-9021</span>. Worktree lease for <span class="font-mono-sm">worker-04</span> timed out.</p>
+<div class="flex gap-2">
+<button class="h-7 px-2.5 bg-error text-white font-label-caps text-label-caps rounded hover:opacity-90">RETRY FAILED</button>
+<button class="h-7 px-2.5 border border-error/30 text-error font-label-caps text-label-caps rounded hover:bg-error-container/30">DISMISS</button>
+</div>
+</div>
+</div>
+</div>
+<!-- Key Metrics Grid -->
+<div class="p-panel-padding grid grid-cols-2 gap-stack-sm border-b border-outline-variant">
+<div class="bg-white p-3 rounded border border-outline-variant">
+<p class="font-label-caps text-label-caps text-on-surface-variant mb-2">READY / TOTAL TASKS</p>
+<div class="flex items-baseline gap-2">
+<span class="text-display-sm font-display-sm">142</span>
+<span class="text-on-surface-variant font-body-sm">/ 1,208</span>
+</div>
+<div class="w-full bg-surface-container-high h-1 rounded mt-3 overflow-hidden">
+<div class="bg-secondary h-full" style="width: 12%"></div>
+</div>
+</div>
+<div class="bg-white p-3 rounded border border-outline-variant">
+<p class="font-label-caps text-label-caps text-on-surface-variant mb-2">ACTIVE BATCHES</p>
+<div class="flex items-baseline gap-2">
+<span class="text-display-sm font-display-sm">04</span>
+<span class="text-on-surface-variant font-body-sm">Running</span>
+</div>
+<div class="flex gap-1 mt-3">
+<div class="h-1 flex-1 bg-secondary rounded"></div>
+<div class="h-1 flex-1 bg-secondary rounded"></div>
+<div class="h-1 flex-1 bg-secondary rounded"></div>
+<div class="h-1 flex-1 bg-secondary rounded animate-pulse"></div>
+</div>
+</div>
+</div>
+<!-- Quick Actions List -->
+<div class="p-panel-padding flex-1">
+<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-stack-md uppercase">Hub Actions</h3>
+<div class="space-y-stack-sm">
+<button class="w-full flex items-center justify-between p-3 bg-white border border-outline-variant rounded hover:border-secondary transition-colors group">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-secondary" data-icon="terminal">terminal</span>
+<div class="text-left">
+<p class="font-body-sm text-body-sm font-bold">archloop tasks init</p>
+<p class="font-mono-sm text-mono-sm text-on-surface-variant">Setup new local task store</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline-variant" data-icon="chevron_right">chevron_right</span>
+</button>
+<button class="w-full flex items-center justify-between p-3 bg-white border border-outline-variant rounded hover:border-secondary transition-colors group">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-secondary" data-icon="sync_alt">sync_alt</span>
+<div class="text-left">
+<p class="font-body-sm text-body-sm font-bold">Sync Tasks</p>
+<p class="font-mono-sm text-mono-sm text-on-surface-variant">Push local changes to registry</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline-variant" data-icon="chevron_right">chevron_right</span>
+</button>
+<button class="w-full flex items-center justify-between p-3 bg-white border border-outline-variant rounded hover:border-secondary transition-colors group">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-on-surface-variant group-hover:text-secondary" data-icon="rocket_launch">rocket_launch</span>
+<div class="text-left">
+<p class="font-body-sm text-body-sm font-bold">Run Flow</p>
+<p class="font-mono-sm text-mono-sm text-on-surface-variant">Execute automated workflow</p>
+</div>
+</div>
+<span class="material-symbols-outlined text-outline-variant" data-icon="chevron_right">chevron_right</span>
+</button>
+</div>
+<div class="mt-8">
+<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-stack-md uppercase">System Status</h3>
+<div class="space-y-stack-xs font-mono-sm text-mono-sm">
+<div class="flex justify-between py-1 border-b border-outline-variant/30">
+<span class="text-on-surface-variant">Beads Engine</span>
+<span class="text-emerald-600">ONLINE</span>
+</div>
+<div class="flex justify-between py-1 border-b border-outline-variant/30">
+<span class="text-on-surface-variant">Worktree Lease</span>
+<span class="text-on-surface">IDLE</span>
+</div>
+<div class="flex justify-between py-1 border-b border-outline-variant/30">
+<span class="text-on-surface-variant">Disk Usage</span>
+<span class="text-on-surface">1.4 GB / 10 GB</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Right Pane: Activity & Timeline -->
+<section class="flex-1 flex flex-col bg-white">
+<div class="p-panel-padding border-b border-outline-variant flex items-center justify-between">
+<h2 class="font-headline-sm text-headline-sm">Activity Timeline</h2>
+<div class="flex gap-2">
+<button class="p-1 text-on-surface-variant hover:bg-surface-container rounded transition-colors">
+<span class="material-symbols-outlined" data-icon="filter_list">filter_list</span>
+</button>
+<button class="p-1 text-on-surface-variant hover:bg-surface-container rounded transition-colors">
+<span class="material-symbols-outlined" data-icon="more_vert">more_vert</span>
+</button>
+</div>
+</div>
+<div class="flex-1 overflow-y-auto p-panel-padding custom-scrollbar">
+<!-- Timeline Container -->
+<div class="relative ml-4 pl-8 border-l border-outline-variant space-y-8">
+<!-- Timeline Entry 1 -->
+<div class="relative">
+<div class="absolute -left-[41px] top-0 w-4 h-4 bg-error rounded-full border-4 border-white ring-1 ring-error/30 animate-pulse"></div>
+<div class="flex items-center gap-2 mb-1">
+<span class="font-mono-sm text-mono-sm text-error font-bold">CRITICAL</span>
+<span class="font-mono-sm text-mono-sm text-on-surface-variant">• 2 minutes ago</span>
+</div>
+<div class="p-4 border border-outline-variant rounded bg-surface-container-lowest">
+<div class="flex justify-between mb-2">
+<h4 class="font-body-sm text-body-sm font-bold">Execution Failed: Batch #BT-9021</h4>
+<span class="font-mono-sm text-mono-sm text-on-surface-variant underline cursor-pointer">View Logs</span>
+</div>
+<p class="text-on-surface-variant font-body-sm text-body-sm">Worker process <span class="font-mono-sm text-primary">worker-04</span> encountered a SIGKILL during lease synchronization. Task 0x9F2 redirected to DLQ.</p>
+</div>
+</div>
+<!-- Timeline Entry 2 -->
+<div class="relative">
+<div class="absolute -left-[41px] top-0 w-4 h-4 bg-secondary rounded-full border-4 border-white ring-1 ring-secondary/30"></div>
+<div class="flex items-center gap-2 mb-1">
+<span class="font-mono-sm text-mono-sm text-secondary font-bold">SYNC</span>
+<span class="font-mono-sm text-mono-sm text-on-surface-variant">• 45 minutes ago</span>
+</div>
+<div class="p-4 border border-outline-variant rounded bg-surface-container-lowest">
+<h4 class="font-body-sm text-body-sm font-bold">8 Tasks Queued for Registry Sync</h4>
+<p class="text-on-surface-variant font-body-sm text-body-sm mt-1">Changes detected in <span class="font-mono-sm text-primary">/run-dirs/session-1102/</span> metadata.</p>
+</div>
+</div>
+<!-- Timeline Entry 3 -->
+<div class="relative">
+<div class="absolute -left-[41px] top-0 w-4 h-4 bg-outline rounded-full border-4 border-white"></div>
+<div class="flex items-center gap-2 mb-1">
+<span class="font-mono-sm text-mono-sm text-on-surface-variant font-bold">SYSTEM</span>
+<span class="font-mono-sm text-mono-sm text-on-surface-variant">• 2 hours ago</span>
+</div>
+<div class="p-4 border border-outline-variant rounded bg-surface-container-lowest">
+<h4 class="font-body-sm text-body-sm font-bold">Worktree Lease Refresh</h4>
+<div class="mt-2 space-y-1">
+<div class="flex items-center gap-2 font-mono-sm text-mono-sm">
+<span class="material-symbols-outlined text-[14px] text-emerald-600" data-icon="done">done</span>
+<span>Lease #LT-771: REFRESHED</span>
+</div>
+<div class="flex items-center gap-2 font-mono-sm text-mono-sm">
+<span class="material-symbols-outlined text-[14px] text-emerald-600" data-icon="done">done</span>
+<span>Lease #LT-772: REFRESHED</span>
+</div>
+</div>
+</div>
+</div>
+<!-- Timeline Entry 4 -->
+<div class="relative">
+<div class="absolute -left-[41px] top-0 w-4 h-4 bg-secondary rounded-full border-4 border-white ring-1 ring-secondary/30"></div>
+<div class="flex items-center gap-2 mb-1">
+<span class="font-mono-sm text-mono-sm text-secondary font-bold">INIT</span>
+<span class="font-mono-sm text-mono-sm text-on-surface-variant">• 5 hours ago</span>
+</div>
+<div class="p-4 border border-outline-variant rounded bg-surface-container-lowest">
+<h4 class="font-body-sm text-body-sm font-bold">Hub Task Store Migration</h4>
+<p class="text-on-surface-variant font-body-sm text-body-sm mt-1">Storage engine updated to v2.1. Indexed 1,208 total task entities across 4 operational branches.</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Footer Section in Right Pane -->
+<div class="p-panel-padding bg-surface-container-low border-t border-outline-variant">
+<div class="flex items-center justify-between">
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 bg-emerald-500 rounded-full"></span>
+<span class="font-body-sm text-body-sm">Diagnostics: Passed</span>
+</div>
+<div class="flex items-center gap-2">
+<span class="w-2 h-2 bg-secondary rounded-full"></span>
+<span class="font-body-sm text-body-sm">Uptime: 14d 02h</span>
+</div>
+</div>
+<div class="flex gap-2">
+<button class="h-8 px-3 border border-outline-variant text-on-surface-variant hover:bg-surface-container font-label-caps text-label-caps rounded transition-all">GENERATE REPORT</button>
+<button class="h-8 px-3 border border-outline-variant text-on-surface-variant hover:bg-surface-container font-label-caps text-label-caps rounded transition-all">VIEW REPO INFO</button>
+</div>
+</div>
+</div>
+</section>
+</main>
+</div>
+<!-- Right Drawer: Worktree Inspector (Hidden by default, shown for UX context) -->
+<div class="fixed right-0 top-0 h-full w-96 bg-white border-l border-outline-variant z-[60] shadow-2xl translate-x-full transition-transform duration-300" id="inspector-drawer">
+<div class="p-panel-padding border-b border-outline-variant flex items-center justify-between bg-surface-container-lowest">
+<div class="flex items-center gap-2">
+<span class="font-mono-md text-mono-md font-bold text-primary">LEASE #LT-771</span>
+<span class="px-1.5 py-0.5 bg-emerald-50 text-emerald-700 text-[10px] font-bold rounded border border-emerald-100">DONE</span>
+</div>
+<button class="p-1 hover:bg-surface-container rounded" onclick="toggleInspector()">
+<span class="material-symbols-outlined" data-icon="close">close</span>
+</button>
+</div>
+<div class="p-panel-padding h-full overflow-y-auto custom-scrollbar">
+<!-- Inspector Content would go here -->
+<div class="mb-8">
+<h3 class="font-label-caps text-label-caps text-on-surface-variant mb-4">WORKTREE METADATA</h3>
+<div class="space-y-4">
+<div class="bg-surface-container-low p-3 rounded">
+<p class="font-label-caps text-label-caps text-on-surface-variant mb-1">SOURCE PATH</p>
+<p class="font-mono-sm text-mono-sm">/run-dirs/session-1102/wt-771</p>
+</div>
+<div class="bg-surface-container-low p-3 rounded">
+<p class="font-label-caps text-label-caps text-on-surface-variant mb-1">LOCKED BY</p>
+<p class="font-body-sm text-body-sm">system_automation_v2</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+<script>
+        function toggleInspector() {
+            const drawer = document.getElementById('inspector-drawer');
+            drawer.classList.toggle('translate-x-full');
+        }
+
+        // Mock interaction to show the drawer when clicking a timeline item
+        document.querySelectorAll('.relative .p-4').forEach(item => {
+            item.addEventListener('click', () => {
+                toggleInspector();
+            });
+            item.style.cursor = 'pointer';
+        });
+    </script>
+</body></html>

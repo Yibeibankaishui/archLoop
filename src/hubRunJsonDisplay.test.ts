@@ -1,0 +1,550 @@
+import { describe, expect, it } from "vitest";
+
+import type { HubRunEvent } from "./hubExecution.js";
+import { createHubRunJsonRenderer } from "./hubRunJsonDisplay.js";
+import {
+  createHubRunDisplayState,
+  projectHubRunOutcome,
+  reduceHubRunDisplayState,
+} from "./hubRunDisplay.js";
+import type { RunHubFlowResult } from "./hubFlowExecution.js";
+
+const parseRecord = (line: string): Record<string, unknown> =>
+  JSON.parse(line) as Record<string, unknown>;
+
+const makeRunResult = (
+  overrides: Partial<RunHubFlowResult>,
+): RunHubFlowResult => ({
+  flowId: "no-review",
+  runId: "run-matrix",
+  batchId: "batch-matrix",
+  runDir: "/tmp/runs/run-matrix",
+  mode: "new_batch",
+  completedBatchCount: 0,
+  completedTaskCount: 0,
+  stopReason: "no_ready_tasks",
+  batchResults: [],
+  selectedTaskIds: [],
+  results: [],
+  unfinishedBatchIds: [],
+  projectDevelopmentContractPath: "/tmp/contract.json",
+  projectDevelopmentContractCreatedGenericFallback: false,
+  ...overrides,
+});
+
+describe("JSONL Hub run lifecycle output", () => {
+  it("emits a versioned and ordered run-start record", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: 'project "alpha"\nnext',
+      flowId: "no-review",
+    });
+    const event: HubRunEvent = {
+      type: "run_started",
+      eventId: "run-1:1",
+      sequence: 1,
+      runId: "run-1",
+      branch: "feature/json output",
+      startedAt: "2026-07-15T10:00:00.000Z",
+      repoRoot: "/tmp/repo with spaces",
+      hubProjectDir: "/tmp/hub\nproject",
+    };
+
+    const line = renderer.event(event);
+
+    expect(line).toBeDefined();
+    expect(line?.split("\n")).toHaveLength(1);
+    expect(parseRecord(line!)).toEqual({
+      schemaVersion: 1,
+      eventId: "run-1:output:1",
+      sequence: 1,
+      timestamp: "2026-07-15T10:00:00.000Z",
+      type: "run_started",
+      runId: "run-1",
+      flowId: "no-review",
+      sourceEventId: "run-1:1",
+      sourceSequence: 1,
+      hubProject: 'project "alpha"\nnext',
+      data: {
+        branch: "feature/json output",
+        repoRoot: "/tmp/repo with spaces",
+        hubProjectDir: "/tmp/hub\nproject",
+      },
+    });
+  });
+
+  it("preserves task lifecycle identity, stage, and diagnostics", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "with-review",
+    });
+    const event: HubRunEvent = {
+      type: "task_implementation_failed",
+      eventId: "run-2:7",
+      sequence: 7,
+      runId: "run-2",
+      batchId: "batch-2",
+      taskId: "task-2",
+      branch: "archloop/task-2",
+      createdAt: "2026-07-15T10:01:00.000Z",
+      status: "failed",
+      failureReason: "agent_failed",
+      diagnosticSummary: 'Agent said "no"\nsee full log',
+      diagnostics: { exitCode: 2, path: "/tmp/a b/task.log" },
+    };
+
+    const record = parseRecord(renderer.event(event)!);
+
+    expect(record).toMatchObject({
+      type: "task_implementation_failed",
+      runId: "run-2",
+      flowId: "with-review",
+      batchId: "batch-2",
+      taskId: "task-2",
+      stage: "Implementation failed",
+      status: "failed",
+      data: {
+        branch: "archloop/task-2",
+        failureReason: "agent_failed",
+        diagnosticSummary: 'Agent said "no"\nsee full log',
+        diagnostics: { exitCode: 2, path: "/tmp/a b/task.log" },
+      },
+    });
+  });
+
+  it("suppresses duplicate and stale source events before assigning output order", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "with-review",
+    });
+    const latest: HubRunEvent = {
+      type: "task_status_advanced",
+      eventId: "run-ordered:10",
+      sequence: 10,
+      runId: "run-ordered",
+      batchId: "batch-ordered",
+      taskId: "task-ordered",
+      branch: "archloop/task-ordered",
+      createdAt: "2026-07-15T10:01:00.000Z",
+      status: "done",
+    };
+    const stale: HubRunEvent = {
+      ...latest,
+      eventId: "run-ordered:9",
+      sequence: 9,
+      status: "waiting_for_merge",
+    };
+
+    expect(parseRecord(renderer.event(latest)!)).toMatchObject({
+      eventId: "run-ordered:output:1",
+      sequence: 1,
+      sourceEventId: "run-ordered:10",
+      sourceSequence: 10,
+      status: "done",
+    });
+    expect(renderer.event(latest)).toBeUndefined();
+    expect(renderer.event(stale)).toBeUndefined();
+  });
+
+  it("emits actionable task failures before one structured final outcome", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+    });
+    const completedEvent: HubRunEvent = {
+      type: "run_completed",
+      eventId: "run-3:8",
+      sequence: 8,
+      runId: "run-3",
+      flowId: "no-review",
+      createdAt: "2026-07-15T10:02:00.000Z",
+      completedBatchCount: 0,
+      completedTaskCount: 0,
+      stopReason: "batch_failed",
+      batchResults: [
+        {
+          batchId: "batch-3",
+          selectedTaskIds: ["task-3"],
+          completedTaskCount: 0,
+          batchStatus: "failed",
+        },
+      ],
+    };
+    const result: RunHubFlowResult = {
+      flowId: "no-review",
+      runId: "run-3",
+      batchId: "batch-3",
+      runDir: "/tmp/run with spaces/run-3",
+      mode: "new_batch",
+      completedBatchCount: 0,
+      completedTaskCount: 0,
+      stopReason: "batch_failed",
+      batchResults: completedEvent.batchResults,
+      selectedTaskIds: ["task-3"],
+      results: [
+        {
+          taskId: "task-3",
+          title: "Fails safely",
+          branch: "archloop/task-3",
+          outcome: "agent_failed",
+          hubStatus: "failed",
+          failureReason: "agent_failed",
+          failureStage: "implementation",
+          diagnosticSummary: 'bad "quote"\nfull details',
+          logPath: "/tmp/logs/task 3.log",
+          commitCount: 0,
+        },
+      ],
+      unfinishedBatchIds: ["batch-3"],
+      projectDevelopmentContractPath: "/tmp/contract.json",
+      projectDevelopmentContractCreatedGenericFallback: false,
+    };
+
+    expect(renderer.event(completedEvent)).toBeUndefined();
+    const lines = renderer.outcome(result, projectHubRunOutcome(result));
+    const records = lines.map(parseRecord);
+
+    expect(lines.every((line) => line.split("\n").length === 1)).toBe(true);
+    expect(records).toEqual([
+      expect.objectContaining({
+        schemaVersion: 1,
+        eventId: "run-3:output:1",
+        sequence: 1,
+        timestamp: "2026-07-15T10:02:00.000Z",
+        type: "task_attention",
+        runId: "run-3",
+        flowId: "no-review",
+        taskId: "task-3",
+        stage: "Implementation failed",
+        diagnostic: 'bad "quote"',
+        logPath: "/tmp/logs/task 3.log",
+        recoveryCommand: "archloop tasks recover task-3",
+      }),
+      expect.objectContaining({
+        schemaVersion: 1,
+        eventId: "run-3:output:2",
+        sequence: 2,
+        timestamp: "2026-07-15T10:02:00.000Z",
+        type: "run_completed",
+        runId: "run-3",
+        flowId: "no-review",
+        batchId: "batch-3",
+        sourceEventId: "run-3:8",
+        sourceSequence: 8,
+        outcome: "failed",
+        summary: "Run failed",
+        counts: {
+          completed: 0,
+          failed: 1,
+          blocked: 0,
+          skipped: 0,
+          readyToMerge: 0,
+        },
+        completedBatchCount: 0,
+        completedTaskCount: 0,
+        stopReason: "batch_failed",
+        exitCode: 1,
+        logs: "/tmp/run with spaces/run-3",
+      }),
+    ]);
+  });
+
+  it("emits cancellation as a final outcome with exit code 130", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "with-review",
+      now: () => new Date("2026-07-15T10:05:00.000Z"),
+    });
+    const runStarted: HubRunEvent = {
+      type: "run_started",
+      eventId: "run-cancelled:1",
+      sequence: 1,
+      runId: "run-cancelled",
+      branch: "feature/cancel",
+      startedAt: "2026-07-15T10:03:00.000Z",
+      repoRoot: "/tmp/repo",
+      hubProjectDir: "/tmp/hub",
+    };
+    const taskReady: HubRunEvent = {
+      type: "task_status_advanced",
+      eventId: "run-cancelled:2",
+      sequence: 2,
+      runId: "run-cancelled",
+      batchId: "batch-cancelled",
+      taskId: "task-ready",
+      branch: "archloop/task-ready",
+      createdAt: "2026-07-15T10:04:00.000Z",
+      status: "waiting_for_merge",
+    };
+    let state = createHubRunDisplayState({
+      hubProjectName: "alpha",
+      flowId: "with-review",
+    });
+    state = reduceHubRunDisplayState(state, runStarted);
+    state = reduceHubRunDisplayState(state, taskReady);
+    renderer.event(runStarted);
+    renderer.event(taskReady);
+
+    const lines = renderer.cancellation(state);
+    const record = parseRecord(lines.at(-1)!);
+
+    expect(lines).toHaveLength(1);
+    expect(record).toMatchObject({
+      schemaVersion: 1,
+      eventId: "run-cancelled:output:3",
+      sequence: 3,
+      timestamp: "2026-07-15T10:05:00.000Z",
+      type: "run_completed",
+      runId: "run-cancelled",
+      flowId: "with-review",
+      outcome: "cancelled",
+      summary: "Run cancelled",
+      cancelled: true,
+      counts: {
+        completed: 0,
+        failed: 0,
+        blocked: 0,
+        skipped: 0,
+        readyToMerge: 1,
+      },
+      completedBatchCount: 0,
+      completedTaskCount: 0,
+      stopReason: "cancelled",
+      exitCode: 130,
+      logs: "/tmp/hub/runs/run-cancelled",
+    });
+  });
+
+  it("preserves SIGTERM exit code in cancellation JSONL", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+    });
+    const state = createHubRunDisplayState({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+    });
+
+    const record = parseRecord(renderer.cancellation(state, 143).at(-1)!);
+
+    expect(record).toMatchObject({
+      type: "run_completed",
+      outcome: "cancelled",
+      exitCode: 143,
+    });
+  });
+
+  it("uses the reducer skipped count in cancellation records", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "with-review",
+    });
+    const runStarted: HubRunEvent = {
+      type: "run_started",
+      eventId: "run-cancel-skipped:1",
+      sequence: 1,
+      runId: "run-cancel-skipped",
+      branch: "feature/cancel",
+      startedAt: "2026-07-15T10:05:00.000Z",
+      repoRoot: "/tmp/repo",
+      hubProjectDir: "/tmp/hub",
+    };
+    const claimSkipped: HubRunEvent = {
+      type: "task_claim_skipped",
+      eventId: "run-cancel-skipped:2",
+      sequence: 2,
+      runId: "run-cancel-skipped",
+      batchId: "batch-cancel-skipped",
+      taskId: "task-skipped",
+      branch: "archloop/task-skipped",
+      createdAt: "2026-07-15T10:05:01.000Z",
+      status: "ready_for_agent",
+    };
+    let state = createHubRunDisplayState({
+      hubProjectName: "alpha",
+      flowId: "with-review",
+    });
+    state = reduceHubRunDisplayState(state, runStarted);
+    state = reduceHubRunDisplayState(state, claimSkipped);
+    renderer.event(runStarted);
+    renderer.event(claimSkipped);
+
+    const record = parseRecord(renderer.cancellation(state).at(-1)!);
+
+    expect(record.counts).toMatchObject({ skipped: 1 });
+  });
+
+  it("retains actionable failed-task details when cancellation follows a failure", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "with-review",
+      now: () => new Date("2026-07-15T10:09:00.000Z"),
+    });
+    const runStarted: HubRunEvent = {
+      type: "run_started",
+      eventId: "run-cancel-with-failure:1",
+      sequence: 1,
+      runId: "run-cancel-with-failure",
+      branch: "feature/cancel",
+      startedAt: "2026-07-15T10:07:00.000Z",
+      repoRoot: "/tmp/repo",
+      hubProjectDir: "/tmp/hub",
+    };
+    const failed: HubRunEvent = {
+      type: "task_review_failed",
+      eventId: "run-cancel-with-failure:2",
+      sequence: 2,
+      runId: "run-cancel-with-failure",
+      batchId: "batch-cancel-with-failure",
+      taskId: "task-failed-before-cancel",
+      branch: "archloop/task-failed-before-cancel",
+      createdAt: "2026-07-15T10:08:00.000Z",
+      status: "failed",
+      diagnosticSummary: "review failed\nraw details",
+      diagnostics: { path: "/tmp/review failure.log" },
+    };
+    let state = createHubRunDisplayState({
+      hubProjectName: "alpha",
+      flowId: "with-review",
+    });
+    state = reduceHubRunDisplayState(state, runStarted);
+    state = reduceHubRunDisplayState(state, failed);
+    renderer.event(runStarted);
+    renderer.event(failed);
+
+    const records = renderer.cancellation(state).map(parseRecord);
+
+    expect(records).toEqual([
+      expect.objectContaining({
+        type: "task_attention",
+        taskId: "task-failed-before-cancel",
+        stage: "Review failed",
+        diagnostic: "review failed",
+        logPath: "/tmp/review failure.log",
+        recoveryCommand: "archloop tasks recover task-failed-before-cancel",
+      }),
+      expect.objectContaining({
+        type: "run_completed",
+        outcome: "cancelled",
+        stopReason: "cancelled",
+        exitCode: 130,
+      }),
+    ]);
+  });
+
+  it.each([
+    {
+      name: "maximum-batch completion",
+      result: makeRunResult({
+        completedBatchCount: 1,
+        completedTaskCount: 1,
+        stopReason: "max_batches_reached",
+        batchResults: [
+          {
+            batchId: "batch-complete",
+            selectedTaskIds: ["task-complete"],
+            completedTaskCount: 1,
+            batchStatus: "completed",
+          },
+        ],
+        selectedTaskIds: ["task-complete"],
+      }),
+      outcome: "completed",
+      exitCode: 0,
+      counts: { completed: 1, failed: 0, blocked: 0 },
+    },
+    {
+      name: "partial failure",
+      result: makeRunResult({
+        completedBatchCount: 1,
+        completedTaskCount: 1,
+        stopReason: "batch_failed",
+        batchResults: [
+          {
+            batchId: "batch-complete",
+            selectedTaskIds: ["task-complete"],
+            completedTaskCount: 1,
+            batchStatus: "completed",
+          },
+          {
+            batchId: "batch-failed",
+            selectedTaskIds: ["task-failed"],
+            completedTaskCount: 0,
+            batchStatus: "failed",
+          },
+        ],
+        selectedTaskIds: ["task-complete", "task-failed"],
+        results: [
+          {
+            taskId: "task-failed",
+            title: "Failed",
+            branch: "archloop/task-failed",
+            outcome: "agent_failed",
+            hubStatus: "failed",
+            failureStage: "implementation",
+            diagnosticSummary: "failed",
+            commitCount: 0,
+          },
+        ],
+      }),
+      outcome: "completed_with_failures",
+      exitCode: 1,
+      counts: { completed: 1, failed: 1, blocked: 0 },
+    },
+    {
+      name: "blocking failure",
+      result: makeRunResult({
+        stopReason: "batch_failed",
+        batchResults: [
+          {
+            batchId: "batch-blocked",
+            selectedTaskIds: ["task-blocked"],
+            completedTaskCount: 0,
+            batchStatus: "failed",
+          },
+        ],
+        selectedTaskIds: ["task-blocked"],
+        results: [
+          {
+            taskId: "task-blocked",
+            title: "Blocked",
+            branch: "archloop/task-blocked",
+            outcome: "active_execution",
+            hubStatus: "implementing",
+            commitCount: 0,
+          },
+        ],
+      }),
+      outcome: "failed",
+      exitCode: 1,
+      counts: { completed: 0, failed: 0, blocked: 1 },
+    },
+  ])("keeps $name consistent with the shared outcome contract", (testCase) => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: testCase.result.flowId,
+    });
+    renderer.event({
+      type: "run_completed",
+      eventId: `${testCase.result.runId}:20`,
+      sequence: 20,
+      runId: testCase.result.runId,
+      flowId: testCase.result.flowId,
+      createdAt: "2026-07-15T10:06:00.000Z",
+      completedBatchCount: testCase.result.completedBatchCount,
+      completedTaskCount: testCase.result.completedTaskCount,
+      stopReason: testCase.result.stopReason,
+      batchResults: testCase.result.batchResults,
+    });
+
+    const projection = projectHubRunOutcome(testCase.result);
+    const record = parseRecord(
+      renderer.outcome(testCase.result, projection).at(-1)!,
+    );
+
+    expect(record).toMatchObject({
+      outcome: testCase.outcome,
+      exitCode: testCase.exitCode,
+      counts: testCase.counts,
+    });
+  });
+});

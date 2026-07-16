@@ -2,7 +2,11 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { maskEnvValue } from "./envFile.js";
-import { readHubEnvFile, type HubEnvKnownKey } from "./hubEnv.js";
+import {
+  normalizeHubEnvValue,
+  readHubEnvFile,
+  type HubEnvKnownKey,
+} from "./hubEnv.js";
 import {
   ensureHubAuthDir,
   resolveHubAuthDir,
@@ -142,8 +146,8 @@ export const formatHubAuthShowLines = (
   ];
 
   for (const provider of HUB_AUTH_PROVIDERS) {
-    const runtimeValue = env[provider.envKey] ?? "";
-    const hubValue = hubEnv[provider.envKey] ?? "";
+    const runtimeValue = normalizeHubEnvValue(env[provider.envKey]);
+    const hubValue = normalizeHubEnvValue(hubEnv[provider.envKey]);
     const authDirReady = hasHubAuthSession(provider, options);
 
     let status: string;
@@ -187,7 +191,7 @@ export const resolveHubAuthSessionEnv = (
       continue;
     }
 
-    const runtimeValue = env[provider.authEnvVar] ?? "";
+    const runtimeValue = normalizeHubEnvValue(env[provider.authEnvVar]);
     if (runtimeValue.length > 0) {
       resolved[provider.authEnvVar] = runtimeValue;
       continue;

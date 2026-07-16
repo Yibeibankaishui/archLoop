@@ -9,6 +9,7 @@ import {
   type HubWorktreeLeaseDiagnostic,
   type HubWorktreeLeaseDiagnosticReason,
 } from "./hubWorktreeLeaseDiagnostics.js";
+import { evaluateHubManagedBranchCleanup } from "./hubManagedBranchCleanup.js";
 import {
   resolveGitRepoRoot,
   resolveHubProjectDir,
@@ -20,6 +21,7 @@ import {
   resolveHubTaskBranch,
   resolveHubTaskSelector,
   transitionHubTaskStatus,
+  formatHubManagedBranchCleanupDiagnosticsLines,
   type HubTaskProjection,
   type HubTaskStatus,
 } from "./taskBoard.js";
@@ -83,6 +85,7 @@ export interface DoctorHubTaskStateInput {
 
 export interface DoctorHubTaskStateResult {
   readonly diagnostics: readonly HubTaskStateDiagnostic[];
+  readonly managedBranchCleanupDiagnostics: readonly string[];
 }
 
 export interface HubTaskStatePlannedRepair {
@@ -371,7 +374,7 @@ const buildDirtyWorktreeDiagnostic = (
   currentStatus: task.hubStatus,
   branch: task.claim?.branch,
   nextAction:
-    "Commit, stash, or revert dirty source files, then rerun the flow.",
+    "Commit, stash, or discard dirty source files, then rerun the flow.",
   message: `Git safety gate: dirty source files (${dirtySourceFiles.join(", ")}) block merge selection. This is not repairable Beads task-state pollution.`,
 });
 
@@ -499,6 +502,11 @@ export const doctorHubTaskState = async (
     input.worktreeInspector ?? defaultWorktreeInspector
   )(repoRoot);
   const leases = (input.listWorktreeLeases ?? listWorktreeLeases)(repoRoot);
+  const managedBranchCleanupEvaluation = await evaluateHubManagedBranchCleanup({
+    cwd: input.cwd,
+    env: input.env,
+    hubProjectDir,
+  });
 
   const diagnostics: HubTaskStateDiagnostic[] = [];
   for (const leaseDiagnostic of collectHubWorktreeLeaseDiagnosticsForTasks(
@@ -586,7 +594,13 @@ export const doctorHubTaskState = async (
     }
   }
 
-  return { diagnostics };
+  return {
+    diagnostics,
+    managedBranchCleanupDiagnostics:
+      formatHubManagedBranchCleanupDiagnosticsLines(
+        managedBranchCleanupEvaluation,
+      ),
+  };
 };
 
 export const repairHubTaskState = async (
@@ -661,16 +675,18 @@ export const formatHubTaskStateDoctorLines = (
   const lines = ["Hub task state doctor"];
   if (result.diagnostics.length === 0) {
     lines.push("No task state issues found.");
-    return lines;
+  } else {
+    lines.push(`Issues found: ${result.diagnostics.length}`);
+    for (const diagnostic of result.diagnostics) {
+      const branch = diagnostic.branch ? ` ${diagnostic.branch}` : "";
+      lines.push(
+        `  ${diagnostic.taskId}: ${diagnostic.reason}${branch}; next action: ${actionLabel(diagnostic)} (${diagnostic.nextAction})`,
+      );
+      lines.push(`    ${diagnostic.message}`);
+    }
   }
-
-  lines.push(`Issues found: ${result.diagnostics.length}`);
-  for (const diagnostic of result.diagnostics) {
-    const branch = diagnostic.branch ? ` ${diagnostic.branch}` : "";
-    lines.push(
-      `  ${diagnostic.taskId}: ${diagnostic.reason}${branch}; next action: ${actionLabel(diagnostic)} (${diagnostic.nextAction})`,
-    );
-    lines.push(`    ${diagnostic.message}`);
+  for (const line of result.managedBranchCleanupDiagnostics) {
+    lines.push(line);
   }
   return lines;
 };

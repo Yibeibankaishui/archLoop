@@ -11,6 +11,8 @@ import {
 } from "./hubAgentCatalog.js";
 import {
   initHubAgentConfig,
+  ensureHubAgentRolesConfigured,
+  HUB_AGENT_ROLES,
   type HubAgentConfig,
   type HubAgentConfigStoreOptions,
   type HubAgentRole,
@@ -169,26 +171,50 @@ export const promptHubAgentRoleSetup = async (
 
 export const promptInitHubAgentConfig = async (
   options: HubAgentConfigStoreOptions = {},
+): Promise<HubAgentConfig> =>
+  promptHubAgentConfig(
+    async (storeOptions) =>
+      initHubAgentConfig({
+        env: storeOptions.env,
+        homeDir: storeOptions.homeDir,
+        confirmApplyToAll: async () => {
+          const applyToAll = await clack.confirm({
+            message:
+              "Apply the same provider and model to all Hub agent roles?",
+            initialValue: true,
+          });
+          if (clack.isCancel(applyToAll)) {
+            clack.cancel(HUB_AGENT_ROLE_SETUP_CANCELLED);
+            process.exit(0);
+          }
+          return Boolean(applyToAll);
+        },
+        configureRole: promptHubAgentRoleSetup,
+      }),
+    options,
+  );
+
+const promptHubAgentConfig = async (
+  configure: (options: HubAgentConfigStoreOptions) => Promise<HubAgentConfig>,
+  options: HubAgentConfigStoreOptions,
 ): Promise<HubAgentConfig> => {
   clack.intro("Configure Hub agent roles");
-
-  const config = await initHubAgentConfig({
-    env: options.env,
-    homeDir: options.homeDir,
-    confirmApplyToAll: async () => {
-      const applyToAll = await clack.confirm({
-        message: "Apply the same provider and model to all Hub agent roles?",
-        initialValue: true,
-      });
-      if (clack.isCancel(applyToAll)) {
-        clack.cancel(HUB_AGENT_ROLE_SETUP_CANCELLED);
-        process.exit(0);
-      }
-      return Boolean(applyToAll);
-    },
-    configureRole: promptHubAgentRoleSetup,
-  });
-
+  const config = await configure(options);
   clack.outro("Hub agent roles configured.");
   return config;
 };
+
+export const promptInitializeHubAgentConfig = async (
+  options: HubAgentConfigStoreOptions = {},
+): Promise<HubAgentConfig> =>
+  promptHubAgentConfig(
+    (storeOptions) =>
+      ensureHubAgentRolesConfigured({
+        env: storeOptions.env,
+        homeDir: storeOptions.homeDir,
+        requiredRoles: HUB_AGENT_ROLES,
+        interactive: true,
+        configureRole: promptHubAgentRoleSetup,
+      }),
+    options,
+  );

@@ -10,7 +10,7 @@ archLoop unified interface 是 archLoop 的新主入口。它把项目管理、�
 https://github.com/Yibeibankaishui/archLoop.git
 ```
 
-旧的 `archloop init` 方式仍然保留。已经使用 `.archloop/main.ts` 或 `.archloop/main.mts` 的项目可以继续按原流程运行；新的主要使用方式推荐直接使用 Hub / task board / flow 命令。
+新的主要使用方式是先做 Hub onboarding: `archloop initialize` -> `archloop project add` / `select` / `list` -> `archloop check` -> selected-project `archloop run --flow ...`。`archloop init` 仍然保留，但只作为 legacy 的 repo-local scaffold 路径；已经使用 `.archloop/main.ts` 或 `.archloop/main.mts` 的项目可以继续按原流程运行。
 
 ## 2 使用边界
 
@@ -26,25 +26,35 @@ Unified interface 面向一个已有 Git 项目运行。目标项目需要满足
 
 Hub flow 使用 archLoop 自带的 flow prompt，不读取目标项目里的 `.archloop/main.ts` 或 `.archloop` prompt。目标项目不需要先执行 `archloop init`。
 
+如果你要先完成 Hub 级共享设置，再注册第一个项目，先运行 `archloop initialize`。它会配置共享 agent roles、env 和 auth 指引，默认再跑一次轻量 Hub check，并在成功后把 `archloop project add` 作为下一步。若要跳过 quick check，使用 `archloop initialize --skip-check`。
+
 ## 3 首次配置
 
 ### 3.1 检查项目状态
 
-在目标项目根目录运行：
+在任意目录运行；`archloop run` 默认针对已选中的 Hub project，TTY 中还会在需要时打开 Hub project / flow 选择器；如需覆盖，可以显式传入 `--project <name>`：
 
 ```bash
 archloop project status
+archloop check
 ```
 
-这个命令用于确认：
+`project status` 用于确认当前选中的或显式指定的 Hub project：
 
-| 输出项                       | 用途                                         |
-| ---------------------------- | -------------------------------------------- |
-| Repo root                    | archLoop 识别到的目标项目根目录              |
-| archLoop user data directory | Hub 状态、共享凭据、运行记录所在位置         |
-| Hub project directory        | 当前项目的 Hub 运行状态目录                  |
-| Beads availability           | Beads 是否可用                               |
-| Task summary                 | 当前任务表、失败任务、运行批次、同步状态摘要 |
+| 输出项                       | 用途                                                                             |
+| ---------------------------- | -------------------------------------------------------------------------------- |
+| Repo root                    | 当前 Hub project 对应的目标项目根目录                                            |
+| archLoop user data directory | Hub 状态、共享凭据、运行记录所在位置                                             |
+| Hub project directory        | 当前项目的 Hub 运行状态目录                                                      |
+| Beads availability           | Beads 是否可用                                                                   |
+| Task summary                 | 当前任务表、失败任务、运行批次、同步状态摘要                                     |
+| Cleanup diagnostics          | safe managed candidates、blocked reasons 和 historical unowned preservation 规则 |
+
+`check` 默认会同时验证 Hub 级 readiness 和当前 CLI selected 的 Hub project（如果存在）。你也可以显式使用 `archloop check --hub` 只跑 Hub 级检查，`archloop check --project <name>` 检查某个项目，或 `archloop check --all-projects` 检查全部项目。Hub 级检查会验证 agent role 是否完整、共享凭据和 auth 是否存在、provider 引用是否可用、provider CLI 是否能从 PATH 找到，以及是否可以通过真实 provider 路径完成最小 smoke check。项目级检查会验证 repo path、git repo、initial commit、development contract、local task store、ready/failed 任务摘要、active run 和 flow readiness signals。输出会显示进度、按 provider/model/options 去重，并列出每个 smoke check 覆盖的 role。
+
+`project list` 则提供更轻量的多项目概览：它按 Hub registry 列出项目，标记 selected 项，显示 repo path、project profile、path validity、local task store readiness 标签、ready/failed/total 数量（可用时）以及 active run 概览，适合快速决定接下来切换到哪个项目。
+
+如果只是需要改名或迁移仓库路径，可以用 `archloop project rename <project> <new-name>` 和 `archloop project relink <project> --path <repo-path>`。这两个命令都会保持 Hub project id 不变，因此任务、运行和历史记录仍然挂在同一个 Hub project 上。
 
 ### 3.2 配置 agent roles
 
@@ -117,6 +127,7 @@ archloop auth show
 
 ### 4.1 初始化本地任务表
 
+任务命令默认针对已选中的 Hub project；如需覆盖，可以显式传 `--project <name>`。
 如果目标项目还没有本地任务表，先运行：
 
 ```bash
@@ -205,7 +216,7 @@ archloop tasks from-prd docs/prd/example.md --yes
 等价 flow 入口：
 
 ```bash
-archloop run . --flow prd-decomposition --input docs/prd/example.md
+archloop run --flow prd-decomposition --input docs/prd/example.md
 ```
 
 ### 5.2 Triage inbox / needs_info 任务
@@ -239,7 +250,7 @@ archloop tasks triage --yes
 等价 flow 入口：
 
 ```bash
-archloop run . --flow triage --input inbox,needs_info
+archloop run --flow triage --input inbox,needs_info
 ```
 
 ## 6 诊断和修复任务状态
@@ -248,9 +259,9 @@ archloop run . --flow triage --input inbox,needs_info
 archloop tasks doctor
 ```
 
-`tasks doctor` 只读检查本地 Beads task board、Hub run events、git 分支和工作区状态，不会修改 Beads、git 或远端 GitHub Issues。它会报告多重 archLoop 状态标签、过期的 `metadata.hubStatus`、缺失的 execution claim、failed 任务上仍存在的分支工作、已 review 但无法被 merge 选择的任务、terminal 任务里残留的 execution metadata、dirty worktree gate，以及需要 `tasks push` 的同步状态。
+`tasks doctor` 只读检查本地 Beads task board、Hub run events、git 分支和工作区状态，不会修改 Beads、git 或远端 GitHub Issues。它会报告多重 archLoop 状态标签、过期的 `metadata.hubStatus`、缺失的 execution claim、failed 任务上仍存在的分支工作、已 review 但无法被 merge 选择的任务、terminal 任务里残留的 execution metadata、dirty worktree gate、需要 `tasks push` 的同步状态，以及 managed branch cleanup diagnostics。
 
-每条输出都会说明下一步：重新运行 flow、执行 `archloop tasks recover <selector>`、执行 `archloop tasks repair-state <selector>`，或推送 task sync。`dirty_worktree` 不是可修复的 Beads 状态污染；先 commit、stash 或 revert 脏文件，再重新运行同一个 flow 让批次恢复。
+每条输出都会说明下一步：重新运行 flow、执行 `archloop tasks recover <selector>`、执行 `archloop tasks repair-state <selector>`、推送 task sync，或按需运行 `archloop tasks cleanup --yes` / `--include-unowned`。dirty source files 是 Git 安全提示，不是可修复的 Beads 状态污染。后续 `run --flow` 只有在待合并分支会改到同一路径时才会阻塞；按输出列出的 blocking files 先 commit、stash 或 discard，再重新运行同一个 flow，archLoop 会优先恢复 `waiting_for_merge` 批次。
 
 ```bash
 archloop tasks repair-state <selector>
@@ -264,7 +275,7 @@ archloop tasks repair-state <selector> --yes
 ### 7.1 无 reviewer flow
 
 ```bash
-archloop run . --flow no-review
+archloop run --flow no-review
 ```
 
 适合先验证最短闭环：读取 `ready_for_agent` 队列，执行实现任务，成功后进入 `waiting_for_merge`，再按批次合并并关闭本地任务。
@@ -272,12 +283,20 @@ archloop run . --flow no-review
 ### 7.2 带 reviewer flow
 
 ```bash
-archloop run . --flow with-review
+archloop run --flow with-review
 ```
 
 适合需要实现后审核的流程：实现成功后进入 `reviewing`，review 完成后进入 `waiting_for_merge`，再进入 merge 阶段。
 
-Merge 阶段会在真正合并前输出 selected / skipped / blocked 诊断。若 Hub 事件显示任务已实现或审核完成、分支仍有未合并工作，但 Beads 投影状态或 claim 元数据已经过期，诊断会显示 `state_inconsistent` 并提示运行 `archloop tasks repair-state <selector>`；若任务处于 failed 或 stale execution 状态，`archloop tasks recover <selector>` 也可能适用。若被 `dirty_worktree` 阻塞，这是 Git 安全门而不是任务状态不一致；提交、stash 或 revert 列出的脏文件后，重新运行同一个 flow 即可恢复批次。
+所有 Hub flow 默认使用 `--output auto`。交互式 TTY 在尺寸与 cursor control 可用时显示有界 live view；任务看板显示 batch/task，PRD decomposition 与 triage 显示 proposal session phases。proposal live view 在 refinement、status、approval、apply prompt 前暂停并恢复，不暴露 agent prose。重定向、CI、dumb/unsupported/unsafe terminal 自动回退 plain，所有退出路径都会恢复 cursor。
+
+所有 flow 支持显式 `--output plain`。proposal records 为 append-only canonical phase/status，不包含原始 agent prose；最终 outcome 区分 applied、no-change、cancelled、validation failure、mutation failure 和其他 failure，并提供 applied/skipped/dependencies、logs、diagnostic 与 recovery。显式 plain/JSON 不发起交互 prompt，写入 proposal 必须传 `--yes`；未确认时不 apply。
+
+脚本和 CI 可改用 `--output json`。proposal phases 使用 stdout-pure schema version 1 `proposal_phase` JSONL，最终使用 `run_completed`；应用/无变化退出 `0`，Ctrl+C 取消退出 `130`，SIGTERM 保留退出码 `143`，validation/mutation/general failure 非零。version 1 消费者应忽略未知字段。
+
+失败或阻塞任务会保留 failed stage、简短 diagnostic、相关 log path 和下一步命令。agent、sandbox、implementation 与 review 失败使用 `archloop tasks recover <selector>`；claim 或 task projection 不一致使用 `archloop tasks repair-state <selector>`；dirty-worktree overlap 会列出准确 blocking paths，并说明先 commit、stash 或 discard。仍在 `waiting_for_merge` 的工作应重新运行同一个 `archloop run --flow <id>`，由既有自动恢复逻辑继续批次；不要使用不存在的 `archloop run --resume`。
+
+Merge 阶段会在真正合并前输出 selected / skipped / blocked 诊断。若 Hub 事件显示任务已实现或审核完成、分支仍有未合并工作，但 Beads 投影状态或 claim 元数据已经过期，诊断会显示 `state_inconsistent` 并提示运行 `archloop tasks repair-state <selector>`；若任务处于 failed 或 stale execution 状态，`archloop tasks recover <selector>` 也可能适用。`run --flow` 启动时会提前提醒宿主仓库存在 dirty source files；若已有 `waiting_for_merge` 批次，会先做 overlap 检查。非重叠脏文件不会阻塞：archLoop 会在干净的 integration worktree/branch 中验证 merge，并在落回宿主前再次确认不会覆盖脏文件。若输出显示 dirty 文件会被覆盖或冲突，任务会留在 `waiting_for_merge`，按列出的 blocking files 先 commit、stash 或 discard，再重新运行同一个 flow 即可恢复批次。
 
 ### 7.3 Flow 状态
 
@@ -298,6 +317,8 @@ Hub task board 使用这些状态：
 | `wontfix`           | 确认不处理                                  |
 | `failed`            | 执行、sandbox、merge、验证或关闭失败        |
 | `sync_conflict`     | 本地和远端同步语义冲突                      |
+
+`project status` 会给出 repo root、archLoop user data directory、Hub project directory、selected project profile、contract path、`bd` 可用性、task board ready/total、active runs、failed tasks、sync state、recent events、Hub run 目录、worktree lease diagnostics，以及 managed branch cleanup diagnostics。
 
 查看当前进度：
 
@@ -342,9 +363,9 @@ archloop tasks recover 1
 | verification failure | 修复验证问题后重新进入可恢复路径           |
 | close_failed         | 如果分支已合并且验证通过，重试关闭本地任务 |
 
-## 10 Legacy Init 兼容路径
+## 10 Legacy Repo-local Scaffold 兼容路径
 
-`archloop init` 继续存在，适用于需要项目内脚手架和自定义 TypeScript 编排的场景。
+`archloop init` 继续存在，适用于需要 repo-local 脚手架和自定义 TypeScript 编排的场景。Hub-wide setup 仍然请先使用 `archloop initialize`。
 
 ```bash
 archloop init
@@ -365,7 +386,7 @@ npx tsx ./.archloop/main.mts
 一旦使用：
 
 ```bash
-archloop run . --flow no-review
+archloop run --flow no-review
 ```
 
 就会使用 archLoop Hub 自带的 flow prompt，而不是项目 `.archloop/` 中生成的 main 脚本或 prompt。
@@ -374,7 +395,7 @@ archloop run . --flow no-review
 
 建议按下面顺序做首轮 QA：
 
-1. 在目标 Git 项目中运行 `archloop project status`，确认不需要 `.archloop/`。
+1. 先在 Hub 中选中或显式指定目标项目，再运行 `archloop project status`，确认不需要 `.archloop/`。
 2. 运行 `archloop agent-config init`，配置 `planning`、`triage`、`implementation`、`review`、`merge`、`recovery`。
 3. 运行 `archloop env init`，配置 agent 和 GitHub 所需凭据。
 4. 运行 `archloop tasks init`，再用 `archloop tasks create` 创建 2 到 3 个测试任务。
@@ -382,11 +403,11 @@ archloop run . --flow no-review
 6. 用 `archloop tasks comment` 追加评论，再用 `tasks show` 验证评论可见。
 7. 准备一个 PRD 文件，运行 `archloop tasks from-prd <prd-file>`，人工调整 proposal 后确认写入。
 8. 运行 `archloop tasks triage`，确认 agent 能给出状态建议并写入本地 Beads。
-9. 将至少一个任务变为 `ready_for_agent`，运行 `archloop run . --flow no-review`。
-10. 再准备一轮任务，运行 `archloop run . --flow with-review`。
+9. 将至少一个任务变为 `ready_for_agent`，运行 `archloop run --flow no-review`。
+10. 再准备一轮任务，运行 `archloop run --flow with-review`。
 11. 运行 `archloop tasks sync`，验证 GitHub Issues pull / push 行为。
 12. 人工制造一个失败或 stale 状态，运行 `archloop tasks recover <selector>`。
-13. 运行 legacy `archloop init`，确认旧的 `.archloop/main.ts` 或 `.archloop/main.mts` 路径仍可用。
+13. 运行 legacy `archloop init`，确认旧的 `.archloop/main.ts` 或 `.archloop/main.mts` 路径仍可用，并再次确认 Hub onboarding 仍然以 `archloop initialize` 为入口。
 
 ## 12 验收指标
 

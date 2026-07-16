@@ -257,6 +257,36 @@ describe("hub agent config store", () => {
     });
   });
 
+  it("keeps existing roles when rerun with only a subset missing", async () => {
+    const { env } = await tempHome();
+    setHubAgentRole("planning", { provider: "cursor", model: "auto" }, { env });
+    const configured: string[] = [];
+
+    const config = await ensureHubAgentRolesConfigured({
+      requiredRoles: ["planning", "triage"],
+      env,
+      interactive: true,
+      configureRole: async (role) => {
+        configured.push(role);
+        return { provider: "codex", model: `model-for-${role}` };
+      },
+    });
+
+    expect(configured).toEqual(["triage"]);
+    expect(config.roles.planning).toEqual({
+      provider: "cursor",
+      model: "auto",
+    });
+    expect(config.roles.triage).toEqual({
+      provider: "codex",
+      model: "model-for-triage",
+    });
+    expect(readHubAgentConfig({ env }).roles.planning).toEqual({
+      provider: "cursor",
+      model: "auto",
+    });
+  });
+
   it("does not persist credential fields when reading manually edited config", async () => {
     const { env, dataDir } = await tempHome();
     const configPath = resolveHubAgentConfigPath({ env });

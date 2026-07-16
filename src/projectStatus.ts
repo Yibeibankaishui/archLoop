@@ -88,6 +88,7 @@ export interface HubProjectStatus {
 export interface HubProjectStatusOptions {
   readonly cwd?: string;
   readonly archloopUserDataDir?: string;
+  readonly hubProjectDir?: string;
   readonly resolveRepoRoot?: (cwd: string) => string;
   readonly detectBeadsAvailable?: () => boolean;
   readonly detectTaskStoreInitialized?: (repoRoot: string) => boolean;
@@ -610,6 +611,7 @@ const appendWorktreeLeaseLines = (
 
 export const formatHubProjectStatusLines = (
   status: HubProjectStatus,
+  cleanupDiagnosticsLines?: readonly string[],
 ): readonly string[] => {
   const lines: string[] = [];
   appendTaskCountLines(lines, status);
@@ -622,6 +624,11 @@ export const formatHubProjectStatusLines = (
   appendRecentEventLines(lines, status.recentEvents);
   appendRunDirectoryLines(lines, status.runDirectories);
   appendWorktreeLeaseLines(lines, status.worktreeLeaseDiagnostics);
+  if (cleanupDiagnosticsLines !== undefined) {
+    for (const line of cleanupDiagnosticsLines) {
+      lines.push(line);
+    }
+  }
 
   return lines;
 };
@@ -788,7 +795,9 @@ export const resolveHubProjectStatus = (
   const cwd = options.cwd ?? process.cwd();
   const repoRoot = resolveRepoRoot(cwd, options.resolveRepoRoot);
   const archloopUserDataDir = resolveUserDataDir(options.archloopUserDataDir);
-  const hubProjectDir = resolveHubProjectDir(archloopUserDataDir, repoRoot);
+  const hubProjectDir =
+    options.hubProjectDir ??
+    resolveHubProjectDir(archloopUserDataDir, repoRoot);
   const projectDevelopmentContract = resolveHubProjectDevelopmentContractState({
     repoRoot,
     hubProjectDir,

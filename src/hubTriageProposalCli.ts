@@ -2,7 +2,7 @@ import * as clack from "@clack/prompts";
 import { Effect } from "effect";
 
 import { Display } from "./Display.js";
-import { TaskBoardError } from "./errors.js";
+import { ProposalPromptCancelledError, TaskBoardError } from "./errors.js";
 import { promptHubAgentRoleSetup } from "./hubAgentConfigPrompt.js";
 import { displayProposalAgentPhase } from "./hubProposalDisplay.js";
 import {
@@ -18,6 +18,7 @@ import {
   isHubTriageSourceStatus,
 } from "./hubTriage.js";
 import type { HubTaskBoard } from "./taskBoard.js";
+import type { HubProposalPresentationEvent } from "./hubProposalSession.js";
 
 const TRIAGE_ALL_SENTINEL = "__all__";
 
@@ -27,8 +28,11 @@ export type TriageProposalFlowDisplayOutcome =
   | { readonly kind: "displayed" };
 
 export const triageProposalCancelledMessage = (
-  phase: "approval" | "refinement",
+  phase: "approval" | "refinement" | "apply",
 ): string => {
+  if (phase === "apply") {
+    return "Triage proposal cancelled before applying Beads task updates.";
+  }
   if (phase === "approval") {
     return "Triage proposal cancelled before applying Beads task updates.";
   }
@@ -54,7 +58,7 @@ export const promptTriageRefinement = async (): Promise<string | null> => {
     initialValue: false,
   });
   if (clack.isCancel(refineFurther)) {
-    throw new TaskBoardError({
+    throw new ProposalPromptCancelledError({
       message: triageProposalCancelledMessage("refinement"),
     });
   }
@@ -68,7 +72,7 @@ export const promptTriageRefinement = async (): Promise<string | null> => {
       "Change outcome for bd-42, adjust confidence, rewrite comment...",
   });
   if (clack.isCancel(result)) {
-    throw new TaskBoardError({
+    throw new ProposalPromptCancelledError({
       message: triageProposalCancelledMessage("refinement"),
     });
   }
@@ -90,7 +94,7 @@ export const promptTriageApprovalWithProposal = async (
     initialValue: true,
   });
   if (clack.isCancel(result)) {
-    throw new TaskBoardError({
+    throw new ProposalPromptCancelledError({
       message: triageProposalCancelledMessage("approval"),
     });
   }
@@ -106,7 +110,7 @@ export const promptTriageApplyConfirmation = async (
     initialValue: reason !== "low_confidence",
   });
   if (clack.isCancel(result)) {
-    throw new TaskBoardError({
+    throw new ProposalPromptCancelledError({
       message: triageProposalCancelledMessage("approval"),
     });
   }
@@ -157,14 +161,39 @@ export const promptTriageTaskSelection = async (input: {
   return values;
 };
 
-const createTriageInteraction = (): {
-  readonly onAssistantMessage: typeof displayProposalAgentPhase;
-  readonly requestRefinement: typeof promptTriageRefinement;
-  readonly requestApproval: typeof promptTriageApprovalWithProposal;
-} => ({
-  onAssistantMessage: displayProposalAgentPhase,
-  requestRefinement: promptTriageRefinement,
-  requestApproval: promptTriageApprovalWithProposal,
+const withPromptLifecycle = async <T>(
+  prompt: () => Promise<T>,
+  beforePrompt?: () => void,
+  afterPrompt?: () => void,
+): Promise<T> => {
+  beforePrompt?.();
+  try {
+    return await prompt();
+  } finally {
+    afterPrompt?.();
+  }
+};
+
+const createTriageInteraction = (input: {
+  readonly showAgentMessages: boolean;
+  readonly beforePrompt?: () => void;
+  readonly afterPrompt?: () => void;
+}) => ({
+  ...(input.showAgentMessages
+    ? { onAssistantMessage: displayProposalAgentPhase }
+    : {}),
+  requestRefinement: () =>
+    withPromptLifecycle(
+      promptTriageRefinement,
+      input.beforePrompt,
+      input.afterPrompt,
+    ),
+  requestApproval: (proposal: TriageProposal) =>
+    withPromptLifecycle(
+      () => promptTriageApprovalWithProposal(proposal),
+      input.beforePrompt,
+      input.afterPrompt,
+    ),
 });
 
 export const displayTriageProposalFlowResult = (
@@ -221,17 +250,45 @@ export const runTriageProposalFlowFromCli = async (input: {
   readonly query?: string;
   readonly yes: boolean;
   readonly isTTY?: boolean;
+  readonly interactive?: boolean;
+  readonly showDecoratedOutput?: boolean;
+  readonly onPresentationEvent?: (event: HubProposalPresentationEvent) => void;
+  readonly beforePrompt?: () => void;
+  readonly afterPrompt?: () => void;
+  readonly signal?: AbortSignal;
 }): Promise<RunTriageProposalFlowResult> =>
   runTriageProposalFlow({
     cwd: input.cwd,
     taskIds: input.taskIds,
     query: input.query,
     yes: input.yes,
-    interaction: input.yes ? undefined : createTriageInteraction(),
-    applyConfirmation:
-      input.yes && input.isTTY !== true
+    interaction:
+      input.interactive === false || input.yes
         ? undefined
-        : promptTriageApplyConfirmation,
-    configureHubAgentRole: promptHubAgentRoleSetup,
-    isTTY: input.isTTY,
+        : createTriageInteraction({
+            showAgentMessages: input.showDecoratedOutput !== false,
+            beforePrompt: input.beforePrompt,
+            afterPrompt: input.afterPrompt,
+          }),
+    applyConfirmation:
+      input.interactive === false || (input.yes && input.isTTY !== true)
+        ? undefined
+        : (decision, reason) =>
+            withPromptLifecycle(
+              () => promptTriageApplyConfirmation(decision, reason),
+              input.beforePrompt,
+              input.afterPrompt,
+            ),
+    configureHubAgentRole:
+      input.interactive === false
+        ? undefined
+        : (role) =>
+            withPromptLifecycle(
+              () => promptHubAgentRoleSetup(role),
+              input.beforePrompt,
+              input.afterPrompt,
+            ),
+    isTTY: input.interactive === false ? false : input.isTTY,
+    onPresentationEvent: input.onPresentationEvent,
+    signal: input.signal,
   });

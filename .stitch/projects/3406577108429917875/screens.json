@@ -1,0 +1,10 @@
+{
+  "projectId": "3406577108429917875",
+  "listScreensResult": {},
+  "screenInstances": [],
+  "notes": [
+    "mcp__stitch.list_screens returned an empty object for this project.",
+    "mcp__stitch.get_project did not include screenInstances for this project.",
+    "No per-screen HTML or screenshot download URLs were available through the exposed Stitch MCP tools."
+  ]
+}

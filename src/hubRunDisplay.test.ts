@@ -1,0 +1,869 @@
+import { describe, expect, it } from "vitest";
+
+import type {
+  HubBatchMergeCompletedEvent,
+  HubRunEvent,
+  HubTaskEvent,
+} from "./hubExecution.js";
+import {
+  createHubRunDisplayState,
+  formatPlainHubRunCancellation,
+  formatPlainHubRunEvent,
+  formatPlainHubRunOutcome,
+  projectHubRunOutcome,
+  projectHubRunStateOutcome,
+  reduceHubRunDisplayState,
+} from "./hubRunDisplay.js";
+import type { RunHubFlowResult } from "./hubFlowExecution.js";
+
+const makeRunResult = (
+  overrides: Partial<RunHubFlowResult> = {},
+): RunHubFlowResult => ({
+  flowId: "no-review",
+  runId: "run-1",
+  batchId: "batch-1",
+  runDir: "/tmp/runs/run-1",
+  mode: "new_batch",
+  completedBatchCount: 0,
+  completedTaskCount: 0,
+  stopReason: "no_ready_tasks",
+  batchResults: [],
+  selectedTaskIds: [],
+  results: [],
+  unfinishedBatchIds: [],
+  projectDevelopmentContractPath: "/tmp/contract.md",
+  projectDevelopmentContractCreatedGenericFallback: false,
+  ...overrides,
+});
+
+describe("projectHubRunStateOutcome", () => {
+  it("retains failed task diagnostics and skipped counts for interrupted runs", () => {
+    const runStarted: HubRunEvent = {
+      type: "run_started",
+      runId: "run-interrupted",
+      branch: "flow/with-review",
+      startedAt: "2026-07-15T13:00:00.000Z",
+      repoRoot: "/tmp/repo",
+      hubProjectDir: "/tmp/hub",
+      eventId: "run-interrupted:1",
+      sequence: 1,
+    };
+    const reviewFailed: HubRunEvent = {
+      type: "task_review_failed",
+      runId: "run-interrupted",
+      batchId: "batch-interrupted",
+      taskId: "task-review-failed",
+      branch: "archloop/task-review-failed",
+      createdAt: "2026-07-15T13:00:01.000Z",
+      status: "failed",
+      diagnosticSummary: "review failed\nraw details",
+      diagnostics: { path: "/tmp/review.log" },
+      eventId: "run-interrupted:2",
+      sequence: 2,
+    };
+    const claimSkipped: HubRunEvent = {
+      type: "task_claim_skipped",
+      runId: "run-interrupted",
+      batchId: "batch-interrupted",
+      taskId: "task-skipped",
+      branch: "archloop/task-skipped",
+      createdAt: "2026-07-15T13:00:02.000Z",
+      status: "ready_for_agent",
+      eventId: "run-interrupted:3",
+      sequence: 3,
+    };
+    let state = createHubRunDisplayState({
+      hubProjectName: "alpha",
+      flowId: "with-review",
+    });
+    state = reduceHubRunDisplayState(state, runStarted);
+    state = reduceHubRunDisplayState(state, reviewFailed);
+    state = reduceHubRunDisplayState(state, claimSkipped);
+
+    expect(
+      projectHubRunStateOutcome(state, {
+        outcome: "cancelled",
+        summary: "Run cancelled",
+        exitCode: 130,
+      }),
+    ).toMatchObject({
+      counts: { failed: 1, skipped: 1 },
+      taskDetails: [
+        {
+          taskId: "task-review-failed",
+          stage: "Review failed",
+          diagnostic: "review failed",
+          logPath: "/tmp/review.log",
+          recoveryCommand: "archloop tasks recover task-review-failed",
+        },
+      ],
+    });
+  });
+});
+
+describe("plain Hub run lifecycle output", () => {
+  it("uses the reducer skipped count in cancellation outcomes", () => {
+    const claimSkipped: HubRunEvent = {
+      type: "task_claim_skipped",
+      runId: "run-cancelled",
+      batchId: "batch-cancelled",
+      taskId: "task-skipped",
+      branch: "archloop/task-skipped",
+      createdAt: "2026-07-15T13:05:00.000Z",
+      status: "ready_for_agent",
+      eventId: "run-cancelled:1",
+      sequence: 1,
+    };
+    const state = reduceHubRunDisplayState(
+      createHubRunDisplayState({
+        hubProjectName: "alpha",
+        flowId: "with-review",
+      }),
+      claimSkipped,
+    );
+
+    expect(formatPlainHubRunCancellation(state)).toContain("skipped=1");
+  });
+
+  it("treats an initially empty ready queue as successful completion", () => {
+    const result: RunHubFlowResult = {
+      flowId: "no-review",
+      runId: "run-empty",
+      batchId: "batch-empty",
+      runDir: "/tmp/runs/run-empty",
+      mode: "no_ready",
+      completedBatchCount: 0,
+      completedTaskCount: 0,
+      stopReason: "no_ready_tasks",
+      batchResults: [],
+      selectedTaskIds: [],
+      results: [],
+      unfinishedBatchIds: [],
+      projectDevelopmentContractPath: "/tmp/contract.md",
+      projectDevelopmentContractCreatedGenericFallback: false,
+    };
+
+    expect(projectHubRunOutcome(result)).toEqual({
+      outcome: "completed",
+      summary: "Nothing to run",
+      counts: {
+        completed: 0,
+        failed: 0,
+        blocked: 0,
+        skipped: 0,
+        readyToMerge: 0,
+      },
+      taskDetails: [],
+      exitCode: 0,
+    });
+  });
+
+  it("treats the configured flow-batch limit as successful completion", () => {
+    const result: RunHubFlowResult = {
+      flowId: "with-review",
+      runId: "run-bounded",
+      batchId: "batch-2",
+      runDir: "/tmp/runs/run-bounded",
+      mode: "new_batch",
+      completedBatchCount: 2,
+      completedTaskCount: 3,
+      stopReason: "max_batches_reached",
+      batchResults: [
+        {
+          batchId: "batch-1",
+          selectedTaskIds: ["task-1", "task-2"],
+          completedTaskCount: 2,
+          batchStatus: "completed",
+        },
+        {
+          batchId: "batch-2",
+          selectedTaskIds: ["task-3"],
+          completedTaskCount: 1,
+          batchStatus: "completed",
+        },
+      ],
+      selectedTaskIds: ["task-1", "task-2", "task-3"],
+      results: [],
+      unfinishedBatchIds: [],
+      projectDevelopmentContractPath: "/tmp/contract.md",
+      projectDevelopmentContractCreatedGenericFallback: false,
+    };
+
+    expect(projectHubRunOutcome(result)).toMatchObject({
+      outcome: "completed",
+      summary: "Reached configured flow-batch limit",
+      counts: { completed: 3 },
+      exitCode: 0,
+    });
+  });
+
+  it("classifies partial progress when a later flow batch fails", () => {
+    const result = makeRunResult({
+      completedBatchCount: 1,
+      completedTaskCount: 2,
+      stopReason: "batch_failed",
+      batchResults: [
+        {
+          batchId: "batch-complete",
+          selectedTaskIds: ["task-complete"],
+          completedTaskCount: 1,
+          batchStatus: "completed",
+        },
+        {
+          batchId: "batch-failed",
+          selectedTaskIds: [
+            "task-failed",
+            "task-blocked",
+            "task-skipped",
+            "task-ready",
+          ],
+          completedTaskCount: 1,
+          batchStatus: "failed",
+        },
+      ],
+      selectedTaskIds: [
+        "task-complete",
+        "task-failed",
+        "task-blocked",
+        "task-skipped",
+        "task-ready",
+      ],
+      results: [
+        {
+          taskId: "task-complete",
+          title: "Completed task",
+          branch: "archloop/task-complete",
+          outcome: "implemented",
+          hubStatus: "waiting_for_merge",
+          commitCount: 1,
+        },
+        {
+          taskId: "task-failed",
+          title: "Failed task",
+          branch: "archloop/task-failed",
+          outcome: "agent_failed",
+          hubStatus: "failed",
+          failureReason: "agent_failed",
+          failureStage: "implementation",
+          diagnosticSummary: "agent exited non-zero\nfull stack trace",
+          logPath: "/tmp/runs/run-1/logs/task-failed.log",
+          commitCount: 0,
+        },
+        {
+          taskId: "task-blocked",
+          title: "Blocked task",
+          branch: "archloop/task-blocked",
+          outcome: "active_execution",
+          hubStatus: "implementing",
+          commitCount: 0,
+        },
+        {
+          taskId: "task-skipped",
+          title: "Skipped task",
+          branch: "archloop/task-skipped",
+          outcome: "claim_skipped",
+          hubStatus: "ready_for_agent",
+          commitCount: 0,
+        },
+        {
+          taskId: "task-ready",
+          title: "Ready to merge task",
+          branch: "archloop/task-ready",
+          outcome: "implemented",
+          hubStatus: "waiting_for_merge",
+          commitCount: 1,
+        },
+      ],
+    });
+
+    expect(projectHubRunOutcome(result)).toMatchObject({
+      outcome: "completed_with_failures",
+      counts: {
+        completed: 1,
+        failed: 1,
+        blocked: 1,
+        skipped: 1,
+        readyToMerge: 1,
+      },
+      exitCode: 1,
+    });
+  });
+
+  it("keeps an implementation failure visible with its log and recovery command", () => {
+    const result = makeRunResult({
+      stopReason: "batch_failed",
+      batchResults: [
+        {
+          batchId: "batch-1",
+          selectedTaskIds: ["task-failed"],
+          completedTaskCount: 0,
+          batchStatus: "failed",
+        },
+      ],
+      selectedTaskIds: ["task-failed"],
+      results: [
+        {
+          taskId: "task-failed",
+          title: "Implement feature",
+          branch: "archloop/task-failed",
+          outcome: "agent_failed",
+          hubStatus: "failed",
+          failureReason: "agent_failed",
+          failureStage: "implementation",
+          diagnosticSummary: "agent exited non-zero\nfull stack trace",
+          logPath: "/tmp/runs/run-1/logs/task-failed.log",
+          commitCount: 0,
+        },
+      ],
+    });
+
+    const projection = projectHubRunOutcome(result);
+    expect(projection.taskDetails).toContainEqual({
+      taskId: "task-failed",
+      stage: "Implementation failed",
+      diagnostic: "agent exited non-zero",
+      logPath: "/tmp/runs/run-1/logs/task-failed.log",
+      recoveryCommand: "archloop tasks recover task-failed",
+    });
+    expect(formatPlainHubRunOutcome(result, projection)).toEqual([
+      'event=task_attention run_id="run-1" task_id="task-failed" stage="Implementation failed" diagnostic="agent exited non-zero" log="/tmp/runs/run-1/logs/task-failed.log" recovery="archloop tasks recover task-failed"',
+      'event=run_completed outcome="failed" summary="Run failed" completed=0 failed=1 blocked=0 skipped=0 ready_to_merge=0 completed_batches=0 run_id="run-1" logs="/tmp/runs/run-1"',
+    ]);
+  });
+
+  it("directs inconsistent task projection state to repair-state", () => {
+    const result = makeRunResult({
+      stopReason: "batch_failed",
+      batchResults: [
+        {
+          batchId: "batch-1",
+          selectedTaskIds: ["task-drifted"],
+          completedTaskCount: 0,
+          batchStatus: "failed",
+        },
+      ],
+      mergeResult: {
+        runId: "run-1",
+        batchId: "batch-1",
+        selectedTaskIds: [],
+        batchStatus: "skipped",
+        results: [],
+        selectionDiagnostics: [
+          {
+            taskId: "task-drifted",
+            title: "Drifted task",
+            hubStatus: "implementing",
+            decision: "blocked",
+            reason: "state_inconsistent",
+            branch: "archloop/task-drifted",
+            message: "Claim metadata does not match the merge-ready event.",
+            suggestedRecovery: "archloop tasks repair-state task-drifted",
+          },
+        ],
+      },
+    });
+
+    expect(projectHubRunOutcome(result)).toMatchObject({
+      outcome: "failed",
+      counts: { blocked: 1 },
+      taskDetails: [
+        {
+          taskId: "task-drifted",
+          stage: "Merge blocked",
+          diagnostic: "Claim metadata does not match the merge-ready event.",
+          recoveryCommand: "archloop tasks repair-state task-drifted",
+        },
+      ],
+      exitCode: 1,
+    });
+  });
+
+  it("lists dirty-worktree overlap paths with commit, stash, or discard guidance", () => {
+    const result = makeRunResult({
+      stopReason: "batch_failed",
+      batchResults: [
+        {
+          batchId: "batch-1",
+          selectedTaskIds: ["task-dirty"],
+          completedTaskCount: 0,
+          batchStatus: "failed",
+        },
+      ],
+      results: [
+        {
+          taskId: "task-dirty",
+          title: "Dirty overlap",
+          branch: "archloop/task-dirty",
+          outcome: "implemented",
+          hubStatus: "waiting_for_merge",
+          commitCount: 1,
+        },
+      ],
+      mergeResult: {
+        runId: "run-1",
+        batchId: "batch-1",
+        selectedTaskIds: [],
+        batchStatus: "skipped",
+        results: [],
+        selectionDiagnostics: [
+          {
+            taskId: "task-dirty",
+            title: "Dirty overlap",
+            hubStatus: "waiting_for_merge",
+            decision: "blocked",
+            reason: "dirty_worktree",
+            branch: "archloop/task-dirty",
+            blockingPaths: ["src/app.ts", "README.md"],
+            message:
+              "Dirty source files overlap this branch. commit, stash, or discard the listed files, then rerun the same flow.",
+          },
+        ],
+      },
+    });
+
+    expect(projectHubRunOutcome(result).taskDetails).toContainEqual({
+      taskId: "task-dirty",
+      stage: "Merge blocked",
+      diagnostic:
+        "Dirty source files overlap this branch. commit, stash, or discard the listed files, then rerun the same flow.",
+      blockingPaths: ["src/app.ts", "README.md"],
+    });
+    expect(projectHubRunOutcome(result).taskDetails).not.toContainEqual(
+      expect.objectContaining({
+        taskId: "task-dirty",
+        stage: "Waiting for merge",
+      }),
+    );
+  });
+
+  it("tells waiting merge work to rerun the same flow without a resume flag", () => {
+    const result = makeRunResult({
+      flowId: "with-review",
+      stopReason: "batch_failed",
+      batchResults: [
+        {
+          batchId: "batch-1",
+          selectedTaskIds: ["task-ready", "task-failed"],
+          completedTaskCount: 1,
+          batchStatus: "failed",
+        },
+      ],
+      selectedTaskIds: ["task-ready", "task-failed"],
+      results: [
+        {
+          taskId: "task-ready",
+          title: "Ready task",
+          branch: "archloop/task-ready",
+          outcome: "reviewed",
+          hubStatus: "waiting_for_merge",
+          commitCount: 1,
+        },
+        {
+          taskId: "task-failed",
+          title: "Failed task",
+          branch: "archloop/task-failed",
+          outcome: "agent_failed",
+          hubStatus: "failed",
+          failureReason: "agent_failed",
+          failureStage: "review",
+          commitCount: 0,
+        },
+      ],
+    });
+
+    const projection = projectHubRunOutcome(result);
+    expect(projection.taskDetails).toContainEqual({
+      taskId: "task-ready",
+      stage: "Waiting for merge",
+      diagnostic:
+        "Work is ready to merge. Rerun the same flow to resume this batch.",
+      recoveryCommand: "archloop run --flow with-review",
+    });
+    expect(JSON.stringify(projection)).not.toContain("--resume");
+  });
+
+  it("does not tell an already merged task to rerun the flow", () => {
+    const result = makeRunResult({
+      stopReason: "batch_failed",
+      results: [
+        {
+          taskId: "task-merged",
+          title: "Merged task",
+          branch: "archloop/task-merged",
+          outcome: "implemented",
+          hubStatus: "waiting_for_merge",
+          commitCount: 1,
+        },
+      ],
+      mergeResult: {
+        runId: "run-1",
+        batchId: "batch-1",
+        selectedTaskIds: ["task-merged"],
+        batchStatus: "partial_failed",
+        selectionDiagnostics: [],
+        results: [
+          {
+            taskId: "task-merged",
+            title: "Merged task",
+            branch: "archloop/task-merged",
+            outcome: "merged",
+            hubStatus: "done",
+          },
+        ],
+      },
+    });
+
+    expect(projectHubRunOutcome(result).taskDetails).not.toContainEqual(
+      expect.objectContaining({
+        taskId: "task-merged",
+        stage: "Waiting for merge",
+      }),
+    );
+  });
+
+  it("does not give same-flow rerun guidance to a selection-skipped task", () => {
+    const result = makeRunResult({
+      stopReason: "batch_failed",
+      results: [
+        {
+          taskId: "task-skipped",
+          title: "Skipped task",
+          branch: "archloop/task-skipped",
+          outcome: "implemented",
+          hubStatus: "waiting_for_merge",
+          commitCount: 1,
+        },
+      ],
+      mergeResult: {
+        runId: "run-1",
+        batchId: "batch-1",
+        selectedTaskIds: [],
+        batchStatus: "skipped",
+        results: [],
+        selectionDiagnostics: [
+          {
+            taskId: "task-skipped",
+            title: "Skipped task",
+            hubStatus: "waiting_for_merge",
+            decision: "skipped",
+            reason: "no_unmerged_work",
+          },
+        ],
+      },
+    });
+
+    expect(projectHubRunOutcome(result).taskDetails).not.toContainEqual(
+      expect.objectContaining({
+        taskId: "task-skipped",
+        stage: "Waiting for merge",
+      }),
+    );
+  });
+
+  it("does not recommend task recovery for a malformed lease before claim", () => {
+    const result = makeRunResult({
+      stopReason: "batch_failed",
+      results: [
+        {
+          taskId: "task-lease",
+          title: "Malformed lease",
+          branch: "archloop/task-lease",
+          outcome: "sandbox_failed",
+          hubStatus: "ready_for_agent",
+          diagnosticSummary: "Worktree lease metadata is invalid.",
+          commitCount: 0,
+        },
+      ],
+    });
+
+    expect(projectHubRunOutcome(result).taskDetails).toContainEqual({
+      taskId: "task-lease",
+      stage: "Execution blocked",
+      diagnostic: "Worktree lease metadata is invalid.",
+      logPath: "/tmp/runs/run-1",
+    });
+  });
+
+  it("maps user cancellation to the cancelled outcome and exit code 130", () => {
+    const projection = projectHubRunOutcome(makeRunResult(), {
+      cancelled: true,
+    });
+
+    expect(projection).toMatchObject({
+      outcome: "cancelled",
+      summary: "Run cancelled",
+      exitCode: 130,
+    });
+  });
+
+  it("keeps a verification failure visible instead of showing waiting merge", () => {
+    const result = makeRunResult({
+      stopReason: "batch_failed",
+      batchResults: [
+        {
+          batchId: "batch-1",
+          selectedTaskIds: ["task-verify", "task-later"],
+          completedTaskCount: 0,
+          batchStatus: "failed",
+        },
+      ],
+      selectedTaskIds: ["task-verify", "task-later"],
+      results: [
+        {
+          taskId: "task-verify",
+          title: "Verify task",
+          branch: "archloop/task-verify",
+          outcome: "implemented",
+          hubStatus: "waiting_for_merge",
+          commitCount: 1,
+        },
+        {
+          taskId: "task-later",
+          title: "Later task",
+          branch: "archloop/task-later",
+          outcome: "implemented",
+          hubStatus: "waiting_for_merge",
+          commitCount: 1,
+        },
+      ],
+      mergeResult: {
+        runId: "run-1",
+        batchId: "batch-1",
+        selectedTaskIds: ["task-verify", "task-later"],
+        batchStatus: "partial_failed",
+        selectionDiagnostics: [],
+        results: [
+          {
+            taskId: "task-verify",
+            title: "Verify task",
+            branch: "archloop/task-verify",
+            outcome: "verification_failed",
+            hubStatus: "failed",
+            failureReason: "verification_failure",
+            diagnosticSummary: "npm test failed",
+          },
+          {
+            taskId: "task-later",
+            title: "Later task",
+            branch: "archloop/task-later",
+            outcome: "skipped",
+            hubStatus: "waiting_for_merge",
+          },
+        ],
+      },
+    });
+
+    const projection = projectHubRunOutcome(result);
+    expect(projection.taskDetails).toContainEqual({
+      taskId: "task-verify",
+      stage: "Verification failed",
+      diagnostic: "npm test failed",
+      logPath: "/tmp/runs/run-1",
+      recoveryCommand: "archloop tasks recover task-verify",
+    });
+    expect(projection.taskDetails).not.toContainEqual(
+      expect.objectContaining({
+        taskId: "task-verify",
+        stage: "Waiting for merge",
+      }),
+    );
+    expect(projection).toMatchObject({
+      counts: { failed: 1, skipped: 0, readyToMerge: 1 },
+      taskDetails: expect.arrayContaining([
+        expect.objectContaining({
+          taskId: "task-later",
+          stage: "Waiting for merge",
+        }),
+      ]),
+    });
+  });
+
+  it.each([
+    {
+      name: "sandbox implementation",
+      outcome: "sandbox_failed" as const,
+      failureStage: "implementation" as const,
+      expectedStage: "Implementation failed",
+      expectedLog: "/tmp/runs/run-1/logs/task-failed.log",
+    },
+    {
+      name: "agent review",
+      outcome: "agent_failed" as const,
+      failureStage: "review" as const,
+      expectedStage: "Review failed",
+      expectedLog: "/tmp/runs/run-1/logs/task-failed-review.log",
+    },
+    {
+      name: "sandbox review",
+      outcome: "sandbox_failed" as const,
+      failureStage: "review" as const,
+      expectedStage: "Review failed",
+      expectedLog: "/tmp/runs/run-1/logs/task-failed-review.log",
+    },
+  ])("shows recover guidance for $name failures", (testCase) => {
+    const result = makeRunResult({
+      stopReason: "batch_failed",
+      batchResults: [
+        {
+          batchId: "batch-1",
+          selectedTaskIds: ["task-failed"],
+          completedTaskCount: 0,
+          batchStatus: "failed",
+        },
+      ],
+      results: [
+        {
+          taskId: "task-failed",
+          title: "Failed task",
+          branch: "archloop/task-failed",
+          outcome: testCase.outcome,
+          hubStatus: "failed",
+          failureReason: testCase.outcome,
+          failureStage: testCase.failureStage,
+          commitCount: 0,
+        },
+      ],
+    });
+
+    expect(projectHubRunOutcome(result).taskDetails).toContainEqual(
+      expect.objectContaining({
+        taskId: "task-failed",
+        stage: testCase.expectedStage,
+        logPath: testCase.expectedLog,
+        recoveryCommand: "archloop tasks recover task-failed",
+      }),
+    );
+  });
+
+  it.each([
+    {
+      name: "completed",
+      result: makeRunResult(),
+      options: {},
+      expected: "completed",
+    },
+    {
+      name: "completed with failures",
+      result: makeRunResult({
+        stopReason: "batch_failed",
+        batchResults: [
+          {
+            batchId: "batch-1",
+            selectedTaskIds: ["task-ready"],
+            completedTaskCount: 1,
+            batchStatus: "failed",
+          },
+        ],
+        results: [
+          {
+            taskId: "task-ready",
+            title: "Ready task",
+            branch: "archloop/task-ready",
+            outcome: "implemented",
+            hubStatus: "waiting_for_merge",
+            commitCount: 1,
+          },
+        ],
+      }),
+      options: {},
+      expected: "completed_with_failures",
+    },
+    {
+      name: "failed",
+      result: makeRunResult({ stopReason: "batch_failed" }),
+      options: {},
+      expected: "failed",
+    },
+    {
+      name: "cancelled",
+      result: makeRunResult(),
+      options: { cancelled: true },
+      expected: "cancelled",
+    },
+  ])("formats the $name run outcome", (testCase) => {
+    const projection = projectHubRunOutcome(testCase.result, testCase.options);
+    const finalLine = formatPlainHubRunOutcome(testCase.result, projection).at(
+      -1,
+    );
+
+    expect(finalLine).toContain(`outcome=${JSON.stringify(testCase.expected)}`);
+  });
+
+  it("converges on the newest task stage when events arrive out of order", () => {
+    const waitingForMerge: HubTaskEvent & {
+      readonly eventId: string;
+      readonly sequence: number;
+    } = {
+      type: "task_status_advanced",
+      runId: "run-1",
+      batchId: "batch-1",
+      taskId: "task-1",
+      branch: "archloop/task-1",
+      createdAt: "2026-07-15T10:00:00.000Z",
+      status: "waiting_for_merge",
+      eventId: "run-1:9",
+      sequence: 9,
+    };
+    const completed: typeof waitingForMerge = {
+      ...waitingForMerge,
+      status: "done",
+      eventId: "run-1:10",
+      sequence: 10,
+    };
+    const initialState = createHubRunDisplayState({
+      hubProjectName: "Demo",
+      flowId: "with-review",
+    });
+
+    const chronological = reduceHubRunDisplayState(
+      reduceHubRunDisplayState(initialState, waitingForMerge),
+      completed,
+    );
+    const outOfOrder = reduceHubRunDisplayState(
+      reduceHubRunDisplayState(initialState, completed),
+      waitingForMerge,
+    );
+
+    expect(outOfOrder).toEqual(chronological);
+    expect(outOfOrder.tasks["task-1"]).toMatchObject({
+      status: "done",
+      stage: "Completed",
+    });
+    expect(outOfOrder.seenEventIds).toEqual(
+      new Set([waitingForMerge.eventId, completed.eventId]),
+    );
+    expect(formatPlainHubRunEvent(waitingForMerge, outOfOrder)).toContain(
+      'stage="Waiting for merge"',
+    );
+    expect(reduceHubRunDisplayState(outOfOrder, completed)).toBe(outOfOrder);
+  });
+
+  it("formats a completed batch in stable field order with escaped values", () => {
+    const event: HubBatchMergeCompletedEvent & {
+      readonly eventId: string;
+      readonly sequence: number;
+    } = {
+      type: "batch_merge_completed",
+      runId: 'run-"quoted"\nline',
+      batchId: "batch\r1",
+      createdAt: "2026-07-15T10:00:00.000Z",
+      taskIds: ["task 1", "task\n2"],
+      batchStatus: "done",
+      eventId: "run-quoted:4",
+      sequence: 4,
+    };
+    const initialState = createHubRunDisplayState({
+      hubProjectName: "Escaped project",
+      flowId: "with-review",
+    });
+    const state = reduceHubRunDisplayState(initialState, event);
+
+    const line = formatPlainHubRunEvent(event, state);
+
+    expect(line).toBe(
+      'event=batch_merge_completed run_id="run-\\"quoted\\"\\nline" batch_id="batch\\r1" outcome="completed" completed_tasks=2 stage="Completed"',
+    );
+    expect(line.split("\n")).toHaveLength(1);
+    expect(line).not.toMatch(/\u001b\[[0-?]*[ -/]*[@-~]/);
+  });
+});

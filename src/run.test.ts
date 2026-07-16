@@ -725,6 +725,26 @@ describe("run() error logging to file", () => {
     consoleSpy.mockRestore();
   });
 
+  it("can keep file-logging startup decoration out of lifecycle output", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "archloop-run-silent-startup-"));
+    const logPath = join(dir, "test.log");
+    const promptFile = join(dir, "prompt.md");
+    writeFileSync(promptFile, "test prompt");
+
+    await expect(
+      run({
+        agent: claudeCode("claude-opus-4-6"),
+        sandbox: testSandbox,
+        promptFile,
+        branchStrategy: { type: "head" },
+        promptArgs: { SOURCE_BRANCH: "override" },
+        logging: { type: "file", path: logPath, showStartup: false },
+      }),
+    ).rejects.toThrow();
+
+    expect(consoleSpy).not.toHaveBeenCalled();
+  });
+
   it("writes SandboxError to log file when using file logging", async () => {
     const dir = mkdtempSync(join(tmpdir(), "archloop-run-error-"));
     const logPath = join(dir, "test.log");

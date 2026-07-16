@@ -121,4 +121,35 @@ describe("hubEnv", () => {
       "Run `archloop env init` for guided credential setup.",
     );
   });
+
+  it("treats placeholder undefined and null strings as empty values", async () => {
+    const { env } = await makeStore();
+    writeHubEnvFile(
+      {
+        OPENAI_KEY: "undefined",
+        ANTHROPIC_API_KEY: " null ",
+        GH_TOKEN: "real-token",
+      },
+      { env },
+    );
+
+    expect(readHubEnvFile({ env })).toMatchObject({
+      OPENAI_KEY: "",
+      ANTHROPIC_API_KEY: "",
+      GH_TOKEN: "real-token",
+    });
+    expect(resolveHubEnv({ env })).toEqual({ GH_TOKEN: "real-token" });
+
+    const merged = mergeHubAndProjectEnv({
+      hubFileEnv: { OPENAI_KEY: "undefined" },
+      projectFileEnv: { OPENAI_KEY: "null" },
+      runtimeEnv: { OPENAI_KEY: "undefined" },
+    });
+    expect(merged).toEqual({});
+
+    const lines = formatHubEnvShowLines({ env }).join("\n");
+    expect(lines).toMatch(/OPENAI_KEY: \(empty\)/);
+    expect(lines).toMatch(/ANTHROPIC_API_KEY: \(empty\)/);
+    expect(lines).not.toContain("undefined");
+  });
 });

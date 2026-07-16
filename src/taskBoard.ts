@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import type { PrdWarningSeverity } from "./hubPrdDecomposition.js";
 import {
   formatPrdWarningDetailsRow,
@@ -16,6 +17,13 @@ import {
   resolveHubTaskClaimState,
   type HubTaskClaimMetadata,
 } from "./hubExecution.js";
+import { inspectHubManagedBranchClaimContext } from "./hubManagedBranchOwnership.js";
+import { evaluateHubManagedBranchCleanup } from "./hubManagedBranchCleanup.js";
+import type {
+  HubManagedBranchCleanupCandidate,
+  HubManagedBranchCleanupEvaluation,
+  HubManagedBranchCleanupSkipDetail,
+} from "./hubManagedBranchCleanup.js";
 import {
   appendBdMetadataArg,
   appendBdSetLabelsArgs,
@@ -1190,6 +1198,66 @@ export interface DeleteHubTasksInput {
   readonly env?: NodeJS.ProcessEnv;
 }
 
+export interface HubManagedBranchCleanupExecutionResult {
+  readonly evaluation: HubManagedBranchCleanupEvaluation;
+  readonly deletedManagedBranches: readonly string[];
+  readonly deletedHistoricalBranches: readonly string[];
+}
+
+export interface HubManagedBranchCleanupExecutionInput {
+  readonly cwd: string;
+  readonly includeUnowned?: boolean;
+  readonly env?: NodeJS.ProcessEnv;
+}
+
+export interface FormatHubManagedBranchCleanupLinesOptions {
+  readonly dryRun?: boolean;
+  readonly includeUnowned?: boolean;
+  readonly deletedManagedBranches?: readonly string[];
+  readonly deletedHistoricalBranches?: readonly string[];
+}
+
+export interface FormatHubManagedBranchCleanupDiagnosticsLinesOptions {
+  readonly includeUnowned?: boolean;
+}
+
+export interface HubManagedBranchCleanupPlan {
+  readonly managedBranches: readonly string[];
+  readonly historicalBranches: readonly string[];
+  readonly totalBranches: number;
+}
+
+const GIT_EXEC_MAX_BUFFER = 10 * 1024 * 1024;
+
+const runGitText = (
+  cwd: string,
+  args: readonly string[],
+  env: NodeJS.ProcessEnv = process.env,
+): string =>
+  execFileSync("git", [...args], {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    maxBuffer: GIT_EXEC_MAX_BUFFER,
+    env,
+  }).trim();
+
+const deleteGitBranch = (
+  cwd: string,
+  branch: string,
+  env: NodeJS.ProcessEnv = process.env,
+): void => {
+  try {
+    runGitText(cwd, ["branch", "-d", branch], env);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : String(error ?? "unknown");
+    throw new TaskBoardError({
+      message: `Failed to delete git branch ${branch}: ${message}`,
+    });
+  }
+};
+
 const hubBeadsTaskExists = (
   cwd: string,
   taskId: string,
@@ -1257,6 +1325,318 @@ export const deleteHubTasks = (input: DeleteHubTasksInput): string => {
   return output;
 };
 
+const formatCleanupCandidateLine = (
+  branch: HubManagedBranchCleanupCandidate,
+  suffix: string,
+): string =>
+  suffix.length > 0
+    ? `  - ${branch.branch} (${suffix})`
+    : `  - ${branch.branch}`;
+
+const formatCleanupReasonSuffix = (
+  reasons: readonly HubManagedBranchCleanupSkipDetail[],
+): string =>
+  reasons.length === 0
+    ? ""
+    : reasons.map((detail) => detail.message).join("; ");
+
+const canDeleteHistoricalCandidate = (
+  candidate: HubManagedBranchCleanupCandidate,
+): boolean =>
+  candidate.skipReasons.every(
+    (detail) => detail.reason === "missing_ownership",
+  );
+
+const isSafeHistoricalCleanupCandidate = (
+  candidate: HubManagedBranchCleanupCandidate,
+): boolean => !candidate.ownership && canDeleteHistoricalCandidate(candidate);
+
+const selectSafeHistoricalCleanupCandidates = (
+  evaluation: HubManagedBranchCleanupEvaluation,
+): readonly HubManagedBranchCleanupCandidate[] =>
+  evaluation.unownedCandidates.filter(canDeleteHistoricalCandidate);
+
+const formatHistoricalCleanupCandidateNote = (
+  candidate: HubManagedBranchCleanupCandidate,
+  includeUnowned: boolean,
+): string => {
+  const historicalSafe = canDeleteHistoricalCandidate(candidate);
+  const reasonSuffix = formatCleanupReasonSuffix(candidate.skipReasons);
+
+  if (includeUnowned && historicalSafe) {
+    return "safe historical branch included by --include-unowned";
+  }
+
+  if (historicalSafe) {
+    return "Use --include-unowned to delete safe historical branches";
+  }
+
+  if (includeUnowned) {
+    return reasonSuffix;
+  }
+
+  const prefix = "Use --include-unowned to delete safe historical branches";
+  return reasonSuffix.length > 0 ? `${prefix}; ${reasonSuffix}` : prefix;
+};
+
+const formatHistoricalCleanupNextAction = (
+  options?: FormatHubManagedBranchCleanupDiagnosticsLinesOptions,
+): string =>
+  options?.includeUnowned === true
+    ? "Run `archloop tasks cleanup --yes --include-unowned` to delete this safe historical branch."
+    : "Use `archloop tasks cleanup --yes --include-unowned` to include this safe historical branch.";
+
+const hasCleanupSkipReason = (
+  candidate: HubManagedBranchCleanupCandidate,
+  reasons: readonly HubManagedBranchCleanupSkipDetail["reason"][],
+): boolean =>
+  candidate.skipReasons.some((detail) => reasons.includes(detail.reason));
+
+const formatCleanupNextAction = (
+  candidate: HubManagedBranchCleanupCandidate,
+  options?: FormatHubManagedBranchCleanupDiagnosticsLinesOptions,
+): string => {
+  if (candidate.skipReasons.length === 0) {
+    if (candidate.ownership) {
+      return "Run `archloop tasks cleanup --yes` to delete this safe managed branch.";
+    }
+
+    return formatHistoricalCleanupNextAction(options);
+  }
+
+  if (isSafeHistoricalCleanupCandidate(candidate)) {
+    return formatHistoricalCleanupNextAction(options);
+  }
+
+  if (hasCleanupSkipReason(candidate, ["branch_existed_before_claim"])) {
+    return "Preserve this branch; it existed before Hub claimed the task.";
+  }
+
+  if (hasCleanupSkipReason(candidate, ["missing_branch"])) {
+    return "No cleanup action is needed because the branch is already gone.";
+  }
+
+  if (
+    hasCleanupSkipReason(candidate, [
+      "active_worktree_lease",
+      "checked_out_worktree",
+      "dirty_preserved_worktree",
+    ])
+  ) {
+    return "Resolve the listed worktree blockers, then rerun `archloop tasks cleanup --yes`.";
+  }
+
+  if (hasCleanupSkipReason(candidate, ["unmerged_work"])) {
+    return candidate.ownership
+      ? `Finish or recover task ${candidate.ownership.taskId}, then rerun \`archloop tasks cleanup --yes\`.`
+      : "Resolve the unmerged branch work, then rerun `archloop tasks cleanup --yes`.";
+  }
+
+  return "Resolve the listed reasons, then rerun `archloop tasks cleanup --yes`.";
+};
+
+const formatCleanupDiagnosticCandidateLine = (
+  candidate: HubManagedBranchCleanupCandidate,
+  suffix: string,
+): string =>
+  suffix.length > 0
+    ? `  - ${candidate.branch} (${suffix})`
+    : `  - ${candidate.branch}`;
+
+const appendCleanupDiagnosticsSection = (
+  lines: string[],
+  title: string,
+  candidates: readonly HubManagedBranchCleanupCandidate[],
+  options?: FormatHubManagedBranchCleanupDiagnosticsLinesOptions,
+): void => {
+  lines.push("");
+  lines.push(title);
+  if (candidates.length === 0) {
+    lines.push("  - none");
+    return;
+  }
+
+  for (const candidate of candidates) {
+    const suffix = candidate.ownership
+      ? `task ${candidate.ownership.taskId}`
+      : "historical";
+    const reasons = formatCleanupReasonSuffix(candidate.skipReasons);
+    lines.push(formatCleanupDiagnosticCandidateLine(candidate, suffix));
+    if (reasons.length > 0) {
+      lines.push(`    Reasons: ${reasons}`);
+    }
+    lines.push(
+      `    Next action: ${formatCleanupNextAction(candidate, options)}`,
+    );
+  }
+};
+
+export const planHubManagedBranchCleanup = (
+  evaluation: HubManagedBranchCleanupEvaluation,
+  options?: Pick<FormatHubManagedBranchCleanupLinesOptions, "includeUnowned">,
+): HubManagedBranchCleanupPlan => {
+  const managedBranches = evaluation.managedSafeCandidates.map(
+    (candidate) => candidate.branch,
+  );
+  const historicalBranches =
+    options?.includeUnowned === true
+      ? selectSafeHistoricalCleanupCandidates(evaluation).map(
+          (candidate) => candidate.branch,
+        )
+      : [];
+
+  return {
+    managedBranches,
+    historicalBranches,
+    totalBranches: managedBranches.length + historicalBranches.length,
+  };
+};
+
+export const formatHubManagedBranchCleanupLines = (
+  evaluation: HubManagedBranchCleanupEvaluation,
+  options?: FormatHubManagedBranchCleanupLinesOptions,
+): readonly string[] => {
+  const lines: string[] = ["Hub managed branch cleanup"];
+  lines.push(`Target branch: ${evaluation.targetBranch}`);
+  lines.push(`Target head: ${evaluation.targetHead}`);
+
+  if (options?.dryRun) {
+    lines.push("Preview: no git refs will be deleted.");
+  }
+
+  if (
+    options?.deletedManagedBranches &&
+    options.deletedManagedBranches.length
+  ) {
+    lines.push(
+      `Deleted managed branches: ${options.deletedManagedBranches.join(", ")}`,
+    );
+  }
+  if (
+    options?.deletedHistoricalBranches &&
+    options.deletedHistoricalBranches.length
+  ) {
+    lines.push(
+      `Deleted historical branches: ${options.deletedHistoricalBranches.join(", ")}`,
+    );
+  }
+
+  lines.push("");
+  lines.push(
+    `Safe managed branches (${evaluation.managedSafeCandidates.length})`,
+  );
+  if (evaluation.managedSafeCandidates.length === 0) {
+    lines.push("  - none");
+  } else {
+    for (const candidate of evaluation.managedSafeCandidates) {
+      const taskSuffix = candidate.ownership
+        ? `task ${candidate.ownership.taskId}`
+        : "managed";
+      lines.push(formatCleanupCandidateLine(candidate, taskSuffix));
+    }
+  }
+
+  lines.push("");
+  lines.push(
+    `Blocked managed branches (${evaluation.managedBlockedBranches.length})`,
+  );
+  if (evaluation.managedBlockedBranches.length === 0) {
+    lines.push("  - none");
+  } else {
+    for (const candidate of evaluation.managedBlockedBranches) {
+      const taskSuffix = candidate.ownership
+        ? `task ${candidate.ownership.taskId}`
+        : "managed";
+      const reasonSuffix = formatCleanupReasonSuffix(candidate.skipReasons);
+      lines.push(
+        formatCleanupCandidateLine(
+          candidate,
+          `${taskSuffix}${reasonSuffix.length > 0 ? ` - ${reasonSuffix}` : ""}`,
+        ),
+      );
+    }
+  }
+
+  lines.push("");
+  lines.push(
+    `Unowned historical candidates (${evaluation.unownedCandidates.length})`,
+  );
+  if (evaluation.unownedCandidates.length === 0) {
+    lines.push("  - none");
+  } else {
+    for (const candidate of evaluation.unownedCandidates) {
+      const note = formatHistoricalCleanupCandidateNote(
+        candidate,
+        options?.includeUnowned === true,
+      );
+      lines.push(formatCleanupCandidateLine(candidate, note));
+    }
+  }
+
+  return lines;
+};
+
+export const formatHubManagedBranchCleanupDiagnosticsLines = (
+  evaluation: HubManagedBranchCleanupEvaluation,
+  options?: FormatHubManagedBranchCleanupDiagnosticsLinesOptions,
+): readonly string[] => {
+  const lines: string[] = ["Managed branch cleanup diagnostics"];
+  lines.push(`Target branch: ${evaluation.targetBranch}`);
+  lines.push(`Target head: ${evaluation.targetHead}`);
+
+  appendCleanupDiagnosticsSection(
+    lines,
+    `Safe managed candidates (${evaluation.managedSafeCandidates.length})`,
+    evaluation.managedSafeCandidates,
+    options,
+  );
+  appendCleanupDiagnosticsSection(
+    lines,
+    `Blocked managed candidates (${evaluation.managedBlockedBranches.length})`,
+    evaluation.managedBlockedBranches,
+    options,
+  );
+  appendCleanupDiagnosticsSection(
+    lines,
+    `Historical unowned candidates (${evaluation.unownedCandidates.length})`,
+    evaluation.unownedCandidates,
+    options,
+  );
+
+  return lines;
+};
+
+export const cleanupHubManagedBranches = async (
+  input: HubManagedBranchCleanupExecutionInput,
+): Promise<HubManagedBranchCleanupExecutionResult> => {
+  const evaluation = await evaluateHubManagedBranchCleanup({
+    cwd: input.cwd,
+    env: input.env,
+  });
+  const plan = planHubManagedBranchCleanup(evaluation, {
+    includeUnowned: input.includeUnowned,
+  });
+
+  const deletedManagedBranches: string[] = [];
+  const deletedHistoricalBranches: string[] = [];
+
+  for (const branch of plan.managedBranches) {
+    deleteGitBranch(input.cwd, branch, input.env);
+    deletedManagedBranches.push(branch);
+  }
+
+  for (const branch of plan.historicalBranches) {
+    deleteGitBranch(input.cwd, branch, input.env);
+    deletedHistoricalBranches.push(branch);
+  }
+
+  return {
+    evaluation,
+    deletedManagedBranches,
+    deletedHistoricalBranches,
+  };
+};
+
 export const claimHubTask = (input: ClaimHubTaskInput): ClaimHubTaskResult => {
   const startedAt = input.startedAt ?? new Date();
   const claimedAt = startedAt.toISOString();
@@ -1298,11 +1678,18 @@ export const claimHubTask = (input: ClaimHubTaskInput): ClaimHubTaskResult => {
     };
   }
 
+  const claimContext = inspectHubManagedBranchClaimContext(
+    input.cwd,
+    input.branch,
+  );
   const claim = createHubTaskClaimMetadata({
     runId: context.runId,
     batchId: context.batchId,
+    taskId: input.taskId,
     branch: input.branch,
     claimedAt,
+    baseHead: claimContext.baseHead,
+    branchExistedBeforeClaim: claimContext.branchExistedBeforeClaim,
   });
   const updatedTask = updateHubTaskStatus({
     cwd: input.cwd,
