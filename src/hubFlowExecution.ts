@@ -624,6 +624,15 @@ const runHubAgent = async (input: {
   const { run } = await import("./run.js");
   const { noSandbox } = await import("./sandboxes/no-sandbox.js");
 
+  const envMaxIterations = Number(
+    input.env?.ARCHLOOP_HUB_MAX_ITERATIONS ??
+      process.env.ARCHLOOP_HUB_MAX_ITERATIONS,
+  );
+  const maxIterations =
+    Number.isFinite(envMaxIterations) && envMaxIterations > 0
+      ? Math.floor(envMaxIterations)
+      : 20;
+
   return run({
     agent: input.agent,
     sandbox: noSandbox(),
@@ -635,6 +644,7 @@ const runHubAgent = async (input: {
     ),
     branchStrategy: { type: "branch", branch: input.branch },
     name: input.name,
+    maxIterations,
     worktreeLeaseOwner: {
       kind: "hub",
       taskId: input.taskId,
