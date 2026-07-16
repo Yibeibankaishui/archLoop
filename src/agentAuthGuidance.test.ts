@@ -47,7 +47,7 @@ describe("detectAgentAuthFailure", () => {
     expect(result).toEqual({
       envKey: "OPENAI_KEY",
       label: "Codex",
-      authEnvKey: "CODEX_HOME",
+      authEnvKeys: ["CODEX_HOME"],
     });
   });
 
@@ -59,6 +59,19 @@ describe("detectAgentAuthFailure", () => {
     expect(result).toEqual({
       envKey: "ANTHROPIC_API_KEY",
       label: "Claude Code",
+      authEnvKeys: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"],
+    });
+  });
+
+  it("detects claude-code auth failure from CLAUDE_CODE_OAUTH_TOKEN mention", () => {
+    const result = detectAgentAuthFailure(
+      "claude-code",
+      "CLAUDE_CODE_OAUTH_TOKEN expired",
+    );
+    expect(result).toEqual({
+      envKey: "ANTHROPIC_API_KEY",
+      label: "Claude Code",
+      authEnvKeys: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"],
     });
   });
 
@@ -221,5 +234,68 @@ describe("assertAgentCredentialsConfigured", () => {
       if (origCodexHome === undefined) delete process.env.CODEX_HOME;
       else process.env.CODEX_HOME = origCodexHome;
     }
+  });
+
+  it("passes for claude-code when CLAUDE_CODE_OAUTH_TOKEN is set without ANTHROPIC_API_KEY", async () => {
+    const dir = await makeDir();
+    await assertAgentCredentialsConfigured({
+      providerName: "claude-code",
+      cwd: dir,
+      env: { CLAUDE_CODE_OAUTH_TOKEN: "oauth-token" },
+    });
+  });
+
+  it("passes for claude-code when ANTHROPIC_AUTH_TOKEN (gateway) is set without ANTHROPIC_API_KEY", async () => {
+    const dir = await makeDir();
+    await assertAgentCredentialsConfigured({
+      providerName: "claude-code",
+      cwd: dir,
+      env: {
+        ANTHROPIC_AUTH_TOKEN: "gateway-token",
+        ANTHROPIC_BASE_URL: "https://gateway.example/v1",
+      },
+    });
+  });
+
+  it("passes for claude-code via project .archloop/.env CLAUDE_CODE_OAUTH_TOKEN", async () => {
+    const dir = await makeDir();
+    await mkdir(join(dir, ".archloop"));
+    await writeFile(
+      join(dir, ".archloop", ".env"),
+      "CLAUDE_CODE_OAUTH_TOKEN=project-token\n",
+    );
+
+    await assertAgentCredentialsConfigured({
+      providerName: "claude-code",
+      cwd: dir,
+      env: {},
+    });
+  });
+
+  it("skips preflight for claude-code regardless of env (CLI handles its own auth)", async () => {
+    const dir = await makeDir();
+    await assertAgentCredentialsConfigured({
+      providerName: "claude-code",
+      cwd: dir,
+      env: {},
+    });
+  });
+
+  it("skips preflight for pi regardless of env", async () => {
+    const dir = await makeDir();
+    await assertAgentCredentialsConfigured({
+      providerName: "pi",
+      cwd: dir,
+      env: {},
+    });
+  });
+
+  it("missing claude-code credentials message mentions CLAUDE_CODE_OAUTH_TOKEN fallback", () => {
+    const message = formatMissingAgentCredentialsMessage({
+      providerName: "claude-code",
+      envKey: "ANTHROPIC_API_KEY",
+      label: "Claude Code",
+    });
+    expect(message).toContain("CLAUDE_CODE_OAUTH_TOKEN");
   });
 });

@@ -6,16 +6,28 @@ import { resolveEnv } from "./EnvResolver.js";
 type ProviderEnvConfig = {
   readonly envKey: string;
   readonly label: string;
-  readonly authEnvKey?: string;
+  readonly authEnvKeys?: readonly string[];
 };
 
 const PROVIDER_ENV_CONFIG: Readonly<
   Record<string, ProviderEnvConfig | undefined>
 > = {
   cursor: { envKey: "CURSOR_API_KEY", label: "Cursor" },
-  codex: { envKey: "OPENAI_KEY", label: "Codex", authEnvKey: "CODEX_HOME" },
-  "claude-code": { envKey: "ANTHROPIC_API_KEY", label: "Claude Code" },
-  pi: { envKey: "ANTHROPIC_API_KEY", label: "Pi" },
+  codex: {
+    envKey: "OPENAI_KEY",
+    label: "Codex",
+    authEnvKeys: ["CODEX_HOME"],
+  },
+  "claude-code": {
+    envKey: "ANTHROPIC_API_KEY",
+    label: "Claude Code",
+    authEnvKeys: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"],
+  },
+  pi: {
+    envKey: "ANTHROPIC_API_KEY",
+    label: "Pi",
+    authEnvKeys: ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"],
+  },
   opencode: { envKey: "OPENCODE_API_KEY", label: "OpenCode" },
 };
 
@@ -30,8 +42,18 @@ const AUTH_FAILURE_PATTERNS: Readonly<
 > = {
   cursor: [/authentication required/i, /agent login/i, /CURSOR_API_KEY/i],
   codex: [/authentication/i, /invalid api key/i, /not logged in/i, /OPENAI/i],
-  "claude-code": [/authentication/i, /ANTHROPIC_API_KEY/i],
-  pi: [/authentication/i, /ANTHROPIC_API_KEY/i],
+  "claude-code": [
+    /authentication/i,
+    /ANTHROPIC_API_KEY/i,
+    /ANTHROPIC_AUTH_TOKEN/i,
+    /CLAUDE_CODE_OAUTH_TOKEN/i,
+  ],
+  pi: [
+    /authentication/i,
+    /ANTHROPIC_API_KEY/i,
+    /ANTHROPIC_AUTH_TOKEN/i,
+    /CLAUDE_CODE_OAUTH_TOKEN/i,
+  ],
   opencode: [/authentication/i, /OPENCODE_API_KEY/i],
 };
 
@@ -81,6 +103,14 @@ const buildarchLoopEnvGuidanceLines = (input: {
     ];
   }
 
+  if (input.providerName === "claude-code" || input.providerName === "pi") {
+    return [
+      ...lines,
+      "- Or set `CLAUDE_CODE_OAUTH_TOKEN` (long-lived OAuth token from `claude setup-token`) instead of `ANTHROPIC_API_KEY`",
+      "- Or set `ANTHROPIC_AUTH_TOKEN` (+ `ANTHROPIC_BASE_URL`) when routing through a Claude-compatible gateway",
+    ];
+  }
+
   return lines;
 };
 
@@ -125,6 +155,15 @@ export const assertAgentCredentialsConfigured = async (input: {
   const config = PROVIDER_ENV_CONFIG[input.providerName];
   if (!config) return;
 
+  // claude-code and pi can authenticate via the claude CLI's own credential
+  // store (OS keychain, internal session state, etc.) without any env var
+  // archloop can observe. Skip the preflight and let the CLI handle auth;
+  // if it fails, enrichAgentFailureDetail still maps the stderr to actionable
+  // guidance.
+  if (input.providerName === "claude-code" || input.providerName === "pi") {
+    return;
+  }
+
   const runtimeEnv = input.env ?? process.env;
   const resolvedEnv = await Effect.runPromise(
     resolveEnv(input.cwd, { env: runtimeEnv }).pipe(
@@ -132,12 +171,10 @@ export const assertAgentCredentialsConfigured = async (input: {
     ),
   );
 
-  const value =
-    resolvedEnv[config.envKey]?.trim() ||
-    (config.authEnvKey ? resolvedEnv[config.authEnvKey]?.trim() : "") ||
-    runtimeEnv[config.envKey]?.trim() ||
-    (config.authEnvKey ? runtimeEnv[config.authEnvKey]?.trim() : "") ||
-    "";
+  const candidateKeys = [config.envKey, ...(config.authEnvKeys ?? [])];
+  const lookup = (key: string): string =>
+    resolvedEnv[key]?.trim() || runtimeEnv[key]?.trim() || "";
+  const value = candidateKeys.map(lookup).find((v) => v.length > 0) ?? "";
 
   if (value.length === 0) {
     throw new Error(
