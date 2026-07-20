@@ -890,21 +890,3 @@ export const renderSyncResultText = (
   options?: RenderSectionOptions,
 ): readonly string[] =>
   renderSection("", syncResultModelToBlocks(model), options);
-
-/** @deprecated Prefer buildSyncResultModel + Display.section; kept until Phase 4 cleanup. */
-export const formatHubTaskSyncSummaryLines = (
-  result: SyncHubTasksResult,
-  options?: {
-    readonly projectName?: string;
-    readonly remote?: string;
-    readonly durationSeconds?: number;
-  },
-): readonly string[] =>
-  renderSyncResultText(
-    buildSyncResultModel({
-      result,
-      projectName: options?.projectName ?? "project",
-      remote: options?.remote,
-      durationSeconds: options?.durationSeconds,
-    }),
-  );

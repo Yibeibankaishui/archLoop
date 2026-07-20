@@ -255,7 +255,17 @@ archLoop 使用常规容器将宿主 worktree 挂载进沙箱，agent 在容器�
 
 ## Hub flow 脏工作区诊断
 
-Hub flow 默认使用 `--output auto`。交互式 TTY 在选完 flow 后会先渲染 run plan section，并在约 3 秒后自动开始（`Ctrl+C` 取消，`e` 重选 flow）；`--yes` 跳过倒计时，`--dry-run` 只打印计划不启动。能力足够的交互式 TTY 在运行中会显示 append-only 的 Hub run card：每次状态转换追加一个 `section` 快照，底部单行 spinner 每秒刷新 phase-elapsed（ADR-0032）。任务看板 flow 显示当前 batch 与已完成 batch 折叠行；`prd-decomposition` 与 `triage` 仍使用各自的 proposal live renderer。run card 不进入 alternate screen，也不在 spinner 行之外使用 cursor-up，不显示原始 agent prose、tool 参数、百分比或 ETA；成功、失败、取消与异常清理都会恢复光标。重定向、CI、`TERM=dumb`、不支持 cursor control 或终端尺寸不安全时自动回退 plain；`NO_COLOR` 或 `--no-color` 只关闭颜色。
+Hub flow 默认使用 `--output auto`。交互式 TTY 在选完 flow 后会先渲染 run plan section，并在约 3 秒后自动开始（`Ctrl+C` 取消，`e` 重选 flow）；`--yes` 跳过倒计时，`--dry-run` 只打印计划不启动：
+
+```text
+  archLoop · run
+  flow      with-review
+  project   demo  ← /path/to/repo
+  ready     1 task
+  tip   starting in 3s · Ctrl+C to cancel · e to edit flow
+```
+
+能力足够的交互式 TTY 在运行中会显示 append-only 的 Hub run card：每次状态转换追加一个 `section` 快照，底部单行 spinner 每秒刷新 phase-elapsed（ADR-0032）。任务看板 flow 显示当前 batch 与已完成 batch 折叠行；`prd-decomposition` 与 `triage` 仍使用各自的 proposal live renderer。run card 不进入 alternate screen，也不在 spinner 行之外使用 cursor-up，不显示原始 agent prose、tool 参数、百分比或 ETA；成功、失败、取消与异常清理都会恢复光标。重定向、CI、`TERM=dumb`、不支持 cursor control 或终端尺寸不安全时自动回退 plain；`NO_COLOR`、`--no-color` 或全局 `--plain` 只关闭颜色/粗体/暗色，保留符号与缩进；`FORCE_COLOR=1` 可在非 TTY 强制着色。
 
 所有 Hub flow 都可显式使用 `--output plain`。该模式让每条 lifecycle 记录各占一个物理行，字段顺序稳定、值会转义，不使用 ANSI 光标重写。任务看板仍输出五类任务计数、失败诊断和恢复动作；proposal flow 只输出 canonical phase/status，以及 applied、skipped、dependencies 计数，终态区分 `applied`、`no_change`、`cancelled`、`validation_failed`、`mutation_failed`、`failed`。显式 plain/JSON 为非交互模式，proposal 写入需要 `--yes`；auto TTY 保留 refinement、status、approval 和 guarded apply prompts。agent prose 与 tool 参数只保存在 Hub run directory。
 
@@ -266,6 +276,24 @@ Hub flow 默认使用 `--output auto`。交互式 TTY 在选完 flow 后会先�
 非重叠脏文件不会阻塞 merge：archLoop 会在干净的 integration worktree/branch 中验证结果，并只在不会覆盖宿主脏文件时落回当前分支。若存在重叠，CLI 会列出具体 blocking files；先 commit、stash 或 discard 这些文件，再重新运行同一个 flow，archLoop 会继续恢复 `waiting_for_merge` 任务。
 
 任务命令默认针对已选中的 Hub project；如需覆盖，可以显式传 `--project <name>`。`.beads/issues.jsonl`、`.beads/interactions.jsonl` 等 Beads runtime/export 文件会单独报告，通常不要提交；通过 `archloop tasks pull` / `push` / `sync` 交换远端任务状态。
+
+`archloop tasks list` / `show` / `pull` 使用 Variant C `section` 排版（无 `clack.note` 左边框、无 1-based 序号；选择器只接受 Beads id 或精确标题）：
+
+```text
+  archLoop · demo                                                                   3 tasks
+  ● 2 todo   ◐ 1 in_progress   ✓ 0 done
+  ●  todo · 2
+     demo-mv2  Fix login redirect
+     demo-nx1  Improve empty state copy
+  tip   archloop tasks show <id>   ·   archloop tasks pull
+```
+
+```text
+  archLoop · sync · demo                                                    owner/repo
+  ↓ pulled  4 created  0 updated · 0 conflicts · 0 dup-candidates
+  ↑ pushed  nothing to push  0 synced · 0 closed · 0 pending
+  next  archloop tasks list
+```
 
 ---
 

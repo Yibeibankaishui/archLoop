@@ -140,20 +140,43 @@ archloop tasks init
 archloop tasks list
 ```
 
-任务选择器支持三种写法：
+示例输出（`--plain` / `NO_COLOR`）：
 
-| 写法                  | 示例                   |
-| --------------------- | ---------------------- |
-| Beads id              | `todo-list-demo-mv2`   |
-| 任务标题              | `"Fix login redirect"` |
-| `tasks list` 中的序号 | `1`                    |
+```text
+  archLoop · demo                                                                   3 tasks
+  ● 2 todo   ◐ 1 in_progress   ✓ 0 done
+  ●  todo · 2
+     todo-list-demo-mv2  Fix login redirect
+     todo-list-demo-nx1  Improve empty state copy
+  ◐  in_progress · 1
+     todo-list-demo-ab3  Handle expired token
+  tip   archloop tasks show <id>   ·   archloop tasks pull
+```
+
+任务选择器支持两种写法（**不再接受** `tasks list` 的 1-based 序号；请用 Beads id）：
+
+| 写法     | 示例                   |
+| -------- | ---------------------- |
+| Beads id | `todo-list-demo-mv2`   |
+| 任务标题 | `"Fix login redirect"` |
 
 查看任务详情：
 
 ```bash
-archloop tasks show 1
 archloop tasks show "Fix login redirect"
 archloop tasks show todo-list-demo-mv2
+```
+
+示例详情：
+
+```text
+  archLoop · task · todo-list-demo-mv2                                               ready_for_agent
+  title       Fix login redirect
+  status      ready_for_agent  (beads: open)
+  labels      ready_for_agent
+  description
+    User lands on blank page after login.
+  next  archloop tasks update todo-list-demo-mv2 ...
 ```
 
 ### 4.2 创建任务
@@ -288,7 +311,17 @@ archloop run --flow with-review
 
 适合需要实现后审核的流程：实现成功后进入 `reviewing`，review 完成后进入 `waiting_for_merge`，再进入 merge 阶段。
 
-所有 Hub flow 默认使用 `--output auto`。交互式 TTY 在尺寸与 cursor control 可用时显示有界 live view；任务看板显示 batch/task，PRD decomposition 与 triage 显示 proposal session phases。proposal live view 在 refinement、status、approval、apply prompt 前暂停并恢复，不暴露 agent prose。重定向、CI、dumb/unsupported/unsafe terminal 自动回退 plain，所有退出路径都会恢复 cursor。
+交互式 TTY 选完 flow 后会先打印 run plan `section`，再等待约 3 秒自动开始（`Ctrl+C` 取消，`e` 重选 flow）；`--yes` / 非 TTY / `--dry-run` 跳过倒计时，`--dry-run` 只打印计划：
+
+```text
+  archLoop · run
+  flow      with-review
+  project   demo  ← /path/to/repo
+  ready     1 task
+  tip   starting in 3s · Ctrl+C to cancel · e to edit flow
+```
+
+所有 Hub flow 默认使用 `--output auto`。交互式 TTY 在尺寸与 cursor control 可用时显示 append-only Hub run card（每次状态转换追加一个 `section`，底部单行 spinner 心跳）；任务看板显示 batch/task，PRD decomposition 与 triage 显示 proposal session phases。proposal live view 在 refinement、status、approval、apply prompt 前暂停并恢复，不暴露 agent prose。重定向、CI、dumb/unsupported/unsafe terminal 自动回退 plain，所有退出路径都会恢复 cursor。`NO_COLOR=1` 或全局 `--plain` 只去掉颜色/粗体/暗色，保留符号与缩进。
 
 所有 flow 支持显式 `--output plain`。proposal records 为 append-only canonical phase/status，不包含原始 agent prose；最终 outcome 区分 applied、no-change、cancelled、validation failure、mutation failure 和其他 failure，并提供 applied/skipped/dependencies、logs、diagnostic 与 recovery。显式 plain/JSON 不发起交互 prompt，写入 proposal 必须传 `--yes`；未确认时不 apply。
 
@@ -332,7 +365,19 @@ archloop tasks list
 Hub task board 的本地任务源是 Beads。GitHub Issues 是远端协作表，通过同步命令 pull / push。
 
 ```bash
+archloop tasks pull
+archloop tasks push
 archloop tasks sync
+```
+
+成功同步后输出方向性 `section`（↓ pulled / ↑ pushed）；有冲突时 footer 变为 `fix` 并指向 `archloop tasks resolve <id>`：
+
+```text
+  archLoop · sync · demo                                                    owner/repo
+  ↓ pulled  4 created  0 updated · 0 conflicts · 0 dup-candidates
+  ↑ pushed  nothing to push  0 synced · 0 closed · 0 pending
+    done in 1.4s
+  next  archloop tasks list
 ```
 
 同步规则：
@@ -399,13 +444,13 @@ archloop run --flow no-review
 2. 运行 `archloop agent-config init`，配置 `planning`、`triage`、`implementation`、`review`、`merge`、`recovery`。
 3. 运行 `archloop env init`，配置 agent 和 GitHub 所需凭据。
 4. 运行 `archloop tasks init`，再用 `archloop tasks create` 创建 2 到 3 个测试任务。
-5. 用 `archloop tasks list` 确认任务带序号，用 `tasks show` 分别测试 id、标题、序号选择。
+5. 用 `archloop tasks list` 确认看板有 status badges + Beads id（无 1-based 序号），用 `tasks show` 分别测试 id、标题选择；确认数字序号会被拒绝。
 6. 用 `archloop tasks comment` 追加评论，再用 `tasks show` 验证评论可见。
 7. 准备一个 PRD 文件，运行 `archloop tasks from-prd <prd-file>`，人工调整 proposal 后确认写入。
 8. 运行 `archloop tasks triage`，确认 agent 能给出状态建议并写入本地 Beads。
-9. 将至少一个任务变为 `ready_for_agent`，运行 `archloop run --flow no-review`。
+9. 将至少一个任务变为 `ready_for_agent`，运行 `archloop run --flow no-review`，确认 run plan + 3s debounce（或 `--yes` 跳过）。
 10. 再准备一轮任务，运行 `archloop run --flow with-review`。
-11. 运行 `archloop tasks sync`，验证 GitHub Issues pull / push 行为。
+11. 运行 `archloop tasks sync`，验证 GitHub Issues pull / push 行为与 ↓/↑ section 输出。
 12. 人工制造一个失败或 stale 状态，运行 `archloop tasks recover <selector>`。
 13. 运行 legacy `archloop init`，确认旧的 `.archloop/main.ts` 或 `.archloop/main.mts` 路径仍可用，并再次确认 Hub onboarding 仍然以 `archloop initialize` 为入口。
 
@@ -415,7 +460,7 @@ archloop run --flow no-review
 | ----------------------------- | ---------------------------------------------------------------------------- |
 | Unified interface 不依赖 init | `project status`、`tasks list`、`run --flow` 不要求目标项目已有 `.archloop/` |
 | 共享配置可复用                | 不同项目读取同一套 Hub agent config 和 Hub env                               |
-| Task selector 易用            | id、标题、列表序号都可选中任务                                               |
+| Task selector 易用            | id、标题可选中任务；列表序号不再被接受                                       |
 | Proposal flow 有人工确认      | PRD 拆解和 triage 都能反复讨论后再 apply                                     |
 | Proposal flow 不直接改远端    | `from-prd` / `triage` 只写本地 Beads                                         |
 | Flow prompt 来源正确          | `run --flow` 使用 archLoop Hub 自带 prompt                                   |
@@ -426,4 +471,5 @@ archloop run --flow no-review
 
 | 修改日期   | 修改项                                                                                                                                       |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-07-20 | Variant C Phase 4：对齐 `section` 示例输出、注明 1-based 序号选择器已移除、补充 run debounce / `--plain`/`NO_COLOR` 说明                       |
 | 2026-06-19 | 更新为 unified-interface 首版用户使用指南，补充 Hub 配置、任务表、PRD 拆解、triage、flow 执行、GitHub 同步、recovery 和 legacy init 兼容说明 |

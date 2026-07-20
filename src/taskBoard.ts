@@ -1874,13 +1874,6 @@ export const filterHubTasksByPrdWarning = (
 ): readonly HubTaskProjection[] =>
   tasks.filter((task) => matchesPrdWarningFilter(task, filter));
 
-export interface FormatHubTaskBoardLinesOptions {
-  readonly warningFilter?: PrdWarningSeverity;
-  readonly projectName?: string;
-  readonly showAll?: boolean;
-  readonly perGroupLimit?: number;
-}
-
 export type TaskBoardDisplayBucket = "todo" | "in_progress" | "done";
 
 export interface TaskBoardModel {
@@ -2103,21 +2096,6 @@ export const renderHubTaskBoardText = (
 ): readonly string[] =>
   renderSection("", taskBoardModelToBlocks(model), options);
 
-/** @deprecated Prefer buildHubTaskBoardModel + Display.section; kept until Phase 4 cleanup. */
-export const formatHubTaskBoardLines = (
-  board: HubTaskBoard,
-  options?: FormatHubTaskBoardLinesOptions,
-): readonly string[] =>
-  renderHubTaskBoardText(
-    buildHubTaskBoardModel({
-      projectName: options?.projectName ?? "project",
-      board,
-      warningFilter: options?.warningFilter,
-      showAll: options?.showAll ?? true,
-      perGroupLimit: options?.perGroupLimit,
-    }),
-  );
-
 const TASK_DETAIL_KV_GUTTER = 12;
 
 const DETAIL_METADATA_IDENTITY_KEYS = new Set([
@@ -2323,71 +2301,6 @@ export const renderHubTaskDetailText = (
   options?: RenderSectionOptions,
 ): readonly string[] =>
   renderSection("", taskDetailModelToBlocks(model), options);
-
-/** @deprecated Prefer buildHubTaskDetailModel + Display.section; kept until Phase 4 cleanup. */
-export const formatHubTaskDetailsRows = (
-  task: HubTaskProjection,
-): Record<string, string> => {
-  const model = buildHubTaskDetailModel(task);
-  const rows: Record<string, string> = {
-    "Beads id": task.id,
-    Title: task.title,
-    "Hub status": task.hubStatus,
-  };
-
-  if (task.beadsStatus) {
-    rows["Beads status"] = task.beadsStatus;
-  }
-  if (task.description) {
-    rows.Description = task.description;
-  }
-  if (task.notes) {
-    rows.Notes = task.notes;
-  }
-  if (task.labels.length > 0) {
-    rows.Labels = cleanJoinedValues(task.labels);
-  }
-  for (const row of model.identity.rows) {
-    if (row.key === "metadata") {
-      rows.Metadata = row.value;
-    }
-    if (row.key === "claim") {
-      rows.Claim = row.value;
-    }
-    if (row.key === "claim state") {
-      rows["Claim state"] = row.value;
-    }
-    if (row.key === "remote") {
-      rows["Remote refs"] = row.value;
-    }
-    if (row.key === "runs") {
-      rows["Run refs"] = row.value;
-    }
-    if (row.key === "prd warning") {
-      rows["PRD warning"] = row.value;
-    }
-  }
-  if (task.comments.length > 0) {
-    rows.Comments = String(task.comments.length);
-  }
-
-  return rows;
-};
-
-/** @deprecated Prefer buildHubTaskDetailModel; kept until Phase 4 cleanup. */
-export const formatHubTaskCommentLines = (
-  task: HubTaskProjection,
-): readonly string[] => {
-  if (task.comments.length === 0) {
-    return [];
-  }
-
-  const lines = ["Comments"];
-  for (const comment of task.comments) {
-    lines.push(`  - ${formatComment(comment)}`);
-  }
-  return lines;
-};
 
 export const isCanonicalHubTaskStatus = (
   value: unknown,

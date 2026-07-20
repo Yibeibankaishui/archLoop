@@ -271,8 +271,15 @@ process.exit(1);
 
     expect(entries).toContainEqual(
       expect.objectContaining({
-        _tag: "summary",
-        title: "Beads task bd-a",
+        _tag: "section",
+        title: "",
+        blocks: expect.arrayContaining([
+          expect.objectContaining({
+            kind: "header",
+            title: "archLoop",
+            subtitle: "task · bd-a",
+          }),
+        ]),
       }),
     );
   });
