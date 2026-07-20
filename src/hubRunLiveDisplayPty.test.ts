@@ -57,18 +57,19 @@ const runInPty = async (
 describe.skipIf(process.platform === "win32" || !existsSync(scriptExecutable))(
   "hub run live display PTY process",
   () => {
-    it("renders and restores the cursor in a real PTY on completion", async () => {
+    it("renders append-only timeline and restores the cursor on completion", async () => {
       const result = await runInPty("complete");
 
       expect(result.exitCode).toBe(0);
       expect(result.output).toContain("PTY_READY tty=true");
-      expect(result.output).toContain("Run completed");
-      expect(result.output).toContain("\x1b[?25l");
-      expect(result.output).toContain("\x1b[?25h");
-      expect(result.output.indexOf("\x1b[?25h")).toBeGreaterThan(
-        result.output.indexOf("\x1b[?25l"),
-      );
+      expect(result.output).toContain("archLoop");
+      expect(result.output).toContain("batch daca6200");
+      expect(result.output).toContain("batch fd3cdf79");
+      // Collapsed completed batch appears in a later section
+      expect(result.output).toMatch(/✓[\s\S]*batch daca6200/);
       expect(result.output).not.toContain("\x1b[?1049");
+      expect(result.output).not.toContain("\x1b[1A");
+      expect(result.output).toContain("\x1b[?25h");
     });
 
     it("restores the cursor when a real PTY process handles SIGINT", async () => {
@@ -77,7 +78,6 @@ describe.skipIf(process.platform === "win32" || !existsSync(scriptExecutable))(
       expect([0, 130]).toContain(result.exitCode);
       expect(result.output).toContain("PTY_READY tty=true");
       expect(result.output).toContain("PTY_SIGNAL_HANDLED");
-      expect(result.output).toContain("\x1b[?25l");
       expect(result.output).toContain("\x1b[?25h");
       expect(result.output.lastIndexOf("\x1b[?25h")).toBeGreaterThan(
         result.output.indexOf("PTY_SIGNAL_HANDLED"),

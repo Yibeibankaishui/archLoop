@@ -4855,6 +4855,10 @@ const runCommand = Command.make(
               columns: process.stdout.columns ?? 0,
               rows: process.stdout.rows,
               color: autoOutputResolution.color,
+              enableSpinner:
+                autoOutputResolution.color &&
+                Boolean(process.stdout.isTTY) &&
+                Boolean(process.stdin.isTTY),
             })
           : undefined;
       let liveRefresh: ReturnType<typeof setInterval> | undefined;

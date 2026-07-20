@@ -349,11 +349,12 @@ describe("archloop run project targeting", () => {
 
     const output = chunks.join("");
     expect(mockConfirm).toHaveBeenCalledOnce();
-    expect(output).toContain("\x1b[?25l");
-    expect(output).toContain("archLoop run | Project alpha | Flow no-review");
+    expect(output).toContain("archLoop");
+    expect(output).toContain("alpha · no-review");
     expect(output).toContain("Nothing to run");
-    expect(output.endsWith("\x1b[?25h")).toBe(true);
+    expect(output).toContain("\x1b[?25h");
     expect(output).not.toContain("Nothing to run...");
+    expect(output).not.toContain("\x1b[1A");
   });
 
   it("does not prompt for run-plan confirmation with --yes in an auto TTY", async () => {
@@ -423,9 +424,10 @@ describe("archloop run project targeting", () => {
     }
 
     const output = chunks.join("");
-    expect(output).toContain("\x1b[?25l");
     expect(output).toContain("Nothing to run");
+    expect(output).toContain("\x1b[?25h");
     expect(output).not.toMatch(/\x1b\[(?:3\d|9\d)m/);
+    expect(output).not.toContain("\x1b[1A");
   });
 
   it("falls back to plain without prompting in CI", async () => {
@@ -1732,12 +1734,11 @@ describe("archloop run project targeting", () => {
 
     const output = chunks.join("");
     expect(process.exitCode).toBe(130);
-    expect(output).toContain("Task task-live-failed | Review failed");
+    expect(output).toContain("task-live-failed");
     expect(output).toContain("review failed before cancellation");
-    expect(output).toContain("archloop tasks recover task-live-failed");
-    expect(output).toContain("Skipped 1");
     expect(output).toContain("Run cancelled");
-    expect(output.endsWith("\x1b[?25h")).toBe(true);
+    expect(output).toContain("\x1b[?25h");
+    expect(output).not.toContain("\x1b[1A");
   });
 
   it("falls back to a plain cancellation when the final live write fails", async () => {
@@ -1864,10 +1865,11 @@ describe("archloop run project targeting", () => {
     }
 
     const output = chunks.join("");
-    expect(output).toContain("Task task-live-failed | Implementation failed");
+    expect(output).toContain("task-live-failed");
     expect(output).toContain("implementation failed before host error");
-    expect(output).toContain("Run failed");
-    expect(output.endsWith("\x1b[?25h")).toBe(true);
+    expect(output).toContain("archloop run --resume");
+    expect(output).toContain("\x1b[?25h");
+    expect(output).not.toContain("\x1b[1A");
   });
 
   it("preserves the execution error when the failed live outcome cannot be written", async () => {
