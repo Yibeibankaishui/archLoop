@@ -2,6 +2,6 @@
   "database": "dolt",
   "backend": "dolt",
   "dolt_mode": "embedded",
-  "dolt_database": "sandcastle",
-  "project_id": "820a748a-5bc6-4648-b0f1-5d58cbfc4963"
+  "dolt_database": "arch",
+  "project_id": "31b3357c-0ab4-4519-a505-7c75542b0225"
 }
