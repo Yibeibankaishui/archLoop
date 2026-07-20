@@ -21,6 +21,7 @@ import { resolveGitRepoRoot } from "./projectStatus.js";
 const mockSelect = vi.fn();
 const mockConfirm = vi.fn();
 const mockText = vi.fn();
+const mockWaitForKeypress = vi.fn();
 const mockRunHubProposalFlowFromCli = vi.fn();
 const mockHandlePrdDecompositionFlowDisplay = vi.fn();
 const mockHandleTriageProposalFlowDisplay = vi.fn();
@@ -34,6 +35,14 @@ vi.mock("@clack/prompts", async (importOriginal) => {
     select: (...args: unknown[]) => mockSelect(...args),
     confirm: (...args: unknown[]) => mockConfirm(...args),
     text: (...args: unknown[]) => mockText(...args),
+  };
+});
+
+vi.mock("./keypress.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./keypress.js")>();
+  return {
+    ...actual,
+    waitForKeypress: (...args: unknown[]) => mockWaitForKeypress(...args),
   };
 });
 
@@ -187,6 +196,18 @@ describe("archloop run project targeting", () => {
   let originalExitCode: typeof process.exitCode;
 
   beforeEach(async () => {
+    mockWaitForKeypress.mockReset();
+    mockWaitForKeypress.mockResolvedValue("start");
+    mockSelect.mockReset();
+    mockConfirm.mockReset();
+    mockText.mockReset();
+    mockWaitForKeypress.mockReset();
+    mockWaitForKeypress.mockResolvedValue("start");
+    mockRunHubProposalFlowFromCli.mockReset();
+    mockHandlePrdDecompositionFlowDisplay.mockReset();
+    mockHandleTriageProposalFlowDisplay.mockReset();
+    mockRunHubFlow.mockReset();
+
     originalCwd = process.cwd();
     originalStdinTTY = process.stdin.isTTY;
     originalStdoutTTY = process.stdout.isTTY;
@@ -333,7 +354,7 @@ describe("archloop run project targeting", () => {
     setTerminalTtyState(true);
     setStdoutColumns(120);
     process.env.TERM = "xterm-256color";
-    mockConfirm.mockResolvedValue(true);
+    mockWaitForKeypress.mockResolvedValue("start");
 
     try {
       await runCli(["run", "--flow", "no-review"]);
@@ -348,7 +369,10 @@ describe("archloop run project targeting", () => {
     }
 
     const output = chunks.join("");
-    expect(mockConfirm).toHaveBeenCalledOnce();
+    expect(mockConfirm).not.toHaveBeenCalled();
+    expect(mockWaitForKeypress).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: 3000 }),
+    );
     expect(output).toContain("archLoop");
     expect(output).toContain("alpha · no-review");
     expect(output).toContain("Nothing to run");
@@ -370,7 +394,7 @@ describe("archloop run project targeting", () => {
     setTerminalTtyState(true);
     setStdoutColumns(120);
     process.env.TERM = "xterm-256color";
-    mockConfirm.mockResolvedValue(false);
+    mockWaitForKeypress.mockResolvedValue("cancel");
 
     try {
       await runCli(["run", "--flow", "no-review", "--yes"]);
@@ -385,6 +409,7 @@ describe("archloop run project targeting", () => {
     }
 
     expect(mockConfirm).not.toHaveBeenCalled();
+    expect(mockWaitForKeypress).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(0);
     expect(chunks.join("")).toContain("Nothing to run");
   });
@@ -459,18 +484,18 @@ describe("archloop run project targeting", () => {
     }
   });
 
-  it("replays the complete plain lifecycle when a live resize becomes unsafe", async () => {
+  it("keeps append-only live output when the terminal resizes narrower", async () => {
     const resizeListenerCountBeforeRun = process.stdout.listenerCount("resize");
-    let resizeListenerCountAfterFallback = -1;
+    let resizeListenerCountDuringRun = -1;
     mockRunHubFlow.mockImplementation(async (input) => {
-      const runId = "run-resize-fallback";
-      const batchId = "batch-resize-fallback";
+      const runId = "run-resize-live";
+      const batchId = "batch-resize-live";
       const hubProjectDir = join(
         process.env.XDG_DATA_HOME!,
         "archloop",
         "hub",
         "projects",
-        "resize-fallback",
+        "resize-live",
       );
       input.onEvent?.({
         type: "run_started",
@@ -482,29 +507,9 @@ describe("archloop run project targeting", () => {
         eventId: `${runId}:1`,
         sequence: 1,
       });
-      input.onEvent?.({
-        type: "batch_started",
-        runId,
-        batchId,
-        branch: "flow/no-review",
-        startedAt: "2026-07-15T12:40:01.000Z",
-        eventId: `${runId}:2`,
-        sequence: 2,
-      });
-      input.onEvent?.({
-        type: "batch_planned",
-        runId,
-        batchId,
-        flowId: "no-review",
-        createdAt: "2026-07-15T12:40:02.000Z",
-        taskIds: [],
-        tasks: [],
-        eventId: `${runId}:3`,
-        sequence: 3,
-      });
       setStdoutColumns(39);
       process.stdout.emit("resize");
-      resizeListenerCountAfterFallback = process.stdout.listenerCount("resize");
+      resizeListenerCountDuringRun = process.stdout.listenerCount("resize");
       return {
         flowId: "no-review",
         runId,
@@ -524,22 +529,22 @@ describe("archloop run project targeting", () => {
     });
     const originalColumns = process.stdout.columns;
     const originalTerm = process.env.TERM;
+    const chunks: string[] = [];
     const write = vi
       .spyOn(process.stdout, "write")
-      .mockImplementation(() => true);
-    const clearIntervalSpy = vi.spyOn(global, "clearInterval");
-    let refreshTimerCleared = false;
+      .mockImplementation(((chunk: string | Uint8Array) => {
+        chunks.push(String(chunk));
+        return true;
+      }) as typeof process.stdout.write);
     setTerminalTtyState(true);
     setStdoutColumns(120);
     process.env.TERM = "xterm-256color";
-    mockConfirm.mockResolvedValue(true);
+    mockWaitForKeypress.mockResolvedValue("start");
 
     let entries: readonly DisplayEntry[] = [];
     try {
       entries = await runCli(["run", "--flow", "no-review"]);
     } finally {
-      refreshTimerCleared = clearIntervalSpy.mock.calls.length > 0;
-      clearIntervalSpy.mockRestore();
       write.mockRestore();
       setStdoutColumns(originalColumns);
       if (originalTerm === undefined) {
@@ -548,15 +553,14 @@ describe("archloop run project targeting", () => {
         process.env.TERM = originalTerm;
       }
     }
-    const plainLines = entries.flatMap((entry) =>
-      entry._tag === "plain" ? [entry.message] : [],
-    );
 
-    expect(plainLines.map((line) => line.match(/^event=([^ ]+)/)?.[1])).toEqual(
-      ["run_started", "batch_started", "batch_planned", "run_completed"],
+    // ADR-0032: narrow resize stays on append-only live sections (no plain fallback).
+    expect(entries.filter((entry) => entry._tag === "plain")).toHaveLength(0);
+    expect(entries.some((entry) => entry._tag === "section")).toBe(true);
+    expect(chunks.join("")).toContain("archLoop");
+    expect(resizeListenerCountDuringRun).toBeGreaterThan(
+      resizeListenerCountBeforeRun,
     );
-    expect(resizeListenerCountAfterFallback).toBe(resizeListenerCountBeforeRun);
-    expect(refreshTimerCleared).toBe(true);
   });
 
   it("falls back to the complete plain lifecycle when a live write fails", async () => {
@@ -794,12 +798,7 @@ describe("archloop run project targeting", () => {
         }
         throw new Error(`Unexpected text prompt: ${opts.message}`);
       });
-      mockConfirm.mockImplementation(async (opts: { message: string }) => {
-        if (opts.message === "Run this Hub flow now?") {
-          return true;
-        }
-        throw new Error(`Unexpected confirm prompt: ${opts.message}`);
-      });
+      mockWaitForKeypress.mockResolvedValue("start");
       mockRunHubProposalFlowFromCli.mockResolvedValue({
         flowId: "prd-decomposition",
         result: { outcome: "cancelled", phase: "approval" },
@@ -839,19 +838,46 @@ describe("archloop run project targeting", () => {
       expect(mockText).toHaveBeenCalledWith(
         expect.objectContaining({ message: "PRD file path" }),
       );
-      expect(mockConfirm).toHaveBeenCalledWith(
-        expect.objectContaining({ message: "Run this Hub flow now?" }),
+      expect(mockConfirm).not.toHaveBeenCalled();
+      expect(mockWaitForKeypress).toHaveBeenCalledWith(
+        expect.objectContaining({ timeoutMs: 3000 }),
       );
       expect(entries).toContainEqual(
         expect.objectContaining({
-          _tag: "summary",
-          title: "Hub run plan",
-          rows: expect.objectContaining({
-            "Hub project": "beta",
-            "Hub flow": "prd-decomposition",
-            "Repository root": repoBetaRoot,
-            "Flow input": expect.stringContaining("docs/prd/example.md"),
-          }),
+          _tag: "section",
+          title: "",
+          blocks: expect.arrayContaining([
+            expect.objectContaining({
+              kind: "header",
+              title: "archLoop",
+              subtitle: "run",
+            }),
+            expect.objectContaining({
+              kind: "kv",
+              rows: expect.arrayContaining([
+                expect.objectContaining({
+                  key: "flow",
+                  value: "prd-decomposition",
+                }),
+                expect.objectContaining({
+                  key: "project",
+                  value: "beta",
+                  secondary: expect.stringContaining(repoBetaRoot),
+                }),
+                expect.objectContaining({
+                  key: "input",
+                  value: expect.stringContaining("docs/prd/example.md"),
+                }),
+              ]),
+            }),
+            expect.objectContaining({
+              kind: "footer",
+              label: "tip",
+              commands: expect.arrayContaining([
+                expect.stringContaining("starting in 3s"),
+              ]),
+            }),
+          ]),
         }),
       );
     } finally {
@@ -1308,16 +1334,61 @@ describe("archloop run project targeting", () => {
 
   it("returns exit code 130 when the user cancels the run plan", async () => {
     setTerminalTtyState(true);
-    mockConfirm.mockResolvedValue(false);
+    mockWaitForKeypress.mockResolvedValue("cancel");
 
     const entries = await runCli(["run", "--flow", "no-review"]);
 
+    expect(mockWaitForKeypress).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: 3000 }),
+    );
+    expect(mockConfirm).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(130);
     expect(entries).toContainEqual(
       expect.objectContaining({
         _tag: "status",
         severity: "warn",
         message: "Run cancelled.",
+      }),
+    );
+  });
+
+  it("dry-run renders the run plan section and skips starting the flow", async () => {
+    setTerminalTtyState(true);
+    mockWaitForKeypress.mockResolvedValue("start");
+
+    const entries = await runCli([
+      "run",
+      "--flow",
+      "no-review",
+      "--dry-run",
+    ]);
+
+    expect(mockWaitForKeypress).not.toHaveBeenCalled();
+    expect(mockRunHubFlow).not.toHaveBeenCalled();
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "section",
+        title: "",
+        blocks: expect.arrayContaining([
+          expect.objectContaining({
+            kind: "header",
+            title: "archLoop",
+            subtitle: "run",
+          }),
+          expect.objectContaining({
+            kind: "kv",
+            rows: expect.arrayContaining([
+              expect.objectContaining({ key: "flow", value: "no-review" }),
+            ]),
+          }),
+        ]),
+      }),
+    );
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        _tag: "status",
+        severity: "info",
+        message: "Dry run — Hub flow not started.",
       }),
     );
   });
@@ -1899,7 +1970,7 @@ describe("archloop run project targeting", () => {
       .spyOn(process.stdout, "write")
       .mockImplementation((chunk: string | Uint8Array) => {
         const text = String(chunk);
-        if (!failedFinalWrite && text.includes("Run failed")) {
+        if (!failedFinalWrite && text.includes("archloop run --resume")) {
           failedFinalWrite = true;
           throw new Error("simulated failure terminal write failure");
         }
@@ -1908,7 +1979,7 @@ describe("archloop run project targeting", () => {
     setTerminalTtyState(true);
     setStdoutColumns(120);
     process.env.TERM = "xterm-256color";
-    mockConfirm.mockResolvedValue(true);
+    mockWaitForKeypress.mockResolvedValue("start");
 
     try {
       await expect(
