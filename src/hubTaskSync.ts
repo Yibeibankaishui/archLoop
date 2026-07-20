@@ -5,6 +5,16 @@ import { TaskBoardError } from "./errors.js";
 import { recordHubTaskSyncConflict } from "./hubTaskLifecycle.js";
 import { runBdTextForHubTaskStore } from "./hubTaskStore.js";
 import {
+  renderSection,
+  type RenderSectionOptions,
+  type SectionBlock,
+  type SectionFooterBlock,
+  type SectionGroupBlock,
+  type SectionHeaderBlock,
+  type SectionKvBlock,
+  type SectionProseBlock,
+} from "./section.js";
+import {
   HUB_COLLABORATION_LABELS_TO_CLEAR,
   isCompletedHubStatus,
   loadHubTaskBoard,
@@ -734,15 +744,167 @@ export const formatHubTaskSyncPreviewLines = (
   return lines;
 };
 
+export interface SyncResultModel {
+  readonly header: SectionHeaderBlock;
+  readonly pullLine: SectionKvBlock;
+  readonly pushLine: SectionKvBlock;
+  readonly duration?: SectionProseBlock;
+  readonly conflicts?: SectionGroupBlock;
+  readonly footer: SectionFooterBlock;
+}
+
+export interface BuildSyncResultModelInput {
+  readonly result: SyncHubTasksResult;
+  readonly projectName: string;
+  readonly remote?: string;
+  readonly durationSeconds?: number;
+}
+
+const SYNC_KV_GUTTER = 10;
+
+const formatSyncDurationBody = (seconds: number): string => {
+  const safe = Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+  return `done in ${(Math.round(safe * 10) / 10).toFixed(1)}s`;
+};
+
+const buildPullLine = (result: SyncHubTasksResult): SectionKvBlock => {
+  const created = result.pulled.created.length;
+  const updated = result.pulled.updated.length;
+  const conflicts = result.pulled.conflicts.length;
+  const dups = result.pulled.duplicateCandidates.length;
+  return {
+    kind: "kv",
+    gutter: SYNC_KV_GUTTER,
+    rows: [
+      {
+        key: "↓ pulled",
+        value: created > 0 ? `${created} created` : "nothing new",
+        secondary: `${updated} updated · ${conflicts} conflicts · ${dups} dup-candidates`,
+      },
+    ],
+  };
+};
+
+const buildPushLine = (result: SyncHubTasksResult): SectionKvBlock => {
+  const synced = result.pushed.synced.length;
+  const closed = result.pushed.closed.length;
+  const pending = result.pushed.pushPending.length;
+  const hasPushActivity = synced > 0 || closed > 0;
+  const mainParts: string[] = [];
+  if (synced > 0) {
+    mainParts.push(`${synced} synced`);
+  }
+  if (closed > 0) {
+    mainParts.push(`${closed} closed`);
+  }
+  return {
+    kind: "kv",
+    gutter: SYNC_KV_GUTTER,
+    rows: [
+      {
+        key: "↑ pushed",
+        value: hasPushActivity ? mainParts.join(" · ") : "nothing to push",
+        secondary: hasPushActivity
+          ? `${pending} pending`
+          : `${synced} synced · ${closed} closed · ${pending} pending`,
+      },
+    ],
+  };
+};
+
+const buildConflictsGroup = (
+  conflictIds: readonly string[],
+): SectionGroupBlock => ({
+  kind: "group",
+  symbol: "!",
+  severity: "error",
+  name: "conflicts pending review",
+  count: conflictIds.length,
+  items: conflictIds.map((id) => ({
+    id,
+    title: "sync conflict",
+  })),
+});
+
+export const buildSyncResultModel = (
+  input: BuildSyncResultModelInput,
+): SyncResultModel => {
+  const { result, projectName } = input;
+  const hasConflicts = result.pulled.conflicts.length > 0;
+  const footer: SectionFooterBlock = hasConflicts
+    ? {
+        kind: "footer",
+        label: "fix",
+        command: "archloop tasks resolve <id>",
+      }
+    : {
+        kind: "footer",
+        label: "next",
+        command: "archloop tasks list",
+      };
+
+  return {
+    header: {
+      kind: "header",
+      title: "archLoop",
+      subtitle: `sync · ${projectName}`,
+      ...(input.remote ? { right: input.remote } : {}),
+    },
+    pullLine: buildPullLine(result),
+    pushLine: buildPushLine(result),
+    ...(input.durationSeconds !== undefined
+      ? {
+          duration: {
+            kind: "prose" as const,
+            body: formatSyncDurationBody(input.durationSeconds),
+          },
+        }
+      : {}),
+    ...(hasConflicts
+      ? { conflicts: buildConflictsGroup(result.pulled.conflicts) }
+      : {}),
+    footer,
+  };
+};
+
+export const syncResultModelToBlocks = (
+  model: SyncResultModel,
+): readonly SectionBlock[] => {
+  const blocks: SectionBlock[] = [
+    model.header,
+    model.pullLine,
+    model.pushLine,
+  ];
+  if (model.duration) {
+    blocks.push(model.duration);
+  }
+  if (model.conflicts) {
+    blocks.push(model.conflicts);
+  }
+  blocks.push(model.footer);
+  return blocks;
+};
+
+export const renderSyncResultText = (
+  model: SyncResultModel,
+  options?: RenderSectionOptions,
+): readonly string[] =>
+  renderSection("", syncResultModelToBlocks(model), options);
+
+/** @deprecated Prefer buildSyncResultModel + Display.section; kept until Phase 4 cleanup. */
 export const formatHubTaskSyncSummaryLines = (
   result: SyncHubTasksResult,
-): readonly string[] => {
-  const lines = ["Synced Hub tasks with GitHub Issues"];
-  lines.push(
-    `Pulled: ${result.pulled.created.length} created, ${result.pulled.updated.length} updated, ${result.pulled.conflicts.length} conflicts, ${result.pulled.duplicateCandidates.length} duplicate candidates`,
+  options?: {
+    readonly projectName?: string;
+    readonly remote?: string;
+    readonly durationSeconds?: number;
+  },
+): readonly string[] =>
+  renderSyncResultText(
+    buildSyncResultModel({
+      result,
+      projectName: options?.projectName ?? "project",
+      remote: options?.remote,
+      durationSeconds: options?.durationSeconds,
+    }),
   );
-  lines.push(
-    `Pushed: ${result.pushed.synced.length} synced, ${result.pushed.closed.length} closed, ${result.pushed.pushPending.length} push pending`,
-  );
-  return lines;
-};

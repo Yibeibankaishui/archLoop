@@ -2507,8 +2507,12 @@ process.exit(1);
     );
 
     expect(stdout).toContain("Hub task sync preview");
-    expect(stdout).toContain("Synced Hub tasks with GitHub Issues");
+    expect(stdout).toContain("sync");
+    expect(stdout).toContain("↓ pulled");
     expect(stdout).toContain("1 created");
+    expect(stdout).toContain("↑ pushed");
+    expect(stdout).toContain("next");
+    expect(stdout).toContain("archloop tasks list");
     const state = JSON.parse(await readFile(stateFile, "utf-8")) as unknown[];
     expect(state).toHaveLength(1);
   });
@@ -2766,7 +2770,9 @@ process.exit(1);
       withBdEnv(bdPath, hostDir, { BD_STATE_FILE: stateFile }),
     );
 
-    expect(stdout).toContain("Pushed: 0 synced, 1 closed");
+    expect(stdout).toContain("↑ pushed");
+    expect(stdout).toContain("1 closed");
+    expect(stdout).toContain("nothing new");
     const ghArgs = await readFile(ghArgsFile, "utf-8");
     expect(ghArgs).toContain("issue close 11");
     expect(ghArgs).not.toContain("issue close 12");

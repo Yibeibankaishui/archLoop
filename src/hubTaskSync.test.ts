@@ -6,6 +6,7 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
 import {
+  buildSyncResultModel,
   detectSemanticSyncConflict,
   formatGithubRemoteRef,
   isHubExecutionStatus,
@@ -15,6 +16,7 @@ import {
   syncHubTasksWithGithub,
   type GithubIssueClient,
   type GithubIssueRecord,
+  type SyncHubTasksResult,
 } from "./hubTaskSync.js";
 
 const execAsync = promisify(exec);
@@ -1056,5 +1058,155 @@ process.exit(1);
     expect(task?.metadata.hubStatus).toBe("done");
     expect(task?.metadata.sync_state).toBe("push_pending");
     expect(task?.status).toBe("closed");
+  });
+});
+
+const emptySyncResult = (): SyncHubTasksResult => ({
+  pulled: {
+    created: [],
+    updated: [],
+    conflicts: [],
+    duplicateCandidates: [],
+  },
+  pushed: {
+    synced: [],
+    pushPending: [],
+    closed: [],
+  },
+});
+
+describe("buildSyncResultModel", () => {
+  it("builds a clean sync model with directional kv rows and a next footer", () => {
+    const result: SyncHubTasksResult = {
+      ...emptySyncResult(),
+      pulled: {
+        created: ["bd-1", "bd-2", "bd-3", "bd-4"],
+        updated: [],
+        conflicts: [],
+        duplicateCandidates: [],
+      },
+    };
+
+    const model = buildSyncResultModel({
+      result,
+      projectName: "autotuneagent",
+      remote: "Yibeibankaishui/archLoop",
+      durationSeconds: 1.4,
+    });
+
+    expect(model.header).toEqual({
+      kind: "header",
+      title: "archLoop",
+      subtitle: "sync · autotuneagent",
+      right: "Yibeibankaishui/archLoop",
+    });
+    expect(model.pullLine).toEqual({
+      kind: "kv",
+      gutter: 10,
+      rows: [
+        {
+          key: "↓ pulled",
+          value: "4 created",
+          secondary: "0 updated · 0 conflicts · 0 dup-candidates",
+        },
+      ],
+    });
+    expect(model.pushLine).toEqual({
+      kind: "kv",
+      gutter: 10,
+      rows: [
+        {
+          key: "↑ pushed",
+          value: "nothing to push",
+          secondary: "0 synced · 0 closed · 0 pending",
+        },
+      ],
+    });
+    expect(model.duration).toEqual({
+      kind: "prose",
+      body: "done in 1.4s",
+    });
+    expect(model.conflicts).toBeUndefined();
+    expect(model.footer).toEqual({
+      kind: "footer",
+      label: "next",
+      command: "archloop tasks list",
+    });
+  });
+
+  it("builds a conflicted sync model with a conflicts group and fix footer", () => {
+    const result: SyncHubTasksResult = {
+      pulled: {
+        created: ["bd-new"],
+        updated: ["bd-u1", "bd-u2"],
+        conflicts: ["AutoTuneAgent-2mr", "AutoTuneAgent-2mp", "AutoTuneAgent-2mq"],
+        duplicateCandidates: [
+          {
+            issueNumber: 99,
+            title: "Dup title",
+            localTaskIds: ["bd-a", "bd-b"],
+          },
+        ],
+      },
+      pushed: {
+        synced: [],
+        pushPending: [],
+        closed: [],
+      },
+    };
+
+    const model = buildSyncResultModel({
+      result,
+      projectName: "demo",
+      durationSeconds: 2,
+    });
+
+    expect(model.pullLine.rows[0]).toEqual({
+      key: "↓ pulled",
+      value: "1 created",
+      secondary: "2 updated · 3 conflicts · 1 dup-candidates",
+    });
+    expect(model.conflicts).toEqual({
+      kind: "group",
+      symbol: "!",
+      severity: "error",
+      name: "conflicts pending review",
+      count: 3,
+      items: [
+        { id: "AutoTuneAgent-2mr", title: "sync conflict" },
+        { id: "AutoTuneAgent-2mp", title: "sync conflict" },
+        { id: "AutoTuneAgent-2mq", title: "sync conflict" },
+      ],
+    });
+    expect(model.footer).toEqual({
+      kind: "footer",
+      label: "fix",
+      command: "archloop tasks resolve <id>",
+    });
+  });
+
+  it("highlights push activity in the main value and dims pending-only details", () => {
+    const result: SyncHubTasksResult = {
+      ...emptySyncResult(),
+      pushed: {
+        synced: ["bd-1", "bd-2", "bd-3"],
+        closed: ["bd-4"],
+        pushPending: [],
+      },
+    };
+
+    const model = buildSyncResultModel({
+      result,
+      projectName: "demo",
+    });
+
+    expect(model.pullLine.rows[0]?.value).toBe("nothing new");
+    expect(model.pushLine.rows[0]).toEqual({
+      key: "↑ pushed",
+      value: "3 synced · 1 closed",
+      secondary: "0 pending",
+    });
+    expect(model.duration).toBeUndefined();
+    expect(model.footer.label).toBe("next");
   });
 });
