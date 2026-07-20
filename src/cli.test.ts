@@ -1804,24 +1804,25 @@ exit 1
       withBdEnv(bdPath, hostDir),
     );
 
-    expect(stdout).toContain("Beads task bd-3");
-    expect(stdout).toContain("Hub status");
+    expect(stdout).toContain("archLoop");
+    expect(stdout).toContain("task · bd-3");
     expect(stdout).toContain("done");
-    expect(stdout).toContain("Description");
+    expect(stdout).toContain("description");
     expect(stdout).toContain("Task description");
-    expect(stdout).toContain("Notes");
     expect(stdout).toContain("Task notes");
-    expect(stdout).toContain("Labels");
+    expect(stdout).toContain("labels");
     expect(stdout).toContain("done");
-    expect(stdout).toContain("Metadata");
+    expect(stdout).toContain("metadata");
     expect(stdout).toContain("execution_mode");
-    expect(stdout).toContain("Remote refs");
+    expect(stdout).toContain("remote");
     expect(stdout).toContain("github#64");
-    expect(stdout).toContain("Run refs");
+    expect(stdout).toContain("runs");
     expect(stdout).toContain("run-123");
-    expect(stdout).toContain("Comments");
+    expect(stdout).toContain("comments · 1");
     expect(stdout).toContain("alice");
     expect(stdout).toContain("Looks good");
+    expect(stdout).toContain("archloop tasks update bd-3");
+    expect(stdout).toContain("gh issue view 64");
   });
 
   it("tasks show resolves exact titles and Beads ids and uses supported Beads flags", async () => {
@@ -1882,14 +1883,14 @@ exit 1
       hostDir,
       withBdEnv(bdPath, hostDir),
     );
-    expect(titleResult.stdout).toContain("Beads task bd-2");
+    expect(titleResult.stdout).toContain("task · bd-2");
 
     const idResult = await runCli(
       "tasks show bd-2",
       hostDir,
       withBdEnv(bdPath, hostDir),
     );
-    expect(idResult.stdout).toContain("Beads task bd-2");
+    expect(idResult.stdout).toContain("task · bd-2");
 
     const showArgs = await readFile(showArgsFile, "utf-8");
     expect(showArgs).toContain("show bd-2 --json --long");
@@ -1967,7 +1968,8 @@ exit 1
       withBdEnv(bdPath, hostDir),
     );
 
-    expect(stdout).toContain("Beads task bd-2");
+    expect(stdout).toContain("archLoop");
+    expect(stdout).toContain("task · bd-2");
     expect(stdout).toContain("Primary details");
   });
 

@@ -287,3 +287,24 @@ describe("flattenSectionForLog", () => {
     expect(text).toContain("tip   archloop tasks show <id>   ·   archloop tasks pull");
   });
 });
+
+describe("prose newlines", () => {
+  it("preserves explicit newlines in prose bodies for comment timelines", () => {
+    const lines = renderSection(
+      "",
+      [
+        {
+          kind: "prose",
+          title: "comments · 2",
+          body: "alice · 2026-06-11: first\nbob · 2026-06-12: second",
+        },
+      ],
+      { width: 80, colorEnabled: false },
+    );
+    expect(lines).toEqual([
+      "  comments · 2",
+      "    alice · 2026-06-11: first",
+      "    bob · 2026-06-12: second",
+    ]);
+  });
+});
