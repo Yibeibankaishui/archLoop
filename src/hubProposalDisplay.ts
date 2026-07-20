@@ -1,7 +1,7 @@
 import * as clack from "@clack/prompts";
 import { join } from "node:path";
 
-import { TaskBoardError } from "./errors.js";
+import { ProposalPromptCancelledError } from "./errors.js";
 import type { PrdDecompositionProposal } from "./hubPrdDecomposition.js";
 import {
   formatProposalWarningsDisplay,
@@ -60,7 +60,7 @@ export const promptPrdDecompositionRefinement = async (): Promise<
     initialValue: false,
   });
   if (clack.isCancel(refineFurther)) {
-    throw new TaskBoardError({
+    throw new ProposalPromptCancelledError({
       message: prdDecompositionCancelledMessage("refinement"),
     });
   }
@@ -73,7 +73,7 @@ export const promptPrdDecompositionRefinement = async (): Promise<
     placeholder: "Split slice 2, reorder dependencies, reclassify AFK/HITL...",
   });
   if (clack.isCancel(result)) {
-    throw new TaskBoardError({
+    throw new ProposalPromptCancelledError({
       message: prdDecompositionCancelledMessage("refinement"),
     });
   }
@@ -141,7 +141,7 @@ export const promptPrdDecompositionApproval = async (
     initialValue: true,
   });
   if (clack.isCancel(result)) {
-    throw new TaskBoardError({
+    throw new ProposalPromptCancelledError({
       message: prdDecompositionCancelledMessage("approval"),
     });
   }
@@ -153,8 +153,11 @@ export const promptPrdDecompositionApprovalWithProposal = (
 ): Promise<boolean> => promptPrdDecompositionApproval(proposal);
 
 export const prdDecompositionCancelledMessage = (
-  phase: "approval" | "refinement",
+  phase: "approval" | "refinement" | "apply",
 ): string => {
+  if (phase === "apply") {
+    return "PRD task creation cancelled before applying Beads task updates.";
+  }
   if (phase === "approval") {
     return "PRD task creation cancelled before creating Beads tasks.";
   }

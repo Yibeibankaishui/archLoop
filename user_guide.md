@@ -288,6 +288,14 @@ archloop run --flow with-review
 
 适合需要实现后审核的流程：实现成功后进入 `reviewing`，review 完成后进入 `waiting_for_merge`，再进入 merge 阶段。
 
+所有 Hub flow 默认使用 `--output auto`。交互式 TTY 在尺寸与 cursor control 可用时显示有界 live view；任务看板显示 batch/task，PRD decomposition 与 triage 显示 proposal session phases。proposal live view 在 refinement、status、approval、apply prompt 前暂停并恢复，不暴露 agent prose。重定向、CI、dumb/unsupported/unsafe terminal 自动回退 plain，所有退出路径都会恢复 cursor。
+
+所有 flow 支持显式 `--output plain`。proposal records 为 append-only canonical phase/status，不包含原始 agent prose；最终 outcome 区分 applied、no-change、cancelled、validation failure、mutation failure 和其他 failure，并提供 applied/skipped/dependencies、logs、diagnostic 与 recovery。显式 plain/JSON 不发起交互 prompt，写入 proposal 必须传 `--yes`；未确认时不 apply。
+
+脚本和 CI 可改用 `--output json`。proposal phases 使用 stdout-pure schema version 1 `proposal_phase` JSONL，最终使用 `run_completed`；应用/无变化退出 `0`，Ctrl+C 取消退出 `130`，SIGTERM 保留退出码 `143`，validation/mutation/general failure 非零。version 1 消费者应忽略未知字段。
+
+失败或阻塞任务会保留 failed stage、简短 diagnostic、相关 log path 和下一步命令。agent、sandbox、implementation 与 review 失败使用 `archloop tasks recover <selector>`；claim 或 task projection 不一致使用 `archloop tasks repair-state <selector>`；dirty-worktree overlap 会列出准确 blocking paths，并说明先 commit、stash 或 discard。仍在 `waiting_for_merge` 的工作应重新运行同一个 `archloop run --flow <id>`，由既有自动恢复逻辑继续批次；不要使用不存在的 `archloop run --resume`。
+
 Merge 阶段会在真正合并前输出 selected / skipped / blocked 诊断。若 Hub 事件显示任务已实现或审核完成、分支仍有未合并工作，但 Beads 投影状态或 claim 元数据已经过期，诊断会显示 `state_inconsistent` 并提示运行 `archloop tasks repair-state <selector>`；若任务处于 failed 或 stale execution 状态，`archloop tasks recover <selector>` 也可能适用。`run --flow` 启动时会提前提醒宿主仓库存在 dirty source files；若已有 `waiting_for_merge` 批次，会先做 overlap 检查。非重叠脏文件不会阻塞：archLoop 会在干净的 integration worktree/branch 中验证 merge，并在落回宿主前再次确认不会覆盖脏文件。若输出显示 dirty 文件会被覆盖或冲突，任务会留在 `waiting_for_merge`，按列出的 blocking files 先 commit、stash 或 discard，再重新运行同一个 flow 即可恢复批次。
 
 ### 7.3 Flow 状态

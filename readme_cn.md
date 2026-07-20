@@ -255,6 +255,12 @@ archLoop 使用常规容器将宿主 worktree 挂载进沙箱，agent 在容器�
 
 ## Hub flow 脏工作区诊断
 
+Hub flow 默认使用 `--output auto`。能力足够的交互式 TTY 会显示共享的紧凑 run header、elapsed、durable logs 和最终 outcome。任务看板 flow 显示当前 batch 任务行；`prd-decomposition` 与 `triage` 显示 input preparation、draft、可选 refinement、finalization、mutation detection、approval、validation、apply proposal phases，并在交互 prompt 前暂停 live region。它不进入 alternate screen，也不显示原始 agent prose、tool 参数、百分比或 ETA；resize 与成功、失败、取消、异常清理都保持有界并恢复光标。重定向、CI、`TERM=dumb`、不支持 cursor control 或终端尺寸不安全时自动回退 plain；`NO_COLOR` 或 `--no-color` 只关闭 live view 颜色。
+
+所有 Hub flow 都可显式使用 `--output plain`。该模式让每条 lifecycle 记录各占一个物理行，字段顺序稳定、值会转义，不使用 ANSI 光标重写。任务看板仍输出五类任务计数、失败诊断和恢复动作；proposal flow 只输出 canonical phase/status，以及 applied、skipped、dependencies 计数，终态区分 `applied`、`no_change`、`cancelled`、`validation_failed`、`mutation_failed`、`failed`。显式 plain/JSON 为非交互模式，proposal 写入需要 `--yes`；auto TTY 保留 refinement、status、approval 和 guarded apply prompts。agent prose 与 tool 参数只保存在 Hub run directory。
+
+自动化消费可使用 `archloop run --flow <id> --output json`。stdout 只包含 schema version 1 JSONL；proposal 使用 `proposal_phase` 和 `run_completed` 记录同一组阶段与终态，不混入 prompt、人工装饰、ANSI、agent 启动文本或原始 agent 输出。应用/无变化退出 `0`，Ctrl+C 取消退出 `130`，SIGTERM 保留退出码 `143`，validation、mutation 或其他失败返回非零；消费者应忽略 version 1 的未知新增字段。
+
 `archloop run --flow no-review` 和 `archloop run --flow with-review` 启动时会提前提醒宿主仓库里的 dirty source files。若同一个 flow 已有未完成的 `waiting_for_merge` 批次，archLoop 会先恢复该批次，并在领取新任务前检查待合并分支是否会改到这些脏文件。
 
 非重叠脏文件不会阻塞 merge：archLoop 会在干净的 integration worktree/branch 中验证结果，并只在不会覆盖宿主脏文件时落回当前分支。若存在重叠，CLI 会列出具体 blocking files；先 commit、stash 或 discard 这些文件，再重新运行同一个 flow，archLoop 会继续恢复 `waiting_for_merge` 任务。

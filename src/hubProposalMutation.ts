@@ -1,4 +1,7 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { lstatSync, readFileSync, readlinkSync } from "node:fs";
+import { resolve } from "node:path";
 
 import { resolveBdExecutable } from "./resolveBdExecutable.js";
 
@@ -14,7 +17,29 @@ const TASK_STORE_JSON_KEYS = [
 export interface ProposalFlowRepoSnapshot {
   readonly head: string;
   readonly statusLines: readonly string[];
+  readonly trackedContentFingerprints?: readonly ProposalFlowTrackedContentFingerprint[];
 }
+
+export interface ProposalFlowTrackedContentFingerprint {
+  readonly path: string;
+  readonly indexEntries: readonly ProposalFlowIndexEntryFingerprint[];
+  readonly worktree: ProposalFlowWorktreeFingerprint;
+}
+
+export interface ProposalFlowIndexEntryFingerprint {
+  readonly mode: string;
+  readonly objectId: string;
+  readonly stage: number;
+}
+
+export type ProposalFlowWorktreeFingerprint =
+  | {
+      readonly kind: "file";
+      readonly executable: boolean;
+      readonly hash: string;
+    }
+  | { readonly kind: "symlink"; readonly hash: string }
+  | { readonly kind: "directory" | "missing" | "other" | "unreadable" };
 
 export interface ProposalFlowTaskStoreSnapshot {
   readonly tasks: readonly Record<string, unknown>[];
@@ -64,7 +89,7 @@ const runGitText = (
     stdio: ["ignore", "pipe", "pipe"],
     maxBuffer: GIT_EXEC_MAX_BUFFER,
     env,
-  }).trim();
+  }).trimEnd();
 
 const tryGitText = (
   cwd: string,
@@ -190,6 +215,120 @@ const statusLinesToPathMap = (
   return byPath;
 };
 
+const parseTrackedPathsFromNullStatus = (output: string): string[] => {
+  const records = output.split("\0");
+  const paths = new Set<string>();
+
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record || record.length < 4) {
+      continue;
+    }
+
+    const code = record.slice(0, 2);
+    const path = record.slice(3);
+    if (code !== "??" && code !== "!!" && path.length > 0) {
+      paths.add(path);
+    }
+
+    if (code.includes("R") || code.includes("C")) {
+      index += 1;
+    }
+  }
+
+  return [...paths].sort();
+};
+
+const readIndexEntriesByPath = (
+  cwd: string,
+  paths: readonly string[],
+  env: NodeJS.ProcessEnv,
+): Map<string, ProposalFlowIndexEntryFingerprint[]> => {
+  if (paths.length === 0) {
+    return new Map();
+  }
+
+  const output = runGitText(
+    cwd,
+    ["ls-files", "--stage", "-z", "--", ...paths],
+    env,
+  );
+  const entriesByPath = new Map<string, ProposalFlowIndexEntryFingerprint[]>();
+
+  for (const record of output.split("\0")) {
+    const separatorIndex = record.indexOf("\t");
+    if (separatorIndex < 0) {
+      continue;
+    }
+
+    const [mode, objectId, rawStage] = record
+      .slice(0, separatorIndex)
+      .split(" ");
+    const path = record.slice(separatorIndex + 1);
+    const stage = Number(rawStage);
+    if (!mode || !objectId || !path || !Number.isInteger(stage)) {
+      continue;
+    }
+
+    const entries = entriesByPath.get(path) ?? [];
+    entries.push({ mode, objectId, stage });
+    entriesByPath.set(path, entries);
+  }
+
+  for (const entries of entriesByPath.values()) {
+    entries.sort((left, right) => left.stage - right.stage);
+  }
+  return entriesByPath;
+};
+
+const hashContent = (content: string | Buffer): string =>
+  createHash("sha256").update(content).digest("hex");
+
+const captureWorktreeFingerprint = (
+  cwd: string,
+  path: string,
+): ProposalFlowWorktreeFingerprint => {
+  const absolutePath = resolve(cwd, path);
+
+  try {
+    const stats = lstatSync(absolutePath);
+    if (stats.isSymbolicLink()) {
+      return { kind: "symlink", hash: hashContent(readlinkSync(absolutePath)) };
+    }
+    if (stats.isFile()) {
+      return {
+        kind: "file",
+        executable: (stats.mode & 0o111) !== 0,
+        hash: hashContent(readFileSync(absolutePath)),
+      };
+    }
+    if (stats.isDirectory()) {
+      return { kind: "directory" };
+    }
+    return { kind: "other" };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { kind: "missing" };
+    }
+    return { kind: "unreadable" };
+  }
+};
+
+const captureTrackedContentFingerprints = (
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): ProposalFlowTrackedContentFingerprint[] => {
+  const nullStatus = runGitText(cwd, ["status", "--porcelain=v1", "-z"], env);
+  const paths = parseTrackedPathsFromNullStatus(nullStatus);
+  const indexEntriesByPath = readIndexEntriesByPath(cwd, paths, env);
+
+  return paths.map((path) => ({
+    path,
+    indexEntries: indexEntriesByPath.get(path) ?? [],
+    worktree: captureWorktreeFingerprint(cwd, path),
+  }));
+};
+
 const diffStringKeyedMaps = (
   before: ReadonlyMap<string, string>,
   after: ReadonlyMap<string, string>,
@@ -235,6 +374,16 @@ const diffStatusLines = (
     statusLinesToPathMap(afterLines),
   );
 
+const buildTrackedContentFingerprintMap = (
+  fingerprints: readonly ProposalFlowTrackedContentFingerprint[] | undefined,
+): Map<string, string> =>
+  new Map(
+    (fingerprints ?? []).map(({ path, indexEntries, worktree }) => [
+      path,
+      stableStringify({ indexEntries, worktree }),
+    ]),
+  );
+
 const buildTaskIdSnapshotMap = (
   tasks: readonly Record<string, unknown>[],
 ): Map<string, string> =>
@@ -276,6 +425,10 @@ export const captureProposalFlowStateSnapshot = (input: {
     repo: {
       head: tryGitText(input.cwd, ["rev-parse", "HEAD"], env) ?? "",
       statusLines,
+      trackedContentFingerprints: captureTrackedContentFingerprints(
+        input.cwd,
+        env,
+      ),
     },
     taskStore: { tasks },
   };
@@ -299,12 +452,23 @@ export const detectProposalFlowMutations = (
     before.repo.statusLines,
     after.repo.statusLines,
   );
-  if (hasKeyedDiff(workingTreeDiff)) {
+  const trackedContentDiff = diffStringKeyedMaps(
+    buildTrackedContentFingerprintMap(before.repo.trackedContentFingerprints),
+    buildTrackedContentFingerprintMap(after.repo.trackedContentFingerprints),
+  );
+  const changedPaths = [
+    ...new Set([...workingTreeDiff.changed, ...trackedContentDiff.changed]),
+  ].sort();
+  if (
+    workingTreeDiff.added.length > 0 ||
+    workingTreeDiff.removed.length > 0 ||
+    changedPaths.length > 0
+  ) {
     repoMutations.push({
       kind: "working_tree_changed",
       addedPaths: workingTreeDiff.added,
       removedPaths: workingTreeDiff.removed,
-      changedPaths: workingTreeDiff.changed,
+      changedPaths,
     });
   }
 

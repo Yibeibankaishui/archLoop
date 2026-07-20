@@ -1,6 +1,7 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 
 import { Output } from "./Output.js";
+import { isProposalPromptCancelledError } from "./errors.js";
 import { createHubProposalAgentInvoker } from "./hubProposalAgent.js";
 import {
   ensureHubAgentRolesConfigured,
@@ -16,9 +17,11 @@ import {
   type HubTriageOutcome,
 } from "./hubTriage.js";
 import {
+  createHubProposalPresentationEvent,
   runProposalSession,
   writeProposalSessionApplyResult,
   type ProposalAgentInvoker,
+  type HubProposalPresentationEvent,
   type ProposalSessionInteraction,
   type RunProposalSessionResult,
 } from "./hubProposalSession.js";
@@ -937,7 +940,7 @@ export type RunTriageProposalFlowResult =
       readonly outcome: "cancelled";
       readonly runId: string;
       readonly runDir: string;
-      readonly phase: "approval" | "refinement";
+      readonly phase: "approval" | "refinement" | "apply";
     }
   | {
       readonly outcome: "failed";
@@ -961,6 +964,8 @@ export interface RunTriageProposalFlowInput {
   readonly isTTY?: boolean;
   readonly agentInvoker?: ProposalAgentInvoker;
   readonly onProposalReady?: (proposal: TriageProposal) => Promise<void>;
+  readonly onPresentationEvent?: (event: HubProposalPresentationEvent) => void;
+  readonly signal?: AbortSignal;
   readonly applyConfirmation?: (
     decision: TriageProposalDecision,
     reason: TriageConfirmationReason,
@@ -1026,6 +1031,34 @@ const resolveDecisionsToApply = async (
 export const runTriageProposalFlow = async (
   input: RunTriageProposalFlowInput,
 ): Promise<RunTriageProposalFlowResult> => {
+  let presentationSequence = 0;
+  let presentationRunDir = "";
+  const acceptPresentationEvent = (
+    event: HubProposalPresentationEvent,
+  ): void => {
+    presentationSequence = event.sequence;
+    presentationRunDir = event.runDir;
+    input.onPresentationEvent?.(event);
+  };
+  const emitPresentationEvent = (
+    runId: string,
+    phase: HubProposalPresentationEvent["phase"],
+    status: HubProposalPresentationEvent["status"],
+    details: Pick<HubProposalPresentationEvent, "diagnostic" | "data"> = {},
+  ): void => {
+    presentationSequence += 1;
+    input.onPresentationEvent?.(
+      createHubProposalPresentationEvent({
+        runId,
+        runDir: presentationRunDir,
+        flowId: "triage",
+        sequence: presentationSequence,
+        phase,
+        status,
+        ...details,
+      }),
+    );
+  };
   const env = input.env ?? process.env;
   const preparedContext = prepareTriageContext({
     cwd: input.cwd,
@@ -1066,6 +1099,7 @@ export const runTriageProposalFlow = async (
       cwd: input.cwd,
       roleEntry: triageRole,
       env: input.env,
+      signal: input.signal,
     });
 
   const session = await runProposalSession({
@@ -1084,6 +1118,8 @@ export const runTriageProposalFlow = async (
     refinements: input.refinements,
     approve: resolveProposalSessionApproval(input),
     oneShot: input.yes,
+    onPresentationEvent: acceptPresentationEvent,
+    signal: input.signal,
   });
 
   if (session.outcome === "cancelled") {
@@ -1110,6 +1146,7 @@ export const runTriageProposalFlow = async (
   const { proposal: sanitized, skippedDependencies } =
     sanitizeTriageProposalDependencies(proposal, boardTaskIds);
 
+  emitPresentationEvent(session.runId, "validation", "started");
   try {
     validateTriageProposal(sanitized, {
       knownTaskIds,
@@ -1123,21 +1160,62 @@ export const runTriageProposalFlow = async (
       status: "validation_failed",
       reason,
     });
+    emitPresentationEvent(session.runId, "validation", "failed", {
+      diagnostic: reason,
+    });
     return toFailedFlowResult(session, reason);
   }
+  emitPresentationEvent(session.runId, "validation", "completed");
 
-  const { decisionsToApply, skippedDecisions } = await resolveDecisionsToApply(
-    sanitized,
-    input,
-  );
+  let decisionsToApply: Set<string>;
+  let skippedDecisions: {
+    readonly taskId: string;
+    readonly reason: SkippedTriageDecisionReason;
+  }[];
+  try {
+    ({ decisionsToApply, skippedDecisions } = await resolveDecisionsToApply(
+      sanitized,
+      input,
+    ));
+  } catch (error) {
+    if (!isProposalPromptCancelledError(error)) {
+      throw error;
+    }
+    writeProposalSessionApplyResult(session.runDir, {
+      status: "cancelled",
+      phase: "apply",
+    });
+    emitPresentationEvent(session.runId, "apply", "cancelled");
+    return {
+      outcome: "cancelled",
+      runId: session.runId,
+      runDir: session.runDir,
+      phase: "apply",
+    };
+  }
 
-  const applied = applyTriageProposal({
-    cwd: input.cwd,
-    proposal: sanitized,
-    decisionsToApply,
-    proposalRunId: session.runId,
-    env: input.env,
-  });
+  emitPresentationEvent(session.runId, "apply", "started");
+  let applied: ApplyTriageProposalResult;
+  try {
+    applied = applyTriageProposal({
+      cwd: input.cwd,
+      proposal: sanitized,
+      decisionsToApply,
+      proposalRunId: session.runId,
+      env: input.env,
+    });
+  } catch (error) {
+    const reason =
+      error instanceof Error ? error.message : "Triage proposal apply failed.";
+    writeProposalSessionApplyResult(session.runDir, {
+      status: "apply_failed",
+      reason,
+    });
+    emitPresentationEvent(session.runId, "apply", "failed", {
+      diagnostic: reason,
+    });
+    return toFailedFlowResult(session, reason);
+  }
 
   writeProposalSessionApplyResult(session.runDir, {
     status: "applied",
@@ -1145,6 +1223,20 @@ export const runTriageProposalFlow = async (
     skippedDecisions,
     dependencyCount: applied.dependencies.length,
   });
+  emitPresentationEvent(
+    session.runId,
+    "apply",
+    applied.appliedDecisions.length === 0 && applied.dependencies.length === 0
+      ? "no_change"
+      : "completed",
+    {
+      data: {
+        applied: applied.appliedDecisions.length,
+        skipped: skippedDecisions.length,
+        dependencies: applied.dependencies.length,
+      },
+    },
+  );
 
   return {
     outcome: "applied",

@@ -2,7 +2,7 @@ import * as clack from "@clack/prompts";
 import { Effect } from "effect";
 
 import { Display } from "./Display.js";
-import { TaskBoardError } from "./errors.js";
+import { ProposalPromptCancelledError, TaskBoardError } from "./errors.js";
 import { promptHubAgentRoleSetup } from "./hubAgentConfigPrompt.js";
 import type { ValidatedHubFlowInput } from "./hubFlowInput.js";
 import {
@@ -30,6 +30,7 @@ import {
   type TriageProposalFlowDisplayOutcome,
 } from "./hubTriageProposalCli.js";
 import type { RunTriageProposalFlowResult } from "./hubTriageProposal.js";
+import type { HubProposalPresentationEvent } from "./hubProposalSession.js";
 
 export type HubProposalFlowExecutionResult =
   | {
@@ -126,7 +127,7 @@ const promptPrdHubStatusMode = async (
     initialValue: "inbox",
   });
   if (clack.isCancel(selected)) {
-    throw new TaskBoardError({
+    throw new ProposalPromptCancelledError({
       message: "PRD task creation cancelled.",
     });
   }
@@ -144,14 +145,39 @@ const promptPrdHubStatusMode = async (
   return hubStatusMode;
 };
 
-const createPrdDecompositionInteraction = (): {
-  readonly onAssistantMessage: typeof displayProposalAgentPhase;
-  readonly requestRefinement: typeof promptPrdDecompositionRefinement;
-  readonly requestApproval: typeof promptPrdDecompositionApprovalWithProposal;
-} => ({
-  onAssistantMessage: displayProposalAgentPhase,
-  requestRefinement: promptPrdDecompositionRefinement,
-  requestApproval: promptPrdDecompositionApprovalWithProposal,
+const withPromptLifecycle = async <T>(
+  prompt: () => Promise<T>,
+  beforePrompt?: () => void,
+  afterPrompt?: () => void,
+): Promise<T> => {
+  beforePrompt?.();
+  try {
+    return await prompt();
+  } finally {
+    afterPrompt?.();
+  }
+};
+
+const createPrdDecompositionInteraction = (input: {
+  readonly showAgentMessages: boolean;
+  readonly beforePrompt?: () => void;
+  readonly afterPrompt?: () => void;
+}) => ({
+  ...(input.showAgentMessages
+    ? { onAssistantMessage: displayProposalAgentPhase }
+    : {}),
+  requestRefinement: () =>
+    withPromptLifecycle(
+      promptPrdDecompositionRefinement,
+      input.beforePrompt,
+      input.afterPrompt,
+    ),
+  requestApproval: (proposal: PrdDecompositionProposal) =>
+    withPromptLifecycle(
+      () => promptPrdDecompositionApprovalWithProposal(proposal),
+      input.beforePrompt,
+      input.afterPrompt,
+    ),
 });
 
 export const runPrdDecompositionProposalFlowFromCli = async (input: {
@@ -161,6 +187,12 @@ export const runPrdDecompositionProposalFlowFromCli = async (input: {
   readonly hubStatusMode?: PrdHubStatusMode;
   readonly dependencyOverride?: string;
   readonly isTTY?: boolean;
+  readonly interactive?: boolean;
+  readonly showDecoratedOutput?: boolean;
+  readonly onPresentationEvent?: (event: HubProposalPresentationEvent) => void;
+  readonly beforePrompt?: () => void;
+  readonly afterPrompt?: () => void;
+  readonly signal?: AbortSignal;
 }): Promise<RunPrdDecompositionFlowResult> => {
   let latestProposal: PrdDecompositionProposal | undefined;
 
@@ -178,15 +210,39 @@ export const runPrdDecompositionProposalFlowFromCli = async (input: {
                 message: "PRD decomposition proposal was not ready.",
               });
             }
-            return promptPrdHubStatusMode(latestProposal);
+            const proposal = latestProposal;
+            return withPromptLifecycle(
+              () => promptPrdHubStatusMode(proposal),
+              input.beforePrompt,
+              input.afterPrompt,
+            );
           },
     dependencyOverride: input.dependencyOverride,
-    interaction: input.yes ? undefined : createPrdDecompositionInteraction(),
-    configureHubAgentRole: promptHubAgentRoleSetup,
-    isTTY: input.isTTY,
+    interaction:
+      input.interactive === false || input.yes
+        ? undefined
+        : createPrdDecompositionInteraction({
+            showAgentMessages: input.showDecoratedOutput !== false,
+            beforePrompt: input.beforePrompt,
+            afterPrompt: input.afterPrompt,
+          }),
+    configureHubAgentRole:
+      input.interactive === false
+        ? undefined
+        : (role) =>
+            withPromptLifecycle(
+              () => promptHubAgentRoleSetup(role),
+              input.beforePrompt,
+              input.afterPrompt,
+            ),
+    isTTY: input.interactive === false ? false : input.isTTY,
+    onPresentationEvent: input.onPresentationEvent,
+    signal: input.signal,
     onProposalReady: async (proposal) => {
       latestProposal = proposal;
-      await displayPrdProposalWarnings(proposal);
+      if (input.showDecoratedOutput !== false) {
+        await displayPrdProposalWarnings(proposal);
+      }
     },
   });
 };
@@ -229,6 +285,12 @@ export const runHubProposalFlowFromCli = async (input: {
   readonly isTTY?: boolean;
   readonly hubStatusMode?: PrdHubStatusMode;
   readonly dependencyOverride?: string;
+  readonly interactive?: boolean;
+  readonly showDecoratedOutput?: boolean;
+  readonly onPresentationEvent?: (event: HubProposalPresentationEvent) => void;
+  readonly beforePrompt?: () => void;
+  readonly afterPrompt?: () => void;
+  readonly signal?: AbortSignal;
 }): Promise<HubProposalFlowExecutionResult> => {
   const flowId = input.validatedInput.flowId;
   switch (flowId) {
@@ -242,6 +304,12 @@ export const runHubProposalFlowFromCli = async (input: {
           hubStatusMode: input.hubStatusMode,
           dependencyOverride: input.dependencyOverride,
           isTTY: input.isTTY,
+          interactive: input.interactive,
+          showDecoratedOutput: input.showDecoratedOutput,
+          onPresentationEvent: input.onPresentationEvent,
+          beforePrompt: input.beforePrompt,
+          afterPrompt: input.afterPrompt,
+          signal: input.signal,
         }),
       };
     case "triage": {
@@ -263,6 +331,12 @@ export const runHubProposalFlowFromCli = async (input: {
           query,
           yes: input.yes,
           isTTY: input.isTTY,
+          interactive: input.interactive,
+          showDecoratedOutput: input.showDecoratedOutput,
+          onPresentationEvent: input.onPresentationEvent,
+          beforePrompt: input.beforePrompt,
+          afterPrompt: input.afterPrompt,
+          signal: input.signal,
         }),
       };
     }

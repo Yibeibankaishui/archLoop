@@ -191,6 +191,42 @@ describe("captureProposalFlowStateSnapshot", () => {
 });
 
 describe("detectProposalFlowMutations", () => {
+  it("reports further content changes to an already dirty tracked file", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "proposal-mutation-dirty-tracked-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "committed", "initial commit");
+    await writeFile(join(repoDir, "hello.txt"), "dirty before session");
+
+    const before = captureProposalFlowStateSnapshot({ cwd: repoDir });
+    const porcelainBefore = (
+      await execAsync("git status --porcelain=v1", { cwd: repoDir })
+    ).stdout.trimEnd();
+
+    await writeFile(join(repoDir, "hello.txt"), "changed during session");
+    const after = captureProposalFlowStateSnapshot({ cwd: repoDir });
+    const porcelainAfter = (
+      await execAsync("git status --porcelain=v1", { cwd: repoDir })
+    ).stdout.trimEnd();
+
+    expect(porcelainBefore).toBe(" M hello.txt");
+    expect(porcelainAfter).toBe(" M hello.txt");
+    expect(after.repo.statusLines).toEqual(before.repo.statusLines);
+
+    const report = detectProposalFlowMutations(before, after);
+
+    expect(report.hasMutations).toBe(true);
+    expect(report.repoMutations).toEqual([
+      {
+        kind: "working_tree_changed",
+        addedPaths: [],
+        removedPaths: [],
+        changedPaths: ["hello.txt"],
+      },
+    ]);
+  });
+
   it("reports no mutations for identical snapshots", () => {
     const snapshot = {
       repo: { head: "abc", statusLines: [] },
@@ -315,6 +351,7 @@ describe("runProposalSession mutation detection", () => {
       "proposal-repo-mutation-hub-",
     );
     const mutatedPath = join(repoDir, "agent-write.txt");
+    const presentationEvents: Array<{ phase: string; status: string }> = [];
 
     const result = await runProposalSession({
       flowId: "prd-decomposition",
@@ -342,6 +379,7 @@ describe("runProposalSession mutation detection", () => {
       ),
       oneShot: true,
       approve: true,
+      onPresentationEvent: (event) => presentationEvents.push(event),
     });
 
     expect(result.outcome).toBe("failed");
@@ -361,6 +399,14 @@ describe("runProposalSession mutation detection", () => {
       ),
     ) as { status: string };
     expect(applyResult.status).toBe("blocked_mutations");
+    expect(
+      presentationEvents.map(({ phase, status }) => [phase, status]),
+    ).toContainEqual(["mutation_detection", "failed"]);
+    expect(
+      presentationEvents
+        .filter(({ phase }) => phase === "finalization")
+        .map(({ status }) => status),
+    ).toEqual(["started", "completed"]);
   });
 
   it("fails before apply when the local task store is mutated and leaves changes in place", async () => {

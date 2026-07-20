@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
+import { ProposalPromptCancelledError } from "./errors.js";
 
 import { readHubFlowPrompt } from "./hubFlows.js";
 import {
@@ -687,7 +688,6 @@ describe("applyTriageProposal", () => {
     process.env.BD_UPDATE_ARGS_FILE = updateArgsFile;
     process.env.BD_COMMENT_ARGS_FILE = commentArgsFile;
     process.env.BD_DEP_ARGS_FILE = depArgsFile;
-
     try {
       const result = applyTriageProposal({
         cwd: repoDir,
@@ -814,6 +814,11 @@ describe("runTriageProposalFlow", () => {
         }),
       ],
     });
+    const presentationEvents: Array<{
+      phase: string;
+      status: string;
+      data?: Readonly<Record<string, unknown>>;
+    }> = [];
 
     const previousPath = process.env.PATH;
     const previousBdPath = process.env.ARCHLOOP_BD_PATH;
@@ -836,6 +841,7 @@ describe("runTriageProposalFlow", () => {
             triage: { provider: "cursor", model: "auto" },
           },
         },
+        onPresentationEvent: (event) => presentationEvents.push(event),
       });
 
       expect(result.outcome).toBe("applied");
@@ -845,6 +851,20 @@ describe("runTriageProposalFlow", () => {
       expect(result.appliedDecisions).toEqual(["bd-1"]);
       expect(result.skippedDecisions).toEqual([
         { taskId: "bd-2", reason: "unconfirmed" },
+      ]);
+      expect(
+        presentationEvents
+          .filter(({ phase }) => phase === "validation" || phase === "apply")
+          .map(({ phase, status, data }) => ({ phase, status, data })),
+      ).toEqual([
+        { phase: "validation", status: "started", data: undefined },
+        { phase: "validation", status: "completed", data: undefined },
+        { phase: "apply", status: "started", data: undefined },
+        {
+          phase: "apply",
+          status: "completed",
+          data: { applied: 1, skipped: 1, dependencies: 0 },
+        },
       ]);
     } finally {
       process.env.PATH = previousPath;
@@ -924,6 +944,83 @@ describe("runTriageProposalFlow", () => {
     }
   });
 
+  it("cancels before apply when a guarded decision prompt is interrupted", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "triage-apply-cancel-"));
+    await initRepo(hostDir);
+    seedHubTaskStoreMetadata(hostDir);
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const stateFile = join(hostDir, "bd-state.json");
+    await writeFile(
+      stateFile,
+      JSON.stringify(
+        [
+          {
+            id: "bd-1",
+            title: "Guarded task",
+            status: "open",
+            labels: ["needs-triage"],
+            metadata: { hubStatus: "inbox" },
+            description: "Requires a guarded decision.",
+          },
+        ],
+        null,
+        2,
+      ),
+    );
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      createBdScript({
+        stateFile,
+        updateArgsFile: join(hostDir, "update.txt"),
+        commentArgsFile: join(hostDir, "comment.txt"),
+        depArgsFile: join(hostDir, "dep.txt"),
+      }),
+    );
+    await chmod(bdPath, 0o755);
+    const previousPath = process.env.PATH;
+    const previousBdPath = process.env.ARCHLOOP_BD_PATH;
+    process.env.PATH = `${binDir}:${previousPath ?? ""}`;
+    process.env.ARCHLOOP_BD_PATH = bdPath;
+    process.env.BD_STATE_FILE = stateFile;
+    const events: Array<{ phase: string; status: string }> = [];
+
+    try {
+      const result = await runTriageProposalFlow({
+        cwd: hostDir,
+        hubProjectDir: join(hostDir, "hub-project"),
+        taskIds: ["bd-1"],
+        approve: true,
+        agentInvoker: createFakeInvoker(
+          sampleProposal({
+            decisions: [
+              sampleDecision({ outcome: "wontfix", confidence: "high" }),
+            ],
+          }),
+        ),
+        hubAgentConfig: {
+          roles: { triage: { provider: "cursor", model: "auto" } },
+        },
+        applyConfirmation: async () => {
+          throw new ProposalPromptCancelledError({
+            message: "Guarded apply cancelled.",
+          });
+        },
+        onPresentationEvent: (event) => events.push(event),
+      });
+
+      expect(result).toMatchObject({ outcome: "cancelled", phase: "apply" });
+      expect(events.at(-1)).toEqual(
+        expect.objectContaining({ phase: "apply", status: "cancelled" }),
+      );
+    } finally {
+      process.env.PATH = previousPath;
+      process.env.ARCHLOOP_BD_PATH = previousBdPath;
+      delete process.env.BD_STATE_FILE;
+    }
+  });
+
   it("fails validation when finalization references unknown task ids", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "triage-proposal-invalid-"));
     await initRepo(hostDir);
@@ -994,6 +1091,69 @@ describe("runTriageProposalFlow", () => {
       process.env.PATH = previousPath;
       process.env.ARCHLOOP_BD_PATH = previousBdPath;
       delete process.env.BD_STATE_FILE;
+    }
+  });
+
+  it("emits an apply failure when a triage task update fails", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "triage-apply-fail-"));
+    await initRepo(hostDir);
+    seedHubTaskStoreMetadata(hostDir);
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const task = JSON.stringify([
+      {
+        id: "bd-1",
+        title: "Ready task",
+        status: "open",
+        labels: ["needs-triage"],
+        metadata: { hubStatus: "inbox" },
+        description: "Ready for triage.",
+      },
+    ]);
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "list" ] || [ "$1" = "show" ]; then printf '%s\\n' '${task}'; exit 0; fi
+if [ "$1" = "update" ]; then printf 'task store locked\\n' >&2; exit 1; fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+    const previousPath = process.env.PATH;
+    const previousBdPath = process.env.ARCHLOOP_BD_PATH;
+    process.env.PATH = `${binDir}:${previousPath ?? ""}`;
+    process.env.ARCHLOOP_BD_PATH = bdPath;
+    const events: Array<{
+      phase: string;
+      status: string;
+      diagnostic?: string;
+    }> = [];
+
+    try {
+      const result = await runTriageProposalFlow({
+        cwd: hostDir,
+        hubProjectDir: join(hostDir, "hub-project"),
+        taskIds: ["bd-1"],
+        yes: true,
+        agentInvoker: createFakeInvoker(
+          sampleProposal({ decisions: [sampleDecision()] }),
+        ),
+        hubAgentConfig: {
+          roles: { triage: { provider: "cursor", model: "auto" } },
+        },
+        onPresentationEvent: (event) => events.push(event),
+      });
+
+      expect(result.outcome).toBe("failed");
+      expect(events.at(-1)).toMatchObject({
+        phase: "apply",
+        status: "failed",
+        diagnostic: expect.stringMatching(/task store locked/i),
+      });
+    } finally {
+      process.env.PATH = previousPath;
+      process.env.ARCHLOOP_BD_PATH = previousBdPath;
     }
   });
 

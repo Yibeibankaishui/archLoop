@@ -1,6 +1,7 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 
 import { Output } from "./Output.js";
+import { isProposalPromptCancelledError } from "./errors.js";
 import type { ValidatedPrdFileFlowInput } from "./hubFlowInput.js";
 import { mapFromPrdArgToFlowInput } from "./hubFlowInput.js";
 import { createHubProposalAgentInvoker } from "./hubProposalAgent.js";
@@ -11,9 +12,11 @@ import {
 } from "./hubAgentConfig.js";
 import { readHubFlowPrompt } from "./hubFlows.js";
 import {
+  createHubProposalPresentationEvent,
   runProposalSession,
   writeProposalSessionApplyResult,
   type ProposalAgentInvoker,
+  type HubProposalPresentationEvent,
   type ProposalSessionInteraction,
   type RunProposalSessionResult,
 } from "./hubProposalSession.js";
@@ -694,7 +697,7 @@ export type RunPrdDecompositionFlowResult =
       readonly outcome: "cancelled";
       readonly runId: string;
       readonly runDir: string;
-      readonly phase: "approval" | "refinement";
+      readonly phase: "approval" | "refinement" | "apply";
     }
   | {
       readonly outcome: "failed";
@@ -722,6 +725,8 @@ export interface RunPrdDecompositionFlowInput {
   readonly onProposalReady?: (
     proposal: PrdDecompositionProposal,
   ) => Promise<void>;
+  readonly onPresentationEvent?: (event: HubProposalPresentationEvent) => void;
+  readonly signal?: AbortSignal;
 }
 
 const determineHubStatusMode = async (
@@ -781,6 +786,34 @@ export const resolveProposalSessionApproval = (
 export const runPrdDecompositionFlow = async (
   input: RunPrdDecompositionFlowInput,
 ): Promise<RunPrdDecompositionFlowResult> => {
+  let presentationSequence = 0;
+  let presentationRunDir = "";
+  const acceptPresentationEvent = (
+    event: HubProposalPresentationEvent,
+  ): void => {
+    presentationSequence = event.sequence;
+    presentationRunDir = event.runDir;
+    input.onPresentationEvent?.(event);
+  };
+  const emitPresentationEvent = (
+    runId: string,
+    phase: HubProposalPresentationEvent["phase"],
+    status: HubProposalPresentationEvent["status"],
+    details: Pick<HubProposalPresentationEvent, "diagnostic" | "data"> = {},
+  ): void => {
+    presentationSequence += 1;
+    input.onPresentationEvent?.(
+      createHubProposalPresentationEvent({
+        runId,
+        runDir: presentationRunDir,
+        flowId: "prd-decomposition",
+        sequence: presentationSequence,
+        phase,
+        status,
+        ...details,
+      }),
+    );
+  };
   const validatedInput = mapFromPrdArgToFlowInput(input.cwd, input.prdRef);
   const preparedContext = preparePrdDecompositionContext(
     validatedInput,
@@ -812,6 +845,7 @@ export const runPrdDecompositionFlow = async (
       cwd: input.cwd,
       roleEntry: planningRole,
       env: input.env,
+      signal: input.signal,
     });
 
   const session = await runProposalSession({
@@ -830,6 +864,8 @@ export const runPrdDecompositionFlow = async (
     refinements: input.refinements,
     approve: resolveProposalSessionApproval(input),
     oneShot: input.yes,
+    onPresentationEvent: acceptPresentationEvent,
+    signal: input.signal,
   });
 
   if (session.outcome === "cancelled") {
@@ -850,8 +886,27 @@ export const runPrdDecompositionFlow = async (
     input.dependencyOverride,
   );
   await input.onProposalReady?.(proposal);
-  const hubStatusMode = await determineHubStatusMode(input);
+  let hubStatusMode: PrdHubStatusMode;
+  try {
+    hubStatusMode = await determineHubStatusMode(input);
+  } catch (error) {
+    if (!isProposalPromptCancelledError(error)) {
+      throw error;
+    }
+    writeProposalSessionApplyResult(session.runDir, {
+      status: "cancelled",
+      phase: "apply",
+    });
+    emitPresentationEvent(session.runId, "apply", "cancelled");
+    return {
+      outcome: "cancelled",
+      runId: session.runId,
+      runDir: session.runDir,
+      phase: "apply",
+    };
+  }
 
+  emitPresentationEvent(session.runId, "validation", "started");
   try {
     validatePrdDecompositionProposal(proposal, {
       unattendedReadyStates: hubStatusMode === "classified_ready",
@@ -865,22 +920,47 @@ export const runPrdDecompositionFlow = async (
       status: "validation_failed",
       reason,
     });
+    emitPresentationEvent(session.runId, "validation", "failed", {
+      diagnostic: reason,
+    });
     return toFailedFlowResult(session, reason);
   }
+  emitPresentationEvent(session.runId, "validation", "completed");
 
-  const applied = applyPrdDecompositionProposal({
-    cwd: input.cwd,
-    proposal,
-    hubStatusMode,
-    proposalRunId: session.runId,
-    env: input.env,
-  });
+  emitPresentationEvent(session.runId, "apply", "started");
+  let applied: ApplyPrdDecompositionProposalResult;
+  try {
+    applied = applyPrdDecompositionProposal({
+      cwd: input.cwd,
+      proposal,
+      hubStatusMode,
+      proposalRunId: session.runId,
+      env: input.env,
+    });
+  } catch (error) {
+    const reason =
+      error instanceof Error ? error.message : "PRD task apply failed.";
+    writeProposalSessionApplyResult(session.runDir, {
+      status: "apply_failed",
+      reason,
+    });
+    emitPresentationEvent(session.runId, "apply", "failed", {
+      diagnostic: reason,
+    });
+    return toFailedFlowResult(session, reason);
+  }
 
   writeProposalSessionApplyResult(session.runDir, {
     status: "applied",
     hubStatusMode,
     taskIds: applied.tasks.map((task) => task.id),
     dependencyCount: applied.dependencies.length,
+  });
+  emitPresentationEvent(session.runId, "apply", "completed", {
+    data: {
+      applied: applied.tasks.length,
+      dependencies: applied.dependencies.length,
+    },
   });
 
   return {

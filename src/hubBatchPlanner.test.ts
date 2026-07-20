@@ -592,6 +592,30 @@ describe("hubBatchPlanner", () => {
     expect(result.selectedTasks.map((task) => task.id)).toEqual(["bd-first"]);
   });
 
+  it("propagates an aborted planned planner instead of falling back", async () => {
+    const controller = new AbortController();
+    const reason = Object.assign(new Error("Run cancelled by SIGINT"), {
+      name: "AbortError",
+      code: "ABORT_ERR",
+    });
+
+    await expect(
+      planHubFlowBatch({
+        flowId: "no-review",
+        cwd: "/tmp/repo",
+        runDir: "/tmp/run",
+        candidates: [readyTask("bd-first"), readyTask("bd-second")],
+        batchStrategy: "planned",
+        maxTasks: 3,
+        signal: controller.signal,
+        batchPlanner: async () => {
+          controller.abort(reason);
+          throw reason;
+        },
+      }),
+    ).rejects.toBe(reason);
+  });
+
   it("falls back to conservative for malformed planned planner output", async () => {
     const result = await planHubFlowBatch({
       flowId: "no-review",

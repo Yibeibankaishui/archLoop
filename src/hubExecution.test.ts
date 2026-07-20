@@ -6,7 +6,11 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { claimHubTask } from "./taskBoard.js";
 import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
-import { createHubRunContext, resolveHubRunDirectory } from "./hubExecution.js";
+import {
+  createHubRunContext,
+  observeHubRunEvents,
+  resolveHubRunDirectory,
+} from "./hubExecution.js";
 
 const execAsync = promisify(exec);
 
@@ -36,6 +40,60 @@ const readJsonl = async (path: string): Promise<unknown[]> => {
 };
 
 describe("Hub run storage", () => {
+  it("persists events even when a presentation observer throws", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-run-observer-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "abc",
+    );
+
+    const context = observeHubRunEvents(
+      () => {
+        throw new Error("renderer failed");
+      },
+      () =>
+        createHubRunContext({
+          cwd: repoDir,
+          hubProjectDir,
+          branch: "feature/observer-isolation",
+        }),
+    );
+
+    const runEvents = await readJsonl(join(context.eventsDir, "run.jsonl"));
+    const batchEvents = await readJsonl(join(context.eventsDir, "batch.jsonl"));
+    expect(runEvents).toHaveLength(1);
+    expect(batchEvents).toHaveLength(1);
+  });
+
+  it("isolates rejected async presentation observers", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-run-async-observer-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const context = observeHubRunEvents(
+      async () => {
+        throw new Error("async renderer failed");
+      },
+      () =>
+        createHubRunContext({
+          cwd: repoDir,
+          hubProjectDir: join(repoDir, "hub-project"),
+          branch: "feature/async-observer-isolation",
+        }),
+    );
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(await readJsonl(join(context.eventsDir, "run.jsonl"))).toHaveLength(
+      1,
+    );
+  });
+
   it("creates run and batch event records in the Hub run directory", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-run-"));
     await initRepo(repoDir);
@@ -49,11 +107,18 @@ describe("Hub run storage", () => {
       "projects",
       "abc",
     );
-    const context = createHubRunContext({
-      cwd: repoDir,
-      hubProjectDir,
-      branch: "feature/issue-69",
-    });
+    const observedEvents: unknown[] = [];
+    const context = observeHubRunEvents(
+      (event) => {
+        observedEvents.push(event);
+      },
+      () =>
+        createHubRunContext({
+          cwd: repoDir,
+          hubProjectDir,
+          branch: "feature/issue-69",
+        }),
+    );
 
     expect(context.runId).toMatch(/^run-/);
     expect(context.batchId).toMatch(/^batch-/);
@@ -68,13 +133,18 @@ describe("Hub run storage", () => {
       type: "run_started",
       branch: "feature/issue-69",
       runId: context.runId,
+      eventId: `${context.runId}:1`,
+      sequence: 1,
     });
     expect(batchEvents[0]).toMatchObject({
       type: "batch_started",
       branch: "feature/issue-69",
       runId: context.runId,
       batchId: context.batchId,
+      eventId: `${context.runId}:2`,
+      sequence: 2,
     });
+    expect(observedEvents).toEqual([runEvents[0], batchEvents[0]]);
   });
 });
 

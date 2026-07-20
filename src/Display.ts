@@ -25,6 +25,7 @@ export type DisplayEntry =
       readonly messages: ReadonlyArray<string>;
     }
   | { readonly _tag: "text"; readonly message: string }
+  | { readonly _tag: "plain"; readonly message: string }
   | {
       readonly _tag: "toolCall";
       readonly name: string;
@@ -52,6 +53,8 @@ export interface DisplayService {
   ) => Effect.Effect<A, E, R>;
 
   readonly text: (message: string) => Effect.Effect<void>;
+
+  readonly plain: (message: string) => Effect.Effect<void>;
 
   readonly toolCall: (
     name: string,
@@ -117,6 +120,12 @@ export const SilentDisplay = {
         Ref.update(ref, (entries) => [
           ...entries,
           { _tag: "text" as const, message },
+        ]),
+
+      plain: (message) =>
+        Ref.update(ref, (entries) => [
+          ...entries,
+          { _tag: "plain" as const, message },
         ]),
 
       toolCall: (name, formattedArgs) =>
@@ -188,6 +197,8 @@ export const FileDisplay = {
             }),
 
           text: (message) => appendToLog(message),
+
+          plain: (message) => appendToLog(message),
 
           toolCall: (name, formattedArgs) =>
             appendToLog(`${name}(${formattedArgs})`),
@@ -262,6 +273,8 @@ export const ClackDisplay = {
       ),
 
     text: (message) => Effect.sync(() => clack.log.message(message)),
+
+    plain: (message) => Effect.sync(() => console.log(message)),
 
     toolCall: (name, formattedArgs) =>
       Effect.sync(() =>

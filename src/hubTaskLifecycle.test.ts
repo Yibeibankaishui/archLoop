@@ -245,6 +245,8 @@ describe("Hub task lifecycle", () => {
         taskId: "bd-started",
         branch: "archloop/bd-started-started-task",
         createdAt: "2026-06-19T10:01:00Z",
+        eventId: "run-started:1",
+        sequence: 1,
         status: "implementing",
         claim: {
           runId: "run-started",

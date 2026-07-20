@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { appendFileSync, mkdirSync } from "node:fs";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import {
@@ -87,6 +88,10 @@ export interface HubBatchPlannedEvent {
   readonly flowId: string;
   readonly createdAt: string;
   readonly taskIds: readonly string[];
+  readonly tasks?: readonly {
+    readonly taskId: string;
+    readonly title: string;
+  }[];
   readonly batchStrategyRequested?: string;
   readonly batchStrategyUsed?: string;
   readonly maxTasks?: number;
@@ -178,6 +183,35 @@ export interface HubTaskEvent {
   };
 }
 
+type HubRunEventData =
+  | HubRunStartedEvent
+  | HubRunCompletedEvent
+  | HubBatchStartedEvent
+  | HubBatchPlannedEvent
+  | HubBatchMergeSelectionEvent
+  | HubBatchMergeStartedEvent
+  | HubBatchMergeCompletedEvent
+  | HubTaskEvent;
+
+export type HubRunEvent = HubRunEventData & {
+  readonly eventId: string;
+  readonly sequence: number;
+};
+
+export type HubRunEventObserver = (
+  event: HubRunEvent,
+) => void | PromiseLike<void>;
+
+const hubRunEventObserver = new AsyncLocalStorage<HubRunEventObserver>();
+
+export const observeHubRunEvents = <T>(
+  observer: HubRunEventObserver | undefined,
+  operation: () => T,
+): T =>
+  observer === undefined
+    ? operation()
+    : hubRunEventObserver.run(observer, operation);
+
 const readObject = (value: unknown): Record<string, unknown> =>
   value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -244,13 +278,59 @@ const writeJsonl = (path: string, record: unknown): void => {
   appendFileSync(path, `${JSON.stringify(record)}\n`, "utf8");
 };
 
-const appendHubEvent = <T>(
+const hubRunEventSequences = new Map<string, number>();
+
+const readPersistedHubRunEventSequence = (eventsDir: string): number => {
+  let eventCount = 0;
+  let maximumSequence = 0;
+  for (const filename of ["run.jsonl", "batch.jsonl", "task.jsonl"]) {
+    const path = join(eventsDir, filename);
+    if (!existsSync(path)) {
+      continue;
+    }
+    for (const line of readFileSync(path, "utf8").split("\n")) {
+      if (line.length === 0) {
+        continue;
+      }
+      eventCount += 1;
+      try {
+        const parsed = JSON.parse(line) as { readonly sequence?: unknown };
+        if (typeof parsed.sequence === "number") {
+          maximumSequence = Math.max(maximumSequence, parsed.sequence);
+        }
+      } catch {
+        // Existing event readers remain responsible for reporting corrupt JSONL.
+      }
+    }
+  }
+  return Math.max(eventCount, maximumSequence);
+};
+
+const appendHubEvent = <T extends HubRunEventData>(
   directory: string,
   path: string,
   event: T,
 ): string => {
   mkdirSync(directory, { recursive: true });
-  writeJsonl(path, event);
+  const currentSequence =
+    hubRunEventSequences.get(directory) ??
+    readPersistedHubRunEventSequence(directory);
+  const sequence = currentSequence + 1;
+  hubRunEventSequences.set(directory, sequence);
+  const observedEvent = {
+    ...event,
+    eventId: `${event.runId}:${sequence}`,
+    sequence,
+  } as HubRunEvent;
+  writeJsonl(path, observedEvent);
+  try {
+    const observation = hubRunEventObserver.getStore()?.(observedEvent);
+    if (observation !== undefined) {
+      void Promise.resolve(observation).catch(() => undefined);
+    }
+  } catch {
+    // Presentation failures must not change the persisted run lifecycle.
+  }
   return path;
 };
 
@@ -341,7 +421,7 @@ export const createHubRunContext = (
   mkdirSync(eventsDir, { recursive: true });
 
   if (!options.runId) {
-    writeJsonl(paths.runEventsPath, {
+    appendHubEvent(eventsDir, paths.runEventsPath, {
       type: "run_started",
       runId: ids.runId,
       branch: options.branch,
@@ -350,7 +430,7 @@ export const createHubRunContext = (
       hubProjectDir,
     } satisfies HubRunStartedEvent);
 
-    writeJsonl(paths.batchEventsPath, {
+    appendHubEvent(eventsDir, paths.batchEventsPath, {
       type: "batch_started",
       runId: ids.runId,
       batchId: ids.batchId,

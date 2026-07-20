@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
+import { ProposalPromptCancelledError } from "./errors.js";
 
 import {
   applyPrdDecompositionProposal,
@@ -596,6 +597,11 @@ exit 1
     const previousBdPath = process.env.ARCHLOOP_BD_PATH;
     process.env.PATH = `${binDir}:${previousPath ?? ""}`;
     process.env.ARCHLOOP_BD_PATH = bdPath;
+    const presentationEvents: Array<{
+      phase: string;
+      status: string;
+      data?: Readonly<Record<string, unknown>>;
+    }> = [];
 
     try {
       const result = await runPrdDecompositionFlow({
@@ -609,6 +615,7 @@ exit 1
             planning: { provider: "cursor", model: "auto" },
           },
         },
+        onPresentationEvent: (event) => presentationEvents.push(event),
       });
 
       expect(result.outcome).toBe("applied");
@@ -617,6 +624,20 @@ exit 1
       }
       expect(result.tasks).toHaveLength(3);
       expect(result.hubStatusMode).toBe("inbox");
+      expect(
+        presentationEvents
+          .filter(({ phase }) => phase === "validation" || phase === "apply")
+          .map(({ phase, status, data }) => ({ phase, status, data })),
+      ).toEqual([
+        { phase: "validation", status: "started", data: undefined },
+        { phase: "validation", status: "completed", data: undefined },
+        { phase: "apply", status: "started", data: undefined },
+        {
+          phase: "apply",
+          status: "completed",
+          data: { applied: 3, dependencies: 2 },
+        },
+      ]);
     } finally {
       process.env.PATH = previousPath;
       process.env.ARCHLOOP_BD_PATH = previousBdPath;
@@ -694,6 +715,121 @@ exit 1
       expect(calls[0]?.prompt).toContain("Unique PRD body marker");
       expect(calls[0]?.prompt).toContain("Feature Slice");
       expect(calls[0]?.prompt).not.toContain("{{PRD_CONTENT}}");
+    } finally {
+      process.env.PATH = previousPath;
+      process.env.ARCHLOOP_BD_PATH = previousBdPath;
+    }
+  });
+
+  it("emits an apply failure instead of rejecting when task creation fails", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "prd-proposal-apply-fail-"));
+    seedHubTaskStoreMetadata(hostDir);
+    const { exec } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execAsync = promisify(exec);
+    await execAsync("git init -b main", { cwd: hostDir });
+    await execAsync('git config user.email "test@test.com"', { cwd: hostDir });
+    await execAsync('git config user.name "Test"', { cwd: hostDir });
+    await mkdir(join(hostDir, "docs"), { recursive: true });
+    await writeFile(join(hostDir, "docs", "fail.md"), "# Apply failure\n");
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "list" ]; then printf '[]\\n'; exit 0; fi
+if [ "$1" = "create" ]; then printf 'database unavailable\\n' >&2; exit 1; fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+    const previousPath = process.env.PATH;
+    const previousBdPath = process.env.ARCHLOOP_BD_PATH;
+    process.env.PATH = `${binDir}:${previousPath ?? ""}`;
+    process.env.ARCHLOOP_BD_PATH = bdPath;
+    const events: Array<{
+      phase: string;
+      status: string;
+      diagnostic?: string;
+    }> = [];
+
+    try {
+      const result = await runPrdDecompositionFlow({
+        cwd: hostDir,
+        hubProjectDir: join(hostDir, "hub-project"),
+        prdRef: "docs/fail.md",
+        yes: true,
+        agentInvoker: createFakeInvoker(sampleProposal()),
+        hubAgentConfig: {
+          roles: { planning: { provider: "cursor", model: "auto" } },
+        },
+        onPresentationEvent: (event) => events.push(event),
+      });
+
+      expect(result.outcome).toBe("failed");
+      expect(events.at(-1)).toMatchObject({
+        phase: "apply",
+        status: "failed",
+        diagnostic: expect.stringMatching(/database unavailable/i),
+      });
+    } finally {
+      process.env.PATH = previousPath;
+      process.env.ARCHLOOP_BD_PATH = previousBdPath;
+    }
+  });
+
+  it("cancels before apply when Hub status selection is interrupted", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "prd-status-cancel-"));
+    seedHubTaskStoreMetadata(hostDir);
+    const { exec } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execAsync = promisify(exec);
+    await execAsync("git init -b main", { cwd: hostDir });
+    await execAsync('git config user.email "test@test.com"', { cwd: hostDir });
+    await execAsync('git config user.name "Test"', { cwd: hostDir });
+    await mkdir(join(hostDir, "docs"), { recursive: true });
+    await writeFile(join(hostDir, "docs", "cancel.md"), "# Cancel\n");
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "list" ]; then printf '[]\\n'; exit 0; fi
+if [ "$1" = "create" ]; then printf 'unexpected apply\\n' >&2; exit 9; fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+    const previousPath = process.env.PATH;
+    const previousBdPath = process.env.ARCHLOOP_BD_PATH;
+    process.env.PATH = `${binDir}:${previousPath ?? ""}`;
+    process.env.ARCHLOOP_BD_PATH = bdPath;
+    const events: Array<{ phase: string; status: string }> = [];
+
+    try {
+      const result = await runPrdDecompositionFlow({
+        cwd: hostDir,
+        hubProjectDir: join(hostDir, "hub-project"),
+        prdRef: "docs/cancel.md",
+        approve: true,
+        agentInvoker: createFakeInvoker(sampleProposal()),
+        hubAgentConfig: {
+          roles: { planning: { provider: "cursor", model: "auto" } },
+        },
+        resolveHubStatusMode: async () => {
+          throw new ProposalPromptCancelledError({
+            message: "Hub status selection cancelled.",
+          });
+        },
+        onPresentationEvent: (event) => events.push(event),
+      });
+
+      expect(result).toMatchObject({ outcome: "cancelled", phase: "apply" });
+      expect(events.at(-1)).toEqual(
+        expect.objectContaining({ phase: "apply", status: "cancelled" }),
+      );
     } finally {
       process.env.PATH = previousPath;
       process.env.ARCHLOOP_BD_PATH = previousBdPath;

@@ -62,6 +62,7 @@ export interface HubBatchPlannerInput {
   readonly maxTasks: number;
   readonly batchPlanner?: HubBatchPlannerInvoker;
   readonly runDir?: string;
+  readonly signal?: AbortSignal;
 }
 
 export interface HubBatchPlannerResult {
@@ -525,6 +526,7 @@ const planPlannedHubFlowBatch = async (
       env: input.env,
     });
   } catch {
+    input.signal?.throwIfAborted();
     return fallbackPlannedHubFlowBatch(input, "planner_failed");
   }
 
@@ -604,6 +606,7 @@ export const selectHubFlowTasksWithBatchOptions = async (input: {
   readonly batchStrategy?: HubBatchStrategy;
   readonly maxTasks?: number;
   readonly batchPlanner?: HubBatchPlannerInvoker;
+  readonly signal?: AbortSignal;
 }): Promise<{
   readonly selectedTasks: readonly HubTaskProjection[];
   readonly batchSelection?: HubBatchPlannerResult;
@@ -623,6 +626,7 @@ export const selectHubFlowTasksWithBatchOptions = async (input: {
     batchStrategy: input.batchStrategy,
     maxTasks: input.maxTasks ?? HUB_BATCH_DEFAULT_MAX_TASKS,
     batchPlanner: input.batchPlanner,
+    signal: input.signal,
   });
 
   return {

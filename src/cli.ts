@@ -120,6 +120,40 @@ import {
   parseHubFlowMaxBatches,
   runHubFlow,
 } from "./hubFlowExecution.js";
+import type { HubRunEvent } from "./hubExecution.js";
+import {
+  createHubRunDisplayState,
+  formatPlainHubRunCancellation,
+  formatPlainHubRunEvent,
+  formatPlainHubRunFailure,
+  formatPlainHubRunOutcome,
+  projectHubRunOutcome,
+  projectHubRunStateOutcome,
+  reduceHubRunDisplayState,
+} from "./hubRunDisplay.js";
+import { createHubRunJsonRenderer } from "./hubRunJsonDisplay.js";
+import { createHubRunLiveDisplay } from "./hubRunLiveDisplay.js";
+import {
+  acceptsHubProposalPresentationEvent,
+  createHubProposalRunDisplayState,
+  createHubProposalRunJsonRenderer,
+  formatPlainHubProposalEvent,
+  formatPlainHubProposalOutcome,
+  projectHubProposalRunCancellation,
+  projectHubProposalRunOutcome,
+  projectHubProposalRunFailure,
+  reduceHubProposalRunDisplayState,
+} from "./hubProposalRunDisplay.js";
+import { createHubProposalRunLiveDisplay } from "./hubProposalRunLiveDisplay.js";
+import type { HubProposalPresentationEvent } from "./hubProposalSession.js";
+import {
+  createRunSignalController,
+  getRunCancellationExitCode,
+} from "./runSignal.js";
+import {
+  resolveHubRunOutputMode,
+  supportsHubRunCursorControl,
+} from "./hubRunOutputMode.js";
 import { createHubBatchPlannerInvoker } from "./hubBatchPlannerAgent.js";
 import { resolveHubBatchSelectionOptions } from "./hubBatchPlanner.js";
 import {
@@ -3619,6 +3653,24 @@ const flowMaxBatchesOption = Options.text("max-batches").pipe(
   Options.optional,
 );
 
+const flowOutputOption = Options.choice("output", ["auto", "plain", "json"] as [
+  "auto",
+  "plain",
+  "json",
+]).pipe(
+  Options.withDescription(
+    "Run output mode (auto for a live TTY view with plain fallback, plain for deterministic text, json for versioned JSONL)",
+  ),
+  Options.optional,
+);
+
+const flowNoColorOption = Options.boolean("no-color").pipe(
+  Options.withDescription(
+    "Disable color while preserving live terminal labels and symbols.",
+  ),
+  Options.withDefault(false),
+);
+
 const runProjectArg = Args.text({ name: "project" }).pipe(
   Args.withDescription(
     "Hub project name or legacy repo path (use . temporarily for the current repo)",
@@ -3764,11 +3816,13 @@ const resolveRunProjectTarget = ({
   positionalProject,
   isInteractive,
   display,
+  showLegacyGuidance,
 }: {
   readonly projectFlag: string | undefined;
   readonly positionalProject: string | undefined;
   readonly isInteractive: boolean;
   readonly display: DisplayService;
+  readonly showLegacyGuidance: boolean;
 }): Effect.Effect<RunProjectResolution, HubFlowError> =>
   Effect.gen(function* () {
     const legacyProjectTarget =
@@ -3783,10 +3837,12 @@ const resolveRunProjectTarget = ({
         try: () => resolveGitRepoRoot(legacyProjectTarget),
         catch: toHubFlowError,
       });
-      yield* display.status(
-        "Legacy path target detected. Run `archloop project add` and `archloop project select <name>` to target this repo by Hub project name next time.",
-        "warn",
-      );
+      if (showLegacyGuidance) {
+        yield* display.status(
+          "Legacy path target detected. Run `archloop project add` and `archloop project select <name>` to target this repo by Hub project name next time.",
+          "warn",
+        );
+      }
       return {
         repoRoot,
         legacyProjectTarget,
@@ -3838,7 +3894,7 @@ const buildRunPlanSummaryRows = ({
   return rows;
 };
 
-const confirmRunPlan = (): Effect.Effect<void, HubFlowError> =>
+const confirmRunPlan = (): Effect.Effect<boolean, HubFlowError> =>
   Effect.gen(function* () {
     const confirmed = yield* Effect.tryPromise({
       try: () =>
@@ -3848,13 +3904,7 @@ const confirmRunPlan = (): Effect.Effect<void, HubFlowError> =>
         }),
       catch: toHubFlowError,
     });
-    if (clack.isCancel(confirmed) || confirmed !== true) {
-      return yield* Effect.fail(
-        new HubFlowError({
-          message: "Run cancelled.",
-        }),
-      );
-    }
+    return !clack.isCancel(confirmed) && confirmed === true;
   });
 
 const requireProposalRunInput = (
@@ -4277,6 +4327,52 @@ const toHubFlowError = (error: unknown): HubFlowError =>
         message: error instanceof Error ? error.message : String(error),
       });
 
+const isHubRunCancellationError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") {
+    return false;
+  }
+  const candidate = error as {
+    readonly name?: unknown;
+    readonly code?: unknown;
+    readonly _tag?: unknown;
+  };
+  return (
+    candidate.name === "AbortError" ||
+    candidate.code === "ABORT_ERR" ||
+    candidate._tag === "InterruptedException"
+  );
+};
+
+const formatEarlyHubRunJsonFailure = (input: {
+  readonly flowId: string;
+  readonly hubProject?: string;
+  readonly error: unknown;
+}): string => {
+  const rawDiagnostic =
+    input.error instanceof Error ? input.error.message : String(input.error);
+  const diagnostic =
+    rawDiagnostic
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .find((line) => line.length > 0)
+      ?.slice(0, 240) ?? "Run failed.";
+  return JSON.stringify({
+    schemaVersion: 1,
+    eventId: "unknown:output:1",
+    sequence: 1,
+    timestamp: new Date().toISOString(),
+    type: "run_failed",
+    runId: "unknown",
+    flowId: input.flowId,
+    ...(input.hubProject ? { hubProject: input.hubProject } : {}),
+    outcome: "failed",
+    summary: "Run failed",
+    diagnostic,
+    exitCode: 1,
+    logs: "",
+  });
+};
+
 const runCommand = Command.make(
   "run",
   {
@@ -4288,6 +4384,8 @@ const runCommand = Command.make(
     batchStrategy: flowBatchStrategyOption,
     maxTasks: flowMaxTasksOption,
     maxBatches: flowMaxBatchesOption,
+    output: flowOutputOption,
+    noColor: flowNoColorOption,
   },
   ({
     projectPath,
@@ -4298,10 +4396,31 @@ const runCommand = Command.make(
     batchStrategy,
     maxTasks,
     maxBatches,
+    output,
+    noColor,
   }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const isInteractive = hasInteractiveTerminal();
+      const outputMode = output._tag === "Some" ? output.value : "auto";
+      const isPlainOutput = outputMode === "plain";
+      const isJsonOutput = outputMode === "json";
+      const isMachineOutput = isPlainOutput || isJsonOutput;
+      const autoOutputResolution =
+        outputMode === "auto"
+          ? resolveHubRunOutputMode({
+              isTTY: process.stdout.isTTY,
+              columns: process.stdout.columns,
+              rows: process.stdout.rows,
+              colorEnabled: !noColor,
+              cursorControl: supportsHubRunCursorControl(process.env),
+              env: process.env,
+            })
+          : undefined;
+      const autoDisablesPrompts =
+        autoOutputResolution?.mode === "plain" &&
+        autoOutputResolution.reason === "ci";
+      const isInteractive =
+        hasInteractiveTerminal() && !isMachineOutput && !autoDisablesPrompts;
       const projectFlag = trimOptionalText(optionalTextValue(project));
       const positionalProject = trimOptionalText(
         optionalTextValue(projectPath),
@@ -4312,6 +4431,7 @@ const runCommand = Command.make(
           positionalProject,
           isInteractive,
           display: d,
+          showLegacyGuidance: !isMachineOutput,
         });
       const flowDefinition = yield* Effect.tryPromise({
         try: () =>
@@ -4321,6 +4441,19 @@ const runCommand = Command.make(
           ),
         catch: toHubFlowError,
       });
+      const usesTaskBoardOutput = flowDefinition.kind === "task-board";
+      const usesStructuredRunOutput =
+        usesTaskBoardOutput || flowDefinition.kind === "proposal";
+      let activeTaskBoardOutput: "live" | "plain" | "json" | undefined =
+        usesStructuredRunOutput
+          ? isJsonOutput
+            ? "json"
+            : isPlainOutput
+              ? "plain"
+              : autoOutputResolution?.mode
+          : undefined;
+      const suppressDecoratedTaskBoardOutput =
+        activeTaskBoardOutput !== undefined;
 
       const batchSelectionOptions = yield* Effect.try({
         try: () =>
@@ -4358,83 +4491,580 @@ const runCommand = Command.make(
           }),
         catch: toHubFlowError,
       });
-      if (validatedInput) {
+      if (
+        validatedInput &&
+        (!suppressDecoratedTaskBoardOutput || isInteractive)
+      ) {
         yield* d.status(
           formatValidatedHubFlowInputSummary(validatedInput),
           "info",
         );
       }
 
-      yield* d.summary(
-        "Hub run plan",
-        buildRunPlanSummaryRows({
-          repoRoot,
-          flowDefinition,
-          targetProjectName,
-          legacyProjectTarget,
-          validatedInput,
-        }),
-      );
+      if (!suppressDecoratedTaskBoardOutput || isInteractive) {
+        yield* d.summary(
+          "Hub run plan",
+          buildRunPlanSummaryRows({
+            repoRoot,
+            flowDefinition,
+            targetProjectName,
+            legacyProjectTarget,
+            validatedInput,
+          }),
+        );
+      }
 
-      if (isInteractive) {
-        yield* confirmRunPlan();
+      if (isInteractive && !yes) {
+        const confirmed = yield* confirmRunPlan();
+        if (!confirmed) {
+          process.exitCode = 130;
+          yield* d.status("Run cancelled.", "warn");
+          return;
+        }
       }
 
       if (flowDefinition.kind === "proposal") {
-        const result = yield* Effect.tryPromise({
-          try: () =>
-            runHubProposalFlowFromCli({
-              cwd: repoRoot,
-              validatedInput: requireProposalRunInput(
-                flowDefinition,
-                validatedInput,
-              ),
-              yes,
-              isTTY: process.stdin.isTTY,
-            }),
-          catch: toHubFlowError,
+        let proposalDisplayState = createHubProposalRunDisplayState({
+          hubProjectName: targetProjectName ?? legacyProjectTarget ?? repoRoot,
+          flowId: flowDefinition.id,
         });
-
-        if (result.flowId === "prd-decomposition") {
-          yield* handlePrdDecompositionFlowDisplay(
-            result.result,
-            (message) => new HubFlowError({ message }),
+        const proposalJsonRenderer =
+          activeTaskBoardOutput === "json"
+            ? createHubProposalRunJsonRenderer({
+                hubProjectName:
+                  targetProjectName ?? legacyProjectTarget ?? repoRoot,
+                flowId: flowDefinition.id,
+              })
+            : undefined;
+        let proposalLiveDisplay =
+          activeTaskBoardOutput === "live" &&
+          autoOutputResolution?.mode === "live"
+            ? createHubProposalRunLiveDisplay({
+                terminal: {
+                  write: (chunk) => {
+                    process.stdout.write(chunk);
+                  },
+                },
+                clock: { now: () => Date.now() },
+                startedAt: Date.now(),
+                columns: process.stdout.columns ?? 0,
+                rows: process.stdout.rows,
+                color: autoOutputResolution.color,
+              })
+            : undefined;
+        const proposalPlainHistory: string[] = [];
+        let proposalLiveRefresh: ReturnType<typeof setInterval> | undefined;
+        let resizeProposalLiveDisplay: (() => void) | undefined;
+        const stopProposalLiveRuntime = (): void => {
+          if (proposalLiveRefresh) {
+            clearInterval(proposalLiveRefresh);
+            proposalLiveRefresh = undefined;
+          }
+          if (resizeProposalLiveDisplay) {
+            process.stdout.off("resize", resizeProposalLiveDisplay);
+            resizeProposalLiveDisplay = undefined;
+          }
+        };
+        const flushProposalPlainHistory = (): void => {
+          for (const line of proposalPlainHistory) {
+            Effect.runSync(d.plain(line));
+          }
+          proposalPlainHistory.length = 0;
+        };
+        const fallbackProposalLiveToPlain = (): void => {
+          try {
+            proposalLiveDisplay?.dispose();
+          } catch {
+            // Process-level cleanup remains the final fallback.
+          }
+          proposalLiveDisplay = undefined;
+          stopProposalLiveRuntime();
+          activeTaskBoardOutput = "plain";
+          flushProposalPlainHistory();
+        };
+        if (proposalLiveDisplay) {
+          proposalLiveRefresh = setInterval(() => {
+            try {
+              if (proposalLiveDisplay?.refresh() === false) {
+                fallbackProposalLiveToPlain();
+              }
+            } catch {
+              fallbackProposalLiveToPlain();
+            }
+          }, 1_000);
+          proposalLiveRefresh.unref();
+          resizeProposalLiveDisplay = () => {
+            try {
+              if (
+                proposalLiveDisplay?.resize(
+                  process.stdout.columns ?? 0,
+                  process.stdout.rows,
+                )
+              ) {
+                return;
+              }
+            } catch {
+              // Fall through to deterministic plain output.
+            }
+            fallbackProposalLiveToPlain();
+          };
+          process.stdout.on("resize", resizeProposalLiveDisplay);
+        }
+        const onPresentationEvent = (
+          event: HubProposalPresentationEvent,
+        ): void => {
+          if (
+            !acceptsHubProposalPresentationEvent(proposalDisplayState, event)
+          ) {
+            return;
+          }
+          proposalDisplayState = reduceHubProposalRunDisplayState(
+            proposalDisplayState,
+            event,
+          );
+          if (activeTaskBoardOutput === "json") {
+            Effect.runSync(d.plain(proposalJsonRenderer!.event(event)));
+            return;
+          }
+          const line = formatPlainHubProposalEvent(
+            event,
+            proposalDisplayState.hubProjectName,
+          );
+          if (activeTaskBoardOutput === "live") {
+            proposalPlainHistory.push(line);
+            try {
+              if (proposalLiveDisplay?.update(proposalDisplayState) === false) {
+                fallbackProposalLiveToPlain();
+              }
+            } catch {
+              fallbackProposalLiveToPlain();
+            }
+            return;
+          }
+          Effect.runSync(d.plain(line));
+        };
+        const proposalRunSignal = createRunSignalController();
+        const proposalAttempt = yield* Effect.promise(() =>
+          runHubProposalFlowFromCli({
+            cwd: repoRoot,
+            validatedInput: requireProposalRunInput(
+              flowDefinition,
+              validatedInput,
+            ),
+            yes,
+            isTTY: process.stdin.isTTY,
+            interactive: isInteractive,
+            showDecoratedOutput: false,
+            onPresentationEvent,
+            beforePrompt: () => {
+              try {
+                proposalLiveDisplay?.suspend();
+              } catch {
+                fallbackProposalLiveToPlain();
+              }
+            },
+            afterPrompt: () => {
+              try {
+                if (proposalLiveDisplay?.resume() === false) {
+                  fallbackProposalLiveToPlain();
+                }
+              } catch {
+                fallbackProposalLiveToPlain();
+              }
+            },
+            signal: proposalRunSignal.signal,
+          })
+            .then(
+              (result) => ({ _tag: "Success" as const, result }),
+              (error: unknown) =>
+                isHubRunCancellationError(error)
+                  ? ({ _tag: "Cancelled" as const, error } as const)
+                  : ({ _tag: "Failure" as const, error } as const),
+            )
+            .finally(proposalRunSignal.dispose),
+        );
+        if (proposalAttempt._tag === "Cancelled") {
+          const cancellation = projectHubProposalRunCancellation(
+            proposalDisplayState,
+            getRunCancellationExitCode(proposalAttempt.error),
+          );
+          process.exitCode = cancellation.exitCode;
+          stopProposalLiveRuntime();
+          if (activeTaskBoardOutput === "live") {
+            try {
+              proposalLiveDisplay?.finalize(proposalDisplayState, cancellation);
+              return;
+            } catch {
+              fallbackProposalLiveToPlain();
+            }
+          }
+          if (activeTaskBoardOutput === "json") {
+            yield* d.plain(
+              proposalJsonRenderer!.outcome(proposalDisplayState, cancellation),
+            );
+            return;
+          }
+          yield* d.plain(
+            formatPlainHubProposalOutcome(proposalDisplayState, cancellation),
           );
           return;
         }
-
-        yield* handleTriageProposalFlowDisplay(
-          result.result,
-          (message) => new HubFlowError({ message }),
+        if (proposalAttempt._tag === "Failure") {
+          const failure = projectHubProposalRunFailure(
+            proposalDisplayState,
+            proposalAttempt.error,
+          );
+          process.exitCode = 1;
+          stopProposalLiveRuntime();
+          if (activeTaskBoardOutput === "json") {
+            yield* d.plain(
+              proposalJsonRenderer!.failure(
+                proposalDisplayState,
+                proposalAttempt.error,
+              ),
+            );
+            return;
+          }
+          if (activeTaskBoardOutput === "live") {
+            try {
+              proposalLiveDisplay?.finalize(proposalDisplayState, failure);
+              return;
+            } catch {
+              fallbackProposalLiveToPlain();
+            }
+          }
+          yield* d.plain(
+            formatPlainHubProposalOutcome(proposalDisplayState, failure),
+          );
+          return;
+        }
+        const outcome = projectHubProposalRunOutcome(proposalDisplayState);
+        process.exitCode = outcome.exitCode;
+        if (activeTaskBoardOutput === "live") {
+          try {
+            proposalLiveDisplay?.finalize(proposalDisplayState, outcome);
+            stopProposalLiveRuntime();
+            return;
+          } catch {
+            fallbackProposalLiveToPlain();
+          }
+        }
+        if (activeTaskBoardOutput === "json") {
+          stopProposalLiveRuntime();
+          yield* d.plain(
+            proposalJsonRenderer!.outcome(proposalDisplayState, outcome),
+          );
+          return;
+        }
+        yield* d.plain(
+          formatPlainHubProposalOutcome(proposalDisplayState, outcome),
         );
+        stopProposalLiveRuntime();
         return;
       }
 
-      const result = yield* Effect.tryPromise({
-        try: () =>
-          runHubFlow({
+      let displayState = createHubRunDisplayState({
+        hubProjectName: targetProjectName ?? legacyProjectTarget ?? repoRoot,
+        flowId: flowDefinition.id,
+      });
+      const jsonRenderer = isJsonOutput
+        ? createHubRunJsonRenderer({
+            hubProjectName:
+              targetProjectName ?? legacyProjectTarget ?? repoRoot,
             flowId: flowDefinition.id,
+          })
+        : undefined;
+      const plainHistory: string[] = [];
+      const seenPlainSourceEventIds = new Set<string>();
+      const plainSourceSequences = new Map<string, number>();
+      let plainHistoryFlushed = false;
+      const acceptsPlainSourceEvent = (event: HubRunEvent): boolean => {
+        if (seenPlainSourceEventIds.has(event.eventId)) {
+          return false;
+        }
+        seenPlainSourceEventIds.add(event.eventId);
+        const scope =
+          "taskId" in event
+            ? `${event.runId}:task:${event.taskId}`
+            : "batchId" in event
+              ? `${event.runId}:batch:${event.batchId}`
+              : `${event.runId}:run`;
+        const currentSequence = plainSourceSequences.get(scope);
+        if (
+          currentSequence !== undefined &&
+          event.sequence <= currentSequence
+        ) {
+          return false;
+        }
+        plainSourceSequences.set(scope, event.sequence);
+        return true;
+      };
+      const flushPlainHistory = (): void => {
+        if (plainHistoryFlushed) {
+          return;
+        }
+        for (const line of plainHistory) {
+          Effect.runSync(d.plain(line));
+        }
+        plainHistory.length = 0;
+        plainHistoryFlushed = true;
+      };
+      let liveDisplay =
+        activeTaskBoardOutput === "live" &&
+        autoOutputResolution?.mode === "live"
+          ? createHubRunLiveDisplay({
+              terminal: {
+                write: (chunk) => {
+                  process.stdout.write(chunk);
+                },
+              },
+              clock: { now: () => Date.now() },
+              startedAt: Date.now(),
+              columns: process.stdout.columns ?? 0,
+              rows: process.stdout.rows,
+              color: autoOutputResolution.color,
+            })
+          : undefined;
+      let liveRefresh: ReturnType<typeof setInterval> | undefined;
+      let resizeLiveDisplay: (() => void) | undefined;
+      const stopLiveRuntime = (): void => {
+        if (liveRefresh) {
+          clearInterval(liveRefresh);
+          liveRefresh = undefined;
+        }
+        if (resizeLiveDisplay) {
+          process.stdout.off("resize", resizeLiveDisplay);
+          resizeLiveDisplay = undefined;
+        }
+      };
+      const fallbackLiveToPlain = (): void => {
+        try {
+          liveDisplay?.dispose();
+        } catch {
+          // Process-level terminal cleanup remains the final fallback.
+        }
+        stopLiveRuntime();
+        flushPlainHistory();
+        liveDisplay = undefined;
+        activeTaskBoardOutput = "plain";
+      };
+      if (liveDisplay) {
+        liveRefresh = setInterval(() => {
+          try {
+            if (liveDisplay?.refresh() === false) {
+              fallbackLiveToPlain();
+            }
+          } catch {
+            fallbackLiveToPlain();
+          }
+        }, 1_000);
+        liveRefresh.unref();
+        resizeLiveDisplay = () => {
+          try {
+            if (
+              liveDisplay?.resize(
+                process.stdout.columns ?? 0,
+                process.stdout.rows,
+              )
+            ) {
+              return;
+            }
+          } catch {
+            // Fall through to deterministic plain output.
+          }
+          fallbackLiveToPlain();
+        };
+        process.stdout.on("resize", resizeLiveDisplay);
+      }
+      const cleanupLiveDisplay = (): void => {
+        stopLiveRuntime();
+        try {
+          liveDisplay?.dispose();
+        } catch {
+          // setupTerminalCleanup() restores the cursor on process exit.
+        }
+        liveDisplay = undefined;
+      };
+      const taskBoardRunSignal = createRunSignalController();
+      const runAttempt = yield* Effect.promise(() =>
+        runHubFlow({
+          flowId: flowDefinition.id,
+          cwd: repoRoot,
+          signal: taskBoardRunSignal.signal,
+          implementer: createHubFlowRunImplementer({
             cwd: repoRoot,
-            implementer: createHubFlowRunImplementer({
-              cwd: repoRoot,
-              env: process.env,
-            }),
-            reviewer: flowDefinition.hasReviewer
-              ? createHubFlowRunReviewer({
-                  cwd: repoRoot,
+            env: process.env,
+            showAgentStartup: !suppressDecoratedTaskBoardOutput,
+          }),
+          reviewer: flowDefinition.hasReviewer
+            ? createHubFlowRunReviewer({
+                cwd: repoRoot,
+                env: process.env,
+                showAgentStartup: !suppressDecoratedTaskBoardOutput,
+              })
+            : undefined,
+          batchStrategy: batchSelectionOptions.batchStrategy,
+          maxTasks: batchSelectionOptions.maxTasks,
+          maxBatches: flowMaxBatches,
+          batchPlanner:
+            batchSelectionOptions.batchStrategy === "planned"
+              ? createHubBatchPlannerInvoker({
                   env: process.env,
+                  signal: taskBoardRunSignal.signal,
                 })
               : undefined,
-            batchStrategy: batchSelectionOptions.batchStrategy,
-            maxTasks: batchSelectionOptions.maxTasks,
-            maxBatches: flowMaxBatches,
-            batchPlanner:
-              batchSelectionOptions.batchStrategy === "planned"
-                ? createHubBatchPlannerInvoker({ env: process.env })
-                : undefined,
-          }),
-        catch: toHubFlowError,
-      });
+          onEvent: suppressDecoratedTaskBoardOutput
+            ? (event) => {
+                const nextDisplayState = reduceHubRunDisplayState(
+                  displayState,
+                  event,
+                );
+                if (activeTaskBoardOutput === "json") {
+                  displayState = nextDisplayState;
+                  const line = jsonRenderer?.event(event);
+                  if (line !== undefined) {
+                    Effect.runSync(d.plain(line));
+                  }
+                  return;
+                }
+                const acceptedPlainEvent = acceptsPlainSourceEvent(event);
+                if (activeTaskBoardOutput === "live") {
+                  displayState = nextDisplayState;
+                  if (acceptedPlainEvent && event.type !== "run_completed") {
+                    plainHistory.push(
+                      formatPlainHubRunEvent(event, displayState),
+                    );
+                  }
+                  try {
+                    if (liveDisplay?.update(displayState) === false) {
+                      fallbackLiveToPlain();
+                    }
+                  } catch {
+                    fallbackLiveToPlain();
+                  }
+                  return;
+                }
+                if (!acceptedPlainEvent) {
+                  return;
+                }
+                displayState = nextDisplayState;
+                if (event.type === "run_completed") {
+                  return;
+                }
+                Effect.runSync(
+                  d.plain(formatPlainHubRunEvent(event, displayState)),
+                );
+              }
+            : undefined,
+        })
+          .then(
+            (result) => ({ _tag: "Success" as const, result }),
+            (error: unknown) =>
+              isHubRunCancellationError(error)
+                ? ({ _tag: "Cancelled" as const, error } as const)
+                : ({ _tag: "Failure" as const, error } as const),
+          )
+          .finally(taskBoardRunSignal.dispose),
+      );
+      if (runAttempt._tag === "Cancelled") {
+        process.exitCode = getRunCancellationExitCode(runAttempt.error);
+        if (activeTaskBoardOutput === "live") {
+          let finalized = false;
+          try {
+            liveDisplay?.cancel(displayState);
+            finalized = true;
+          } catch {
+            fallbackLiveToPlain();
+          } finally {
+            cleanupLiveDisplay();
+          }
+          if (finalized) {
+            return;
+          }
+        }
+        if (activeTaskBoardOutput === "json") {
+          for (const line of jsonRenderer!.cancellation(
+            displayState,
+            getRunCancellationExitCode(runAttempt.error),
+          )) {
+            yield* d.plain(line);
+          }
+        } else if (activeTaskBoardOutput === "plain") {
+          yield* d.plain(formatPlainHubRunCancellation(displayState));
+        } else {
+          yield* d.status("Run cancelled.", "warn");
+        }
+        cleanupLiveDisplay();
+        return;
+      }
+      if (runAttempt._tag === "Failure") {
+        if (activeTaskBoardOutput === "json") {
+          process.exitCode = 1;
+          yield* d.plain(jsonRenderer!.failure(displayState, runAttempt.error));
+          cleanupLiveDisplay();
+          return;
+        }
+        if (activeTaskBoardOutput === "plain") {
+          process.exitCode = 1;
+          yield* d.plain(
+            formatPlainHubRunFailure(displayState, runAttempt.error),
+          );
+          cleanupLiveDisplay();
+          return;
+        }
+        if (activeTaskBoardOutput === "live") {
+          try {
+            liveDisplay?.finalize(
+              displayState,
+              projectHubRunStateOutcome(displayState, {
+                outcome: "failed",
+                summary: "Run failed",
+                exitCode: 1,
+              }),
+            );
+          } catch {
+            fallbackLiveToPlain();
+          } finally {
+            cleanupLiveDisplay();
+          }
+        }
+        cleanupLiveDisplay();
+        return yield* Effect.fail(toHubFlowError(runAttempt.error));
+      }
+      const result = runAttempt.result;
+      const outcome = projectHubRunOutcome(result);
+      process.exitCode = outcome.exitCode;
+
+      if (activeTaskBoardOutput === "live") {
+        let finalized = false;
+        try {
+          liveDisplay?.finalize(displayState, outcome);
+          finalized = true;
+        } catch {
+          fallbackLiveToPlain();
+        } finally {
+          cleanupLiveDisplay();
+        }
+        if (finalized) {
+          return;
+        }
+      }
+
+      if (activeTaskBoardOutput === "json") {
+        for (const line of jsonRenderer!.outcome(result, outcome)) {
+          yield* d.plain(line);
+        }
+        cleanupLiveDisplay();
+        return;
+      }
+
+      if (activeTaskBoardOutput === "plain") {
+        for (const line of formatPlainHubRunOutcome(result, outcome)) {
+          yield* d.plain(line);
+        }
+        cleanupLiveDisplay();
+        return;
+      }
 
       for (const line of formatHubFlowResultLines(result)) {
         yield* d.status(line, "info");
@@ -4456,7 +5086,26 @@ const runCommand = Command.make(
       } else {
         yield* d.status("Hub flow completed.", "success");
       }
-    }),
+    }).pipe(
+      Effect.catchAll((error) => {
+        if (output._tag !== "Some" || output.value !== "json") {
+          return Effect.fail(error);
+        }
+        return Effect.gen(function* () {
+          const d = yield* Display;
+          process.exitCode = 1;
+          yield* d.plain(
+            formatEarlyHubRunJsonFailure({
+              flowId: trimOptionalText(optionalTextValue(flow)) ?? "unknown",
+              hubProject:
+                trimOptionalText(optionalTextValue(project)) ??
+                trimOptionalText(optionalTextValue(projectPath)),
+              error,
+            }),
+          );
+        });
+      }),
+    ),
 );
 
 // --- Docker namespace command ---

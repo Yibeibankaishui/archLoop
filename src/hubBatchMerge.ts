@@ -158,6 +158,7 @@ export interface HubBatchMergeSelectionDiagnostic {
   readonly message?: string;
   readonly taskStoreDirtyFiles?: readonly string[];
   readonly taskStoreBranchFiles?: readonly string[];
+  readonly blockingPaths?: readonly string[];
   readonly observedProjectedStatus?: HubTaskStatus;
   readonly missingClaimFields?: readonly string[];
   readonly staleClaimFields?: Readonly<Record<string, string>>;
@@ -215,6 +216,7 @@ export interface HubBatchMergeTaskResult {
   readonly failureReason?: HubFailureReason;
   readonly diagnosticSummary?: string;
   readonly diagnostics?: HubMergeDiagnostics;
+  readonly logPath?: string;
   readonly cleanup?: HubBranchCleanupResult;
 }
 
@@ -279,6 +281,7 @@ const toBatchMergeTaskResult = (
   diagnosticSummary?: string,
   diagnostics?: HubMergeDiagnostics,
   cleanup?: HubBranchCleanupResult,
+  logPath?: string,
 ): HubBatchMergeTaskResult => ({
   taskId: task.id,
   title: task.title,
@@ -289,6 +292,7 @@ const toBatchMergeTaskResult = (
   ...(diagnosticSummary === undefined ? {} : { diagnosticSummary }),
   ...(diagnostics === undefined ? {} : { diagnostics }),
   ...(cleanup === undefined ? {} : { cleanup }),
+  ...(logPath === undefined ? {} : { logPath }),
 });
 
 const recordBatchMergeCompleted = (
@@ -679,6 +683,7 @@ const buildSelectionDiagnostic = (
     | "message"
     | "taskStoreDirtyFiles"
     | "taskStoreBranchFiles"
+    | "blockingPaths"
     | "observedProjectedStatus"
     | "missingClaimFields"
     | "staleClaimFields"
@@ -979,6 +984,7 @@ const evaluateHubBatchMergeSelection = async (input: {
           decision: "blocked",
           reason: "dirty_worktree",
           branch,
+          blockingPaths: overlappingDirtyFiles,
           message: branchChangedFiles
             ? `Git safety gate: dirty source files would be overwritten or conflict with ${branch} (${overlappingDirtyFiles.join(", ")}). ${formatDirtyWorktreeRemediation(overlappingDirtyFiles)}`
             : `Git safety gate: unable to prove ${branch} is safe against dirty source files. ${formatDirtyWorktreeRemediation(overlappingDirtyFiles)}`,
@@ -1101,9 +1107,12 @@ const processMergeTask = async (
 
   if (verifyResult.outcome !== "success") {
     await mergeIntegration?.cleanup().catch(() => undefined);
+    const diagnosticSummary = verifyResult.message;
+    const logPath = resolveHubRunEventsPaths(input.runDir).taskEventsPath;
     const lifecycleResult = recordVerificationFailure({
       ...lifecycleBase,
       createdAt: verifyFinishedAt,
+      diagnosticSummary,
     });
 
     return toBatchMergeTaskResult(
@@ -1112,6 +1121,10 @@ const processMergeTask = async (
       "verification_failed",
       lifecycleResult.hubStatus,
       lifecycleResult.failureReason,
+      diagnosticSummary,
+      undefined,
+      undefined,
+      logPath,
     );
   }
 

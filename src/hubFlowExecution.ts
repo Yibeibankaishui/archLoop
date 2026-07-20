@@ -12,7 +12,9 @@ import {
   appendHubTaskEvent,
   createHubRunContext,
   createHubRunIdentifiers,
+  observeHubRunEvents,
   type HubRunCompletedBatchResult,
+  type HubRunEventObserver,
   type HubRunStopReason,
   type HubTaskClaimMetadata,
 } from "./hubExecution.js";
@@ -90,6 +92,7 @@ export interface HubImplementTaskInput {
   readonly projectDevelopmentContract: HubProjectDevelopmentContractState;
   readonly retryContext?: string;
   readonly preservedWorktreePath?: string;
+  readonly signal?: AbortSignal;
 }
 
 export interface HubImplementTaskResult {
@@ -114,6 +117,7 @@ export interface HubReviewTaskInput {
   readonly cwd: string;
   readonly runDir: string;
   readonly implementCommitCount: number;
+  readonly signal?: AbortSignal;
 }
 
 export interface HubReviewTaskResult {
@@ -143,6 +147,8 @@ export interface RunHubFlowInput {
   readonly maxTasks?: number;
   readonly maxBatches?: number;
   readonly batchPlanner?: HubBatchPlannerInvoker;
+  readonly onEvent?: HubRunEventObserver;
+  readonly signal?: AbortSignal;
 }
 
 export interface HubFlowTaskResult {
@@ -158,6 +164,9 @@ export interface HubFlowTaskResult {
     | "sandbox_failed";
   readonly hubStatus: string;
   readonly failureReason?: HubFailureReason;
+  readonly failureStage?: "implementation" | "review";
+  readonly diagnosticSummary?: string;
+  readonly logPath?: string;
   readonly commitCount: number;
   readonly implementationWork?: "new_commits" | "existing_unmerged_work";
 }
@@ -614,6 +623,8 @@ const runHubAgent = async (input: {
   readonly env?: NodeJS.ProcessEnv;
   readonly retryContext?: string;
   readonly projectDevelopmentContract?: HubProjectDevelopmentContractState;
+  readonly showAgentStartup?: boolean;
+  readonly signal?: AbortSignal;
 }) => {
   await assertAgentCredentialsConfigured({
     providerName: input.agent.name,
@@ -654,7 +665,9 @@ const runHubAgent = async (input: {
     logging: {
       type: "file",
       path: join(input.runDir, "logs", input.logFileName),
+      showStartup: input.showAgentStartup,
     },
+    signal: input.signal,
   });
 };
 
@@ -702,8 +715,10 @@ const reviewSelectedTask = async (
       cwd,
       runDir: context.runDir,
       implementCommitCount,
+      signal: input.signal,
     });
   } catch (error) {
+    input.signal?.throwIfAborted();
     const message =
       error instanceof Error ? error.message : "Hub reviewer failed";
     reviewResult = {
@@ -746,7 +761,14 @@ const reviewSelectedTask = async (
     hubStatus: lifecycleResult.hubStatus,
     commitCount,
     ...("failureReason" in lifecycleResult
-      ? { failureReason: lifecycleResult.failureReason }
+      ? {
+          failureReason: lifecycleResult.failureReason,
+          failureStage: "review" as const,
+          ...(reviewResult.message
+            ? { diagnosticSummary: reviewResult.message }
+            : {}),
+          logPath: join(context.runDir, "logs", `${task.id}-review.log`),
+        }
       : {}),
   };
 };
@@ -799,6 +821,7 @@ const implementSelectedTask = async (
       outcome: "sandbox_failed",
       hubStatus: task.hubStatus,
       failureReason: "sandbox_failed",
+      diagnosticSummary: retryPreparation.message,
       commitCount: 0,
     };
   }
@@ -871,8 +894,10 @@ const implementSelectedTask = async (
       projectDevelopmentContract: input.projectDevelopmentContract!,
       retryContext,
       preservedWorktreePath: retryPreparation.preservedWorktreePath,
+      signal: input.signal,
     });
   } catch (error) {
+    input.signal?.throwIfAborted();
     const message =
       error instanceof Error ? error.message : "Hub implementer failed";
     implementationResult = {
@@ -955,11 +980,16 @@ const implementSelectedTask = async (
         : "agent_failed",
     hubStatus: updatedTask.hubStatus,
     failureReason,
+    failureStage: "implementation",
+    ...(implementationResult.message
+      ? { diagnosticSummary: implementationResult.message }
+      : {}),
+    logPath: join(context.runDir, "logs", `${task.id}.log`),
     commitCount: implementationResult.commits.length,
   };
 };
 
-export const runHubFlow = async (
+const runObservedHubFlow = async (
   input: RunHubFlowInput,
 ): Promise<RunHubFlowResult> => {
   const cwd = input.cwd ?? process.cwd();
@@ -1100,6 +1130,7 @@ export const runHubFlow = async (
       batchStrategy,
       maxTasks,
       batchPlanner: input.batchPlanner,
+      signal: input.signal,
     });
     const freshBoard = loadHubReadyQueue(repoRoot, input.env);
     const freshValidation = resolveFreshValidatedHubBatchSelection({
@@ -1125,6 +1156,10 @@ export const runHubFlow = async (
       flowId: input.flowId,
       createdAt: batchStartedAt.toISOString(),
       taskIds: selectedIds,
+      tasks: selectedTasks.map((task) => ({
+        taskId: task.id,
+        title: task.title,
+      })),
       ...batchPlannedMetadata,
     });
 
@@ -1289,6 +1324,9 @@ export const runHubFlow = async (
   };
 };
 
+export const runHubFlow = (input: RunHubFlowInput): Promise<RunHubFlowResult> =>
+  observeHubRunEvents(input.onEvent, () => runObservedHubFlow(input));
+
 export const formatHubFlowResultLines = (
   result: RunHubFlowResult,
 ): readonly string[] => {
@@ -1444,6 +1482,7 @@ export const createHubFlowRunImplementer = (options: {
   readonly env?: NodeJS.ProcessEnv;
   readonly homeDir?: string;
   readonly roleEntry?: HubAgentRoleEntry;
+  readonly showAgentStartup?: boolean;
 }): HubFlowImplementer => {
   const agent = resolveHubFlowRunnerAgent("implementation", options);
 
@@ -1464,6 +1503,8 @@ export const createHubFlowRunImplementer = (options: {
         env: options.env,
         retryContext: input.retryContext,
         projectDevelopmentContract: input.projectDevelopmentContract,
+        showAgentStartup: options.showAgentStartup,
+        signal: input.signal,
       });
 
       if (!result.completionSignal) {
@@ -1495,6 +1536,7 @@ export const createHubFlowRunImplementer = (options: {
         branchHasUnmergedWork,
       };
     } catch (error) {
+      input.signal?.throwIfAborted();
       return buildHubFlowRunnerFailure(error);
     }
   };
@@ -1505,6 +1547,7 @@ export const createHubFlowRunReviewer = (options: {
   readonly env?: NodeJS.ProcessEnv;
   readonly homeDir?: string;
   readonly roleEntry?: HubAgentRoleEntry;
+  readonly showAgentStartup?: boolean;
 }): HubFlowReviewer => {
   const agent = resolveHubFlowRunnerAgent("review", options);
 
@@ -1523,6 +1566,8 @@ export const createHubFlowRunReviewer = (options: {
         name: `review-${input.taskId}`,
         logFileName: `${input.taskId}-review.log`,
         env: options.env,
+        showAgentStartup: options.showAgentStartup,
+        signal: input.signal,
       });
 
       if (!result.completionSignal) {
@@ -1539,6 +1584,7 @@ export const createHubFlowRunReviewer = (options: {
         completionSignal: result.completionSignal,
       };
     } catch (error) {
+      input.signal?.throwIfAborted();
       return buildHubFlowRunnerFailure(error);
     }
   };

@@ -168,6 +168,8 @@ export interface RecordMergePhaseFailureInput {
   readonly metadata: Readonly<Record<string, unknown>>;
   readonly claim?: HubTaskClaimMetadata;
   readonly createdAt: string;
+  readonly diagnosticSummary?: string;
+  readonly diagnostics?: Readonly<Record<string, unknown>>;
 }
 
 export interface RecordMergeFailureInput extends RecordMergePhaseFailureInput {
@@ -527,10 +529,17 @@ export const recordMergeFailure = (
 export const recordVerificationFailure = (
   input: RecordMergePhaseFailureInput,
 ): HubTaskLifecycleResult =>
-  recordMergePhaseFailure(input, {
-    type: "verification_failed",
-    failureReason: "verification_failure",
-  });
+  recordMergePhaseFailure(
+    input,
+    {
+      type: "verification_failed",
+      failureReason: "verification_failure",
+    },
+    {
+      diagnosticSummary: input.diagnosticSummary,
+      diagnostics: input.diagnostics,
+    },
+  );
 
 export const recordCloseFailure = (
   input: RecordMergePhaseFailureInput,
