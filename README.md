@@ -1008,7 +1008,6 @@ Example:
   next  archloop tasks update AutoTuneAgent-2mr ... · gh issue view 210
 ```
 
-
 ### `archloop tasks create <title>`
 
 Creates a local Beads task in the Hub `inbox` bucket with a `needs-triage` label and `origin` metadata. The `origin` flag defaults to `manual`; pass `--origin user-feedback` for feedback-driven tasks. Use `--description` for the task body and `--kind` for optional extra classification metadata when you need it. `--category` is accepted as an alias for `--kind`.
@@ -1094,7 +1093,6 @@ Example run plan (before the countdown):
   ready     1 task
   tip   starting in 3s · Ctrl+C to cancel · e to edit flow
 ```
-
 
 The first available task-board flows are `no-review` and `with-review`. Proposal flows `prd-decomposition` and `triage` run through the shared proposal session runtime: `archloop run --flow prd-decomposition --input <prd-ref>` and `archloop run --flow triage --input <task-id|statuses>` execute end-to-end. Task-board flow implementers now read the Hub project development contract before prompting the agent; if no contract exists, `run --flow` creates a generic fallback contract, reports how to specialize it with `archloop project configure [--project <name>] --project-profile <profile>`, and then continues. The matching `archloop tasks` shortcuts remain the recommended entry points.
 
