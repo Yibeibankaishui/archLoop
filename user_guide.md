@@ -32,7 +32,7 @@ Hub flow 使用 archLoop 自带的 flow prompt，不读取目标项目里的 `.a
 
 ### 3.1 检查项目状态
 
-在任意目录运行；`archloop run` 默认针对已选中的 Hub project，TTY 中还会在需要时打开 Hub project / flow 选择器；如需覆盖，可以显式传入 `--project <name>`：
+在任意目录运行；`archloop run` 默认针对已选中的 Hub project，TTY 中还会在需要时打开 Hub project / flow 选择器；选完 flow 后会渲染 run plan section，并在约 3 秒后自动开始（`Ctrl+C` 取消，`e` 重选 flow）。`--yes` 跳过倒计时，`--dry-run` 只打印计划不启动。如需覆盖项目，可以显式传入 `--project <name>`：
 
 ```bash
 archloop project status

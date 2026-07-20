@@ -195,7 +195,14 @@ import {
   planHubManagedBranchCleanup,
   resolveHubTaskSelector,
   resolveHubTaskSelectors,
+  selectHubFlowTasks,
 } from "./taskBoard.js";
+import { waitForKeypress } from "./keypress.js";
+import {
+  RUN_START_DEBOUNCE_MS,
+  buildRunPlanModel,
+  runPlanModelToBlocks,
+} from "./runPlan.js";
 import { evaluateHubManagedBranchCleanup } from "./hubManagedBranchCleanup.js";
 import { HUB_TRIAGE_DEFAULT_TASK_QUERY } from "./hubTriage.js";
 import { initHubTaskStore } from "./hubTaskStore.js";
@@ -3659,7 +3666,14 @@ const flowInputOption = Options.text("input").pipe(
 
 const flowYesOption = Options.boolean("yes").pipe(
   Options.withDescription(
-    "Run proposal flows in one-shot mode without interactive prompts.",
+    "Skip the interactive run-start debounce (and proposal prompts) and start immediately.",
+  ),
+  Options.withDefault(false),
+);
+
+const flowDryRunOption = Options.boolean("dry-run").pipe(
+  Options.withDescription(
+    "Render the Hub run plan section and exit without starting the flow.",
   ),
   Options.withDefault(false),
 );
@@ -3897,47 +3911,13 @@ const resolveRunProjectTarget = ({
     };
   });
 
-const buildRunPlanSummaryRows = ({
-  repoRoot,
-  flowDefinition,
-  targetProjectName,
-  legacyProjectTarget,
-  validatedInput,
-}: {
-  readonly repoRoot: string;
-  readonly flowDefinition: HubFlowDefinition;
-  readonly targetProjectName?: string;
-  readonly legacyProjectTarget?: string;
-  readonly validatedInput?: ValidatedHubFlowInput;
-}): Record<string, string> => {
-  const rows: Record<string, string> = {
-    "Repository root": repoRoot,
-    "Hub flow": flowDefinition.id,
-  };
-  if (targetProjectName) {
-    rows["Hub project"] = targetProjectName;
+const resolveRunPlanReadyCount = (repoRoot: string): number => {
+  try {
+    return selectHubFlowTasks(loadHubTaskBoard(repoRoot)).length;
+  } catch {
+    return 0;
   }
-  if (legacyProjectTarget) {
-    rows["Legacy path target"] = legacyProjectTarget;
-  }
-  if (validatedInput) {
-    rows["Flow input"] = formatValidatedHubFlowInputSummary(validatedInput);
-  }
-  return rows;
 };
-
-const confirmRunPlan = (): Effect.Effect<boolean, HubFlowError> =>
-  Effect.gen(function* () {
-    const confirmed = yield* Effect.tryPromise({
-      try: () =>
-        clack.confirm({
-          message: "Run this Hub flow now?",
-          initialValue: true,
-        }),
-      catch: toHubFlowError,
-    });
-    return !clack.isCancel(confirmed) && confirmed === true;
-  });
 
 const requireProposalRunInput = (
   flowDefinition: HubFlowDefinition,
@@ -4413,6 +4393,7 @@ const runCommand = Command.make(
     flow: flowOption,
     input: flowInputOption,
     yes: flowYesOption,
+    dryRun: flowDryRunOption,
     batchStrategy: flowBatchStrategyOption,
     maxTasks: flowMaxTasksOption,
     maxBatches: flowMaxBatchesOption,
@@ -4425,6 +4406,7 @@ const runCommand = Command.make(
     flow,
     input,
     yes,
+    dryRun,
     batchStrategy,
     maxTasks,
     maxBatches,
@@ -4465,14 +4447,125 @@ const runCommand = Command.make(
           display: d,
           showLegacyGuidance: !isMachineOutput,
         });
-      const flowDefinition = yield* Effect.tryPromise({
-        try: () =>
-          resolveRunFlowDefinition(
-            trimOptionalText(optionalTextValue(flow)),
-            isInteractive,
-          ),
+      let flowIdOption = trimOptionalText(optionalTextValue(flow));
+      let flowDefinition = yield* Effect.tryPromise({
+        try: () => resolveRunFlowDefinition(flowIdOption, isInteractive),
         catch: toHubFlowError,
       });
+      const maxBatchesValue = optionalTextValue(maxBatches);
+      const flowMaxBatches = yield* Effect.try({
+        try: () =>
+          maxBatchesValue !== undefined
+            ? parseHubFlowMaxBatches(maxBatchesValue)
+            : undefined,
+        catch: toHubFlowError,
+      });
+      if (flowDefinition.kind === "proposal" && flowMaxBatches !== undefined) {
+        return yield* Effect.fail(
+          new HubFlowError({
+            message: "Proposal flows do not support --max-batches.",
+          }),
+        );
+      }
+
+      const rawInput = optionalTextValue(input);
+      let validatedInput = yield* Effect.tryPromise({
+        try: () =>
+          resolveRunFlowInput({
+            flowDefinition,
+            cwd: repoRoot,
+            rawInput,
+            isInteractive,
+          }),
+        catch: toHubFlowError,
+      });
+
+      // Pre-start plan + optional debounce (Phase 3b). Edit (`e`) re-selects flow.
+      for (;;) {
+        const showDecoratedPlan =
+          isInteractive ||
+          dryRun ||
+          !(
+            flowDefinition.kind === "task-board" ||
+            flowDefinition.kind === "proposal"
+          );
+
+        if (validatedInput && showDecoratedPlan) {
+          yield* d.status(
+            formatValidatedHubFlowInputSummary(validatedInput),
+            "info",
+          );
+        }
+
+        if (showDecoratedPlan) {
+          const model = buildRunPlanModel({
+            flowId: flowDefinition.id,
+            repoRoot,
+            projectName: targetProjectName,
+            legacyProjectTarget,
+            readyCount: resolveRunPlanReadyCount(repoRoot),
+            flowInputSummary: validatedInput
+              ? formatValidatedHubFlowInputSummary(validatedInput)
+              : undefined,
+          });
+          yield* d.section("", runPlanModelToBlocks(model));
+        }
+
+        if (dryRun) {
+          yield* d.status("Dry run — Hub flow not started.", "info");
+          return;
+        }
+
+        if (!(isInteractive && !yes)) {
+          break;
+        }
+
+        const outcome = yield* Effect.tryPromise({
+          try: () =>
+            waitForKeypress({
+              timeoutMs: RUN_START_DEBOUNCE_MS,
+            }),
+          catch: toHubFlowError,
+        });
+
+        if (outcome === "cancel") {
+          process.exitCode = 130;
+          yield* d.status("Run cancelled.", "warn");
+          return;
+        }
+
+        if (outcome === "edit") {
+          flowIdOption = undefined;
+          flowDefinition = yield* Effect.tryPromise({
+            try: () => resolveRunFlowDefinition(undefined, true),
+            catch: toHubFlowError,
+          });
+          if (
+            flowDefinition.kind === "proposal" &&
+            flowMaxBatches !== undefined
+          ) {
+            return yield* Effect.fail(
+              new HubFlowError({
+                message: "Proposal flows do not support --max-batches.",
+              }),
+            );
+          }
+          validatedInput = yield* Effect.tryPromise({
+            try: () =>
+              resolveRunFlowInput({
+                flowDefinition,
+                cwd: repoRoot,
+                rawInput,
+                isInteractive: true,
+              }),
+            catch: toHubFlowError,
+          });
+          continue;
+        }
+
+        break;
+      }
+
       const usesTaskBoardOutput = flowDefinition.kind === "task-board";
       const usesStructuredRunOutput =
         usesTaskBoardOutput || flowDefinition.kind === "proposal";
@@ -4496,64 +4589,6 @@ const runCommand = Command.make(
           }),
         catch: toHubFlowError,
       });
-      const maxBatchesValue = optionalTextValue(maxBatches);
-      const flowMaxBatches = yield* Effect.try({
-        try: () =>
-          maxBatchesValue !== undefined
-            ? parseHubFlowMaxBatches(maxBatchesValue)
-            : undefined,
-        catch: toHubFlowError,
-      });
-      if (flowDefinition.kind === "proposal" && flowMaxBatches !== undefined) {
-        return yield* Effect.fail(
-          new HubFlowError({
-            message: "Proposal flows do not support --max-batches.",
-          }),
-        );
-      }
-
-      const rawInput = optionalTextValue(input);
-      const validatedInput = yield* Effect.tryPromise({
-        try: () =>
-          resolveRunFlowInput({
-            flowDefinition,
-            cwd: repoRoot,
-            rawInput,
-            isInteractive,
-          }),
-        catch: toHubFlowError,
-      });
-      if (
-        validatedInput &&
-        (!suppressDecoratedTaskBoardOutput || isInteractive)
-      ) {
-        yield* d.status(
-          formatValidatedHubFlowInputSummary(validatedInput),
-          "info",
-        );
-      }
-
-      if (!suppressDecoratedTaskBoardOutput || isInteractive) {
-        yield* d.summary(
-          "Hub run plan",
-          buildRunPlanSummaryRows({
-            repoRoot,
-            flowDefinition,
-            targetProjectName,
-            legacyProjectTarget,
-            validatedInput,
-          }),
-        );
-      }
-
-      if (isInteractive && !yes) {
-        const confirmed = yield* confirmRunPlan();
-        if (!confirmed) {
-          process.exitCode = 130;
-          yield* d.status("Run cancelled.", "warn");
-          return;
-        }
-      }
 
       if (flowDefinition.kind === "proposal") {
         let proposalDisplayState = createHubProposalRunDisplayState({
