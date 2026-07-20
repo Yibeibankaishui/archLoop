@@ -17,10 +17,13 @@ setupTerminalCleanup();
 // Variant C `--plain`: strip styling globally. Consume the flag from argv so
 // Effect CLI does not see an unknown option; screens that call `section` honor
 // the palette decision matrix via detectPalette().
-const argv = process.argv.filter((arg) => arg !== "--plain");
-if (process.argv.includes("--plain")) {
+const plainRequested = process.argv.includes("--plain");
+if (plainRequested) {
   setPlainFlag(true);
 }
+const argv = plainRequested
+  ? process.argv.filter((arg) => arg !== "--plain")
+  : process.argv;
 
 const mainLayer = Layer.merge(NodeContext.layer, ClackDisplay.layer);
 

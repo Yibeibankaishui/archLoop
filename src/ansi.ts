@@ -77,14 +77,10 @@ export const resolveSectionWidth = (width: number | undefined): number => {
   return Math.max(40, Math.min(raw, 120));
 };
 
-/** Strip CSI sequences for visible-width measurement. */
+/** Strip CSI sequences for visible-width measurement (counts code points, not UTF-16 units). */
 export const visibleLength = (text: string): number => {
   const stripped = String(text).replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
-  let len = 0;
-  for (const _ of stripped) {
-    len += 1;
-  }
-  return len;
+  return [...stripped].length;
 };
 
 export const truncateTail = (text: string, maxVisible: number): string => {
