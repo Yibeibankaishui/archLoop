@@ -181,15 +181,15 @@ import type {
 } from "./hubPrdDecomposition.js";
 import {
   buildHubTaskBoardModel,
+  buildHubTaskDetailModel,
   taskBoardModelToBlocks,
+  taskDetailModelToBlocks,
   appendHubTaskComment,
   cleanupHubManagedBranches,
   createHubTask,
   deleteHubTasks,
   formatHubManagedBranchCleanupDiagnosticsLines,
   formatHubManagedBranchCleanupLines,
-  formatHubTaskCommentLines,
-  formatHubTaskDetailsRows,
   loadHubTask,
   loadHubTaskBoard,
   planHubManagedBranchCleanup,
@@ -2063,10 +2063,8 @@ const tasksShowCommand = Command.make(
         catch: toTaskBoardError,
       });
 
-      yield* d.summary(`Beads task ${task.id}`, formatHubTaskDetailsRows(task));
-      for (const line of formatHubTaskCommentLines(task)) {
-        yield* d.text(line);
-      }
+      const model = buildHubTaskDetailModel(task);
+      yield* d.section("", taskDetailModelToBlocks(model));
     }),
 );
 

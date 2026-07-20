@@ -9,8 +9,7 @@ import {
   claimHubTask,
   deleteHubTasks,
   buildHubTaskBoardModel,
-  formatHubTaskCommentLines,
-  formatHubTaskDetailsRows,
+  buildHubTaskDetailModel,
   isCanonicalHubTaskStatus,
   loadHubTaskBoard,
   mapHubStatusToTaskBoardBucket,
@@ -251,13 +250,19 @@ describe("task status projection", () => {
     }
   });
 
-  it("preserves Beads details, labels, metadata, comments, and refs for show output", () => {
+  it("builds a Hub task detail model with kv identity, prose, comments timeline, and next footer", () => {
     const task = projectHubTask({
       id: "bd-42",
       title: "Projected task",
       status: "open",
+      owner: "alice",
       labels: ["ready-for-agent", "backend"],
-      metadata: { execution_mode: "agent", blocked_reason: undefined },
+      metadata: {
+        execution_mode: "agent",
+        origin: "manual",
+        kind: "slice",
+        blocked_reason: undefined,
+      },
       description: "Task description",
       notes: "Task notes",
       comments: [
@@ -272,20 +277,47 @@ describe("task status projection", () => {
     });
 
     expect(task.hubStatus).toBe("ready_for_agent");
-    expect(formatHubTaskDetailsRows(task)).toMatchObject({
-      "Beads id": "bd-42",
-      Title: "Projected task",
-      "Hub status": "ready_for_agent",
-      Labels: "ready-for-agent, backend",
-      Metadata: '{"execution_mode":"agent"}',
-      "Remote refs": "github#64",
-      "Run refs": "run-123",
-      Comments: "1",
+    const model = buildHubTaskDetailModel(task);
+
+    expect(model.header).toEqual({
+      kind: "header",
+      title: "archLoop",
+      subtitle: "task · bd-42",
+      right: "ready_for_agent · alice",
     });
-    expect(formatHubTaskCommentLines(task)).toEqual([
-      "Comments",
-      "  - alice · 2026-06-11T15:00:00Z: Looks good",
-    ]);
+    expect(model.identity).toEqual({
+      kind: "kv",
+      gutter: 12,
+      rows: [
+        { key: "title", value: "Projected task" },
+        {
+          key: "status",
+          value: "ready_for_agent",
+          secondary: "(beads: open)",
+        },
+        { key: "labels", value: "ready-for-agent, backend" },
+        { key: "origin", value: "manual" },
+        { key: "kind", value: "slice" },
+        { key: "remote", value: "github#64" },
+        { key: "runs", value: "run-123" },
+        { key: "metadata", value: '{"execution_mode":"agent"}' },
+      ],
+    });
+    expect(model.description).toEqual({
+      kind: "prose",
+      title: "description",
+      body: "Task description\n\nTask notes",
+    });
+    expect(model.comments).toEqual({
+      kind: "prose",
+      title: "comments · 1",
+      body: "alice · 2026-06-11T15:00:00Z: Looks good",
+    });
+    expect(model.footer).toEqual({
+      kind: "footer",
+      label: "next",
+      command: "archloop tasks update bd-42 ... · gh issue view 64",
+    });
   });
 
   it("loads all Beads tasks including closed tasks beyond the default list page", async () => {
@@ -387,7 +419,7 @@ fs.writeSync(1, JSON.stringify(tasks));
     expect(task.hubStatus).toBe("done");
   });
 
-  it("represents task claims in metadata without inventing a claimed status", () => {
+  it("represents task claims in the detail model without inventing a claimed status", () => {
     const task = projectHubTask({
       id: "bd-69",
       title: "Claimed task",
@@ -404,11 +436,17 @@ fs.writeSync(1, JSON.stringify(tasks));
 
     expect(task.hubStatus).toBe("inbox");
     expect(task.claimState).toBe("stale");
-    expect(formatHubTaskDetailsRows(task)).toMatchObject({
-      Claim:
-        '{"runId":"run-1","batchId":"batch-1","branch":"feature/issue-69","claimedAt":"2026-06-11T16:00:00Z"}',
-      "Claim state": "stale",
-    });
+    const model = buildHubTaskDetailModel(task);
+    expect(model.identity.rows).toEqual(
+      expect.arrayContaining([
+        {
+          key: "claim",
+          value:
+            '{"runId":"run-1","batchId":"batch-1","branch":"feature/issue-69","claimedAt":"2026-06-11T16:00:00Z"}',
+        },
+        { key: "claim state", value: "stale" },
+      ]),
+    );
   });
 
   it("builds a Hub task board model with display buckets and no ordinals", () => {
@@ -448,7 +486,7 @@ fs.writeSync(1, JSON.stringify(tasks));
     expect(mapHubStatusToTaskBoardBucket("ready_for_agent")).toBe("todo");
   });
 
-  it("shows PRD warning details when task metadata includes warning fields", () => {
+  it("shows PRD warning details on the task detail model", () => {
     const task = projectHubTask({
       id: "bd-99",
       title: "Warned task",
@@ -462,9 +500,47 @@ fs.writeSync(1, JSON.stringify(tasks));
       },
     });
 
-    expect(formatHubTaskDetailsRows(task)).toMatchObject({
-      "PRD warning":
-        "[high] · Missing acceptance criteria · Slice: slice-1 · Proposal run: run-abc",
+    const model = buildHubTaskDetailModel(task);
+    expect(model.identity.rows).toEqual(
+      expect.arrayContaining([
+        {
+          key: "prd warning",
+          value:
+            "[high] · Missing acceptance criteria · Slice: slice-1 · Proposal run: run-abc",
+        },
+      ]),
+    );
+  });
+
+  it("formats a multi-comment timeline on the task detail model", () => {
+    const task = projectHubTask({
+      id: "bd-7",
+      title: "Discussed task",
+      status: "open",
+      comments: [
+        {
+          author: "alice",
+          body: "First note",
+          createdAt: "2026-06-11T15:00:00Z",
+        },
+        {
+          author: "bob",
+          body: "Second note",
+          createdAt: "2026-06-12T09:00:00Z",
+        },
+      ],
+    });
+
+    const model = buildHubTaskDetailModel(task);
+    expect(model.comments).toEqual({
+      kind: "prose",
+      title: "comments · 2",
+      body: "alice · 2026-06-11T15:00:00Z: First note\nbob · 2026-06-12T09:00:00Z: Second note",
+    });
+    expect(model.footer).toEqual({
+      kind: "footer",
+      label: "next",
+      command: "archloop tasks update bd-7 ...",
     });
   });
 

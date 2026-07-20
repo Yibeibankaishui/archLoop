@@ -376,9 +376,17 @@ const renderProse = (
   }
   const indent = MARGIN + "  ";
   const usable = Math.max(10, cols - indent.length);
-  const wrapped = wrapText(block.body.trimEnd(), usable);
-  for (const line of wrapped) {
-    lines.push(indent + line);
+  // Preserve explicit newlines (comments timeline); soft-wrap within each paragraph line.
+  const paragraphs = block.body.trimEnd().split(/\r?\n/);
+  for (const paragraph of paragraphs) {
+    if (paragraph.length === 0) {
+      lines.push(indent);
+      continue;
+    }
+    const wrapped = wrapText(paragraph, usable);
+    for (const line of wrapped) {
+      lines.push(indent + line);
+    }
   }
   return lines;
 };

@@ -39,6 +39,7 @@ import {
   type SectionFooterBlock,
   type SectionGroupBlock,
   type SectionHeaderBlock,
+  type SectionKvBlock,
   type SectionProseBlock,
 } from "./section.js";
 
@@ -2117,9 +2118,217 @@ export const formatHubTaskBoardLines = (
     }),
   );
 
+const TASK_DETAIL_KV_GUTTER = 12;
+
+const DETAIL_METADATA_IDENTITY_KEYS = new Set([
+  "origin",
+  "kind",
+  "remote_refs",
+  "remoteRefs",
+  "run_refs",
+  "runRefs",
+  "github_issue",
+  "claim",
+  "hubStatus",
+  "hub_status",
+  "done",
+  "slice_temp_id",
+  "warning_severity",
+  "warning_message",
+  "proposal_run_id",
+]);
+
+export interface TaskDetailModel {
+  readonly header: SectionHeaderBlock;
+  readonly identity: SectionKvBlock;
+  readonly description: SectionProseBlock;
+  readonly comments?: SectionProseBlock;
+  readonly footer: SectionFooterBlock;
+}
+
+const readMetadataString = (
+  metadata: Readonly<Record<string, unknown>>,
+  key: string,
+): string | undefined => {
+  const value = metadata[key];
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : undefined;
+};
+
+const leftoverDetailMetadata = (
+  metadata: Readonly<Record<string, unknown>>,
+): Record<string, unknown> => {
+  const leftover: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(metadata)) {
+    if (DETAIL_METADATA_IDENTITY_KEYS.has(key)) {
+      continue;
+    }
+    if (value === undefined) {
+      continue;
+    }
+    leftover[key] = value;
+  }
+  return leftover;
+};
+
+const buildTaskDetailDescriptionBody = (task: HubTaskProjection): string => {
+  const description = task.description?.trim() ?? "";
+  const notes = task.notes?.trim() ?? "";
+  if (description.length > 0 && notes.length > 0) {
+    return `${description}\n\n${notes}`;
+  }
+  return description || notes;
+};
+
+const buildTaskDetailHeaderRight = (task: HubTaskProjection): string =>
+  task.owner ? `${task.hubStatus} · ${task.owner}` : task.hubStatus;
+
+const buildTaskDetailIdentity = (task: HubTaskProjection): SectionKvBlock => {
+  const rows: SectionKvBlock["rows"][number][] = [
+    { key: "title", value: task.title },
+  ];
+
+  const statusRow: SectionKvBlock["rows"][number] = {
+    key: "status",
+    value: task.hubStatus,
+  };
+  if (task.beadsStatus) {
+    rows.push({
+      ...statusRow,
+      secondary: `(beads: ${task.beadsStatus})`,
+    });
+  } else {
+    rows.push(statusRow);
+  }
+
+  if (task.labels.length > 0) {
+    rows.push({ key: "labels", value: cleanJoinedValues(task.labels) });
+  }
+
+  const origin = readMetadataString(task.metadata, "origin");
+  if (origin) {
+    rows.push({ key: "origin", value: origin });
+  }
+  const kind = readMetadataString(task.metadata, "kind");
+  if (kind) {
+    rows.push({ key: "kind", value: kind });
+  }
+  if (task.remoteRefs.length > 0) {
+    rows.push({ key: "remote", value: cleanJoinedValues(task.remoteRefs) });
+  }
+  if (task.runRefs.length > 0) {
+    rows.push({ key: "runs", value: cleanJoinedValues(task.runRefs) });
+  }
+  if (task.claim) {
+    rows.push({ key: "claim", value: formatInlineObject(task.claim.raw) });
+    rows.push({ key: "claim state", value: task.claimState ?? "stale" });
+  }
+
+  const warning = readPrdWarningFromTask(task);
+  if (warning) {
+    const proposalRunId =
+      typeof task.metadata.proposal_run_id === "string"
+        ? task.metadata.proposal_run_id
+        : undefined;
+    rows.push({
+      key: "prd warning",
+      value: formatPrdWarningDetailsRow(warning, proposalRunId),
+    });
+  }
+
+  const leftover = leftoverDetailMetadata(task.metadata);
+  if (Object.keys(leftover).length > 0) {
+    rows.push({ key: "metadata", value: formatInlineObject(leftover) });
+  }
+
+  return {
+    kind: "kv",
+    gutter: TASK_DETAIL_KV_GUTTER,
+    rows,
+  };
+};
+
+const buildTaskDetailComments = (
+  task: HubTaskProjection,
+): SectionProseBlock | undefined => {
+  if (task.comments.length === 0) {
+    return undefined;
+  }
+  return {
+    kind: "prose",
+    title: `comments · ${task.comments.length}`,
+    body: task.comments.map((comment) => formatComment(comment)).join("\n"),
+  };
+};
+
+const buildTaskDetailFooter = (task: HubTaskProjection): SectionFooterBlock => {
+  const githubIssue = task.remoteRefs
+    .map((ref) => {
+      const match = /^github#(\d+)$/i.exec(ref.trim());
+      return match ? Number(match[1]) : undefined;
+    })
+    .find((value): value is number => value !== undefined);
+
+  if (githubIssue !== undefined) {
+    return {
+      kind: "footer",
+      label: "next",
+      command: `archloop tasks update ${task.id} ... · gh issue view ${githubIssue}`,
+    };
+  }
+
+  return {
+    kind: "footer",
+    label: "next",
+    command: `archloop tasks update ${task.id} ...`,
+  };
+};
+
+export const buildHubTaskDetailModel = (
+  task: HubTaskProjection,
+): TaskDetailModel => {
+  const comments = buildTaskDetailComments(task);
+  return {
+    header: {
+      kind: "header",
+      title: "archLoop",
+      subtitle: `task · ${task.id}`,
+      right: buildTaskDetailHeaderRight(task),
+    },
+    identity: buildTaskDetailIdentity(task),
+    description: {
+      kind: "prose",
+      title: "description",
+      body: buildTaskDetailDescriptionBody(task),
+    },
+    ...(comments ? { comments } : {}),
+    footer: buildTaskDetailFooter(task),
+  };
+};
+
+export const taskDetailModelToBlocks = (
+  model: TaskDetailModel,
+): readonly SectionBlock[] => {
+  const blocks: SectionBlock[] = [model.header, model.identity, model.description];
+  if (model.comments) {
+    blocks.push(model.comments);
+  }
+  blocks.push(model.footer);
+  return blocks;
+};
+
+export const renderHubTaskDetailText = (
+  model: TaskDetailModel,
+  options?: RenderSectionOptions,
+): readonly string[] =>
+  renderSection("", taskDetailModelToBlocks(model), options);
+
+/** @deprecated Prefer buildHubTaskDetailModel + Display.section; kept until Phase 4 cleanup. */
 export const formatHubTaskDetailsRows = (
   task: HubTaskProjection,
 ): Record<string, string> => {
+  const model = buildHubTaskDetailModel(task);
   const rows: Record<string, string> = {
     "Beads id": task.id,
     Title: task.title,
@@ -2138,35 +2347,34 @@ export const formatHubTaskDetailsRows = (
   if (task.labels.length > 0) {
     rows.Labels = cleanJoinedValues(task.labels);
   }
-  if (Object.keys(task.metadata).length > 0) {
-    rows.Metadata = formatInlineObject(task.metadata);
-  }
-  if (task.claim) {
-    rows.Claim = formatInlineObject(task.claim.raw);
-    rows["Claim state"] = task.claimState ?? "stale";
-  }
-  if (task.remoteRefs.length > 0) {
-    rows["Remote refs"] = cleanJoinedValues(task.remoteRefs);
-  }
-  if (task.runRefs.length > 0) {
-    rows["Run refs"] = cleanJoinedValues(task.runRefs);
+  for (const row of model.identity.rows) {
+    if (row.key === "metadata") {
+      rows.Metadata = row.value;
+    }
+    if (row.key === "claim") {
+      rows.Claim = row.value;
+    }
+    if (row.key === "claim state") {
+      rows["Claim state"] = row.value;
+    }
+    if (row.key === "remote") {
+      rows["Remote refs"] = row.value;
+    }
+    if (row.key === "runs") {
+      rows["Run refs"] = row.value;
+    }
+    if (row.key === "prd warning") {
+      rows["PRD warning"] = row.value;
+    }
   }
   if (task.comments.length > 0) {
     rows.Comments = String(task.comments.length);
   }
 
-  const warning = readPrdWarningFromTask(task);
-  if (warning) {
-    const proposalRunId =
-      typeof task.metadata.proposal_run_id === "string"
-        ? task.metadata.proposal_run_id
-        : undefined;
-    rows["PRD warning"] = formatPrdWarningDetailsRow(warning, proposalRunId);
-  }
-
   return rows;
 };
 
+/** @deprecated Prefer buildHubTaskDetailModel; kept until Phase 4 cleanup. */
 export const formatHubTaskCommentLines = (
   task: HubTaskProjection,
 ): readonly string[] => {
