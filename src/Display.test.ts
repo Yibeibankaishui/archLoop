@@ -541,6 +541,139 @@ describe("FileDisplay - toolCall", () => {
   });
 });
 
+describe("SilentDisplay - section", () => {
+  const setup = () => {
+    const ref = Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]);
+    const layer = SilentDisplay.layer(ref);
+    return { ref, layer };
+  };
+
+  it("records section title and blocks verbatim", async () => {
+    const { ref, layer } = setup();
+    const blocks = [
+      {
+        kind: "header" as const,
+        title: "archLoop",
+        subtitle: "demo",
+        right: "2 tasks",
+      },
+      {
+        kind: "footer" as const,
+        label: "tip" as const,
+        commands: ["archloop tasks list"],
+      },
+    ];
+
+    const entries = await Effect.runPromise(
+      Effect.gen(function* () {
+        const d = yield* Display;
+        yield* d.section("", blocks);
+        return yield* Ref.get(ref);
+      }).pipe(Effect.provide(layer)),
+    );
+
+    expect(entries).toEqual([
+      { _tag: "section", title: "", blocks },
+    ]);
+  });
+});
+
+describe("FileDisplay - section", () => {
+  const setup = () => {
+    const dir = mkdtempSync(join(tmpdir(), "archloop-display-"));
+    const logPath = join(dir, "test.log");
+    const layer = Layer.provide(
+      FileDisplay.layer(logPath),
+      NodeFileSystem.layer,
+    );
+    return { logPath, layer };
+  };
+
+  const readLog = (logPath: string) => readFileSync(logPath, "utf-8");
+
+  it("flattens section blocks to plain text without color or dividers", async () => {
+    const { logPath, layer } = setup();
+
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const d = yield* Display;
+        yield* d.section("run card", [
+          {
+            kind: "header",
+            title: "archLoop",
+            subtitle: "run",
+            right: "1m00s",
+          },
+          { kind: "divider" },
+          {
+            kind: "group",
+            symbol: "◐",
+            severity: "warn",
+            name: "batch",
+            count: 1,
+            items: [
+              {
+                id: "AutoTuneAgent-2mr",
+                title: "Implement section primitive",
+              },
+            ],
+          },
+          {
+            kind: "footer",
+            label: "next",
+            command: "archloop tasks list",
+          },
+        ]);
+      }).pipe(Effect.provide(layer)),
+    );
+
+    const log = readLog(logPath);
+    expect(log).toContain("run card");
+    expect(log).toContain("archLoop · run    1m00s");
+    expect(log).toContain("AutoTuneAgent-2mr");
+    expect(log).toContain("next   archloop tasks list");
+    expect(log).not.toMatch(/─/);
+    expect(log).not.toMatch(/\x1b\[/);
+  });
+});
+
+describe("ClackDisplay - section", () => {
+  it("writes via console.log without the clack.note gutter", async () => {
+    const logs: string[] = [];
+    const logSpy = vi
+      .spyOn(console, "log")
+      .mockImplementation((msg?: unknown) => {
+        logs.push(String(msg ?? ""));
+      });
+
+    try {
+      const { ClackDisplay: Clack } = await import("./Display.js");
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const d = yield* Display;
+          yield* d.section("", [
+            { kind: "header", title: "archLoop", right: "1 task" },
+            {
+              kind: "footer",
+              label: "tip",
+              commands: ["archloop tasks list"],
+            },
+          ]);
+        }).pipe(Effect.provide(Clack.layer)),
+      );
+
+      expect(logs.some((l) => l.includes("archLoop"))).toBe(true);
+      expect(logs.some((l) => l.includes("tip"))).toBe(true);
+      // clack.note draws a left │ gutter; section must not.
+      expect(logs.some((l) => l.includes("│"))).toBe(false);
+      // Trailing blank line after every section
+      expect(logs.at(-1)).toBe("");
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+});
+
 describe("terminalStyle", () => {
   beforeEach(() => {
     process.env.FORCE_COLOR = "1";
