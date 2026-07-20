@@ -1973,12 +1973,9 @@ const buildTaskBoardGroup = (
 
   const meta = TASK_BOARD_BUCKET_META[bucket];
   // Default view truncates only the done bucket; --all expands it.
-  const shouldTruncate =
+  const truncated =
     !showAll && bucket === "done" && tasks.length > perGroupLimit;
-  const visibleTasks = shouldTruncate
-    ? tasks.slice(0, perGroupLimit)
-    : tasks;
-  const truncated = visibleTasks.length < tasks.length;
+  const visibleTasks = truncated ? tasks.slice(0, perGroupLimit) : tasks;
 
   return {
     kind: "group",
@@ -1989,14 +1986,10 @@ const buildTaskBoardGroup = (
     ...(truncated
       ? {
           rightHint: `showing ${visibleTasks.length} · archloop tasks list --all`,
-        }
-      : {}),
-    items: visibleTasks.map(toTaskBoardGroupItem),
-    ...(truncated
-      ? {
           footerDim: `… ${tasks.length - visibleTasks.length} more`,
         }
       : {}),
+    items: visibleTasks.map(toTaskBoardGroupItem),
   };
 };
 
