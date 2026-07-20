@@ -201,9 +201,10 @@ import { HUB_TRIAGE_DEFAULT_TASK_QUERY } from "./hubTriage.js";
 import { initHubTaskStore } from "./hubTaskStore.js";
 import { isTriageTaskIdInput } from "./hubTriageProposal.js";
 import {
+  buildSyncResultModel,
   formatHubTaskSyncPreviewLines,
-  formatHubTaskSyncSummaryLines,
   syncHubTasksWithGithub,
+  syncResultModelToBlocks,
 } from "./hubTaskSync.js";
 import { formatHubRecoveryComment, recoverHubTask } from "./hubTaskRecover.js";
 import {
@@ -2253,6 +2254,7 @@ const tasksFromPrdCommand = Command.make(
 const runHubTaskSyncCommand = (input: {
   readonly mode: "sync" | "pull" | "push";
   readonly cwd: string;
+  readonly projectName: string;
   readonly yes?: boolean;
   readonly dryRun?: boolean;
   readonly includeClosed?: boolean;
@@ -2322,6 +2324,7 @@ const runHubTaskSyncCommand = (input: {
       }
     }
 
+    const startedAt = Date.now();
     const result = yield* Effect.try({
       try: () =>
         syncHubTasksWithGithub({
@@ -2331,10 +2334,14 @@ const runHubTaskSyncCommand = (input: {
         }),
       catch: toTaskBoardError,
     });
+    const durationSeconds = (Date.now() - startedAt) / 1000;
 
-    for (const line of formatHubTaskSyncSummaryLines(result)) {
-      yield* d.text(line);
-    }
+    const model = buildSyncResultModel({
+      result,
+      projectName: input.projectName,
+      durationSeconds,
+    });
+    yield* d.section("", syncResultModelToBlocks(model));
   });
 
 const tasksSyncCommand = Command.make(
@@ -2347,10 +2354,11 @@ const tasksSyncCommand = Command.make(
   },
   ({ yes, dryRun, includeClosed, project }) =>
     Effect.gen(function* () {
-      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const target = yield* resolveTaskCommandProjectTarget(project);
       return yield* runHubTaskSyncCommand({
         mode: "sync",
-        cwd,
+        cwd: target.repoRoot,
+        projectName: target.projectName,
         yes,
         dryRun,
         includeClosed,
@@ -2367,10 +2375,11 @@ const tasksPullCommand = Command.make(
   },
   ({ includeClosed, dryRun, project }) =>
     Effect.gen(function* () {
-      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const target = yield* resolveTaskCommandProjectTarget(project);
       return yield* runHubTaskSyncCommand({
         mode: "pull",
-        cwd,
+        cwd: target.repoRoot,
+        projectName: target.projectName,
         includeClosed,
         dryRun,
       });
@@ -2382,10 +2391,11 @@ const tasksPushCommand = Command.make(
   { dryRun: taskSyncDryRunOption, project: projectTargetOption },
   ({ dryRun, project }) =>
     Effect.gen(function* () {
-      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const target = yield* resolveTaskCommandProjectTarget(project);
       return yield* runHubTaskSyncCommand({
         mode: "push",
-        cwd,
+        cwd: target.repoRoot,
+        projectName: target.projectName,
         dryRun,
       });
     }),
