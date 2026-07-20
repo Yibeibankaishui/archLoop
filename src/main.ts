@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
 import { Effect, Layer } from "effect";
+import { setPlainFlag } from "./ansi.js";
 import { cli } from "./cli.js";
 import { ClackDisplay } from "./Display.js";
 import { withFriendlyErrors } from "./ErrorHandler.js";
@@ -13,9 +14,17 @@ import { setupTerminalCleanup } from "./terminalCleanup.js";
 // bypassed, leaving the terminal broken. This exit hook fixes that.
 setupTerminalCleanup();
 
+// Variant C `--plain`: strip styling globally. Consume the flag from argv so
+// Effect CLI does not see an unknown option; screens that call `section` honor
+// the palette decision matrix via detectPalette().
+const argv = process.argv.filter((arg) => arg !== "--plain");
+if (process.argv.includes("--plain")) {
+  setPlainFlag(true);
+}
+
 const mainLayer = Layer.merge(NodeContext.layer, ClackDisplay.layer);
 
-cli(process.argv).pipe(
+cli(argv).pipe(
   withFriendlyErrors,
   Effect.provide(mainLayer),
   NodeRuntime.runMain,

@@ -3,6 +3,12 @@ import { FileSystem } from "@effect/platform";
 import { dirname } from "node:path";
 import { Context, Effect, Layer, Ref } from "effect";
 import { styleText } from "node:util";
+import { detectPalette } from "./ansi.js";
+import {
+  flattenSectionForLog,
+  renderSection,
+  type SectionBlock,
+} from "./section.js";
 
 export type Severity = "info" | "success" | "warn" | "error";
 
@@ -30,6 +36,11 @@ export type DisplayEntry =
       readonly _tag: "toolCall";
       readonly name: string;
       readonly formattedArgs: string;
+    }
+  | {
+      readonly _tag: "section";
+      readonly title: string;
+      readonly blocks: ReadonlyArray<SectionBlock>;
     };
 
 export interface DisplayService {
@@ -59,6 +70,11 @@ export interface DisplayService {
   readonly toolCall: (
     name: string,
     formattedArgs: string,
+  ) => Effect.Effect<void>;
+
+  readonly section: (
+    title: string,
+    blocks: ReadonlyArray<SectionBlock>,
   ) => Effect.Effect<void>;
 }
 
@@ -133,6 +149,12 @@ export const SilentDisplay = {
           ...entries,
           { _tag: "toolCall" as const, name, formattedArgs },
         ]),
+
+      section: (title, blocks) =>
+        Ref.update(ref, (entries) => [
+          ...entries,
+          { _tag: "section" as const, title, blocks },
+        ]),
     }),
 };
 
@@ -202,6 +224,11 @@ export const FileDisplay = {
 
           toolCall: (name, formattedArgs) =>
             appendToLog(`${name}(${formattedArgs})`),
+
+          section: (title, blocks) =>
+            appendToLog(
+              [title, "", ...flattenSectionForLog(blocks), ""].join("\n"),
+            ),
         };
       }),
     ),
@@ -280,5 +307,18 @@ export const ClackDisplay = {
       Effect.sync(() =>
         clack.log.step(terminalStyle.toolCall(`${name}(${formattedArgs})`)),
       ),
+
+    section: (title, blocks) =>
+      Effect.sync(() => {
+        const cols = process.stdout.columns ?? 100;
+        const colorEnabled = detectPalette() === "color";
+        for (const line of renderSection(title, blocks, {
+          width: cols,
+          colorEnabled,
+        })) {
+          console.log(line);
+        }
+        console.log("");
+      }),
   }),
 };
