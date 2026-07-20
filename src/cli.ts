@@ -4447,9 +4447,9 @@ const runCommand = Command.make(
           display: d,
           showLegacyGuidance: !isMachineOutput,
         });
-      let flowIdOption = trimOptionalText(optionalTextValue(flow));
+      const initialFlowId = trimOptionalText(optionalTextValue(flow));
       let flowDefinition = yield* Effect.tryPromise({
-        try: () => resolveRunFlowDefinition(flowIdOption, isInteractive),
+        try: () => resolveRunFlowDefinition(initialFlowId, isInteractive),
         catch: toHubFlowError,
       });
       const maxBatchesValue = optionalTextValue(maxBatches);
@@ -4460,13 +4460,17 @@ const runCommand = Command.make(
             : undefined,
         catch: toHubFlowError,
       });
-      if (flowDefinition.kind === "proposal" && flowMaxBatches !== undefined) {
-        return yield* Effect.fail(
-          new HubFlowError({
-            message: "Proposal flows do not support --max-batches.",
-          }),
-        );
-      }
+      const rejectProposalWithMaxBatches = (
+        definition: HubFlowDefinition,
+      ): Effect.Effect<void, HubFlowError> =>
+        definition.kind === "proposal" && flowMaxBatches !== undefined
+          ? Effect.fail(
+              new HubFlowError({
+                message: "Proposal flows do not support --max-batches.",
+              }),
+            )
+          : Effect.void;
+      yield* rejectProposalWithMaxBatches(flowDefinition);
 
       const rawInput = optionalTextValue(input);
       let validatedInput = yield* Effect.tryPromise({
@@ -4535,21 +4539,11 @@ const runCommand = Command.make(
         }
 
         if (outcome === "edit") {
-          flowIdOption = undefined;
           flowDefinition = yield* Effect.tryPromise({
             try: () => resolveRunFlowDefinition(undefined, true),
             catch: toHubFlowError,
           });
-          if (
-            flowDefinition.kind === "proposal" &&
-            flowMaxBatches !== undefined
-          ) {
-            return yield* Effect.fail(
-              new HubFlowError({
-                message: "Proposal flows do not support --max-batches.",
-              }),
-            );
-          }
+          yield* rejectProposalWithMaxBatches(flowDefinition);
           validatedInput = yield* Effect.tryPromise({
             try: () =>
               resolveRunFlowInput({

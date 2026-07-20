@@ -24,6 +24,8 @@ export interface BuildRunPlanModelInput {
   readonly legacyProjectTarget?: string;
 }
 
+type RunPlanKvRow = SectionKvBlock["rows"][number];
+
 const RUN_PLAN_KV_GUTTER = 10;
 
 const DEBOUNCE_TIP = "starting in 3s · Ctrl+C to cancel · e to edit flow";
@@ -34,62 +36,35 @@ const formatReadyCount = (count: number): string =>
 export const buildRunPlanModel = (
   input: BuildRunPlanModelInput,
 ): RunPlanModel => {
-  const rows: SectionKvBlock["rows"][number][] = [
+  const rows: RunPlanKvRow[] = [
     {
       key: "flow",
       value: input.flowId,
       ...(input.flowHint ? { secondary: input.flowHint } : {}),
     },
+    input.projectName
+      ? {
+          key: "project",
+          value: input.projectName,
+          secondary: `← ${input.repoRoot}`,
+        }
+      : { key: "project", value: input.repoRoot },
   ];
 
-  if (input.projectName) {
-    rows.push({
-      key: "project",
-      value: input.projectName,
-      secondary: `← ${input.repoRoot}`,
-    });
-  } else {
-    rows.push({
-      key: "project",
-      value: input.repoRoot,
-    });
-  }
-
   if (input.legacyProjectTarget) {
-    rows.push({
-      key: "legacy",
-      value: input.legacyProjectTarget,
-    });
+    rows.push({ key: "legacy", value: input.legacyProjectTarget });
   }
 
-  rows.push({
-    key: "ready",
-    value: formatReadyCount(input.readyCount),
-  });
+  rows.push({ key: "ready", value: formatReadyCount(input.readyCount) });
 
   if (input.flowInputSummary) {
-    rows.push({
-      key: "input",
-      value: input.flowInputSummary,
-    });
+    rows.push({ key: "input", value: input.flowInputSummary });
   }
 
   return {
-    header: {
-      kind: "header",
-      title: "archLoop",
-      subtitle: "run",
-    },
-    plan: {
-      kind: "kv",
-      gutter: RUN_PLAN_KV_GUTTER,
-      rows,
-    },
-    footer: {
-      kind: "footer",
-      label: "tip",
-      commands: [DEBOUNCE_TIP],
-    },
+    header: { kind: "header", title: "archLoop", subtitle: "run" },
+    plan: { kind: "kv", gutter: RUN_PLAN_KV_GUTTER, rows },
+    footer: { kind: "footer", label: "tip", commands: [DEBOUNCE_TIP] },
   };
 };
 
