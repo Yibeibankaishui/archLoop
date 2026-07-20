@@ -1594,7 +1594,7 @@ process.exit(1);
     expect(initStdout).toContain("Initialized local Hub task store");
 
     const { stdout } = await runCli("tasks list", hostDir, env);
-    expect(stdout).toContain("Hub task board");
+    expect(stdout).toContain("archLoop");
     expect(stdout).toContain("No Beads tasks found");
   });
 
@@ -1665,14 +1665,17 @@ exit 1
       withBdEnv(bdPath, hostDir),
     );
 
-    expect(stdout).toContain("Hub task board");
-    expect(stdout).toContain("Total tasks: 3");
-    expect(stdout).toContain("inbox (1)");
-    expect(stdout).toContain("ready_for_agent (1)");
-    expect(stdout).toContain("done (1)");
-    expect(stdout).toContain("  1. bd-1: Inbox task");
-    expect(stdout).toContain("  2. bd-2: Ready task");
-    expect(stdout).toContain("  3. bd-3: Done task");
+    expect(stdout).toContain("archLoop");
+    expect(stdout).toContain("3 tasks");
+    expect(stdout).toContain("todo · 2");
+    expect(stdout).toContain("done · 1");
+    expect(stdout).toContain("bd-1");
+    expect(stdout).toContain("Inbox task");
+    expect(stdout).toContain("bd-2");
+    expect(stdout).toContain("Ready task");
+    expect(stdout).toContain("bd-3");
+    expect(stdout).toContain("Done task");
+    expect(stdout).not.toContain("  1. bd-1");
   });
 
   it("tasks list --warning filters tasks by PRD warning severity", async () => {
@@ -1728,7 +1731,9 @@ exit 1
     );
 
     expect(stdout).toContain("PRD warnings: 1 high · 0 medium · 0 low");
-    expect(stdout).toContain("  1. bd-1: High warning task [high]");
+    expect(stdout).toContain("bd-1");
+    expect(stdout).toContain("High warning task");
+    expect(stdout).toContain("⚠ prd-warn");
     expect(stdout).not.toContain("bd-2");
   });
 
@@ -1819,7 +1824,7 @@ exit 1
     expect(stdout).toContain("Looks good");
   });
 
-  it("tasks show resolves exact titles and list indices and uses supported Beads flags", async () => {
+  it("tasks show resolves exact titles and Beads ids and uses supported Beads flags", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
@@ -1879,12 +1884,12 @@ exit 1
     );
     expect(titleResult.stdout).toContain("Beads task bd-2");
 
-    const indexResult = await runCli(
-      "tasks show 2",
+    const idResult = await runCli(
+      "tasks show bd-2",
       hostDir,
       withBdEnv(bdPath, hostDir),
     );
-    expect(indexResult.stdout).toContain("Beads task bd-2");
+    expect(idResult.stdout).toContain("Beads task bd-2");
 
     const showArgs = await readFile(showArgsFile, "utf-8");
     expect(showArgs).toContain("show bd-2 --json --long");
@@ -2013,7 +2018,7 @@ exit 1
     }
   });
 
-  it("tasks show fails with actionable error for out-of-range list numbers", async () => {
+  it("tasks show rejects numeric list ordinals as selectors", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
@@ -2050,8 +2055,8 @@ exit 1
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       const output = cliFailureOutput(err);
-      expect(output).toContain("out of range");
-      expect(output).toContain("1-2");
+      expect(output).toContain("did not match a Beads id or an exact task title");
+      expect(output).not.toContain("out of range");
     }
   });
 
@@ -2985,7 +2990,7 @@ exit 1
     expect(stdout).toContain("Appended a comment to Beads task bd-99.");
   });
 
-  it("tasks comment resolves exact titles and list indices", async () => {
+  it("tasks comment resolves exact titles and Beads ids", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
     await commitFile(hostDir, "hello.txt", "hello", "initial commit");
@@ -3032,18 +3037,18 @@ exit 1
       "Appended a comment to Beads task bd-2.",
     );
 
-    const indexResult = await runCli(
-      'tasks comment 2 --body "Comment from index"',
+    const idResult = await runCli(
+      'tasks comment bd-2 --body "Comment from id"',
       hostDir,
       withBdEnv(bdPath, hostDir),
     );
-    expect(indexResult.stdout).toContain(
+    expect(idResult.stdout).toContain(
       "Appended a comment to Beads task bd-2.",
     );
 
     const commentArgs = await readFile(commentArgsFile, "utf-8");
     expect(commentArgs).toContain("comments add bd-2 Comment from title");
-    expect(commentArgs).toContain("comments add bd-2 Comment from index");
+    expect(commentArgs).toContain("comments add bd-2 Comment from id");
   });
 
   it("tasks doctor reports state-inconsistent merge-ready task state", async () => {

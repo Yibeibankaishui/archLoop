@@ -966,14 +966,13 @@ Runs `gh auth login --insecure-storage` with `GH_CONFIG_DIR` set to archLoop's H
 
 ### `archloop tasks list`
 
-Shows the Hub task board grouped by canonical Hub task status from Beads data in the current git repository. Use it to inspect inbox, ready, blocked, implementation, review, merge, done, failure, and sync-conflict buckets. Each displayed task includes a 1-based list number that can be used as a task selector in follow-up commands.
-Task commands target the selected Hub project by default and accept `--project <name>` for an explicit override.
+Shows the Hub task board view for Beads data in the selected Hub project: a header (`archLoop · <project>`), status badges (`todo` / `in_progress` / `done`), per-bucket task groups with full Beads ids (no 1-based ordinals), and a tip footer. Done tasks are truncated by default; pass `--all` to expand them. Use `--warning high|medium|low` to filter PRD-warning tasks. Task commands target the selected Hub project by default and accept `--project <name>` for an explicit override.
 
 ### `archloop tasks show <task-selector>`
 
 Shows a single Beads task with its Hub status, Beads lifecycle state, claim metadata/state, labels, metadata, comments, remote refs, and run refs when present.
 
-Task selectors resolve in this order: exact Beads id, exact task title, then the 1-based number shown by `archloop tasks list`. Ambiguous title matches fail with candidate ids instead of guessing.
+Task selectors are an exact Beads id or exact task title. Ambiguous title matches fail with candidate ids instead of guessing.
 
 ### `archloop tasks create <title>`
 
