@@ -10,6 +10,7 @@ import {
   formatHubTaskStoreCommandFailure,
   formatHubTaskStoreNotInitializedMessage,
   initHubTaskStore,
+  isHubTaskStoreFullyInitialized,
   isHubTaskStoreInitialized,
   runBdTextForHubTaskStore,
 } from "./hubTaskStore.js";
@@ -43,6 +44,34 @@ describe("isHubTaskStoreInitialized", () => {
       JSON.stringify({ backend: "dolt" }),
     );
     expect(isHubTaskStoreInitialized(repoDir)).toBe(true);
+  });
+});
+
+describe("isHubTaskStoreFullyInitialized", () => {
+  it("returns false when only metadata.json exists without the embedded database", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-task-store-"));
+    await initRepo(repoDir);
+    const beadsDir = join(repoDir, ".beads");
+    await mkdir(beadsDir, { recursive: true });
+    await writeFile(
+      join(beadsDir, "metadata.json"),
+      JSON.stringify({ backend: "dolt" }),
+    );
+    // Marker present, but no embeddeddolt directory → orphaned marker.
+    expect(isHubTaskStoreInitialized(repoDir)).toBe(true);
+    expect(isHubTaskStoreFullyInitialized(repoDir)).toBe(false);
+  });
+
+  it("returns true when both metadata.json and embeddeddolt exist", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-task-store-"));
+    await initRepo(repoDir);
+    const beadsDir = join(repoDir, ".beads");
+    await mkdir(join(beadsDir, "embeddeddolt"), { recursive: true });
+    await writeFile(
+      join(beadsDir, "metadata.json"),
+      JSON.stringify({ backend: "dolt" }),
+    );
+    expect(isHubTaskStoreFullyInitialized(repoDir)).toBe(true);
   });
 });
 
@@ -111,12 +140,6 @@ describe("initHubTaskStore", () => {
   it("is idempotent when the task store already exists", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-task-store-init-"));
     await initRepo(repoDir);
-    const beadsDir = join(repoDir, ".beads");
-    await mkdir(beadsDir, { recursive: true });
-    await writeFile(
-      join(beadsDir, "metadata.json"),
-      JSON.stringify({ backend: "dolt" }),
-    );
 
     const bundledBd = resolveBundledBdExecutable();
     if (!bundledBd) {
@@ -124,13 +147,52 @@ describe("initHubTaskStore", () => {
       return;
     }
 
+    // First init builds the real store (metadata.json + embeddeddolt).
+    const first = initHubTaskStore(repoDir, {
+      ...process.env,
+      ARCHLOOP_BD_PATH: bundledBd,
+    });
+    expect(first.alreadyInitialized).toBe(false);
+    expect(isHubTaskStoreFullyInitialized(repoDir)).toBe(true);
+
+    // A second init must no-op, not re-run bd init.
+    const second = initHubTaskStore(repoDir, {
+      ...process.env,
+      ARCHLOOP_BD_PATH: bundledBd,
+    });
+    expect(second.alreadyInitialized).toBe(true);
+    expect(second.output).toBe("");
+  });
+
+  it("re-runs bd init when an orphaned metadata.json has no embedded database", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-task-store-init-"));
+    await initRepo(repoDir);
+
+    const bundledBd = resolveBundledBdExecutable();
+    if (!bundledBd) {
+      expect(bundledBd).toBeDefined();
+      return;
+    }
+
+    // Simulate a stale marker left behind by a deleted database: metadata.json
+    // present, but no embeddeddolt directory. The marker-only check used to
+    // treat this as "already initialized" and skip bd init, leaving every
+    // task command to fail with "no beads database found".
+    const beadsDir = join(repoDir, ".beads");
+    await mkdir(beadsDir, { recursive: true });
+    await writeFile(
+      join(beadsDir, "metadata.json"),
+      JSON.stringify({ backend: "dolt" }),
+    );
+
     const result = initHubTaskStore(repoDir, {
       ...process.env,
       ARCHLOOP_BD_PATH: bundledBd,
     });
 
-    expect(result.alreadyInitialized).toBe(true);
-  });
+    expect(result.alreadyInitialized).toBe(false);
+    expect(isHubTaskStoreFullyInitialized(repoDir)).toBe(true);
+  }, 60_000);
 });
 
 describe("formatHubTaskStoreCommandFailure", () => {

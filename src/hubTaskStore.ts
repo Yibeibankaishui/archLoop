@@ -10,8 +10,39 @@ export const HUB_TASK_STORE_INIT_COMMAND = "archloop tasks init";
 export const resolveHubTaskStoreDir = (cwd: string): string =>
   join(cwd, ".beads");
 
+const resolveHubTaskStoreMetadataPath = (cwd: string): string =>
+  join(resolveHubTaskStoreDir(cwd), "metadata.json");
+
+/**
+ * Embedded Dolt database directory written by `bd init`. Presence of this
+ * directory (alongside `metadata.json`) is what proves a real task-store
+ * database exists — `metadata.json` alone is just a marker and can be left
+ * behind as an orphan if the database is deleted out from under it.
+ */
+const resolveHubTaskStoreDatabaseDir = (cwd: string): string =>
+  join(resolveHubTaskStoreDir(cwd), "embeddeddolt");
+
+const isHubTaskStoreDatabasePresent = (cwd: string): boolean =>
+  existsSync(resolveHubTaskStoreDatabaseDir(cwd));
+
+/**
+ * Marker-file check only. True when `.beads/metadata.json` exists, regardless
+ * of whether the underlying Dolt database is still present. Use
+ * {@link isHubTaskStoreFullyInitialized} when you need to know the store is
+ * actually usable (e.g. before skipping `bd init`), so an orphaned
+ * `metadata.json` does not mask a missing database.
+ */
 export const isHubTaskStoreInitialized = (cwd: string): boolean =>
-  existsSync(join(resolveHubTaskStoreDir(cwd), "metadata.json"));
+  existsSync(resolveHubTaskStoreMetadataPath(cwd));
+
+/**
+ * True only when both the metadata marker and the embedded Dolt database
+ * directory exist. This is the check `tasks init` uses to decide whether a
+ * real `bd init` is still needed, so a stale `metadata.json` left behind by a
+ * deleted database triggers a genuine re-init instead of a no-op.
+ */
+export const isHubTaskStoreFullyInitialized = (cwd: string): boolean =>
+  isHubTaskStoreInitialized(cwd) && isHubTaskStoreDatabasePresent(cwd);
 
 export const seedHubTaskStoreMetadata = (cwd: string): void => {
   const beadsDir = resolveHubTaskStoreDir(cwd);
@@ -20,6 +51,10 @@ export const seedHubTaskStoreMetadata = (cwd: string): void => {
   if (!existsSync(metadataPath)) {
     writeFileSync(metadataPath, JSON.stringify({ backend: "dolt" }));
   }
+  // Mirror what `bd init` writes: an embedded Dolt database directory. This
+  // keeps the seeded store consistent with isHubTaskStoreFullyInitialized so
+  // test fixtures that stub the task store read as genuinely initialized.
+  mkdirSync(resolveHubTaskStoreDatabaseDir(cwd), { recursive: true });
 };
 
 export const formatHubTaskStoreNotInitializedMessage = (
@@ -44,7 +79,7 @@ export const formatHubTaskStoreCommandFailure = (
   cwd: string,
 ): string => {
   const message = readErrorMessage(error);
-  if (!isHubTaskStoreInitialized(cwd) || isTaskStoreInitError(message)) {
+  if (!isHubTaskStoreFullyInitialized(cwd) || isTaskStoreInitError(message)) {
     return formatHubTaskStoreNotInitializedMessage(failureLabel);
   }
 
@@ -114,14 +149,14 @@ export const initHubTaskStore = (
     });
   }
 
-  if (isHubTaskStoreInitialized(cwd)) {
+  if (isHubTaskStoreFullyInitialized(cwd)) {
     return { alreadyInitialized: true, output: "" };
   }
 
   try {
     const output = execBdText(cwd, ["init", "--non-interactive"], env);
 
-    if (!isHubTaskStoreInitialized(cwd)) {
+    if (!isHubTaskStoreFullyInitialized(cwd)) {
       throw new TaskBoardError({
         message:
           "archloop tasks init reported success, but the local task store is still missing. Retry after checking repository permissions.",

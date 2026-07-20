@@ -29,6 +29,8 @@ const seedHubTaskStore = (repoDir: string): void => {
   if (!existsSync(metadataPath)) {
     writeFileSync(metadataPath, JSON.stringify({ backend: "dolt" }));
   }
+  // Mirror bd init: a fully-initialized store also has the embeddeddolt dir.
+  mkdirSync(join(beadsDir, "embeddeddolt"), { recursive: true });
 };
 
 const initRepo = async (dir: string) => {

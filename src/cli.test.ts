@@ -1564,6 +1564,7 @@ const { join } = require("node:path");
 const [command] = process.argv.slice(2);
 if (command === "init") {
   mkdirSync(".beads", { recursive: true });
+  mkdirSync(join(".beads", "embeddeddolt"), { recursive: true });
   writeFileSync(join(".beads", "metadata.json"), JSON.stringify({ backend: "dolt" }));
   process.exit(0);
 }
@@ -1588,11 +1589,7 @@ process.exit(1);
     const { stdout: initStdout } = await runCli("tasks init", hostDir, env);
     expect(initStdout).toContain("Initialized local Hub task store");
 
-    const { stdout } = await runCli(
-      "tasks list",
-      hostDir,
-      env,
-    );
+    const { stdout } = await runCli("tasks list", hostDir, env);
     expect(stdout).toContain("Hub task board");
     expect(stdout).toContain("No Beads tasks found");
   });
