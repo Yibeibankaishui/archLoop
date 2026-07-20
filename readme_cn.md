@@ -255,7 +255,7 @@ archLoop 使用常规容器将宿主 worktree 挂载进沙箱，agent 在容器�
 
 ## Hub flow 脏工作区诊断
 
-Hub flow 默认使用 `--output auto`。能力足够的交互式 TTY 会显示共享的紧凑 run header、elapsed、durable logs 和最终 outcome。任务看板 flow 显示当前 batch 任务行；`prd-decomposition` 与 `triage` 显示 input preparation、draft、可选 refinement、finalization、mutation detection、approval、validation、apply proposal phases，并在交互 prompt 前暂停 live region。它不进入 alternate screen，也不显示原始 agent prose、tool 参数、百分比或 ETA；resize 与成功、失败、取消、异常清理都保持有界并恢复光标。重定向、CI、`TERM=dumb`、不支持 cursor control 或终端尺寸不安全时自动回退 plain；`NO_COLOR` 或 `--no-color` 只关闭 live view 颜色。
+Hub flow 默认使用 `--output auto`。能力足够的交互式 TTY 会显示 append-only 的 Hub run card：每次状态转换追加一个 `section` 快照，底部单行 spinner 每秒刷新 phase-elapsed（ADR-0032）。任务看板 flow 显示当前 batch 与已完成 batch 折叠行；`prd-decomposition` 与 `triage` 仍使用各自的 proposal live renderer。run card 不进入 alternate screen，也不在 spinner 行之外使用 cursor-up，不显示原始 agent prose、tool 参数、百分比或 ETA；成功、失败、取消与异常清理都会恢复光标。重定向、CI、`TERM=dumb`、不支持 cursor control 或终端尺寸不安全时自动回退 plain；`NO_COLOR` 或 `--no-color` 只关闭颜色。
 
 所有 Hub flow 都可显式使用 `--output plain`。该模式让每条 lifecycle 记录各占一个物理行，字段顺序稳定、值会转义，不使用 ANSI 光标重写。任务看板仍输出五类任务计数、失败诊断和恢复动作；proposal flow 只输出 canonical phase/status，以及 applied、skipped、dependencies 计数，终态区分 `applied`、`no_change`、`cancelled`、`validation_failed`、`mutation_failed`、`failed`。显式 plain/JSON 为非交互模式，proposal 写入需要 `--yes`；auto TTY 保留 refinement、status、approval 和 guarded apply prompts。agent prose 与 tool 参数只保存在 Hub run directory。
 
