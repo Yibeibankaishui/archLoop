@@ -180,7 +180,8 @@ import type {
   PrdWarningSeverity,
 } from "./hubPrdDecomposition.js";
 import {
-  formatHubTaskBoardLines,
+  buildHubTaskBoardModel,
+  taskBoardModelToBlocks,
   appendHubTaskComment,
   cleanupHubManagedBranches,
   createHubTask,
@@ -1871,29 +1872,45 @@ const taskWarningOption = Options.text("warning").pipe(
   ),
   Options.optional,
 );
+const taskListAllOption = Options.boolean("all").pipe(
+  Options.withDescription(
+    "Show every task in each status group, including the full done list.",
+  ),
+  Options.withDefault(false),
+);
 const taskSelectorsArg = Args.atLeast(
   Args.text({ name: "task-selector" }).pipe(
-    Args.withDescription(
-      "Beads id, exact task title, or 1-based number from tasks list.",
-    ),
+    Args.withDescription("Beads id, or exact task title."),
   ),
   1,
 );
 
+const resolveTaskCommandProjectTarget = (
+  project: OptionalTextFlag,
+): Effect.Effect<
+  { readonly repoRoot: string; readonly projectName: string },
+  TaskBoardError,
+  never
+> =>
+  Effect.tryPromise({
+    try: async () => {
+      const resolved = await resolveHubProjectTarget({
+        projectSelector: optionalTextValue(project),
+        isTTY: process.stdin.isTTY === true,
+        selectProject: resolveInteractiveProjectSelection,
+      });
+      return {
+        repoRoot: resolved.project.repoRoot,
+        projectName: resolved.project.name,
+      };
+    },
+    catch: toTaskBoardError,
+  });
+
 const resolveTaskCommandRepoRoot = (
   project: OptionalTextFlag,
 ): Effect.Effect<string, TaskBoardError, never> =>
-  Effect.tryPromise({
-    try: async () =>
-      (
-        await resolveHubProjectTarget({
-          projectSelector: optionalTextValue(project),
-          isTTY: process.stdin.isTTY === true,
-          selectProject: resolveInteractiveProjectSelection,
-        })
-      ).project.repoRoot,
-    catch: toTaskBoardError,
-  });
+  Effect.map(resolveTaskCommandProjectTarget(project), (target) => target.repoRoot);
 
 const normalizeTaskOrigin = (
   value: string,
@@ -1974,20 +1991,27 @@ const tasksInitCommand = Command.make(
 
 const tasksListCommand = Command.make(
   "list",
-  { warning: taskWarningOption, project: projectTargetOption },
-  ({ warning, project }) =>
+  {
+    warning: taskWarningOption,
+    all: taskListAllOption,
+    project: projectTargetOption,
+  },
+  ({ warning, all, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const target = yield* resolveTaskCommandProjectTarget(project);
       const warningFilter = yield* resolvePrdWarningFilter(warning);
       const board = yield* Effect.try({
-        try: () => loadHubTaskBoard(cwd),
+        try: () => loadHubTaskBoard(target.repoRoot),
         catch: toTaskBoardError,
       });
-
-      for (const line of formatHubTaskBoardLines(board, { warningFilter })) {
-        yield* d.text(line);
-      }
+      const model = buildHubTaskBoardModel({
+        projectName: target.projectName,
+        board,
+        warningFilter,
+        showAll: all,
+      });
+      yield* d.section("", taskBoardModelToBlocks(model));
     }),
 );
 

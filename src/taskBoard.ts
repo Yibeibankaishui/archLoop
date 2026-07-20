@@ -2,7 +2,6 @@ import { execFileSync } from "node:child_process";
 import type { PrdWarningSeverity } from "./hubPrdDecomposition.js";
 import {
   formatPrdWarningDetailsRow,
-  formatPrdWarningListSuffix,
   formatPrdWarningSummaryLine,
   matchesPrdWarningFilter,
   readPrdWarningFromTask,
@@ -31,6 +30,17 @@ import {
 } from "./bdCliArgs.js";
 import { TaskBoardError } from "./errors.js";
 import { runBdTextForHubTaskStore } from "./hubTaskStore.js";
+import {
+  renderSection,
+  type RenderSectionOptions,
+  type SectionBadgesBlock,
+  type SectionBlock,
+  type SectionDividerBlock,
+  type SectionFooterBlock,
+  type SectionGroupBlock,
+  type SectionHeaderBlock,
+  type SectionProseBlock,
+} from "./section.js";
 
 export const HUB_TASK_STATUSES = [
   "inbox",
@@ -179,6 +189,7 @@ export interface HubTaskProjection {
   readonly title: string;
   readonly beadsStatus: string | undefined;
   readonly hubStatus: HubTaskStatus;
+  readonly owner?: string;
   readonly claim: HubTaskClaimMetadata | undefined;
   readonly claimState: "active" | "stale" | undefined;
   readonly labels: readonly string[];
@@ -469,6 +480,7 @@ export const projectHubTask = (task: BeadsTaskRecord): HubTaskProjection => {
       String(task.id ?? "untitled"),
     beadsStatus,
     hubStatus: resolvedHubStatus,
+    owner: readFirstString(task, ["owner", "assignee", "claimed_by", "claimedBy"]),
     claim,
     claimState,
     labels,
@@ -614,9 +626,6 @@ export const getHubTaskBoardDisplayTasks = (
   board: HubTaskBoard,
 ): readonly HubTaskProjection[] => board.groups.flatMap((group) => group.tasks);
 
-const isPositiveIntegerSelector = (value: string): boolean =>
-  /^[1-9]\d*$/.test(value);
-
 const formatSelectorCandidates = (
   tasks: readonly HubTaskProjection[],
 ): string => tasks.map((task) => task.id).join(", ");
@@ -629,20 +638,18 @@ export const resolveHubTaskSelector = (
   const trimmedSelector = selector.trim();
   if (trimmedSelector.length === 0) {
     throw new TaskBoardError({
-      message: "archloop tasks require a task id, exact title, or list number.",
+      message: "archloop tasks require a Beads id or exact task title.",
     });
   }
 
-  if (!isPositiveIntegerSelector(trimmedSelector)) {
-    const [task] = tryRunBdJson(
-      cwd,
-      ["show", trimmedSelector, "--json"],
-      `tasks show ${trimmedSelector}`,
-      env,
-    ) as BeadsTaskRecord[];
-    if (task) {
-      return projectHubTask(task);
-    }
+  const [task] = tryRunBdJson(
+    cwd,
+    ["show", trimmedSelector, "--json"],
+    `tasks show ${trimmedSelector}`,
+    env,
+  ) as BeadsTaskRecord[];
+  if (task) {
+    return projectHubTask(task);
   }
 
   const board = loadHubTaskBoard(cwd, env);
@@ -660,23 +667,12 @@ export const resolveHubTaskSelector = (
   }
   if (titleMatches.length > 1) {
     throw new TaskBoardError({
-      message: `archloop tasks selector "${selector}" matched multiple tasks with the same exact title: ${formatSelectorCandidates(titleMatches)}. Use a Beads id or the list number instead.`,
+      message: `archloop tasks selector "${selector}" matched multiple tasks with the same exact title: ${formatSelectorCandidates(titleMatches)}. Use a Beads id instead.`,
     });
   }
 
-  if (isPositiveIntegerSelector(trimmedSelector)) {
-    const displayTasks = getHubTaskBoardDisplayTasks(board);
-    const position = Number(trimmedSelector);
-    if (position < 1 || position > displayTasks.length) {
-      throw new TaskBoardError({
-        message: `archloop tasks selector ${position} is out of range for the current task list (1-${displayTasks.length}).`,
-      });
-    }
-    return displayTasks[position - 1]!;
-  }
-
   throw new TaskBoardError({
-    message: `archloop tasks selector "${selector}" did not match a Beads id, an exact task title, or a list number.`,
+    message: `archloop tasks selector "${selector}" did not match a Beads id or an exact task title.`,
   });
 };
 
@@ -1879,60 +1875,247 @@ export const filterHubTasksByPrdWarning = (
 
 export interface FormatHubTaskBoardLinesOptions {
   readonly warningFilter?: PrdWarningSeverity;
+  readonly projectName?: string;
+  readonly showAll?: boolean;
+  readonly perGroupLimit?: number;
 }
 
-export const formatHubTaskBoardLines = (
-  board: HubTaskBoard,
-  options?: FormatHubTaskBoardLinesOptions,
-): readonly string[] => {
-  const lines: string[] = ["Hub task board"];
-  if (board.tasks.length === 0) {
-    lines.push("No Beads tasks found.");
-    return lines;
+export type TaskBoardDisplayBucket = "todo" | "in_progress" | "done";
+
+export interface TaskBoardModel {
+  readonly header: SectionHeaderBlock;
+  readonly divider: SectionDividerBlock;
+  readonly badges: SectionBadgesBlock;
+  readonly groups: readonly SectionGroupBlock[];
+  readonly footer: SectionFooterBlock;
+  readonly warningSummary?: SectionProseBlock;
+  readonly emptyMessage?: SectionProseBlock;
+}
+
+export interface BuildTaskBoardModelInput {
+  readonly projectName: string;
+  readonly board: HubTaskBoard;
+  readonly warningFilter?: PrdWarningSeverity;
+  readonly showAll: boolean;
+  readonly perGroupLimit?: number;
+}
+
+const TASK_BOARD_BUCKETS = [
+  "todo",
+  "in_progress",
+  "done",
+] as const satisfies readonly TaskBoardDisplayBucket[];
+
+const TASK_BOARD_BUCKET_META: Readonly<
+  Record<
+    TaskBoardDisplayBucket,
+    {
+      readonly symbol: SectionGroupBlock["symbol"];
+      readonly severity: SectionGroupBlock["severity"];
+    }
+  >
+> = {
+  todo: { symbol: "●", severity: "info" },
+  in_progress: { symbol: "◐", severity: "warn" },
+  done: { symbol: "✓", severity: "success" },
+};
+
+export const mapHubStatusToTaskBoardBucket = (
+  status: HubTaskStatus,
+): TaskBoardDisplayBucket => {
+  switch (status) {
+    case "implementing":
+    case "reviewing":
+    case "waiting_for_merge":
+    case "merging":
+      return "in_progress";
+    case "done":
+    case "wontfix":
+      return "done";
+    default:
+      return "todo";
+  }
+};
+
+const formatTaskCountLabel = (count: number): string =>
+  count === 1 ? "1 task" : `${count} tasks`;
+
+const taskBoardItemTrailingDim = (
+  task: HubTaskProjection,
+): string | undefined => {
+  if (readPrdWarningFromTask(task)) {
+    return "⚠ prd-warn";
+  }
+  if (task.claim && task.owner) {
+    return task.owner;
+  }
+  return undefined;
+};
+
+const toTaskBoardGroupItem = (
+  task: HubTaskProjection,
+): SectionGroupBlock["items"][number] => {
+  const trailingDim = taskBoardItemTrailingDim(task);
+  return trailingDim
+    ? { id: task.id, title: task.title, trailingDim }
+    : { id: task.id, title: task.title };
+};
+
+const buildTaskBoardGroup = (
+  bucket: TaskBoardDisplayBucket,
+  tasks: readonly HubTaskProjection[],
+  showAll: boolean,
+  perGroupLimit: number,
+): SectionGroupBlock | undefined => {
+  if (tasks.length === 0) {
+    return undefined;
   }
 
-  const visibleTasks = options?.warningFilter
-    ? filterHubTasksByPrdWarning(board.tasks, options.warningFilter)
-    : board.tasks;
-  const visibleGroups = groupHubTasks(visibleTasks);
+  const meta = TASK_BOARD_BUCKET_META[bucket];
+  // Default view truncates only the done bucket; --all expands it.
+  const truncated =
+    !showAll && bucket === "done" && tasks.length > perGroupLimit;
+  const visibleTasks = truncated ? tasks.slice(0, perGroupLimit) : tasks;
+
+  return {
+    kind: "group",
+    symbol: meta.symbol,
+    severity: meta.severity,
+    name: bucket,
+    count: tasks.length,
+    ...(truncated
+      ? {
+          rightHint: `showing ${visibleTasks.length} · archloop tasks list --all`,
+          footerDim: `… ${tasks.length - visibleTasks.length} more`,
+        }
+      : {}),
+    items: visibleTasks.map(toTaskBoardGroupItem),
+  };
+};
+
+export const buildHubTaskBoardModel = (
+  input: BuildTaskBoardModelInput,
+): TaskBoardModel => {
+  const perGroupLimit = input.perGroupLimit ?? 5;
+  const visibleTasks = input.warningFilter
+    ? filterHubTasksByPrdWarning(input.board.tasks, input.warningFilter)
+    : input.board.tasks;
+
+  const bucketTasks: Record<TaskBoardDisplayBucket, HubTaskProjection[]> = {
+    todo: [],
+    in_progress: [],
+    done: [],
+  };
+  for (const task of visibleTasks) {
+    bucketTasks[mapHubStatusToTaskBoardBucket(task.hubStatus)].push(task);
+  }
+  for (const bucket of TASK_BOARD_BUCKETS) {
+    bucketTasks[bucket].sort(compareTaskIds);
+  }
+
+  const badges: SectionBadgesBlock = {
+    kind: "badges",
+    badges: TASK_BOARD_BUCKETS.map((bucket) => ({
+      symbol: TASK_BOARD_BUCKET_META[bucket].symbol,
+      count: bucketTasks[bucket].length,
+      label: bucket,
+      severity: TASK_BOARD_BUCKET_META[bucket].severity,
+    })),
+  };
+
+  const groups = TASK_BOARD_BUCKETS.flatMap((bucket) => {
+    const group = buildTaskBoardGroup(
+      bucket,
+      bucketTasks[bucket],
+      input.showAll,
+      perGroupLimit,
+    );
+    return group ? [group] : [];
+  });
+
   const warningSummaryLine = formatPrdWarningSummaryLine(
     summarizeTasksPrdWarnings(visibleTasks),
   );
 
-  lines.push(`Total tasks: ${visibleTasks.length}`);
-  if (warningSummaryLine) {
-    lines.push(warningSummaryLine);
+  let emptyMessage: SectionProseBlock | undefined;
+  if (input.board.tasks.length === 0) {
+    emptyMessage = {
+      kind: "prose",
+      body: "No Beads tasks found.",
+    };
+  } else if (visibleTasks.length === 0) {
+    emptyMessage = {
+      kind: "prose",
+      body: "No tasks match the current PRD warning filter.",
+    };
   }
 
-  if (visibleTasks.length === 0) {
-    lines.push("No tasks match the current PRD warning filter.");
-    return lines;
-  }
-
-  const displayIndexById = new Map<string, number>();
-  visibleGroups
-    .flatMap((group) => group.tasks)
-    .forEach((task, index) => {
-      displayIndexById.set(task.id, index + 1);
-    });
-
-  for (const group of visibleGroups) {
-    lines.push("");
-    lines.push(`${group.status} (${group.tasks.length})`);
-    for (const task of group.tasks) {
-      const displayIndex = displayIndexById.get(task.id);
-      const warning = readPrdWarningFromTask(task);
-      const warningSuffix = warning
-        ? ` ${formatPrdWarningListSuffix(warning.severity)}`
-        : "";
-      lines.push(
-        `  ${displayIndex ?? "?"}. ${task.id}: ${task.title}${warningSuffix}`,
-      );
-    }
-  }
-
-  return lines;
+  return {
+    header: {
+      kind: "header",
+      title: "archLoop",
+      subtitle: input.projectName,
+      right: formatTaskCountLabel(visibleTasks.length),
+    },
+    divider: { kind: "divider" },
+    badges,
+    ...(warningSummaryLine
+      ? {
+          warningSummary: {
+            kind: "prose" as const,
+            body: warningSummaryLine,
+          },
+        }
+      : {}),
+    ...(emptyMessage ? { emptyMessage } : {}),
+    groups,
+    footer: {
+      kind: "footer",
+      label: "tip",
+      commands: ["archloop tasks show <id>", "archloop tasks pull"],
+    },
+  };
 };
+
+export const taskBoardModelToBlocks = (
+  model: TaskBoardModel,
+): readonly SectionBlock[] => {
+  const blocks: SectionBlock[] = [
+    model.header,
+    model.divider,
+    model.badges,
+  ];
+  if (model.warningSummary) {
+    blocks.push(model.warningSummary);
+  }
+  if (model.emptyMessage) {
+    blocks.push(model.emptyMessage);
+  }
+  blocks.push(...model.groups);
+  blocks.push(model.footer);
+  return blocks;
+};
+
+export const renderHubTaskBoardText = (
+  model: TaskBoardModel,
+  options?: RenderSectionOptions,
+): readonly string[] =>
+  renderSection("", taskBoardModelToBlocks(model), options);
+
+/** @deprecated Prefer buildHubTaskBoardModel + Display.section; kept until Phase 4 cleanup. */
+export const formatHubTaskBoardLines = (
+  board: HubTaskBoard,
+  options?: FormatHubTaskBoardLinesOptions,
+): readonly string[] =>
+  renderHubTaskBoardText(
+    buildHubTaskBoardModel({
+      projectName: options?.projectName ?? "project",
+      board,
+      warningFilter: options?.warningFilter,
+      showAll: options?.showAll ?? true,
+      perGroupLimit: options?.perGroupLimit,
+    }),
+  );
 
 export const formatHubTaskDetailsRows = (
   task: HubTaskProjection,

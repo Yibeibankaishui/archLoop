@@ -8,11 +8,12 @@ import { describe, expect, it } from "vitest";
 import {
   claimHubTask,
   deleteHubTasks,
-  formatHubTaskBoardLines,
+  buildHubTaskBoardModel,
   formatHubTaskCommentLines,
   formatHubTaskDetailsRows,
   isCanonicalHubTaskStatus,
   loadHubTaskBoard,
+  mapHubStatusToTaskBoardBucket,
   projectHubTask,
   projectHubTaskBoard,
   projectHubReadyQueueBoard,
@@ -410,9 +411,11 @@ fs.writeSync(1, JSON.stringify(tasks));
     });
   });
 
-  it("formats grouped task board lines", () => {
-    const lines = formatHubTaskBoardLines(
-      projectHubTaskBoard([
+  it("builds a Hub task board model with display buckets and no ordinals", () => {
+    const model = buildHubTaskBoardModel({
+      projectName: "demo",
+      showAll: true,
+      board: projectHubTaskBoard([
         { id: "bd-1", title: "Inbox task", status: "open" },
         {
           id: "bd-2",
@@ -421,14 +424,28 @@ fs.writeSync(1, JSON.stringify(tasks));
           labels: ["ready-for-agent"],
         },
       ]),
-    );
+    });
 
-    expect(lines).toContain("Hub task board");
-    expect(lines).toContain("Total tasks: 2");
-    expect(lines).toContain("inbox (1)");
-    expect(lines).toContain("ready_for_agent (1)");
-    expect(lines).toContain("  1. bd-1: Inbox task");
-    expect(lines).toContain("  2. bd-2: Ready task");
+    expect(model.header).toEqual({
+      kind: "header",
+      title: "archLoop",
+      subtitle: "demo",
+      right: "2 tasks",
+    });
+    expect(model.badges.badges.map((badge) => [badge.label, badge.count])).toEqual([
+      ["todo", 2],
+      ["in_progress", 0],
+      ["done", 0],
+    ]);
+    expect(model.groups.map((group) => [group.name, group.count])).toEqual([
+      ["todo", 2],
+    ]);
+    expect(model.groups[0]?.items).toEqual([
+      { id: "bd-1", title: "Inbox task" },
+      { id: "bd-2", title: "Ready task" },
+    ]);
+    expect(mapHubStatusToTaskBoardBucket("inbox")).toBe("todo");
+    expect(mapHubStatusToTaskBoardBucket("ready_for_agent")).toBe("todo");
   });
 
   it("shows PRD warning details when task metadata includes warning fields", () => {
@@ -451,9 +468,11 @@ fs.writeSync(1, JSON.stringify(tasks));
     });
   });
 
-  it("shows PRD warning summary and severity suffix on task board lines", () => {
-    const lines = formatHubTaskBoardLines(
-      projectHubTaskBoard([
+  it("attaches PRD warning badges on the task board model", () => {
+    const model = buildHubTaskBoardModel({
+      projectName: "demo",
+      showAll: true,
+      board: projectHubTaskBoard([
         { id: "bd-1", title: "Clean task", status: "open" },
         {
           id: "bd-2",
@@ -467,14 +486,22 @@ fs.writeSync(1, JSON.stringify(tasks));
           },
         },
       ]),
-    );
+    });
 
-    expect(lines).toContain("PRD warnings: 1 high · 0 medium · 0 low");
-    expect(lines).toContain("  1. bd-1: Clean task");
-    expect(lines).toContain("  2. bd-2: Warned task [high]");
+    expect(model.warningSummary?.body).toBe(
+      "PRD warnings: 1 high · 0 medium · 0 low",
+    );
+    expect(model.groups[0]?.items).toEqual([
+      { id: "bd-1", title: "Clean task" },
+      {
+        id: "bd-2",
+        title: "Warned task",
+        trailingDim: "⚠ prd-warn",
+      },
+    ]);
   });
 
-  it("filters task board lines by PRD warning severity", () => {
+  it("filters the task board model by PRD warning severity", () => {
     const board = projectHubTaskBoard([
       {
         id: "bd-1",
@@ -499,12 +526,95 @@ fs.writeSync(1, JSON.stringify(tasks));
       },
     ]);
 
-    const lines = formatHubTaskBoardLines(board, { warningFilter: "high" });
+    const model = buildHubTaskBoardModel({
+      projectName: "demo",
+      board,
+      warningFilter: "high",
+      showAll: true,
+    });
 
-    expect(lines).toContain("Total tasks: 1");
-    expect(lines).toContain("PRD warnings: 1 high · 0 medium · 0 low");
-    expect(lines).toContain("  1. bd-1: High warning [high]");
-    expect(lines.some((line) => line.includes("bd-2"))).toBe(false);
+    expect(model.header.right).toBe("1 task");
+    expect(model.warningSummary?.body).toBe(
+      "PRD warnings: 1 high · 0 medium · 0 low",
+    );
+    expect(model.groups[0]?.items).toEqual([
+      {
+        id: "bd-1",
+        title: "High warning",
+        trailingDim: "⚠ prd-warn",
+      },
+    ]);
+    expect(
+      model.groups.some((group) =>
+        group.items.some((item) => item.id === "bd-2"),
+      ),
+    ).toBe(false);
+  });
+
+  it("hides surplus done tasks until --all expands them", () => {
+    const board = projectHubTaskBoard(
+      Array.from({ length: 7 }, (_, index) => ({
+        id: `bd-${index}`,
+        title: `Done task ${index}`,
+        status: "closed",
+        labels: ["done"],
+      })),
+    );
+
+    const collapsed = buildHubTaskBoardModel({
+      projectName: "demo",
+      board,
+      showAll: false,
+      perGroupLimit: 5,
+    });
+    expect(collapsed.groups).toHaveLength(1);
+    expect(collapsed.groups[0]?.name).toBe("done");
+    expect(collapsed.groups[0]?.count).toBe(7);
+    expect(collapsed.groups[0]?.items).toHaveLength(5);
+    expect(collapsed.groups[0]?.rightHint).toBe(
+      "showing 5 · archloop tasks list --all",
+    );
+    expect(collapsed.groups[0]?.footerDim).toBe("… 2 more");
+
+    const expanded = buildHubTaskBoardModel({
+      projectName: "demo",
+      board,
+      showAll: true,
+    });
+    expect(expanded.groups[0]?.items).toHaveLength(7);
+    expect(expanded.groups[0]?.rightHint).toBeUndefined();
+  });
+
+  it("shows owner dim on claimed tasks in the board model", () => {
+    const model = buildHubTaskBoardModel({
+      projectName: "demo",
+      showAll: true,
+      board: projectHubTaskBoard([
+        {
+          id: "bd-1",
+          title: "Claimed task",
+          status: "in_progress",
+          owner: "yc.bai",
+          metadata: {
+            claim: {
+              runId: "run-1",
+              batchId: "batch-1",
+              branch: "archloop/bd-1",
+              claimedAt: "2026-07-20T00:00:00Z",
+            },
+          },
+        },
+      ]),
+    });
+
+    expect(model.groups.map((group) => group.name)).toEqual(["in_progress"]);
+    expect(model.groups[0]?.items).toEqual([
+      {
+        id: "bd-1",
+        title: "Claimed task",
+        trailingDim: "yc.bai",
+      },
+    ]);
   });
 
   it("preserves bd ready queue order in projectHubReadyQueueBoard", () => {
@@ -807,7 +917,7 @@ describe("resolveHubTaskSelectors", () => {
 
     const tasks = resolveHubTaskSelectors(
       repoDir,
-      ["bd-1", "Second task", "3"],
+      ["bd-1", "Second task", "bd-3"],
       env,
     );
     expect(tasks.map((task) => task.id)).toEqual(["bd-1", "bd-2", "bd-3"]);
@@ -822,10 +932,22 @@ describe("resolveHubTaskSelectors", () => {
 
     const tasks = resolveHubTaskSelectors(
       repoDir,
-      ["bd-1", "Only task", "1"],
+      ["bd-1", "Only task"],
       env,
     );
     expect(tasks.map((task) => task.id)).toEqual(["bd-1"]);
+  });
+
+  it("rejects 1-based ordinal selectors", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "taskboard-ordinal-"));
+    await initRepo(repoDir);
+    const { env } = await writeMockBdDelete(repoDir, [
+      { id: "bd-1", title: "Only task", status: "open" },
+    ]);
+
+    expect(() => resolveHubTaskSelectors(repoDir, ["1"], env)).toThrow(
+      /did not match a Beads id or an exact task title/,
+    );
   });
 });
 

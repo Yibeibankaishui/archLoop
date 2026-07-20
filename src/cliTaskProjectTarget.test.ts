@@ -236,15 +236,28 @@ process.exit(1);
 
   it("uses the selected Hub project from any directory", async () => {
     const entries = await runCli(["tasks", "list"]);
-    const rendered = entries
-      .filter((entry): entry is Extract<DisplayEntry, { _tag: "text" }> =>
-        entry._tag === "text",
-      )
-      .map((entry) => entry.message)
-      .join("\n");
-
-    expect(rendered).toContain("bd-b: Beta task");
-    expect(rendered).not.toContain("bd-a: Alpha task");
+    const section = entries.find(
+      (entry): entry is Extract<DisplayEntry, { _tag: "section" }> =>
+        entry._tag === "section",
+    );
+    expect(section).toBeDefined();
+    const itemIds = section!.blocks.flatMap((block) =>
+      block.kind === "group" ? block.items.map((item) => item.id) : [],
+    );
+    const itemTitles = section!.blocks.flatMap((block) =>
+      block.kind === "group" ? block.items.map((item) => item.title) : [],
+    );
+    expect(itemIds).toContain("bd-b");
+    expect(itemTitles).toContain("Beta task");
+    expect(itemIds).not.toContain("bd-a");
+    expect(itemTitles).not.toContain("Alpha task");
+    expect(section!.blocks).toContainEqual(
+      expect.objectContaining({
+        kind: "header",
+        title: "archLoop",
+        subtitle: "beta",
+      }),
+    );
   });
 
   it("accepts --project as an explicit override without disturbing selectors", async () => {
@@ -279,19 +292,28 @@ process.exit(1);
     mockSelect.mockResolvedValue("alpha");
 
     const entries = await runCli(["tasks", "list"]);
-    const rendered = entries
-      .filter((entry): entry is Extract<DisplayEntry, { _tag: "text" }> =>
-        entry._tag === "text",
-      )
-      .map((entry) => entry.message)
-      .join("\n");
+    const section = entries.find(
+      (entry): entry is Extract<DisplayEntry, { _tag: "section" }> =>
+        entry._tag === "section",
+    );
+    expect(section).toBeDefined();
 
     expect(mockSelect).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "Select a Hub project:",
       }),
     );
-    expect(rendered).toContain("bd-a: Alpha task");
+    const itemIds = section!.blocks.flatMap((block) =>
+      block.kind === "group" ? block.items.map((item) => item.id) : [],
+    );
+    expect(itemIds).toContain("bd-a");
+    expect(section!.blocks).toContainEqual(
+      expect.objectContaining({
+        kind: "header",
+        title: "archLoop",
+        subtitle: "alpha",
+      }),
+    );
   });
 
   it("fails in non-interactive mode when no project is selected", async () => {
