@@ -213,11 +213,23 @@ import { initHubTaskStore } from "./hubTaskStore.js";
 import { isTriageTaskIdInput } from "./hubTriageProposal.js";
 import {
   buildSyncResultModel,
+  createDefaultGithubIssueClient,
   formatHubTaskSyncPreviewLines,
   syncHubTasksWithGithub,
   syncResultModelToBlocks,
 } from "./hubTaskSync.js";
 import { formatHubRecoveryComment, recoverHubTask } from "./hubTaskRecover.js";
+import {
+  buildConflictFieldValues,
+  buildHubTaskConflictResolveModel,
+  formatConflictKeepOptionLabel,
+  formatResolveHubTaskConflictJson,
+  hasHubTaskSyncConflict,
+  hubTaskConflictResolveModelToBlocks,
+  loadRemoteConflictIssue,
+  resolveHubTaskSyncConflict,
+  type HubConflictKeep,
+} from "./hubTaskResolve.js";
 import {
   doctorHubTaskState,
   formatHubTaskStateDoctorLines,
@@ -1878,6 +1890,27 @@ const taskSyncIncludeClosedOption = Options.boolean("include-closed").pipe(
   ),
   Options.withDefault(false),
 );
+const taskResolveKeepOption = Options.choice("keep", [
+  "local",
+  "remote",
+] as const).pipe(
+  Options.withDescription(
+    "Resolve a sync conflict by keeping the local or remote side (required in non-interactive mode).",
+  ),
+  Options.optional,
+);
+const taskResolveYesOption = Options.boolean("yes").pipe(
+  Options.withDescription(
+    "Skip the interactive keep prompt when --keep is also provided.",
+  ),
+  Options.withDefault(false),
+);
+const taskResolveJsonOption = Options.boolean("json").pipe(
+  Options.withDescription(
+    "Emit a structured JSON payload instead of the resolve section.",
+  ),
+  Options.withDefault(false),
+);
 const taskWarningOption = Options.text("warning").pipe(
   Options.withDescription(
     "Filter tasks by PRD warning severity (high, medium, or low).",
@@ -2487,6 +2520,130 @@ const tasksRecoverCommand = Command.make(
     }),
 );
 
+const normalizeResolveKeep = (
+  value: import("effect").Option.Option<HubConflictKeep>,
+): HubConflictKeep | undefined =>
+  value._tag === "Some" ? value.value : undefined;
+
+const tasksResolveCommand = Command.make(
+  "resolve",
+  {
+    id: taskIdArg,
+    keep: taskResolveKeepOption,
+    yes: taskResolveYesOption,
+    json: taskResolveJsonOption,
+    project: projectTargetOption,
+  },
+  ({ id, keep, yes, json, project }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const target = yield* resolveTaskCommandProjectTarget(project);
+      const cwd = target.repoRoot;
+      const task = yield* Effect.try({
+        try: () => resolveHubTaskSelector(cwd, id),
+        catch: toTaskBoardError,
+      });
+
+      if (!hasHubTaskSyncConflict(task)) {
+        return yield* Effect.fail(
+          new TaskBoardError({
+            message: `archloop tasks resolve ${task.id}: nothing to resolve. This task has no sync conflict. Try archloop tasks show ${task.id}.`,
+          }),
+        );
+      }
+
+      const github = createDefaultGithubIssueClient(cwd, process.env, {
+        includeClosed: true,
+      });
+      const issue = yield* Effect.try({
+        try: () => loadRemoteConflictIssue(task, github),
+        catch: toTaskBoardError,
+      });
+      const { localValue, remoteValue, divergedFields, reason } =
+        buildConflictFieldValues({ task, issue });
+      const model = buildHubTaskConflictResolveModel({
+        taskId: task.id,
+        projectName: target.projectName,
+        reason,
+        localValue,
+        remoteValue,
+        divergedFields,
+      });
+
+      if (!json) {
+        yield* d.section("", hubTaskConflictResolveModelToBlocks(model));
+      }
+
+      let resolvedKeep = normalizeResolveKeep(keep);
+      const isTTY = process.stdin.isTTY === true;
+
+      if (!resolvedKeep) {
+        if (!isTTY || yes) {
+          return yield* Effect.fail(
+            new TaskBoardError({
+              message:
+                "archloop tasks resolve requires --keep local|remote in non-interactive mode (or without an interactive keep prompt). Example: archloop tasks resolve <id> --keep local",
+            }),
+          );
+        }
+
+        resolvedKeep = yield* Effect.tryPromise({
+          try: async () => {
+            const result = await clack.select({
+              message: "Which side should win?",
+              options: [
+                {
+                  value: "local" as const,
+                  label: formatConflictKeepOptionLabel(
+                    "local",
+                    localValue,
+                    divergedFields,
+                  ),
+                },
+                {
+                  value: "remote" as const,
+                  label: formatConflictKeepOptionLabel(
+                    "remote",
+                    remoteValue,
+                    divergedFields,
+                  ),
+                },
+              ],
+            });
+            if (clack.isCancel(result)) {
+              throw new TaskBoardError({
+                message: "Task resolve cancelled.",
+              });
+            }
+            return result;
+          },
+          catch: toTaskBoardError,
+        });
+      }
+
+      const result = yield* Effect.try({
+        try: () =>
+          resolveHubTaskSyncConflict({
+            cwd,
+            taskId: task.id,
+            keep: resolvedKeep!,
+            github,
+          }),
+        catch: toTaskBoardError,
+      });
+
+      if (json) {
+        yield* d.plain(formatResolveHubTaskConflictJson(result));
+        return;
+      }
+
+      yield* d.status(
+        `Resolved sync conflict for ${result.id} by keeping ${result.kept}.`,
+        "success",
+      );
+    }),
+);
+
 const tasksDoctorCommand = Command.make(
   "doctor",
   { project: projectTargetOption },
@@ -2799,6 +2956,7 @@ const tasksCommand = Command.make("tasks", {}, () =>
     tasksPullCommand,
     tasksPushCommand,
     tasksSyncCommand,
+    tasksResolveCommand,
     tasksCommentCommand,
     tasksRecoverCommand,
     tasksDoctorCommand,

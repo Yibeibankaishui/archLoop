@@ -275,7 +275,7 @@ Hub flow 默认使用 `--output auto`。交互式 TTY 在选完 flow 后会先�
 
 非重叠脏文件不会阻塞 merge：archLoop 会在干净的 integration worktree/branch 中验证结果，并只在不会覆盖宿主脏文件时落回当前分支。若存在重叠，CLI 会列出具体 blocking files；先 commit、stash 或 discard 这些文件，再重新运行同一个 flow，archLoop 会继续恢复 `waiting_for_merge` 任务。
 
-任务命令默认针对已选中的 Hub project；如需覆盖，可以显式传 `--project <name>`。`.beads/issues.jsonl`、`.beads/interactions.jsonl` 等 Beads runtime/export 文件会单独报告，通常不要提交；通过 `archloop tasks pull` / `push` / `sync` 交换远端任务状态。
+任务命令默认针对已选中的 Hub project；如需覆盖，可以显式传 `--project <name>`。`.beads/issues.jsonl`、`.beads/interactions.jsonl` 等 Beads runtime/export 文件会单独报告，通常不要提交；通过 `archloop tasks pull` / `push` / `sync` 交换远端任务状态。同步冲突用 `archloop tasks resolve <id> --keep local|remote` 在本地 Beads 上解决（不直接改 GitHub；`--keep local` 后由下一次 `tasks push` 写回远端）。
 
 `archloop tasks list` / `show` / `pull` 使用 Variant C `section` 排版（无 `clack.note` 左边框、无 1-based 序号；选择器只接受 Beads id 或精确标题）：
 
