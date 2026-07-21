@@ -1,3 +1,17 @@
+---
+status: superseded by ADR-0033
+---
+
+> **Superseded by [ADR-0033](./0033-hub-run-card-alt-screen-dashboard.md).** Real-world use showed
+> that "append-only + reprint the whole card each transition" degenerated into the exact waterfall
+> problem Variant C was meant to solve — the header and footer were reprinted for every state
+> change, drowning the active state under stale copies of themselves. ADR-0033 replaces this
+> decision with an alt-screen dashboard that shows a persistent done ledger above a live-updating
+> active card, then dumps a plain-text summary to real scrollback on exit. The body below is
+> preserved as historical context for the reversal.
+
+---
+
 # Hub run card uses append-only rendering with a single-line spinner heartbeat
 
 The **Hub run card** in **terminal mode** renders as an append-only sequence of `section` snapshots
