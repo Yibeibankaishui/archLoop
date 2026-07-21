@@ -740,6 +740,7 @@ const runHubAgent = async (input: {
   readonly branch: string;
   readonly runDir: string;
   readonly name: string;
+  readonly role: "implement" | "review";
   readonly logFileName: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly retryContext?: string;
@@ -768,7 +769,7 @@ const runHubAgent = async (input: {
 
   const logPath = join(input.runDir, "logs", input.logFileName);
   const retryConfig = resolveProviderRetryConfig(input.env);
-  const status = input.name.startsWith("review-") ? "reviewing" : "implementing";
+  const status = input.role === "review" ? "reviewing" : "implementing";
 
   const invoke = () =>
     run({
@@ -1701,6 +1702,7 @@ export const createHubFlowRunImplementer = (options: {
         branch: input.branch,
         runDir: input.runDir,
         name: `implement-${input.taskId}`,
+        role: "implement",
         logFileName,
         env: options.env,
         retryContext: input.retryContext,
@@ -1787,6 +1789,7 @@ export const createHubFlowRunReviewer = (options: {
         branch: input.branch,
         runDir: input.runDir,
         name: `review-${input.taskId}`,
+        role: "review",
         logFileName: `${input.taskId}-review.log`,
         env: options.env,
         showAgentStartup: options.showAgentStartup,
