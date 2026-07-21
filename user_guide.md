@@ -368,6 +368,7 @@ Hub task board 的本地任务源是 Beads。GitHub Issues 是远端协作表，
 archloop tasks pull
 archloop tasks push
 archloop tasks sync
+archloop tasks resolve <id> --keep local|remote
 ```
 
 成功同步后输出方向性 `section`（↓ pulled / ↑ pushed）；有冲突时 footer 变为 `fix` 并指向 `archloop tasks resolve <id>`：
@@ -379,6 +380,8 @@ archloop tasks sync
     done in 1.4s
   next  archloop tasks list
 ```
+
+`archloop tasks resolve <id>` 读取本地 `sync_conflict` 标记与关联 GitHub issue，展示 local / remote 分歧字段，再用 `--keep local|remote`（TTY 下可交互选择）写回 Beads。`--keep local` 会把 `sync_state` 设为 `push_pending` 并保留本地字段；`--keep remote` 用远端覆盖本地并设为 `synced`。解析只改本地 Beads，不直接调用 `gh issue edit/close`。非交互模式必须带 `--keep`；`--json` 输出 `{ id, kept, mutations }`。
 
 同步规则：
 

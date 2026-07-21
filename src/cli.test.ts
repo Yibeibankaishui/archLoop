@@ -879,7 +879,7 @@ exit 1
     expect(stdout).toContain("configure");
   });
 
-  it("tasks --help shows the list, sync, pull, and push subcommands", async () => {
+  it("tasks --help shows the list, sync, pull, push, and resolve subcommands", async () => {
     const { stdout } = await runCli("tasks --help", process.cwd());
     expect(stdout).toContain("init");
     expect(stdout).toContain("list");
@@ -890,11 +890,299 @@ exit 1
     expect(stdout).toContain("pull");
     expect(stdout).toContain("push");
     expect(stdout).toContain("sync");
+    expect(stdout).toContain("resolve");
     expect(stdout).toContain("comment");
     expect(stdout).toContain("doctor");
     expect(stdout).toContain("repair-state");
     expect(stdout).toContain("cleanup");
     expect(stdout).toContain("delete");
+  });
+
+  it("tasks resolve nonexistent-id returns a task error, not CommandMismatch", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-resolve-missing-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+    seedHubTaskStoreMetadata(hostDir);
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const stateFile = join(hostDir, "bd-state.json");
+    await writeFile(stateFile, "[]");
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = process.env.BD_STATE_FILE;
+const args = process.argv.slice(2);
+const [command, id] = args;
+if (command === "show" && id) {
+  process.exit(1);
+}
+if (command === "list") {
+  process.stdout.write(fs.readFileSync(stateFile, "utf8"));
+  process.exit(0);
+}
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    try {
+      await runCli(
+        "tasks resolve nonexistent-id --keep local",
+        hostDir,
+        withBdEnv(bdPath, hostDir, { BD_STATE_FILE: stateFile }),
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toMatch(/did not match a Beads id|not found|selector/i);
+      expect(output).not.toMatch(/CommandMismatch|Invalid subcommand/i);
+    }
+  });
+
+  it("tasks resolve requires --keep in non-interactive mode", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-resolve-nontty-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+    seedHubTaskStoreMetadata(hostDir);
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const stateFile = join(hostDir, "bd-state.json");
+    await writeFile(
+      stateFile,
+      JSON.stringify(
+        [
+          {
+            id: "bd-conflict",
+            title: "Local title",
+            status: "blocked",
+            labels: ["sync-conflict"],
+            metadata: {
+              hubStatus: "sync_conflict",
+              sync_state: "conflict",
+              sync_conflict_reason:
+                "local ready_for_agent disagrees with remote needs_info",
+              github_issue: 226,
+              remote_refs: ["github#226"],
+            },
+          },
+        ],
+        null,
+        2,
+      ),
+    );
+
+    const ghPath = join(binDir, "gh");
+    await writeFile(
+      ghPath,
+      `#!/bin/sh
+if [ "$1" = "issue" ] && [ "$2" = "list" ]; then
+  cat <<'JSON'
+[{"number":226,"title":"Remote title","body":"Remote description","state":"OPEN","labels":[{"name":"archLoop"},{"name":"needs-info"}],"updatedAt":"2026-07-21T12:00:00Z"}]
+JSON
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(ghPath, 0o755);
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = process.env.BD_STATE_FILE;
+const args = process.argv.slice(2);
+const [command, id] = args;
+const readState = () => JSON.parse(fs.readFileSync(stateFile, "utf8"));
+if (command === "show" && id) {
+  const task = readState().find((entry) => entry.id === id);
+  if (!task) process.exit(1);
+  process.stdout.write(JSON.stringify([task]));
+  process.exit(0);
+}
+if (command === "list") {
+  process.stdout.write(JSON.stringify(readState()));
+  process.exit(0);
+}
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    try {
+      await runCli(
+        "tasks resolve bd-conflict",
+        hostDir,
+        withBdEnv(bdPath, hostDir, { BD_STATE_FILE: stateFile }),
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      const output = cliFailureOutput(err);
+      expect(output).toContain("--keep");
+      expect(output).not.toMatch(/CommandMismatch/i);
+    }
+  });
+
+  it("tasks resolve --keep local --json clears conflict and emits structured payload", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-resolve-keep-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+    seedHubTaskStoreMetadata(hostDir);
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const stateFile = join(hostDir, "bd-state.json");
+    await writeFile(
+      stateFile,
+      JSON.stringify(
+        [
+          {
+            id: "bd-conflict",
+            title: "Local title",
+            description: "Local description",
+            status: "blocked",
+            labels: ["sync-conflict"],
+            metadata: {
+              hubStatus: "sync_conflict",
+              sync_state: "conflict",
+              sync_conflict_reason:
+                "local ready_for_agent disagrees with remote needs_info",
+              github_issue: 226,
+              remote_refs: ["github#226"],
+            },
+          },
+        ],
+        null,
+        2,
+      ),
+    );
+
+    const ghEditArgs = join(hostDir, "gh-edit-args.txt");
+    await writeFile(ghEditArgs, "");
+    const ghPath = join(binDir, "gh");
+    await writeFile(
+      ghPath,
+      `#!/bin/sh
+gh_edit_args=${JSON.stringify(ghEditArgs)}
+printf '%s\\n' "$*" >> "$gh_edit_args"
+if [ "$1" = "issue" ] && [ "$2" = "list" ]; then
+  cat <<'JSON'
+[{"number":226,"title":"Remote title","body":"Remote description","state":"OPEN","labels":[{"name":"archLoop"},{"name":"needs-info"}],"updatedAt":"2026-07-21T12:00:00Z"}]
+JSON
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(ghPath, 0o755);
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = process.env.BD_STATE_FILE;
+const args = process.argv.slice(2);
+const [command, id] = args;
+const readState = () => JSON.parse(fs.readFileSync(stateFile, "utf8"));
+const writeState = (state) => fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+const findTask = (state, taskId) => state.find((task) => task.id === taskId);
+
+if (command === "show" && id) {
+  const task = findTask(readState(), id);
+  if (!task) process.exit(1);
+  process.stdout.write(JSON.stringify([task]));
+  process.exit(0);
+}
+if (command === "list") {
+  process.stdout.write(JSON.stringify(readState()));
+  process.exit(0);
+}
+if (command === "update" && id) {
+  const state = readState();
+  const task = findTask(state, id);
+  if (!task) process.exit(1);
+  const statusIndex = args.indexOf("--status");
+  if (statusIndex >= 0) task.status = args[statusIndex + 1];
+  const titleIndex = args.indexOf("--title");
+  if (titleIndex >= 0) task.title = args[titleIndex + 1];
+  const descriptionIndex = args.indexOf("--description");
+  if (descriptionIndex >= 0) task.description = args[descriptionIndex + 1];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") task.labels = [];
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      const label = args[index + 1];
+      if (!task.labels.includes(label)) task.labels.push(label);
+    }
+  }
+  const metadataIndex = args.indexOf("--metadata");
+  if (metadataIndex >= 0) {
+    task.metadata = {
+      ...task.metadata,
+      ...JSON.parse(args[metadataIndex + 1]),
+    };
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--unset-metadata") {
+      delete task.metadata[args[index + 1]];
+    }
+  }
+  writeState(state);
+  process.exit(0);
+}
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const { stdout } = await runCli(
+      "tasks resolve bd-conflict --keep local --json",
+      hostDir,
+      withBdEnv(bdPath, hostDir, { BD_STATE_FILE: stateFile }),
+    );
+
+    const payload = JSON.parse(stdout) as {
+      id: string;
+      kept: string;
+      mutations: unknown[];
+    };
+    expect(payload).toMatchObject({
+      id: "bd-conflict",
+      kept: "local",
+    });
+    expect(Array.isArray(payload.mutations)).toBe(true);
+
+    const state = JSON.parse(await readFile(stateFile, "utf-8")) as Array<{
+      title: string;
+      metadata: Record<string, unknown>;
+      labels: string[];
+    }>;
+    expect(state[0]?.title).toBe("Local title");
+    expect(state[0]?.metadata.sync_state).toBe("push_pending");
+    expect(state[0]?.metadata.hubStatus).toBe("ready_for_agent");
+    expect(state[0]?.metadata.sync_conflict_reason).toBeUndefined();
+    expect(state[0]?.labels).toContain("ready-for-agent");
+
+    const ghArgs = await readFile(ghEditArgs, "utf-8");
+    expect(ghArgs).toContain("issue list");
+    expect(ghArgs).not.toContain("issue edit");
+    expect(ghArgs).not.toContain("issue close");
   });
 
   it("init --help no longer advertises podman as a sandbox option", async () => {

@@ -1040,6 +1040,15 @@ Successful pull/push/sync results render as a directional `section` (↓ pulled 
 
 Beads remains the local task store. Execution statuses such as `implementing`, `reviewing`, `waiting_for_merge`, `merging`, and `failed` stay local. Tasks imported from GitHub remain linked through metadata such as `remote_refs` and `github_issue`. If an unlinked GitHub issue has the same normalized title as a local task, archLoop reports a duplicate link candidate instead of silently creating another local task.
 
+### `archloop tasks resolve <task-selector>`
+
+Resolves a Hub sync conflict recorded on a local Beads task. Shows the diverged local vs remote fields (title, Hub status, description), then keeps one side:
+
+- `--keep local` clears the conflict marker, sets `sync_state = push_pending`, and leaves local title/status/description unchanged so the next `archloop tasks push` writes the local side back to GitHub.
+- `--keep remote` overwrites the local Beads fields with the remote GitHub issue values, clears the conflict marker, and sets `sync_state = synced`.
+
+Resolution mutates local Beads only; it never edits or closes GitHub issues. In a TTY without `--keep`, archLoop prompts with `clack.select`. Non-interactive runs (and `--yes` without `--keep`) require `--keep local|remote`. Pass `--json` for `{ id, kept, mutations }`.
+
 ### `archloop tasks from-prd <prd-ref>`
 
 Runs the `prd-decomposition` proposal flow for a local PRD file. The flow runs no-sandbox, prepares PRD and project context, invokes the configured **planning** role, opens an interactive proposal session for tracer-bullet vertical slices, asks the agent for a final schema-validated task proposal, checks for unexpected repo or Beads mutations, and writes approved Beads tasks and dependency edges locally.
