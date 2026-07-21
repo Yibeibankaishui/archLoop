@@ -5,20 +5,28 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+import { createPalette } from "./ansi.js";
 import {
   claimHubTask,
   deleteHubTasks,
   buildHubTaskBoardModel,
   buildHubTaskDetailModel,
+  deriveTaskBoardRemoteBadge,
+  formatTaskBoardJson,
   isCanonicalHubTaskStatus,
   loadHubTaskBoard,
   mapHubStatusToTaskBoardBucket,
   projectHubTask,
   projectHubTaskBoard,
   projectHubReadyQueueBoard,
+  renderHubTaskBoardText,
   resolveHubTaskSelectors,
   selectHubBatchMergeTasks,
+  type TaskBoardRemoteBadge,
 } from "./taskBoard.js";
+
+const stripAnsi = (s: string): string =>
+  s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
 
 const execAsync = promisify(exec);
 
@@ -484,8 +492,121 @@ fs.writeSync(1, JSON.stringify(tasks));
       { id: "bd-1", title: "Inbox task" },
       { id: "bd-2", title: "Ready task" },
     ]);
+    expect(model.rows).toEqual([
+      { id: "bd-1", title: "Inbox task" },
+      { id: "bd-2", title: "Ready task" },
+    ]);
     expect(mapHubStatusToTaskBoardBucket("inbox")).toBe("todo");
     expect(mapHubStatusToTaskBoardBucket("ready_for_agent")).toBe("todo");
+  });
+
+  it.each([
+    {
+      name: "sync-conflict from metadata flag",
+      task: {
+        id: "bd-c",
+        title: "Conflicted",
+        status: "blocked",
+        metadata: {
+          sync_conflict: true,
+          remote_refs: ["github#10"],
+          sync_state: "synced",
+        },
+      },
+      expected: { kind: "sync-conflict" } satisfies TaskBoardRemoteBadge,
+    },
+    {
+      name: "sync-conflict from hubStatus",
+      task: {
+        id: "bd-c2",
+        title: "Conflicted hub",
+        status: "blocked",
+        labels: ["sync-conflict"],
+        metadata: { remote_refs: ["github#11"] },
+      },
+      expected: { kind: "sync-conflict" } satisfies TaskBoardRemoteBadge,
+    },
+    {
+      name: "synced with remote_ref",
+      task: {
+        id: "bd-s",
+        title: "Synced",
+        status: "open",
+        metadata: { sync_state: "synced", remote_ref: "github#211" },
+      },
+      expected: {
+        kind: "synced",
+        value: "github#211",
+      } satisfies TaskBoardRemoteBadge,
+    },
+    {
+      name: "synced with remote_refs projection",
+      task: {
+        id: "bd-s2",
+        title: "Synced refs",
+        status: "open",
+        metadata: { sync_state: "synced", remote_refs: ["github#212"] },
+      },
+      expected: {
+        kind: "synced",
+        value: "github#212",
+      } satisfies TaskBoardRemoteBadge,
+    },
+    {
+      name: "push_pending is local-only",
+      task: {
+        id: "bd-p",
+        title: "Pending push",
+        status: "open",
+        metadata: { sync_state: "push_pending" },
+      },
+      expected: { kind: "local-only" } satisfies TaskBoardRemoteBadge,
+    },
+    {
+      name: "local_only sync_state",
+      task: {
+        id: "bd-l",
+        title: "Local only",
+        status: "open",
+        metadata: { sync_state: "local_only" },
+      },
+      expected: { kind: "local-only" } satisfies TaskBoardRemoteBadge,
+    },
+    {
+      name: "no remote link → no badge",
+      task: {
+        id: "bd-n",
+        title: "Plain",
+        status: "open",
+        metadata: {},
+      },
+      expected: undefined,
+    },
+    {
+      name: "synced without remote_ref → no badge",
+      task: {
+        id: "bd-empty",
+        title: "Synced empty",
+        status: "open",
+        metadata: { sync_state: "synced" },
+      },
+      expected: undefined,
+    },
+  ])("derives remoteBadge: $name", ({ task, expected }) => {
+    const projected = projectHubTask(task);
+    expect(deriveTaskBoardRemoteBadge(projected)).toEqual(expected);
+
+    const model = buildHubTaskBoardModel({
+      projectName: "demo",
+      showAll: true,
+      board: projectHubTaskBoard([task]),
+    });
+    const row = model.rows.find((item) => item.id === projected.id);
+    expect(row?.remoteBadge).toEqual(expected);
+    const groupItem = model.groups
+      .flatMap((group) => group.items)
+      .find((item) => item.id === projected.id);
+    expect(groupItem?.remoteBadge).toEqual(expected);
   });
 
   it("routes blocked, failed, sync_conflict, and needs_info tasks to the attention bucket", () => {
@@ -913,6 +1034,115 @@ fs.writeSync(1, JSON.stringify(tasks));
         trailingDim: "yc.bai",
       },
     ]);
+  });
+
+  it("renders remote badges right-aligned with severity colors and owner stacking", () => {
+    const model = buildHubTaskBoardModel({
+      projectName: "demo",
+      showAll: true,
+      board: projectHubTaskBoard([
+        {
+          id: "bd-synced",
+          title: "Synced task",
+          status: "open",
+          metadata: { sync_state: "synced", remote_ref: "github#211" },
+        },
+        {
+          id: "bd-local",
+          title: "Local only task",
+          status: "open",
+          metadata: { sync_state: "push_pending" },
+        },
+        {
+          id: "bd-conflict",
+          title: "Conflict task",
+          status: "blocked",
+          metadata: { sync_conflict: true, remote_refs: ["github#99"] },
+        },
+        {
+          id: "bd-owner",
+          title: "Claimed synced",
+          status: "in_progress",
+          owner: "yc.bai",
+          metadata: {
+            sync_state: "synced",
+            remote_ref: "github#300",
+            claim: {
+              runId: "run-1",
+              batchId: "batch-1",
+              branch: "archloop/bd-owner",
+              claimedAt: "2026-07-20T00:00:00Z",
+            },
+          },
+        },
+      ]),
+    });
+
+    const plain = renderHubTaskBoardText(model, {
+      width: 100,
+      colorEnabled: false,
+    }).map(stripAnsi);
+    expect(plain.some((line) => /bd-synced\s+Synced task/.test(line))).toBe(
+      true,
+    );
+    expect(plain.some((line) => line.includes("github#211"))).toBe(true);
+    expect(plain.some((line) => line.includes("local-only"))).toBe(true);
+    expect(plain.some((line) => line.includes("sync-conflict"))).toBe(true);
+    expect(
+      plain.some(
+        (line) =>
+          line.includes("bd-owner") && line.includes("yc.bai · github#300"),
+      ),
+    ).toBe(true);
+
+    const colored = renderHubTaskBoardText(model, {
+      width: 100,
+      colorEnabled: true,
+    }).join("\n");
+    const palette = createPalette(true);
+    expect(colored).toContain(palette.dim(palette.cyan("github#211")));
+    expect(colored).toContain(palette.dim("local-only"));
+    expect(colored).toContain(palette.yellow("sync-conflict"));
+  });
+
+  it("formatTaskBoardJson includes remoteBadge on rows", () => {
+    const model = buildHubTaskBoardModel({
+      projectName: "demo",
+      showAll: true,
+      board: projectHubTaskBoard([
+        {
+          id: "bd-1",
+          title: "Synced",
+          status: "open",
+          metadata: { sync_state: "synced", remote_ref: "github#211" },
+        },
+        {
+          id: "bd-2",
+          title: "Local",
+          status: "open",
+          metadata: { sync_state: "local_only" },
+        },
+        {
+          id: "bd-3",
+          title: "Plain",
+          status: "open",
+          metadata: {},
+        },
+      ]),
+    });
+
+    const payload = JSON.parse(formatTaskBoardJson(model)) as Array<{
+      id: string;
+      title: string;
+      remoteBadge?: TaskBoardRemoteBadge;
+    }>;
+    expect(payload.map((row) => row.id)).toEqual(["bd-1", "bd-2", "bd-3"]);
+    expect(payload[0]?.remoteBadge).toEqual({
+      kind: "synced",
+      value: "github#211",
+    });
+    expect(payload[1]?.remoteBadge).toEqual({ kind: "local-only" });
+    expect(payload[2]?.remoteBadge).toBeUndefined();
   });
 
   it("preserves bd ready queue order in projectHubReadyQueueBoard", () => {

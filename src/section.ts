@@ -53,6 +53,11 @@ export interface SectionGroupBlock {
     readonly id: string;
     readonly title: string;
     readonly trailingDim?: string;
+    /** Optional remote sync badge (github#N / local-only / sync-conflict). */
+    readonly remoteBadge?: {
+      readonly kind: "synced" | "local-only" | "sync-conflict";
+      readonly value?: string;
+    };
     /** Optional dim continuation line under the item (e.g. sync conflict reason). */
     readonly detailDim?: string;
   }[];
@@ -263,6 +268,60 @@ const renderBadges = (
   return lines;
 };
 
+const remoteBadgeLabel = (
+  badge: NonNullable<SectionGroupBlock["items"][number]["remoteBadge"]>,
+): string => {
+  if (badge.kind === "synced") {
+    return badge.value ?? "";
+  }
+  return badge.kind;
+};
+
+const renderRemoteBadge = (
+  badge: NonNullable<SectionGroupBlock["items"][number]["remoteBadge"]>,
+  palette: Palette,
+): string => {
+  const label = remoteBadgeLabel(badge);
+  if (!label) {
+    return "";
+  }
+  switch (badge.kind) {
+    case "synced":
+      return palette.dim(palette.cyan(label));
+    case "local-only":
+      return palette.dim(label);
+    case "sync-conflict":
+      return palette.yellow(label);
+  }
+};
+
+const composeGroupItemTrailing = (
+  item: SectionGroupBlock["items"][number],
+  palette: Palette,
+): { readonly plain: string; readonly rendered: string } => {
+  const dimPart = item.trailingDim ?? "";
+  const badgePart = item.remoteBadge
+    ? remoteBadgeLabel(item.remoteBadge)
+    : "";
+  const plain =
+    dimPart && badgePart
+      ? `${dimPart} · ${badgePart}`
+      : dimPart || badgePart;
+  if (!plain) {
+    return { plain: "", rendered: "" };
+  }
+
+  const dimRendered = dimPart ? palette.dim(dimPart) : "";
+  const badgeRendered = item.remoteBadge
+    ? renderRemoteBadge(item.remoteBadge, palette)
+    : "";
+  const rendered =
+    dimRendered && badgeRendered
+      ? `${dimRendered} ${palette.dim("·")} ${badgeRendered}`
+      : dimRendered || badgeRendered;
+  return { plain, rendered };
+};
+
 const renderGroup = (
   block: SectionGroupBlock,
   cols: number,
@@ -301,12 +360,13 @@ const renderGroup = (
     const titleGap = "  ";
     const prefix = indent + idPad + titleGap;
     const prefixVL = visibleLength(prefix);
-    const trailing = item.trailingDim ?? "";
-    const trailingRendered = trailing ? palette.dim(trailing) : "";
-    const trailingVL = trailing ? visibleLength(trailingRendered) + 1 : 0;
+    const trailing = composeGroupItemTrailing(item, palette);
+    const trailingVL = trailing.plain
+      ? visibleLength(trailing.rendered) + 1
+      : 0;
 
     let titleBudget = cols - prefixVL - trailingVL;
-    let useTrailing = Boolean(trailing);
+    let useTrailing = Boolean(trailing.plain);
     if (titleBudget < 8 && useTrailing) {
       // Drop trailing so the title can breathe.
       useTrailing = false;
@@ -325,7 +385,7 @@ const renderGroup = (
       if (useTrailing) {
         const left = prefix + title;
         if (visibleLength(left) + trailingVL <= cols) {
-          lines.push(alignLeftRight(left, trailingRendered, cols));
+          lines.push(alignLeftRight(left, trailing.rendered, cols));
         } else {
           lines.push(prefix + title);
         }
@@ -578,7 +638,14 @@ export const flattenSectionForLog = (
           lines.push(`${block.symbol}  ${block.name} · ${block.count}`);
         }
         for (const item of block.items) {
-          const trailing = item.trailingDim ? `  ${item.trailingDim}` : "";
+          const badgeLabel = item.remoteBadge
+            ? remoteBadgeLabel(item.remoteBadge)
+            : "";
+          const trailingParts = [item.trailingDim, badgeLabel].filter(
+            (part): part is string => Boolean(part),
+          );
+          const trailing =
+            trailingParts.length > 0 ? `  ${trailingParts.join(" · ")}` : "";
           lines.push(`  ${item.id}  ${item.title}${trailing}`);
           if (item.detailDim) {
             lines.push(`    ${item.detailDim}`);

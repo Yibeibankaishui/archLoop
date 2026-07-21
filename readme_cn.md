@@ -277,14 +277,14 @@ Hub flow 默认使用 `--output auto`。交互式 TTY 在选完 flow 后会先�
 
 任务命令默认针对已选中的 Hub project；如需覆盖，可以显式传 `--project <name>`。`.beads/issues.jsonl`、`.beads/interactions.jsonl` 等 Beads runtime/export 文件会单独报告，通常不要提交；通过 `archloop tasks pull` / `push` / `sync` 交换远端任务状态。同步冲突用 `archloop tasks resolve <id> --keep local|remote` 在本地 Beads 上解决（不直接改 GitHub；`--keep local` 后由下一次 `tasks push` 写回远端）。
 
-`archloop tasks list` / `show` / `pull` 使用 Variant C `section` 排版（无 `clack.note` 左边框、无 1-based 序号；选择器只接受 Beads id 或精确标题）：
+`archloop tasks list` / `show` / `pull` 使用 Variant C `section` 排版（无 `clack.note` 左边框、无 1-based 序号；选择器只接受 Beads id 或精确标题）。`tasks list` 行尾可带远端徽章：已同步为 dim cyan `github#N`，待推送为 dim `local-only`，冲突为 yellow `sync-conflict`；无远端链接则不显示。`--json` 输出行数组（含 `remoteBadge`）：
 
 ```text
   archLoop · demo                                                                   3 tasks
   ● 2 todo   ◐ 1 in_progress   ✓ 0 done
   ●  todo · 2
-     demo-mv2  Fix login redirect
-     demo-nx1  Improve empty state copy
+     demo-mv2  Fix login redirect                                          github#101
+     demo-nx1  Improve empty state copy                                      local-only
   tip   archloop tasks show <id>   ·   archloop tasks pull
 ```
 

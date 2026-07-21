@@ -138,16 +138,17 @@ archloop tasks init
 
 ```bash
 archloop tasks list
+archloop tasks list --json
 ```
 
-示例输出（`--plain` / `NO_COLOR`）：
+示例输出（`--plain` / `NO_COLOR`）。行尾远端徽章：`github#N`（已同步）、`local-only`（待推送）、`sync-conflict`（冲突）；无远端链接则省略：
 
 ```text
   archLoop · demo                                                                   3 tasks
   ● 2 todo   ◐ 1 in_progress   ✓ 0 done
   ●  todo · 2
-     todo-list-demo-mv2  Fix login redirect
-     todo-list-demo-nx1  Improve empty state copy
+     todo-list-demo-mv2  Fix login redirect                                github#101
+     todo-list-demo-nx1  Improve empty state copy                            local-only
   ◐  in_progress · 1
      todo-list-demo-ab3  Handle expired token
   tip   archloop tasks show <id>   ·   archloop tasks pull

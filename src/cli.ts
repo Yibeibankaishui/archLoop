@@ -186,6 +186,7 @@ import type {
 import {
   buildHubTaskBoardModel,
   buildHubTaskDetailModel,
+  formatTaskBoardJson,
   taskBoardModelToBlocks,
   taskDetailModelToBlocks,
   appendHubTaskComment,
@@ -1930,6 +1931,12 @@ const taskListAllOption = Options.boolean("all").pipe(
   ),
   Options.withDefault(false),
 );
+const taskListJsonOption = Options.boolean("json").pipe(
+  Options.withDescription(
+    "Emit a structured JSON array of task board rows, including remoteBadge when present.",
+  ),
+  Options.withDefault(false),
+);
 const taskSelectorsArg = Args.atLeast(
   Args.text({ name: "task-selector" }).pipe(
     Args.withDescription("Beads id, or exact task title."),
@@ -2049,9 +2056,10 @@ const tasksListCommand = Command.make(
   {
     warning: taskWarningOption,
     all: taskListAllOption,
+    json: taskListJsonOption,
     project: projectTargetOption,
   },
-  ({ warning, all, project }) =>
+  ({ warning, all, json, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
       const target = yield* resolveTaskCommandProjectTarget(project);
@@ -2066,6 +2074,10 @@ const tasksListCommand = Command.make(
         warningFilter,
         showAll: all,
       });
+      if (json) {
+        yield* d.plain(formatTaskBoardJson(model));
+        return;
+      }
       yield* d.section("", taskBoardModelToBlocks(model));
     }),
 );
