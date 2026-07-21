@@ -139,6 +139,7 @@ export interface HubTaskEvent {
     | "task_claimed"
     | "task_claim_skipped"
     | "task_retry_blocked"
+    | "task_provider_retry"
     | "task_implementation_started"
     | "task_implementation_succeeded"
     | "task_implementation_failed"

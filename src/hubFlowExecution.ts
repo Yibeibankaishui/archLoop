@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { promisify } from "node:util";
 
 import { assertAgentCredentialsConfigured } from "./agentAuthGuidance.js";
@@ -626,6 +626,109 @@ const buildHubAgentPromptArgs = (
     : {}),
 });
 
+const HUB_COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
+
+const readCompletionSignalFromLog = (
+  logPath: string,
+): string | undefined => {
+  try {
+    const content = readFileSync(logPath, "utf8");
+    return content.includes(HUB_COMPLETION_SIGNAL)
+      ? HUB_COMPLETION_SIGNAL
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const DEFAULT_PROVIDER_RETRY_ATTEMPTS = 3;
+const DEFAULT_PROVIDER_RETRY_BASE_MS = 5_000;
+/** Multipliers for attempt backoffs: 5s / 20s / 60s when base is 5000ms. */
+const PROVIDER_RETRY_BACKOFF_MULTIPLIERS = [1, 4, 12] as const;
+
+const parsePositiveIntEnv = (
+  raw: string | undefined,
+  fallback: number,
+): number => {
+  if (raw === undefined) {
+    return fallback;
+  }
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    return fallback;
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  return parsed > 0 ? parsed : fallback;
+};
+
+const resolveProviderRetryConfig = (env?: NodeJS.ProcessEnv) => {
+  const attempts = parsePositiveIntEnv(
+    env?.ARCHLOOP_PROVIDER_RETRY_ATTEMPTS ??
+      process.env.ARCHLOOP_PROVIDER_RETRY_ATTEMPTS,
+    DEFAULT_PROVIDER_RETRY_ATTEMPTS,
+  );
+  const baseMsRaw =
+    env?.ARCHLOOP_PROVIDER_RETRY_BASE_MS ??
+    process.env.ARCHLOOP_PROVIDER_RETRY_BASE_MS;
+  // 0 is allowed so tests can disable backoff sleeps.
+  let baseMs = DEFAULT_PROVIDER_RETRY_BASE_MS;
+  if (baseMsRaw !== undefined) {
+    const trimmed = baseMsRaw.trim();
+    if (/^\d+$/.test(trimmed)) {
+      baseMs = Number.parseInt(trimmed, 10);
+    }
+  }
+
+  return { attempts, baseMs };
+};
+
+export const matchProviderTransientReason = (
+  message: string,
+): string | undefined => {
+  if (message.includes("API Error: 400 Invalid request parameters")) {
+    return "API Error: 400 Invalid request parameters";
+  }
+
+  const retriableMatch = message.match(/RetriableError:\s*([^\n]+)/);
+  if (retriableMatch?.[1]) {
+    return `RetriableError: ${retriableMatch[1].trim()}`;
+  }
+
+  return undefined;
+};
+
+const providerRetryBackoffMs = (baseMs: number, retryIndex: number): number => {
+  const multiplier =
+    PROVIDER_RETRY_BACKOFF_MULTIPLIERS[
+      Math.min(retryIndex, PROVIDER_RETRY_BACKOFF_MULTIPLIERS.length - 1)
+    ] ?? 1;
+  return baseMs * multiplier;
+};
+
+const sleepMs = (ms: number, signal?: AbortSignal): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (ms <= 0) {
+      resolve();
+      return;
+    }
+    if (signal?.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 const runHubAgent = async (input: {
   readonly agent: AgentProvider;
   readonly cwd: string;
@@ -637,6 +740,7 @@ const runHubAgent = async (input: {
   readonly branch: string;
   readonly runDir: string;
   readonly name: string;
+  readonly role: "implement" | "review";
   readonly logFileName: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly retryContext?: string;
@@ -663,32 +767,85 @@ const runHubAgent = async (input: {
       ? Math.floor(envMaxIterations)
       : 20;
 
-  return run({
-    agent: input.agent,
-    sandbox: noSandbox(),
-    cwd: input.cwd,
-    promptFile: input.promptFile,
-    promptArgs: buildHubAgentPromptArgs(
-      input,
-      input.projectDevelopmentContract,
-    ),
-    branchStrategy: { type: "branch", branch: input.branch },
-    name: input.name,
-    maxIterations,
-    idleTimeoutSeconds: input.idleTimeoutSeconds,
-    worktreeLeaseOwner: {
-      kind: "hub",
-      taskId: input.taskId,
-      flowId: input.flowId,
-      batchId: input.batchId,
-    },
-    logging: {
-      type: "file",
-      path: join(input.runDir, "logs", input.logFileName),
-      showStartup: input.showAgentStartup,
-    },
-    signal: input.signal,
-  });
+  const logPath = join(input.runDir, "logs", input.logFileName);
+  const retryConfig = resolveProviderRetryConfig(input.env);
+  const status = input.role === "review" ? "reviewing" : "implementing";
+
+  const invoke = () =>
+    run({
+      agent: input.agent,
+      sandbox: noSandbox(),
+      cwd: input.cwd,
+      promptFile: input.promptFile,
+      promptArgs: buildHubAgentPromptArgs(
+        input,
+        input.projectDevelopmentContract,
+      ),
+      branchStrategy: { type: "branch", branch: input.branch },
+      name: input.name,
+      maxIterations,
+      idleTimeoutSeconds: input.idleTimeoutSeconds,
+      worktreeLeaseOwner: {
+        kind: "hub",
+        taskId: input.taskId,
+        flowId: input.flowId,
+        batchId: input.batchId,
+      },
+      logging: {
+        type: "file",
+        path: logPath,
+        showStartup: input.showAgentStartup,
+      },
+      signal: input.signal,
+    });
+
+  let attempt = 0;
+  for (;;) {
+    attempt += 1;
+    try {
+      return await invoke();
+    } catch (error) {
+      input.signal?.throwIfAborted();
+
+      const completionAlreadyEmitted =
+        readCompletionSignalFromLog(logPath) !== undefined;
+      if (completionAlreadyEmitted) {
+        throw error;
+      }
+
+      const transientReason = matchProviderTransientReason(
+        errorMessage(error),
+      );
+      if (transientReason === undefined || attempt >= retryConfig.attempts) {
+        throw error;
+      }
+
+      const backoffMs = providerRetryBackoffMs(
+        retryConfig.baseMs,
+        attempt - 1,
+      );
+      const backoffSeconds = backoffMs / 1000;
+      appendHubTaskEvent(input.runDir, {
+        type: "task_provider_retry",
+        runId: basename(input.runDir),
+        batchId: input.batchId,
+        taskId: input.taskId,
+        branch: input.branch,
+        createdAt: new Date().toISOString(),
+        status,
+        reason: transientReason,
+        message: `Retrying provider after transient error (attempt ${attempt}/${retryConfig.attempts}, backoff ${backoffSeconds}s)`,
+        diagnostics: {
+          attempt,
+          maxAttempts: retryConfig.attempts,
+          backoffSeconds,
+          transientReason,
+        },
+      });
+
+      await sleepMs(backoffMs, input.signal);
+    }
+  }
 };
 
 const reviewSelectedTask = async (
@@ -1445,8 +1602,6 @@ export const formatHubFlowResultLines = (
   return lines;
 };
 
-const HUB_COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
-
 const hasBranchUnmergedWork = async (
   cwd: string,
   branch: string,
@@ -1480,19 +1635,6 @@ const collectBranchCommits = async (
     return lines.split("\n").map((sha) => ({ sha }));
   } catch {
     return [];
-  }
-};
-
-const readCompletionSignalFromLog = (
-  logPath: string,
-): string | undefined => {
-  try {
-    const content = readFileSync(logPath, "utf8");
-    return content.includes(HUB_COMPLETION_SIGNAL)
-      ? HUB_COMPLETION_SIGNAL
-      : undefined;
-  } catch {
-    return undefined;
   }
 };
 
@@ -1560,6 +1702,7 @@ export const createHubFlowRunImplementer = (options: {
         branch: input.branch,
         runDir: input.runDir,
         name: `implement-${input.taskId}`,
+        role: "implement",
         logFileName,
         env: options.env,
         retryContext: input.retryContext,
@@ -1646,6 +1789,7 @@ export const createHubFlowRunReviewer = (options: {
         branch: input.branch,
         runDir: input.runDir,
         name: `review-${input.taskId}`,
+        role: "review",
         logFileName: `${input.taskId}-review.log`,
         env: options.env,
         showAgentStartup: options.showAgentStartup,
