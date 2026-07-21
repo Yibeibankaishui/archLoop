@@ -481,7 +481,12 @@ export const projectHubTask = (task: BeadsTaskRecord): HubTaskProjection => {
       String(task.id ?? "untitled"),
     beadsStatus,
     hubStatus: resolvedHubStatus,
-    owner: readFirstString(task, ["owner", "assignee", "claimed_by", "claimedBy"]),
+    owner: readFirstString(task, [
+      "owner",
+      "assignee",
+      "claimed_by",
+      "claimedBy",
+    ]),
     claim,
     claimState,
     labels,
@@ -1874,7 +1879,11 @@ export const filterHubTasksByPrdWarning = (
 ): readonly HubTaskProjection[] =>
   tasks.filter((task) => matchesPrdWarningFilter(task, filter));
 
-export type TaskBoardDisplayBucket = "todo" | "in_progress" | "done";
+export type TaskBoardDisplayBucket =
+  | "todo"
+  | "in_progress"
+  | "attention"
+  | "done";
 
 export interface TaskBoardModel {
   readonly header: SectionHeaderBlock;
@@ -1897,6 +1906,7 @@ export interface BuildTaskBoardModelInput {
 const TASK_BOARD_BUCKETS = [
   "todo",
   "in_progress",
+  "attention",
   "done",
 ] as const satisfies readonly TaskBoardDisplayBucket[];
 
@@ -1911,6 +1921,7 @@ const TASK_BOARD_BUCKET_META: Readonly<
 > = {
   todo: { symbol: "●", severity: "info" },
   in_progress: { symbol: "◐", severity: "warn" },
+  attention: { symbol: "!", severity: "error" },
   done: { symbol: "✓", severity: "success" },
 };
 
@@ -1923,6 +1934,10 @@ export const mapHubStatusToTaskBoardBucket = (
     case "waiting_for_merge":
     case "merging":
       return "in_progress";
+    case "blocked":
+    case "failed":
+    case "sync_conflict":
+      return "attention";
     case "done":
     case "wontfix":
       return "done";
@@ -1998,6 +2013,7 @@ export const buildHubTaskBoardModel = (
   const bucketTasks: Record<TaskBoardDisplayBucket, HubTaskProjection[]> = {
     todo: [],
     in_progress: [],
+    attention: [],
     done: [],
   };
   for (const task of visibleTasks) {
@@ -2007,9 +2023,14 @@ export const buildHubTaskBoardModel = (
     bucketTasks[bucket].sort(compareTaskIds);
   }
 
+  // `attention` is only shown when there is at least one task in it — the
+  // badge and group both suppress themselves otherwise, so a healthy board
+  // still reads as todo / in_progress / done.
   const badges: SectionBadgesBlock = {
     kind: "badges",
-    badges: TASK_BOARD_BUCKETS.map((bucket) => ({
+    badges: TASK_BOARD_BUCKETS.filter(
+      (bucket) => bucket !== "attention" || bucketTasks.attention.length > 0,
+    ).map((bucket) => ({
       symbol: TASK_BOARD_BUCKET_META[bucket].symbol,
       count: bucketTasks[bucket].length,
       label: bucket,
@@ -2074,11 +2095,7 @@ export const buildHubTaskBoardModel = (
 export const taskBoardModelToBlocks = (
   model: TaskBoardModel,
 ): readonly SectionBlock[] => {
-  const blocks: SectionBlock[] = [
-    model.header,
-    model.divider,
-    model.badges,
-  ];
+  const blocks: SectionBlock[] = [model.header, model.divider, model.badges];
   if (model.warningSummary) {
     blocks.push(model.warningSummary);
   }
@@ -2288,7 +2305,11 @@ export const buildHubTaskDetailModel = (
 export const taskDetailModelToBlocks = (
   model: TaskDetailModel,
 ): readonly SectionBlock[] => {
-  const blocks: SectionBlock[] = [model.header, model.identity, model.description];
+  const blocks: SectionBlock[] = [
+    model.header,
+    model.identity,
+    model.description,
+  ];
   if (model.comments) {
     blocks.push(model.comments);
   }

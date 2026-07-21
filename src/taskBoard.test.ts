@@ -470,7 +470,9 @@ fs.writeSync(1, JSON.stringify(tasks));
       subtitle: "demo",
       right: "2 tasks",
     });
-    expect(model.badges.badges.map((badge) => [badge.label, badge.count])).toEqual([
+    expect(
+      model.badges.badges.map((badge) => [badge.label, badge.count]),
+    ).toEqual([
       ["todo", 2],
       ["in_progress", 0],
       ["done", 0],
@@ -484,6 +486,76 @@ fs.writeSync(1, JSON.stringify(tasks));
     ]);
     expect(mapHubStatusToTaskBoardBucket("inbox")).toBe("todo");
     expect(mapHubStatusToTaskBoardBucket("ready_for_agent")).toBe("todo");
+  });
+
+  it("routes blocked, failed, and sync_conflict tasks to the attention bucket", () => {
+    expect(mapHubStatusToTaskBoardBucket("blocked")).toBe("attention");
+    expect(mapHubStatusToTaskBoardBucket("failed")).toBe("attention");
+    expect(mapHubStatusToTaskBoardBucket("sync_conflict")).toBe("attention");
+    expect(mapHubStatusToTaskBoardBucket("implementing")).toBe("in_progress");
+    expect(mapHubStatusToTaskBoardBucket("done")).toBe("done");
+    expect(mapHubStatusToTaskBoardBucket("wontfix")).toBe("done");
+  });
+
+  it("shows the attention badge and group only when at least one task needs attention", () => {
+    const board = projectHubTaskBoard([
+      {
+        id: "bd-1",
+        title: "Inbox task",
+        status: "open",
+        labels: [],
+        metadata: {},
+      },
+      {
+        id: "bd-2",
+        title: "Blocked task",
+        status: "blocked",
+        labels: [],
+        metadata: { blocked_reason: "waiting on design" },
+      },
+      {
+        id: "bd-3",
+        title: "Failed task",
+        status: "failed",
+        labels: [],
+        metadata: { failed: "provider exited non-zero" },
+      },
+    ]);
+    const model = buildHubTaskBoardModel({
+      projectName: "sample",
+      board,
+      showAll: false,
+    });
+    const badgeLabels = model.badges.badges.map((b) => b.label);
+    expect(badgeLabels).toEqual(["todo", "in_progress", "attention", "done"]);
+    const attentionBadge = model.badges.badges.find(
+      (b) => b.label === "attention",
+    );
+    expect(attentionBadge?.count).toBe(2);
+    expect(attentionBadge?.severity).toBe("error");
+    const attentionGroup = model.groups.find((g) => g.name === "attention");
+    expect(attentionGroup?.count).toBe(2);
+    expect(attentionGroup?.items.map((i) => i.id)).toEqual(["bd-2", "bd-3"]);
+  });
+
+  it("hides the attention badge and group when there are no attention tasks", () => {
+    const board = projectHubTaskBoard([
+      {
+        id: "bd-1",
+        title: "Inbox task",
+        status: "open",
+        labels: [],
+        metadata: {},
+      },
+    ]);
+    const model = buildHubTaskBoardModel({
+      projectName: "sample",
+      board,
+      showAll: false,
+    });
+    const badgeLabels = model.badges.badges.map((b) => b.label);
+    expect(badgeLabels).toEqual(["todo", "in_progress", "done"]);
+    expect(model.groups.find((g) => g.name === "attention")).toBeUndefined();
   });
 
   it("shows PRD warning details on the task detail model", () => {
@@ -1006,11 +1078,7 @@ describe("resolveHubTaskSelectors", () => {
       { id: "bd-1", title: "Only task", status: "open" },
     ]);
 
-    const tasks = resolveHubTaskSelectors(
-      repoDir,
-      ["bd-1", "Only task"],
-      env,
-    );
+    const tasks = resolveHubTaskSelectors(repoDir, ["bd-1", "Only task"], env);
     expect(tasks.map((task) => task.id)).toEqual(["bd-1"]);
   });
 
