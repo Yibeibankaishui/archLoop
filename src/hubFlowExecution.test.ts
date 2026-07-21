@@ -25,7 +25,7 @@ import {
   type HubImplementTaskInput,
   type HubReviewTaskInput,
 } from "./hubFlowExecution.js";
-import { HubFlowError } from "./errors.js";
+import { AgentError, HubFlowError } from "./errors.js";
 import {
   resolveHubFlowPromptPath,
   validateHubFlowRegistries,
@@ -2914,6 +2914,200 @@ describe("with-review Hub flow execution", () => {
     expect(() => parseHubFlowIdleTimeoutSeconds("-1")).toThrow(HubFlowError);
     expect(() => parseHubFlowIdleTimeoutSeconds("1.5")).toThrow(HubFlowError);
     expect(() => parseHubFlowIdleTimeoutSeconds("abc")).toThrow(HubFlowError);
+  });
+
+  it("createHubFlowRunImplementer marks missing completion signal as agent_failed even with branch commits", async () => {
+    const cwd = await mkdtemp(
+      join(tmpdir(), "hub-flow-implementer-no-complete-"),
+    );
+    await initRepo(cwd);
+    await commitFile(cwd, "hello.txt", "hello", "initial commit");
+    const branch = "archloop/bd-1-test-task";
+    await execAsync(`git checkout -b "${branch}"`, { cwd });
+    await commitFile(cwd, "work.txt", "work", "RALPH: partial");
+    await execAsync("git checkout main", { cwd });
+
+    const { stdout: commitList } = await execAsync(
+      `git rev-list --reverse HEAD..${branch}`,
+      { cwd },
+    );
+    const expectedShas = commitList
+      .trim()
+      .split("\n")
+      .filter((line) => line.length > 0);
+
+    const runDir = join(cwd, "run");
+    await mkdir(join(runDir, "logs"), { recursive: true });
+    await writeFile(
+      join(runDir, "logs", "bd-1.log"),
+      "agent still working; no completion signal yet\n",
+      "utf-8",
+    );
+
+    const projectDevelopmentContract =
+      resolveHubProjectDevelopmentContractState({
+        repoRoot: cwd,
+        hubProjectDir: join(cwd, "hub-project"),
+        now: new Date("2026-07-21T12:00:00.000Z"),
+      });
+    const runSpy = vi.spyOn(runModule, "run").mockRejectedValue(
+      new AgentError({
+        message:
+          "cursor exited with code 1:\nRetriableError: Connection stalled",
+      }),
+    );
+    const implementer = createHubFlowRunImplementer({
+      cwd,
+      env: { OPENAI_KEY: "test-openai-key" },
+      roleEntry: { provider: "codex", model: "gpt-5.4-mini" },
+    });
+
+    vi.stubEnv("OPENAI_KEY", "");
+    vi.stubEnv("CODEX_HOME", "");
+    try {
+      const result = await implementer({
+        flowId: "no-review",
+        batchId: "batch-test",
+        taskId: "bd-1",
+        title: "Test task",
+        branch,
+        promptFile: "/tmp/prompt.md",
+        cwd,
+        runDir,
+        projectDevelopmentContract,
+      });
+
+      expect(result.outcome).toBe("agent_failed");
+      expect(result.completionSignal).toBeUndefined();
+      expect(result.commits.map((commit) => commit.sha)).toEqual(expectedShas);
+      expect(result.message).toContain("cursor exited with code 1");
+    } finally {
+      runSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("createHubFlowRunImplementer marks COMPLETE without commits or unmerged work as agent_failed", async () => {
+    const cwd = await mkdtemp(
+      join(tmpdir(), "hub-flow-implementer-empty-complete-"),
+    );
+    await initRepo(cwd);
+    await commitFile(cwd, "hello.txt", "hello", "initial commit");
+    const branch = "archloop/bd-1-test-task";
+    await execAsync(`git branch "${branch}"`, { cwd });
+
+    const projectDevelopmentContract =
+      resolveHubProjectDevelopmentContractState({
+        repoRoot: cwd,
+        hubProjectDir: join(cwd, "hub-project"),
+        now: new Date("2026-07-21T12:00:00.000Z"),
+      });
+    const runSpy = vi.spyOn(runModule, "run").mockResolvedValue({
+      completionSignal: "<promise>COMPLETE</promise>",
+      commits: [],
+      branch,
+      iterations: [],
+      stdout: "<promise>COMPLETE</promise>",
+    });
+    const implementer = createHubFlowRunImplementer({
+      cwd,
+      env: { OPENAI_KEY: "test-openai-key" },
+      roleEntry: { provider: "codex", model: "gpt-5.4-mini" },
+    });
+
+    vi.stubEnv("OPENAI_KEY", "");
+    vi.stubEnv("CODEX_HOME", "");
+    try {
+      const result = await implementer({
+        flowId: "no-review",
+        batchId: "batch-test",
+        taskId: "bd-1",
+        title: "Test task",
+        branch,
+        promptFile: "/tmp/prompt.md",
+        cwd,
+        runDir: cwd,
+        projectDevelopmentContract,
+      });
+
+      expect(result.outcome).toBe("agent_failed");
+      expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
+      expect(result.commits).toEqual([]);
+      expect(result.message).toBe("Implementer completed without commits");
+    } finally {
+      runSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("createHubFlowRunImplementer treats COMPLETE + branch commits as success despite non-zero exit", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "hub-flow-implementer-observe-"));
+    await initRepo(cwd);
+    await commitFile(cwd, "hello.txt", "hello", "initial commit");
+    const branch = "archloop/bd-1-test-task";
+    await execAsync(`git checkout -b "${branch}"`, { cwd });
+    await commitFile(cwd, "work-a.txt", "a", "RALPH: first");
+    await commitFile(cwd, "work-b.txt", "b", "RALPH: second");
+    await execAsync("git checkout main", { cwd });
+
+    const { stdout: commitList } = await execAsync(
+      `git rev-list --reverse HEAD..${branch}`,
+      { cwd },
+    );
+    const expectedShas = commitList
+      .trim()
+      .split("\n")
+      .filter((line) => line.length > 0);
+
+    const runDir = join(cwd, "run");
+    await mkdir(join(runDir, "logs"), { recursive: true });
+    await writeFile(
+      join(runDir, "logs", "bd-1.log"),
+      "agent work...\n<promise>COMPLETE</promise>\n",
+      "utf-8",
+    );
+
+    const projectDevelopmentContract =
+      resolveHubProjectDevelopmentContractState({
+        repoRoot: cwd,
+        hubProjectDir: join(cwd, "hub-project"),
+        now: new Date("2026-07-21T12:00:00.000Z"),
+      });
+    const runSpy = vi.spyOn(runModule, "run").mockRejectedValue(
+      new AgentError({
+        message:
+          "cursor exited with code 1:\nRetriableError: Connection stalled",
+      }),
+    );
+    const implementer = createHubFlowRunImplementer({
+      cwd,
+      env: { OPENAI_KEY: "test-openai-key" },
+      roleEntry: { provider: "codex", model: "gpt-5.4-mini" },
+    });
+
+    vi.stubEnv("OPENAI_KEY", "");
+    vi.stubEnv("CODEX_HOME", "");
+    try {
+      const result = await implementer({
+        flowId: "no-review",
+        batchId: "batch-test",
+        taskId: "bd-1",
+        title: "Test task",
+        branch,
+        promptFile: "/tmp/prompt.md",
+        cwd,
+        runDir,
+        projectDevelopmentContract,
+      });
+
+      expect(result.outcome).toBe("success");
+      expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
+      expect(result.commits.map((commit) => commit.sha)).toEqual(expectedShas);
+      expect(result.commits).toHaveLength(2);
+    } finally {
+      runSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
   });
 
   it("createHubFlowRunImplementer propagates an aborted run", async () => {
