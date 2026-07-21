@@ -278,6 +278,24 @@ describe("Hub flow registry", () => {
   );
 
   it.each(["no-review", "with-review"] as const)(
+    "implement prompt for %s forbids remote push and Beads sync",
+    async (flowId) => {
+      const prompt = await readFile(
+        resolveHubFlowPromptPath(flowId, "implement"),
+        "utf-8",
+      );
+
+      expect(prompt).toContain("git push");
+      expect(prompt).toContain("bd dolt push");
+      expect(prompt).toContain("bd dolt commit");
+      expect(prompt).toMatch(/do not sync Beads|must NOT sync Beads/i);
+      expect(prompt).toMatch(
+        /Hub handles merge and remote sync|merge and remote sync later/i,
+      );
+    },
+  );
+
+  it.each(["no-review", "with-review"] as const)(
     "batch planner prompt for %s treats empty live blockers as unblocked",
     async (flowId) => {
       const prompt = await readFile(
