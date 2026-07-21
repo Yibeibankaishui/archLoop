@@ -558,6 +558,107 @@ fs.writeSync(1, JSON.stringify(tasks));
     expect(model.groups.find((g) => g.name === "attention")).toBeUndefined();
   });
 
+  it("renders the specific hub status when attention holds only one kind of trouble", () => {
+    const board = projectHubTaskBoard([
+      {
+        id: "bd-1",
+        title: "Inbox task",
+        status: "open",
+        labels: [],
+        metadata: {},
+      },
+      {
+        id: "bd-2",
+        title: "Blocked one",
+        status: "blocked",
+        labels: [],
+        metadata: { blocked_reason: "waiting on design" },
+      },
+      {
+        id: "bd-3",
+        title: "Blocked two",
+        status: "blocked",
+        labels: [],
+        metadata: { blocked_reason: "waiting on remote" },
+      },
+    ]);
+    const model = buildHubTaskBoardModel({
+      projectName: "sample",
+      board,
+      showAll: false,
+    });
+    // Only blocked lives in attention → badge and group both read "blocked".
+    const attentionBadge = model.badges.badges.find(
+      (b) => b.severity === "error",
+    );
+    expect(attentionBadge?.label).toBe("blocked");
+    expect(attentionBadge?.count).toBe(2);
+    expect(attentionBadge?.symbol).toBe("!");
+    const attentionGroup = model.groups.find((g) => g.severity === "error");
+    expect(attentionGroup?.name).toBe("blocked");
+    expect(attentionGroup?.symbol).toBe("!");
+  });
+
+  it("uses the ✗ glyph and 'failed' label when attention holds only failed tasks", () => {
+    const board = projectHubTaskBoard([
+      {
+        id: "bd-1",
+        title: "Failed one",
+        status: "failed",
+        labels: [],
+        metadata: { failed: "typecheck" },
+      },
+    ]);
+    const model = buildHubTaskBoardModel({
+      projectName: "sample",
+      board,
+      showAll: false,
+    });
+    const attentionBadge = model.badges.badges.find(
+      (b) => b.severity === "error",
+    );
+    expect(attentionBadge?.label).toBe("failed");
+    expect(attentionBadge?.symbol).toBe("✗");
+    const attentionGroup = model.groups.find((g) => g.severity === "error");
+    expect(attentionGroup?.name).toBe("failed");
+    expect(attentionGroup?.symbol).toBe("✗");
+  });
+
+  it("falls back to the generic attention label when multiple trouble kinds coexist", () => {
+    // This is the branch the existing "shows the attention badge and group"
+    // test already covers (blocked + failed together → fallback to attention).
+    // Documenting it explicitly here so the intent is not accidentally lost.
+    const board = projectHubTaskBoard([
+      {
+        id: "bd-1",
+        title: "Blocked",
+        status: "blocked",
+        labels: [],
+        metadata: { blocked_reason: "waiting on design" },
+      },
+      {
+        id: "bd-2",
+        title: "Failed",
+        status: "failed",
+        labels: [],
+        metadata: { failed: "typecheck" },
+      },
+    ]);
+    const model = buildHubTaskBoardModel({
+      projectName: "sample",
+      board,
+      showAll: false,
+    });
+    const attentionBadge = model.badges.badges.find(
+      (b) => b.severity === "error",
+    );
+    expect(attentionBadge?.label).toBe("attention");
+    expect(attentionBadge?.symbol).toBe("!");
+    const attentionGroup = model.groups.find((g) => g.severity === "error");
+    expect(attentionGroup?.name).toBe("attention");
+    expect(attentionGroup?.symbol).toBe("!");
+  });
+
   it("shows PRD warning details on the task detail model", () => {
     const task = projectHubTask({
       id: "bd-99",

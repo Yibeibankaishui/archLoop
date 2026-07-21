@@ -1975,6 +1975,7 @@ const buildTaskBoardGroup = (
   tasks: readonly HubTaskProjection[],
   showAll: boolean,
   perGroupLimit: number,
+  displayName?: string,
 ): SectionGroupBlock | undefined => {
   if (tasks.length === 0) {
     return undefined;
@@ -1990,7 +1991,7 @@ const buildTaskBoardGroup = (
     kind: "group",
     symbol: meta.symbol,
     severity: meta.severity,
-    name: bucket,
+    name: displayName ?? bucket,
     count: tasks.length,
     ...(truncated
       ? {
@@ -2000,6 +2001,46 @@ const buildTaskBoardGroup = (
       : {}),
     items: visibleTasks.map(toTaskBoardGroupItem),
   };
+};
+
+// The attention bucket merges failed / blocked / sync_conflict / needs_info
+// so a healthy board reads as three badges. When the bucket contains only a
+// single kind of trouble, we render the more specific label instead — that
+// way users see "! 1 blocked" or "✗ 2 failed" in the common case, and only
+// fall back to the generic "attention" when several kinds coexist.
+const ATTENTION_HUB_STATUSES: readonly HubTaskStatus[] = [
+  "failed",
+  "blocked",
+  "sync_conflict",
+  "needs_info",
+];
+
+const resolveAttentionDisplay = (
+  attentionTasks: readonly HubTaskProjection[],
+): { readonly label: string; readonly symbol: SectionGroupBlock["symbol"] } => {
+  const distinct = new Set<HubTaskStatus>();
+  for (const task of attentionTasks) {
+    if (
+      (ATTENTION_HUB_STATUSES as readonly string[]).includes(task.hubStatus)
+    ) {
+      distinct.add(task.hubStatus);
+    }
+    if (distinct.size > 1) {
+      break;
+    }
+  }
+  if (distinct.size !== 1) {
+    return {
+      label: "attention",
+      symbol: TASK_BOARD_BUCKET_META.attention.symbol,
+    };
+  }
+  const only = distinct.values().next().value as HubTaskStatus;
+  // Failure keeps its own glyph (✗) so an at-a-glance scan reads "failed"
+  // even before the text; other single-kind attention buckets stay on `!`.
+  const symbol =
+    only === "failed" ? "✗" : TASK_BOARD_BUCKET_META.attention.symbol;
+  return { label: only, symbol };
 };
 
 export const buildHubTaskBoardModel = (
@@ -2025,15 +2066,22 @@ export const buildHubTaskBoardModel = (
 
   // `attention` is only shown when there is at least one task in it — the
   // badge and group both suppress themselves otherwise, so a healthy board
-  // still reads as todo / in_progress / done.
+  // still reads as todo / in_progress / done. When attention holds only one
+  // kind of trouble (e.g. only blocked tasks) the badge and group render the
+  // specific kind — "! 1 blocked" or "✗ 2 failed" — instead of the generic
+  // "attention" label.
+  const attentionDisplay = resolveAttentionDisplay(bucketTasks.attention);
   const badges: SectionBadgesBlock = {
     kind: "badges",
     badges: TASK_BOARD_BUCKETS.filter(
       (bucket) => bucket !== "attention" || bucketTasks.attention.length > 0,
     ).map((bucket) => ({
-      symbol: TASK_BOARD_BUCKET_META[bucket].symbol,
+      symbol:
+        bucket === "attention"
+          ? attentionDisplay.symbol
+          : TASK_BOARD_BUCKET_META[bucket].symbol,
       count: bucketTasks[bucket].length,
-      label: bucket,
+      label: bucket === "attention" ? attentionDisplay.label : bucket,
       severity: TASK_BOARD_BUCKET_META[bucket].severity,
     })),
   };
@@ -2044,8 +2092,16 @@ export const buildHubTaskBoardModel = (
       bucketTasks[bucket],
       input.showAll,
       perGroupLimit,
+      bucket === "attention" ? attentionDisplay.label : undefined,
     );
-    return group ? [group] : [];
+    if (!group) {
+      return [];
+    }
+    if (bucket === "attention") {
+      // Override the group symbol too so it matches the badge.
+      return [{ ...group, symbol: attentionDisplay.symbol }];
+    }
+    return [group];
   });
 
   const warningSummaryLine = formatPrdWarningSummaryLine(
