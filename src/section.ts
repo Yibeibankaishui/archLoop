@@ -638,11 +638,10 @@ export const flattenSectionForLog = (
           lines.push(`${block.symbol}  ${block.name} · ${block.count}`);
         }
         for (const item of block.items) {
-          const badge =
-            item.remoteBadge?.kind === "synced"
-              ? (item.remoteBadge.value ?? "")
-              : (item.remoteBadge?.kind ?? "");
-          const trailingParts = [item.trailingDim, badge].filter(
+          const badgeLabel = item.remoteBadge
+            ? remoteBadgeLabel(item.remoteBadge)
+            : "";
+          const trailingParts = [item.trailingDim, badgeLabel].filter(
             (part): part is string => Boolean(part),
           );
           const trailing =

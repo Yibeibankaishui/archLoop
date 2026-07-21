@@ -2025,6 +2025,9 @@ export const deriveTaskBoardRemoteBadge = (
   return undefined;
 };
 
+// `TaskBoardRow` is structurally compatible with `SectionGroupBlock`'s item
+// type (`detailDim` is optional there), so the same object doubles as the
+// group-item shape — no re-projection needed.
 const toTaskBoardRow = (task: HubTaskProjection): TaskBoardRow => {
   const trailingDim = taskBoardItemTrailingDim(task);
   const remoteBadge = deriveTaskBoardRemoteBadge(task);
@@ -2033,18 +2036,6 @@ const toTaskBoardRow = (task: HubTaskProjection): TaskBoardRow => {
     title: task.title,
     ...(trailingDim ? { trailingDim } : {}),
     ...(remoteBadge ? { remoteBadge } : {}),
-  };
-};
-
-const toTaskBoardGroupItem = (
-  task: HubTaskProjection,
-): SectionGroupBlock["items"][number] => {
-  const row = toTaskBoardRow(task);
-  return {
-    id: row.id,
-    title: row.title,
-    ...(row.trailingDim ? { trailingDim: row.trailingDim } : {}),
-    ...(row.remoteBadge ? { remoteBadge: row.remoteBadge } : {}),
   };
 };
 
@@ -2077,7 +2068,7 @@ const buildTaskBoardGroup = (
           footerDim: `… ${tasks.length - visibleTasks.length} more`,
         }
       : {}),
-    items: visibleTasks.map(toTaskBoardGroupItem),
+    items: visibleTasks.map(toTaskBoardRow),
   };
 };
 
@@ -2262,16 +2253,7 @@ export const renderHubTaskBoardText = (
 
 /** Machine-readable board rows for `archloop tasks list --json`. */
 export const formatTaskBoardJson = (model: TaskBoardModel): string =>
-  JSON.stringify(
-    model.rows.map((row) => ({
-      id: row.id,
-      title: row.title,
-      ...(row.trailingDim ? { trailingDim: row.trailingDim } : {}),
-      ...(row.remoteBadge ? { remoteBadge: row.remoteBadge } : {}),
-    })),
-    null,
-    2,
-  );
+  JSON.stringify(model.rows, null, 2);
 
 const TASK_DETAIL_KV_GUTTER = 12;
 
