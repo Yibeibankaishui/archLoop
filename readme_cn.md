@@ -291,6 +291,7 @@ Hub flow 默认使用 `--output auto`。交互式 TTY 在选完 flow 后会先�
 ```text
   archLoop · sync · demo                                                    owner/repo
   ↓ pulled  4 created  0 updated · 0 conflicts · 0 dup-candidates
+     arch-abc  Import open issues into Beads                                 github#101
   ↑ pushed  nothing to push  0 synced · 0 closed · 0 pending
   next  archloop tasks list
 ```

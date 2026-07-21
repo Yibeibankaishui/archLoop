@@ -371,11 +371,12 @@ archloop tasks sync
 archloop tasks resolve <id> --keep local|remote
 ```
 
-成功同步后输出方向性 `section`（↓ pulled / ↑ pushed）；有冲突时 footer 变为 `fix` 并指向 `archloop tasks resolve <id>`：
+成功同步后输出方向性 `section`（↓ pulled / ↑ pushed）。有变更时在对应方向下缩进列出每个任务（`<id> <title> <github#N>`）；冲突行额外显示 dim 的 reason。空摘要（`nothing new` / `nothing to push`）不打印条目列表。有冲突时 footer 变为 `fix` 并指向 `archloop tasks resolve <id>`。`--json` 输出含完整 `entries[]`；全局 `--plain`（或 `NO_COLOR`）保留同样信息但无颜色：
 
 ```text
   archLoop · sync · demo                                                    owner/repo
   ↓ pulled  4 created  0 updated · 0 conflicts · 0 dup-candidates
+     arch-abc  Import open issues into Beads                                 github#101
   ↑ pushed  nothing to push  0 synced · 0 closed · 0 pending
     done in 1.4s
   next  archloop tasks list

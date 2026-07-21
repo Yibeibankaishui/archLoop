@@ -39,6 +39,7 @@ export interface SectionBadgesBlock {
 /**
  * Group heading (symbol · name · count) followed by an indented flat list.
  * Nested detail is a separate `indented-block`, not a nested group item.
+ * Set `hideHeading` to render only the indented rows (used under sync kv headers).
  */
 export interface SectionGroupBlock {
   readonly kind: "group";
@@ -47,10 +48,13 @@ export interface SectionGroupBlock {
   readonly name: string;
   readonly count: number;
   readonly rightHint?: string;
+  readonly hideHeading?: boolean;
   readonly items: readonly {
     readonly id: string;
     readonly title: string;
     readonly trailingDim?: string;
+    /** Optional dim continuation line under the item (e.g. sync conflict reason). */
+    readonly detailDim?: string;
   }[];
   readonly footerDim?: string;
 }
@@ -266,17 +270,19 @@ const renderGroup = (
 ): string[] => {
   const usable = cols - MARGIN.length;
   const lines: string[] = [];
-  const color = severityColor(palette, block.severity);
-  const heading = `${color(block.symbol)}  ${palette.bold(`${block.name} · ${block.count}`)}`;
-  if (block.rightHint) {
-    const right = palette.dim(block.rightHint);
-    if (visibleLength(heading) + visibleLength(right) + 1 <= usable) {
-      lines.push(MARGIN + alignLeftRight(heading, right, usable));
+  if (!block.hideHeading) {
+    const color = severityColor(palette, block.severity);
+    const heading = `${color(block.symbol)}  ${palette.bold(`${block.name} · ${block.count}`)}`;
+    if (block.rightHint) {
+      const right = palette.dim(block.rightHint);
+      if (visibleLength(heading) + visibleLength(right) + 1 <= usable) {
+        lines.push(MARGIN + alignLeftRight(heading, right, usable));
+      } else {
+        lines.push(MARGIN + heading);
+      }
     } else {
       lines.push(MARGIN + heading);
     }
-  } else {
-    lines.push(MARGIN + heading);
   }
 
   // Prefer full id; shrink column on narrow terminals so title+trailing fit.
@@ -314,19 +320,25 @@ const renderGroup = (
         titleBudget,
       );
       lines.push(indent + title);
-      continue;
-    }
-
-    const title = truncateTail(item.title, titleBudget);
-    if (useTrailing) {
-      const left = prefix + title;
-      if (visibleLength(left) + trailingVL <= cols) {
-        lines.push(alignLeftRight(left, trailingRendered, cols));
+    } else {
+      const title = truncateTail(item.title, titleBudget);
+      if (useTrailing) {
+        const left = prefix + title;
+        if (visibleLength(left) + trailingVL <= cols) {
+          lines.push(alignLeftRight(left, trailingRendered, cols));
+        } else {
+          lines.push(prefix + title);
+        }
       } else {
         lines.push(prefix + title);
       }
-    } else {
-      lines.push(prefix + title);
+    }
+
+    if (item.detailDim) {
+      const detailIndent = indent + " ".repeat(idWidth + titleGap.length);
+      const detailBudget = Math.max(4, cols - visibleLength(detailIndent));
+      const detail = truncateTail(item.detailDim, detailBudget);
+      lines.push(detailIndent + palette.dim(detail));
     }
   }
   if (block.footerDim) {
@@ -562,10 +574,15 @@ export const flattenSectionForLog = (
         );
         break;
       case "group": {
-        lines.push(`${block.symbol}  ${block.name} · ${block.count}`);
+        if (!block.hideHeading) {
+          lines.push(`${block.symbol}  ${block.name} · ${block.count}`);
+        }
         for (const item of block.items) {
           const trailing = item.trailingDim ? `  ${item.trailingDim}` : "";
           lines.push(`  ${item.id}  ${item.title}${trailing}`);
+          if (item.detailDim) {
+            lines.push(`    ${item.detailDim}`);
+          }
         }
         if (block.footerDim) {
           lines.push(`  ${block.footerDim}`);

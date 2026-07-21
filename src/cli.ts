@@ -215,6 +215,7 @@ import {
   buildSyncResultModel,
   createDefaultGithubIssueClient,
   formatHubTaskSyncPreviewLines,
+  formatSyncResultJson,
   syncHubTasksWithGithub,
   syncResultModelToBlocks,
 } from "./hubTaskSync.js";
@@ -1890,6 +1891,12 @@ const taskSyncIncludeClosedOption = Options.boolean("include-closed").pipe(
   ),
   Options.withDefault(false),
 );
+const taskSyncJsonOption = Options.boolean("json").pipe(
+  Options.withDescription(
+    "Emit a structured JSON payload including the per-task entries array.",
+  ),
+  Options.withDefault(false),
+);
 const taskResolveKeepOption = Options.choice("keep", [
   "local",
   "remote",
@@ -2303,6 +2310,7 @@ const runHubTaskSyncCommand = (input: {
   readonly yes?: boolean;
   readonly dryRun?: boolean;
   readonly includeClosed?: boolean;
+  readonly json?: boolean;
 }) =>
   Effect.gen(function* () {
     const d = yield* Display;
@@ -2381,11 +2389,22 @@ const runHubTaskSyncCommand = (input: {
     });
     const durationSeconds = (Date.now() - startedAt) / 1000;
 
+    const board = yield* Effect.try({
+      try: () => loadHubTaskBoard(cwd),
+      catch: toTaskBoardError,
+    });
     const model = buildSyncResultModel({
       result,
       projectName: input.projectName,
       durationSeconds,
+      tasks: board.tasks,
     });
+
+    if (input.json) {
+      yield* d.plain(formatSyncResultJson(model));
+      return;
+    }
+
     yield* d.section("", syncResultModelToBlocks(model));
   });
 
@@ -2395,9 +2414,10 @@ const tasksSyncCommand = Command.make(
     yes: taskSyncYesOption,
     dryRun: taskSyncDryRunOption,
     includeClosed: taskSyncIncludeClosedOption,
+    json: taskSyncJsonOption,
     project: projectTargetOption,
   },
-  ({ yes, dryRun, includeClosed, project }) =>
+  ({ yes, dryRun, includeClosed, json, project }) =>
     Effect.gen(function* () {
       const target = yield* resolveTaskCommandProjectTarget(project);
       return yield* runHubTaskSyncCommand({
@@ -2407,6 +2427,7 @@ const tasksSyncCommand = Command.make(
         yes,
         dryRun,
         includeClosed,
+        json,
       });
     }),
 );
@@ -2416,9 +2437,10 @@ const tasksPullCommand = Command.make(
   {
     includeClosed: taskSyncIncludeClosedOption,
     dryRun: taskSyncDryRunOption,
+    json: taskSyncJsonOption,
     project: projectTargetOption,
   },
-  ({ includeClosed, dryRun, project }) =>
+  ({ includeClosed, dryRun, json, project }) =>
     Effect.gen(function* () {
       const target = yield* resolveTaskCommandProjectTarget(project);
       return yield* runHubTaskSyncCommand({
@@ -2427,14 +2449,19 @@ const tasksPullCommand = Command.make(
         projectName: target.projectName,
         includeClosed,
         dryRun,
+        json,
       });
     }),
 );
 
 const tasksPushCommand = Command.make(
   "push",
-  { dryRun: taskSyncDryRunOption, project: projectTargetOption },
-  ({ dryRun, project }) =>
+  {
+    dryRun: taskSyncDryRunOption,
+    json: taskSyncJsonOption,
+    project: projectTargetOption,
+  },
+  ({ dryRun, json, project }) =>
     Effect.gen(function* () {
       const target = yield* resolveTaskCommandProjectTarget(project);
       return yield* runHubTaskSyncCommand({
@@ -2442,6 +2469,7 @@ const tasksPushCommand = Command.make(
         cwd: target.repoRoot,
         projectName: target.projectName,
         dryRun,
+        json,
       });
     }),
 );
