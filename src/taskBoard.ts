@@ -1885,11 +1885,30 @@ export type TaskBoardDisplayBucket =
   | "attention"
   | "done";
 
+export type TaskBoardRemoteBadgeKind =
+  | "synced"
+  | "local-only"
+  | "sync-conflict";
+
+export interface TaskBoardRemoteBadge {
+  readonly kind: TaskBoardRemoteBadgeKind;
+  readonly value?: string;
+}
+
+export interface TaskBoardRow {
+  readonly id: string;
+  readonly title: string;
+  readonly trailingDim?: string;
+  readonly remoteBadge?: TaskBoardRemoteBadge;
+}
+
 export interface TaskBoardModel {
   readonly header: SectionHeaderBlock;
   readonly divider: SectionDividerBlock;
   readonly badges: SectionBadgesBlock;
   readonly groups: readonly SectionGroupBlock[];
+  /** Flat row list (warning-filtered); used by `--json` and future renderers. */
+  readonly rows: readonly TaskBoardRow[];
   readonly footer: SectionFooterBlock;
   readonly warningSummary?: SectionProseBlock;
   readonly emptyMessage?: SectionProseBlock;
@@ -1962,13 +1981,71 @@ const taskBoardItemTrailingDim = (
   return undefined;
 };
 
+const isGithubRemoteRef = (ref: string): boolean =>
+  /^github#\d+$/i.test(ref.trim());
+
+const readRemoteRefForBadge = (task: HubTaskProjection): string | undefined => {
+  const metadata = task.metadata as Record<string, unknown>;
+  const singular = readFirstString(metadata, ["remote_ref", "remoteRef"]);
+  if (singular) {
+    return singular;
+  }
+  return task.remoteRefs.find((ref) => isGithubRemoteRef(ref)) ?? task.remoteRefs[0];
+};
+
+/**
+ * Derive the trailing remote badge for a Hub task board row.
+ * Conflict wins over synced/local-only; no placeholder when nothing matches.
+ */
+export const deriveTaskBoardRemoteBadge = (
+  task: HubTaskProjection,
+): TaskBoardRemoteBadge | undefined => {
+  const metadata = task.metadata;
+  const syncConflict =
+    metadata.sync_conflict === true ||
+    metadata.syncConflict === true ||
+    task.hubStatus === "sync_conflict";
+  if (syncConflict) {
+    return { kind: "sync-conflict" };
+  }
+
+  const syncState = metadata.sync_state ?? metadata.syncState;
+  if (syncState === "synced") {
+    const remoteRef = readRemoteRefForBadge(task);
+    if (remoteRef) {
+      return { kind: "synced", value: remoteRef };
+    }
+    return undefined;
+  }
+
+  if (syncState === "push_pending" || syncState === "local_only") {
+    return { kind: "local-only" };
+  }
+
+  return undefined;
+};
+
+const toTaskBoardRow = (task: HubTaskProjection): TaskBoardRow => {
+  const trailingDim = taskBoardItemTrailingDim(task);
+  const remoteBadge = deriveTaskBoardRemoteBadge(task);
+  return {
+    id: task.id,
+    title: task.title,
+    ...(trailingDim ? { trailingDim } : {}),
+    ...(remoteBadge ? { remoteBadge } : {}),
+  };
+};
+
 const toTaskBoardGroupItem = (
   task: HubTaskProjection,
 ): SectionGroupBlock["items"][number] => {
-  const trailingDim = taskBoardItemTrailingDim(task);
-  return trailingDim
-    ? { id: task.id, title: task.title, trailingDim }
-    : { id: task.id, title: task.title };
+  const row = toTaskBoardRow(task);
+  return {
+    id: row.id,
+    title: row.title,
+    ...(row.trailingDim ? { trailingDim: row.trailingDim } : {}),
+    ...(row.remoteBadge ? { remoteBadge: row.remoteBadge } : {}),
+  };
 };
 
 const buildTaskBoardGroup = (
@@ -2151,6 +2228,9 @@ export const buildHubTaskBoardModel = (
       : {}),
     ...(emptyMessage ? { emptyMessage } : {}),
     groups,
+    rows: TASK_BOARD_BUCKETS.flatMap((bucket) =>
+      bucketTasks[bucket].map(toTaskBoardRow),
+    ),
     footer: {
       kind: "footer",
       label: "tip",
@@ -2179,6 +2259,19 @@ export const renderHubTaskBoardText = (
   options?: RenderSectionOptions,
 ): readonly string[] =>
   renderSection("", taskBoardModelToBlocks(model), options);
+
+/** Machine-readable board rows for `archloop tasks list --json`. */
+export const formatTaskBoardJson = (model: TaskBoardModel): string =>
+  JSON.stringify(
+    model.rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      ...(row.trailingDim ? { trailingDim: row.trailingDim } : {}),
+      ...(row.remoteBadge ? { remoteBadge: row.remoteBadge } : {}),
+    })),
+    null,
+    2,
+  );
 
 const TASK_DETAIL_KV_GUTTER = 12;
 

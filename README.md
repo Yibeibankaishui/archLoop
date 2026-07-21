@@ -966,7 +966,7 @@ Runs `gh auth login --insecure-storage` with `GH_CONFIG_DIR` set to archLoop's H
 
 ### `archloop tasks list`
 
-Shows the Hub task board view for Beads data in the selected Hub project: a header (`archLoop · <project>`), status badges (`todo` / `in_progress` / `done`), per-bucket task groups with full Beads ids (no 1-based ordinals), and a tip footer. Done tasks are truncated by default; pass `--all` to expand them. Use `--warning high|medium|low` to filter PRD-warning tasks. Task commands target the selected Hub project by default and accept `--project <name>` for an explicit override.
+Shows the Hub task board view for Beads data in the selected Hub project: a header (`archLoop · <project>`), status badges (`todo` / `in_progress` / `done`), per-bucket task groups with full Beads ids (no 1-based ordinals), and a tip footer. Each row may show a trailing remote badge: dim cyan `github#N` when synced, dim `local-only` when push is pending, or yellow `sync-conflict` when local and remote disagree. Rows with no remote link omit the badge. Done tasks are truncated by default; pass `--all` to expand them. Use `--warning high|medium|low` to filter PRD-warning tasks. Pass `--json` for a structured array of rows (including `remoteBadge` when present). Task commands target the selected Hub project by default and accept `--project <name>` for an explicit override.
 
 Example (plain / `NO_COLOR`):
 
@@ -974,10 +974,10 @@ Example (plain / `NO_COLOR`):
   archLoop · autotuneagent                                                                   8 tasks
   ● 2 todo   ◐ 1 in_progress   ✓ 5 done
   ●  todo · 2
-     AutoTuneAgent-9k3  Slice 5 · Wire config validator into apply pipeline
-     AutoTuneAgent-a12  fix(run_task): stop double-registering error handlers
+     AutoTuneAgent-9k3  Slice 5 · Wire config validator into apply pipeline         github#211
+     AutoTuneAgent-a12  fix(run_task): stop double-registering error handlers         local-only
   ◐  in_progress · 1
-     AutoTuneAgent-2mr  Slice 2 · Remove TaskOrchestrator and legacy Test Task model
+     AutoTuneAgent-2mr  Slice 2 · Remove TaskOrchestrator and legacy Test Task
   ✓  done · 5
      AutoTuneAgent-fij  feat(scenario_register): apply candidate writes board
      …

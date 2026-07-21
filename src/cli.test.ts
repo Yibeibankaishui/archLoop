@@ -1986,6 +1986,137 @@ exit 1
     expect(stdout).not.toContain("  1. bd-1");
   });
 
+  it("tasks list shows remote badges for synced, local-only, and sync-conflict rows", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const boardJson = JSON.stringify([
+      {
+        id: "bd-synced",
+        title: "Synced task",
+        status: "open",
+        metadata: { sync_state: "synced", remote_ref: "github#211" },
+      },
+      {
+        id: "bd-local",
+        title: "Local only task",
+        status: "open",
+        metadata: { sync_state: "push_pending" },
+      },
+      {
+        id: "bd-conflict",
+        title: "Conflict task",
+        status: "blocked",
+        metadata: { sync_conflict: true, remote_refs: ["github#99"] },
+      },
+    ]);
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "list" ]; then
+  printf '%s\\n' '${boardJson}'
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const { stdout } = await runCli(
+      "tasks list --plain",
+      hostDir,
+      withBdEnv(bdPath, hostDir),
+    );
+
+    expect(stdout).toContain("github#211");
+    expect(stdout).toContain("local-only");
+    expect(stdout).toContain("sync-conflict");
+    expect(stdout).toContain("bd-synced");
+    expect(stdout).toContain("bd-local");
+    expect(stdout).toContain("bd-conflict");
+  });
+
+  it("tasks list --json includes remoteBadge on rows", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const boardJson = JSON.stringify([
+      {
+        id: "bd-synced",
+        title: "Synced task",
+        status: "open",
+        metadata: { sync_state: "synced", remote_ref: "github#211" },
+      },
+      {
+        id: "bd-local",
+        title: "Local only task",
+        status: "open",
+        metadata: { sync_state: "local_only" },
+      },
+      {
+        id: "bd-plain",
+        title: "No remote",
+        status: "open",
+        metadata: {},
+      },
+    ]);
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "list" ]; then
+  printf '%s\\n' '${boardJson}'
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const { stdout } = await runCli(
+      "tasks list --json",
+      hostDir,
+      withBdEnv(bdPath, hostDir),
+    );
+
+    const payload = JSON.parse(stdout) as Array<{
+      id: string;
+      title: string;
+      remoteBadge?: { kind: string; value?: string };
+    }>;
+    expect(payload).toEqual(
+      expect.arrayContaining([
+        {
+          id: "bd-synced",
+          title: "Synced task",
+          remoteBadge: { kind: "synced", value: "github#211" },
+        },
+        {
+          id: "bd-local",
+          title: "Local only task",
+          remoteBadge: { kind: "local-only" },
+        },
+        {
+          id: "bd-plain",
+          title: "No remote",
+        },
+      ]),
+    );
+  });
+
   it("tasks list --warning filters tasks by PRD warning severity", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);
