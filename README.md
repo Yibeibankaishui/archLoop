@@ -350,7 +350,7 @@ if (closeResult.preservedWorktreePath) {
 | `promptArgs`         | PromptArgs         | —                             | Key-value map for `{{KEY}}` placeholder substitution                |
 | `maxIterations`      | number             | `1`                           | Maximum iterations to run                                           |
 | `completionSignal`   | string \| string[] | `<promise>COMPLETE</promise>` | String(s) the agent emits to stop the iteration loop early          |
-| `idleTimeoutSeconds` | number             | `600`                         | Idle timeout in seconds — resets on each agent output event         |
+| `idleTimeoutSeconds` | number             | `600`                         | Idle timeout in seconds — resets on each agent output event; does not fire while an agent-spawned child process is running |
 | `name`               | string             | —                             | Display name for the run                                            |
 | `logging`            | object             | file (auto-generated)         | `{ type: 'file', path }` or `{ type: 'stdout' }`                    |
 | `signal`             | AbortSignal        | —                             | Cancels the run when aborted; handle stays usable afterward         |
@@ -1136,6 +1136,7 @@ Hub moves selected tasks to `merging`, merges each branch with per-task events, 
 | `--batch-strategy` | No       | Task-board batch selection strategy (`planned`, `limited`, `conservative`; default `planned`)                                   |
 | `--max-tasks`      | No       | Maximum tasks to select for a task-board batch (1–10; default `3`)                                                              |
 | `--max-batches`    | No       | Maximum task-board batches to complete in one run (positive integer; unlimited by default)                                      |
+| `--idle-timeout`   | No       | Agent idle timeout in seconds (default `600`). Resets on agent output; does not fire while an agent-spawned child process is running |
 | `--output <mode>`  | No       | `auto` (default) for live TTY output with plain fallback, `plain` for deterministic text, or `json` for stdout-pure JSONL       |
 | `--no-color`       | No       | Disable live-view color while retaining labels and symbols                                                                      |
 
@@ -1217,7 +1218,7 @@ Removes the Podman image.
 | `copyToWorktree`     | string[]           | —                             | Host-relative file paths to copy into the sandbox before start (not supported with `branchStrategy: { type: 'head' }`)                                                       |
 | `logging`            | object             | file (auto-generated)         | `{ type: 'file', path }` or `{ type: 'stdout' }`                                                                                                                             |
 | `completionSignal`   | string \| string[] | `<promise>COMPLETE</promise>` | String or array of strings the agent emits to stop the iteration loop early                                                                                                  |
-| `idleTimeoutSeconds` | number             | `600`                         | Idle timeout in seconds — resets on each agent output event                                                                                                                  |
+| `idleTimeoutSeconds` | number             | `600`                         | Idle timeout in seconds — resets on each agent output event; does not fire while an agent-spawned child process is running                                                 |
 | `resumeSession`      | string             | —                             | Resume a prior Claude Code session by ID. Incompatible with `maxIterations > 1`. Session file must exist on host.                                                            |
 | `signal`             | AbortSignal        | —                             | Cancel the run when aborted. Kills the in-flight agent subprocess and cancels lifecycle hooks; the worktree is preserved on disk. Rejects with `signal.reason`.              |
 | `timeouts`           | Timeouts           | —                             | Override default timeouts for built-in lifecycle steps. Currently supports `{ copyToWorktreeMs?: number }` (default: 60 000).                                                |

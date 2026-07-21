@@ -117,6 +117,7 @@ import {
   createHubFlowRunImplementer,
   createHubFlowRunReviewer,
   formatHubFlowResultLines,
+  parseHubFlowIdleTimeoutSeconds,
   parseHubFlowMaxBatches,
   runHubFlow,
 } from "./hubFlowExecution.js";
@@ -3705,6 +3706,13 @@ const flowMaxBatchesOption = Options.text("max-batches").pipe(
   Options.optional,
 );
 
+const flowIdleTimeoutOption = Options.text("idle-timeout").pipe(
+  Options.withDescription(
+    "Agent idle timeout in seconds (default 600). Resets on agent output; does not fire while an agent-spawned child process is still running.",
+  ),
+  Options.optional,
+);
+
 const flowOutputOption = Options.choice("output", ["auto", "plain", "json"] as [
   "auto",
   "plain",
@@ -4410,6 +4418,7 @@ const runCommand = Command.make(
     batchStrategy: flowBatchStrategyOption,
     maxTasks: flowMaxTasksOption,
     maxBatches: flowMaxBatchesOption,
+    idleTimeout: flowIdleTimeoutOption,
     output: flowOutputOption,
     noColor: flowNoColorOption,
     stream: flowStreamOption,
@@ -4424,6 +4433,7 @@ const runCommand = Command.make(
     batchStrategy,
     maxTasks,
     maxBatches,
+    idleTimeout,
     output,
     noColor,
     stream,
@@ -4472,6 +4482,14 @@ const runCommand = Command.make(
         try: () =>
           maxBatchesValue !== undefined
             ? parseHubFlowMaxBatches(maxBatchesValue)
+            : undefined,
+        catch: toHubFlowError,
+      });
+      const idleTimeoutValue = optionalTextValue(idleTimeout);
+      const flowIdleTimeoutSeconds = yield* Effect.try({
+        try: () =>
+          idleTimeoutValue !== undefined
+            ? parseHubFlowIdleTimeoutSeconds(idleTimeoutValue)
             : undefined,
         catch: toHubFlowError,
       });
@@ -4984,12 +5002,14 @@ const runCommand = Command.make(
             cwd: repoRoot,
             env: process.env,
             showAgentStartup: !suppressDecoratedTaskBoardOutput,
+            idleTimeoutSeconds: flowIdleTimeoutSeconds,
           }),
           reviewer: flowDefinition.hasReviewer
             ? createHubFlowRunReviewer({
                 cwd: repoRoot,
                 env: process.env,
                 showAgentStartup: !suppressDecoratedTaskBoardOutput,
+                idleTimeoutSeconds: flowIdleTimeoutSeconds,
               })
             : undefined,
           batchStrategy: batchSelectionOptions.batchStrategy,

@@ -834,6 +834,26 @@ exit 1
     }
   });
 
+  it("run --help exposes --idle-timeout", async () => {
+    const { stdout } = await runCli("run --help", process.cwd());
+    expect(stdout).toContain("--idle-timeout");
+  });
+
+  it("run --flow no-review rejects invalid --idle-timeout values", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-run-idle-timeout-"));
+    await initRepo(hostDir);
+
+    try {
+      await runCli(
+        "run . --flow no-review --batch-strategy conservative --idle-timeout 0",
+        hostDir,
+      );
+      expect.fail("Expected command to fail");
+    } catch (err: unknown) {
+      expect(cliFailureOutput(err)).toMatch(/Invalid --idle-timeout value/i);
+    }
+  });
+
   it("root help exposes the tasks namespace", async () => {
     const { stdout } = await runCli("--help", process.cwd());
     expect(stdout).toContain("tasks");

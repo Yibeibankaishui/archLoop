@@ -18,12 +18,14 @@ import {
   createHubFlowRunImplementer,
   createHubFlowRunReviewer,
   formatHubFlowResultLines,
+  parseHubFlowIdleTimeoutSeconds,
   runHubFlow,
   type HubFlowImplementer,
   type HubFlowReviewer,
   type HubImplementTaskInput,
   type HubReviewTaskInput,
 } from "./hubFlowExecution.js";
+import { HubFlowError } from "./errors.js";
 import {
   resolveHubFlowPromptPath,
   validateHubFlowRegistries,
@@ -2837,6 +2839,63 @@ describe("with-review Hub flow execution", () => {
       runSpy.mockRestore();
       vi.unstubAllEnvs();
     }
+  });
+
+  it("createHubFlowRunImplementer forwards idleTimeoutSeconds to run", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "hub-flow-implementer-idle-"));
+    await initRepo(cwd);
+    const projectDevelopmentContract =
+      resolveHubProjectDevelopmentContractState({
+        repoRoot: cwd,
+        hubProjectDir: join(cwd, "hub-project"),
+        now: new Date("2026-06-27T10:00:00.000Z"),
+      });
+    const runSpy = vi.spyOn(runModule, "run").mockResolvedValue({
+      completionSignal: "<promise>COMPLETE</promise>",
+      commits: [{ sha: "abc123" }],
+      branch: "archloop/bd-1-test-task",
+      iterations: [],
+      stdout: "",
+    });
+    const implementer = createHubFlowRunImplementer({
+      cwd,
+      env: { OPENAI_KEY: "test-openai-key" },
+      roleEntry: { provider: "codex", model: "gpt-5.4-mini" },
+      idleTimeoutSeconds: 1200,
+    });
+
+    vi.stubEnv("OPENAI_KEY", "");
+    vi.stubEnv("CODEX_HOME", "");
+    try {
+      await implementer({
+        flowId: "no-review",
+        batchId: "batch-test",
+        taskId: "bd-1",
+        title: "Test task",
+        branch: "archloop/bd-1-test-task",
+        promptFile: "/tmp/prompt.md",
+        cwd,
+        runDir: cwd,
+        projectDevelopmentContract,
+      });
+
+      expect(runSpy.mock.calls[0]?.[0].idleTimeoutSeconds).toBe(1200);
+    } finally {
+      runSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("parseHubFlowIdleTimeoutSeconds accepts positive integer seconds", () => {
+    expect(parseHubFlowIdleTimeoutSeconds("600")).toBe(600);
+    expect(parseHubFlowIdleTimeoutSeconds(" 1200 ")).toBe(1200);
+  });
+
+  it("parseHubFlowIdleTimeoutSeconds rejects non-positive and non-integer values", () => {
+    expect(() => parseHubFlowIdleTimeoutSeconds("0")).toThrow(HubFlowError);
+    expect(() => parseHubFlowIdleTimeoutSeconds("-1")).toThrow(HubFlowError);
+    expect(() => parseHubFlowIdleTimeoutSeconds("1.5")).toThrow(HubFlowError);
+    expect(() => parseHubFlowIdleTimeoutSeconds("abc")).toThrow(HubFlowError);
   });
 
   it("createHubFlowRunImplementer propagates an aborted run", async () => {

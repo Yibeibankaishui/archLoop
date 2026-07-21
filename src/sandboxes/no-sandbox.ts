@@ -113,6 +113,7 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
         command: string,
         opts?: {
           onLine?: (line: string) => void;
+          onSpawn?: (pid: number) => void;
           cwd?: string;
           sudo?: boolean;
           stdin?: string;
@@ -142,6 +143,10 @@ export const noSandbox = (options?: NoSandboxOptions): NoSandboxProvider => ({
               "pipe",
             ],
           });
+
+          if (proc.pid !== undefined) {
+            opts?.onSpawn?.(proc.pid);
+          }
 
           if (opts?.stdin !== undefined) {
             proc.stdin!.write(opts.stdin);
