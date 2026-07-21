@@ -13,8 +13,7 @@ export const listDirectChildPids = (parentPid: number): number[] => {
   }
 
   try {
-    const childrenPath =
-      "/proc/" + parentPid + "/task/" + parentPid + "/children";
+    const childrenPath = `/proc/${parentPid}/task/${parentPid}/children`;
     const content = readFileSync(childrenPath, "utf8").trim();
     if (content.length === 0) {
       return [];
@@ -34,7 +33,7 @@ export const listDirectChildPids = (parentPid: number): number[] => {
         continue;
       }
       try {
-        const stat = readFileSync("/proc/" + entry + "/stat", "utf8");
+        const stat = readFileSync(`/proc/${entry}/stat`, "utf8");
         const closeParen = stat.lastIndexOf(")");
         if (closeParen < 0) {
           continue;
