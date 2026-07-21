@@ -1445,6 +1445,8 @@ export const formatHubFlowResultLines = (
   return lines;
 };
 
+const HUB_COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
+
 const hasBranchUnmergedWork = async (
   cwd: string,
   branch: string,
@@ -1458,6 +1460,42 @@ const hasBranchUnmergedWork = async (
     return Number(String(stdout).trim()) > 0;
   } catch {
     return false;
+  }
+};
+
+const collectBranchCommits = async (
+  cwd: string,
+  branch: string,
+): Promise<{ sha: string }[]> => {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["rev-list", "--reverse", `HEAD..${branch}`],
+      { cwd, encoding: "utf8" },
+    );
+    const lines = String(stdout).trim();
+    if (!lines) {
+      return [];
+    }
+    return lines.split("\n").map((sha) => ({ sha }));
+  } catch {
+    return [];
+  }
+};
+
+const readCompletionSignalFromLog = (
+  logPath: string,
+): string | undefined => {
+  try {
+    if (!existsSync(logPath)) {
+      return undefined;
+    }
+    const content = readFileSync(logPath, "utf8");
+    return content.includes(HUB_COMPLETION_SIGNAL)
+      ? HUB_COMPLETION_SIGNAL
+      : undefined;
+  } catch {
+    return undefined;
   }
 };
 
@@ -1508,8 +1546,15 @@ export const createHubFlowRunImplementer = (options: {
   const agent = resolveHubFlowRunnerAgent("implementation", options);
 
   return async (input) => {
+    const logFileName = `${input.taskId}.log`;
+    const logPath = join(input.runDir, "logs", logFileName);
+    let runResult:
+      | Awaited<ReturnType<typeof runHubAgent>>
+      | undefined;
+    let runError: unknown;
+
     try {
-      const result = await runHubAgent({
+      runResult = await runHubAgent({
         agent,
         cwd: options.cwd,
         promptFile: input.promptFile,
@@ -1520,7 +1565,7 @@ export const createHubFlowRunImplementer = (options: {
         branch: input.branch,
         runDir: input.runDir,
         name: `implement-${input.taskId}`,
-        logFileName: `${input.taskId}.log`,
+        logFileName,
         env: options.env,
         retryContext: input.retryContext,
         projectDevelopmentContract: input.projectDevelopmentContract,
@@ -1528,39 +1573,58 @@ export const createHubFlowRunImplementer = (options: {
         idleTimeoutSeconds: options.idleTimeoutSeconds,
         signal: input.signal,
       });
-
-      if (!result.completionSignal) {
-        return {
-          outcome: "agent_failed",
-          commits: result.commits,
-          message: "Implementer finished without completion signal",
-        };
-      }
-
-      const branchHasUnmergedWork = await hasBranchUnmergedWork(
-        options.cwd,
-        input.branch,
-      );
-
-      if (result.commits.length === 0 && !branchHasUnmergedWork) {
-        return {
-          outcome: "agent_failed",
-          commits: result.commits,
-          completionSignal: result.completionSignal,
-          message: "Implementer completed without commits",
-        };
-      }
-
-      return {
-        outcome: "success",
-        commits: result.commits,
-        completionSignal: result.completionSignal,
-        branchHasUnmergedWork,
-      };
     } catch (error) {
       input.signal?.throwIfAborted();
-      return buildHubFlowRunnerFailure(error);
+      runError = error;
     }
+
+    // Observe branch state before attributing provider exit-code failure.
+    const observedCommits = await collectBranchCommits(
+      options.cwd,
+      input.branch,
+    );
+    const commits =
+      observedCommits.length > 0
+        ? observedCommits
+        : (runResult?.commits ?? []);
+    const branchHasUnmergedWork = await hasBranchUnmergedWork(
+      options.cwd,
+      input.branch,
+    );
+    const hasBranchWork = commits.length > 0 || branchHasUnmergedWork;
+    const completionSignal =
+      runResult?.completionSignal ?? readCompletionSignalFromLog(logPath);
+
+    if (hasBranchWork && completionSignal) {
+      return {
+        outcome: "success",
+        commits,
+        completionSignal,
+        branchHasUnmergedWork,
+      };
+    }
+
+    if (runError !== undefined) {
+      return {
+        ...buildHubFlowRunnerFailure(runError),
+        commits,
+      };
+    }
+
+    if (!completionSignal) {
+      return {
+        outcome: "agent_failed",
+        commits,
+        message: "Implementer finished without completion signal",
+      };
+    }
+
+    return {
+      outcome: "agent_failed",
+      commits,
+      completionSignal,
+      message: "Implementer completed without commits",
+    };
   };
 };
 

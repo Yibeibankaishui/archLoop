@@ -302,7 +302,7 @@ archloop tasks repair-state <selector> --yes
 archloop run --flow no-review
 ```
 
-适合先验证最短闭环：读取 `ready_for_agent` 队列，执行实现任务，成功后进入 `waiting_for_merge`，再按批次合并并关闭本地任务。
+适合先验证最短闭环：读取 `ready_for_agent` 队列，执行实现任务，成功后进入 `waiting_for_merge`，再按批次合并并关闭本地任务。实现成功以任务分支上的提交（或既有未合并工作）加上 `<promise>COMPLETE</promise>` 为准；provider CLI 尾随的非零退出不会把已完成的工作判成 `agent_failed`，失败事件也会带上真实的分支 `commitCount`。
 
 ### 7.2 带 reviewer flow
 

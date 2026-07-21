@@ -271,7 +271,7 @@ Hub flow 默认使用 `--output auto`。交互式 TTY 在选完 flow 后会先�
 
 自动化消费可使用 `archloop run --flow <id> --output json`。stdout 只包含 schema version 1 JSONL；proposal 使用 `proposal_phase` 和 `run_completed` 记录同一组阶段与终态，不混入 prompt、人工装饰、ANSI、agent 启动文本或原始 agent 输出。应用/无变化退出 `0`，Ctrl+C 取消退出 `130`，SIGTERM 保留退出码 `143`，validation、mutation 或其他失败返回非零；消费者应忽略 version 1 的未知新增字段。
 
-`archloop run --flow no-review` 和 `archloop run --flow with-review` 启动时会提前提醒宿主仓库里的 dirty source files。若同一个 flow 已有未完成的 `waiting_for_merge` 批次，archLoop 会先恢复该批次，并在领取新任务前检查待合并分支是否会改到这些脏文件。
+`archloop run --flow no-review` 和 `archloop run --flow with-review` 启动时会提前提醒宿主仓库里的 dirty source files。若同一个 flow 已有未完成的 `waiting_for_merge` 批次，archLoop 会先恢复该批次，并在领取新任务前检查待合并分支是否会改到这些脏文件。实现阶段成功与否以任务分支提交（或既有未合并工作）加上 `<promise>COMPLETE</promise>` 为准；provider CLI 尾随非零退出不会覆盖该结论。
 
 非重叠脏文件不会阻塞 merge：archLoop 会在干净的 integration worktree/branch 中验证结果，并只在不会覆盖宿主脏文件时落回当前分支。若存在重叠，CLI 会列出具体 blocking files；先 commit、stash 或 discard 这些文件，再重新运行同一个 flow，archLoop 会继续恢复 `waiting_for_merge` 任务。
 
