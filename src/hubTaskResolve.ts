@@ -251,19 +251,33 @@ const truncatePreview = (value: string, max = 48): string => {
   return `${trimmed.slice(0, max - 1)}…`;
 };
 
+const pickPrimaryDivergedValue = (
+  values: HubConflictFieldValues,
+  divergedFields: readonly HubConflictField[],
+): string => {
+  if (divergedFields.includes("hubStatus")) {
+    return values.hubStatus;
+  }
+  if (divergedFields.includes("title")) {
+    return values.title;
+  }
+  return values.description;
+};
+
 export const formatConflictKeepOptionLabel = (
   keep: HubConflictKeep,
   values: HubConflictFieldValues,
   divergedFields: readonly HubConflictField[],
 ): string => {
-  const primary =
-    divergedFields.includes("hubStatus")
-      ? values.hubStatus
-      : divergedFields.includes("title")
-        ? values.title
-        : values.description;
+  const primary = pickPrimaryDivergedValue(values, divergedFields);
   const prefix = keep === "local" ? "Keep local" : "Keep remote";
   return `${prefix} · ${truncatePreview(primary)}`;
+};
+
+const CONFLICT_FIELD_LABEL: Record<HubConflictField, string> = {
+  hubStatus: "status",
+  title: "title",
+  description: "description",
 };
 
 export const buildHubTaskConflictResolveModel = (input: {
@@ -274,15 +288,11 @@ export const buildHubTaskConflictResolveModel = (input: {
   readonly remoteValue: HubConflictFieldValues;
   readonly divergedFields: readonly HubConflictField[];
 }): HubTaskConflictResolveModel => {
-  const rows = input.divergedFields.map((field) => {
-    const key =
-      field === "hubStatus" ? "status" : field === "title" ? "title" : "description";
-    return {
-      key,
-      value: String(input.localValue[field]),
-      secondary: String(input.remoteValue[field]),
-    };
-  });
+  const rows = input.divergedFields.map((field) => ({
+    key: CONFLICT_FIELD_LABEL[field],
+    value: String(input.localValue[field]),
+    secondary: String(input.remoteValue[field]),
+  }));
 
   return {
     header: {
