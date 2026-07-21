@@ -1487,9 +1487,6 @@ const readCompletionSignalFromLog = (
   logPath: string,
 ): string | undefined => {
   try {
-    if (!existsSync(logPath)) {
-      return undefined;
-    }
     const content = readFileSync(logPath, "utf8");
     return content.includes(HUB_COMPLETION_SIGNAL)
       ? HUB_COMPLETION_SIGNAL
@@ -1548,9 +1545,7 @@ export const createHubFlowRunImplementer = (options: {
   return async (input) => {
     const logFileName = `${input.taskId}.log`;
     const logPath = join(input.runDir, "logs", logFileName);
-    let runResult:
-      | Awaited<ReturnType<typeof runHubAgent>>
-      | undefined;
+    let runResult: Awaited<ReturnType<typeof runHubAgent>> | undefined;
     let runError: unknown;
 
     try {
