@@ -62,6 +62,10 @@ const withCompletedBatch: HubRunDisplayState = {
   },
 };
 
+// PTY fixture uses the ALT-SCREEN dashboard path (ADR-0033).
+// Inject minimal adapters so the process does not: exit early, keep a live
+// ticker running, or block on real stdin data.
+const noop = () => undefined;
 const display = createHubRunLiveDisplay({
   terminal: {
     write: (chunk) => {
@@ -73,7 +77,32 @@ const display = createHubRunLiveDisplay({
   columns: process.stdout.columns || 80,
   rows: process.stdout.rows || 24,
   color: Boolean(process.stdout.isTTY),
-  enableSpinner: Boolean(process.stdout.isTTY),
+  mode: "alt-screen",
+  altScreen: {
+    stdin: process.stdin,
+    // No-op ticker — we drive frames explicitly via display.update.
+    setInterval: () => ({ unref: noop } as unknown as NodeJS.Timeout),
+    clearInterval: noop,
+    // No-op grace hold — call cleanup immediately so the process exits.
+    setTimeout: (fn) => {
+      fn();
+      return { unref: noop } as unknown as NodeJS.Timeout;
+    },
+    clearTimeout: noop,
+    // Handle signals in this process (default `process.once` would work too).
+    onSignal: (signal, handler) => {
+      process.once(signal, handler);
+    },
+    // Test-only exit — invoke real process.exit so the outer script observes
+    // the intended exit code.
+    exitProcess: (code) => {
+      process.exit(code);
+    },
+    // Belt-and-suspenders — we still need it in this real PTY fixture.
+    registerProcessExit: (handler) => {
+      process.once("exit", handler);
+    },
+  },
 });
 
 display.update(started);
@@ -122,6 +151,11 @@ if (mode === "complete") {
     },
     taskDetails: [],
     exitCode: 0,
+  });
+  // If exitProcess did not fire (shouldn't happen), keep the process alive
+  // long enough to flush stdout.
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 200);
   });
 } else {
   process.stdin.setRawMode?.(true);

@@ -132,7 +132,10 @@ import {
   reduceHubRunDisplayState,
 } from "./hubRunDisplay.js";
 import { createHubRunJsonRenderer } from "./hubRunJsonDisplay.js";
-import { createHubRunLiveDisplay } from "./hubRunLiveDisplay.js";
+import {
+  createHubRunLiveDisplay,
+  shouldUseAltScreenDashboard,
+} from "./hubRunLiveDisplay.js";
 import {
   acceptsHubProposalPresentationEvent,
   createHubProposalRunDisplayState,
@@ -1918,7 +1921,10 @@ const resolveTaskCommandProjectTarget = (
 const resolveTaskCommandRepoRoot = (
   project: OptionalTextFlag,
 ): Effect.Effect<string, TaskBoardError, never> =>
-  Effect.map(resolveTaskCommandProjectTarget(project), (target) => target.repoRoot);
+  Effect.map(
+    resolveTaskCommandProjectTarget(project),
+    (target) => target.repoRoot,
+  );
 
 const normalizeTaskOrigin = (
   value: string,
@@ -3717,6 +3723,13 @@ const flowNoColorOption = Options.boolean("no-color").pipe(
   Options.withDefault(false),
 );
 
+const flowStreamOption = Options.boolean("stream").pipe(
+  Options.withDescription(
+    "Force append-only line output instead of the alt-screen dashboard (useful for CI logs and piped consumers).",
+  ),
+  Options.withDefault(false),
+);
+
 const runProjectArg = Args.text({ name: "project" }).pipe(
   Args.withDescription(
     "Hub project name or legacy repo path (use . temporarily for the current repo)",
@@ -4399,6 +4412,7 @@ const runCommand = Command.make(
     maxBatches: flowMaxBatchesOption,
     output: flowOutputOption,
     noColor: flowNoColorOption,
+    stream: flowStreamOption,
   },
   ({
     projectPath,
@@ -4412,6 +4426,7 @@ const runCommand = Command.make(
     maxBatches,
     output,
     noColor,
+    stream,
   }) =>
     Effect.gen(function* () {
       const d = yield* Display;
@@ -4567,7 +4582,7 @@ const runCommand = Command.make(
         usesStructuredRunOutput
           ? isJsonOutput
             ? "json"
-            : isPlainOutput
+            : isPlainOutput || stream
               ? "plain"
               : autoOutputResolution?.mode
           : undefined;
@@ -4888,6 +4903,15 @@ const runCommand = Command.make(
                 autoOutputResolution.color &&
                 Boolean(process.stdout.isTTY) &&
                 Boolean(process.stdin.isTTY),
+              mode: shouldUseAltScreenDashboard({
+                isTTY: Boolean(process.stdout.isTTY),
+                plain: isPlainOutput || noColor,
+                stream,
+                yes,
+                env: process.env,
+              })
+                ? "alt-screen"
+                : "fallback",
             })
           : undefined;
       let liveRefresh: ReturnType<typeof setInterval> | undefined;

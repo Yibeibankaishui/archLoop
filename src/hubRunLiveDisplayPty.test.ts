@@ -57,19 +57,28 @@ const runInPty = async (
 describe.skipIf(process.platform === "win32" || !existsSync(scriptExecutable))(
   "hub run live display PTY process",
   () => {
-    it("renders append-only timeline and restores the cursor on completion", async () => {
+    it("enters and leaves alt-screen, restores the cursor, and dumps a scrollback summary on completion", async () => {
       const result = await runInPty("complete");
 
       expect(result.exitCode).toBe(0);
       expect(result.output).toContain("PTY_READY tty=true");
-      expect(result.output).toContain("archLoop");
-      expect(result.output).toContain("batch daca6200");
-      expect(result.output).toContain("batch fd3cdf79");
-      // Collapsed completed batch appears in a later section
-      expect(result.output).toMatch(/✓[\s\S]*batch daca6200/);
-      expect(result.output).not.toContain("\x1b[?1049");
-      expect(result.output).not.toContain("\x1b[1A");
+      // Alt-screen enter + leave both present
+      expect(result.output).toContain("\x1b[?1049h");
+      expect(result.output).toContain("\x1b[?1049l");
+      // Cursor hidden then restored
+      expect(result.output).toContain("\x1b[?25l");
       expect(result.output).toContain("\x1b[?25h");
+      expect(result.output.indexOf("\x1b[?1049l")).toBeGreaterThan(
+        result.output.indexOf("\x1b[?1049h"),
+      );
+      // Frame contents rendered inside alt-screen (header text)
+      expect(result.output).toContain("archLoop");
+      // Scrollback summary lands AFTER the FIRST leave sequence (the
+      // belt-and-suspenders exit handler writes a second leave on process
+      // exit, so use indexOf rather than lastIndexOf).
+      const leaveIdx = result.output.indexOf("\x1b[?1049l");
+      const summaryIdx = result.output.indexOf("archLoop", leaveIdx);
+      expect(summaryIdx).toBeGreaterThan(leaveIdx);
     });
 
     it("restores the cursor when a real PTY process handles SIGINT", async () => {
@@ -79,6 +88,8 @@ describe.skipIf(process.platform === "win32" || !existsSync(scriptExecutable))(
       expect(result.output).toContain("PTY_READY tty=true");
       expect(result.output).toContain("PTY_SIGNAL_HANDLED");
       expect(result.output).toContain("\x1b[?25h");
+      // Alt-screen entered
+      expect(result.output).toContain("\x1b[?1049h");
       expect(result.output.lastIndexOf("\x1b[?25h")).toBeGreaterThan(
         result.output.indexOf("PTY_SIGNAL_HANDLED"),
       );
