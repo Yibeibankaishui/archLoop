@@ -2820,11 +2820,141 @@ process.exit(1);
     expect(stdout).toContain("sync");
     expect(stdout).toContain("↓ pulled");
     expect(stdout).toContain("1 created");
+    expect(stdout).toContain("bd-68");
+    expect(stdout).toContain("Sync Hub task state");
+    expect(stdout).toContain("github#68");
     expect(stdout).toContain("↑ pushed");
     expect(stdout).toContain("next");
     expect(stdout).toContain("archloop tasks list");
     const state = JSON.parse(await readFile(stateFile, "utf-8")) as unknown[];
     expect(state).toHaveLength(1);
+  });
+
+  it("tasks pull --json includes the entries array for created tasks", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const stateFile = join(hostDir, "bd-state.json");
+    await writeFile(stateFile, "[]");
+    const ghArgsFile = join(hostDir, "gh-args.txt");
+    await writeFile(ghArgsFile, "");
+
+    const ghPath = join(binDir, "gh");
+    await writeFile(
+      ghPath,
+      `#!/bin/sh
+gh_args_file=${JSON.stringify(ghArgsFile)}
+printf '%s\\n' "$*" >> "$gh_args_file"
+if [ "$1" = "issue" ] && [ "$2" = "list" ]; then
+  cat <<'JSON'
+[{"number":68,"title":"Sync Hub task state","body":"Implement tasks sync","state":"OPEN","labels":[{"name":"archLoop"},{"name":"ready-for-agent"}],"updatedAt":"2026-06-11T12:00:00Z"}]
+JSON
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(ghPath, 0o755);
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = process.env.BD_STATE_FILE;
+const args = process.argv.slice(2);
+const [command, id] = args;
+
+if (command === "list") {
+  process.stdout.write(fs.readFileSync(stateFile, "utf8"));
+  process.exit(0);
+}
+
+if (command === "show") {
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  const task = state.find((entry) => entry.id === id);
+  if (!task) {
+    process.exit(1);
+  }
+  process.stdout.write(JSON.stringify([task], null, 2));
+  process.exit(0);
+}
+
+if (command === "create") {
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  const created = {
+    id: "bd-68",
+    title: args[1],
+    status: "open",
+    labels: ["ready-for-agent"],
+    metadata: { remote_refs: ["github#68"] },
+    remoteRefs: [{ url: "github#68" }],
+  };
+  state.push(created);
+  fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+  process.stdout.write(JSON.stringify([created], null, 2));
+  process.exit(0);
+}
+
+if (command === "update") {
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  const task = state.find((entry) => entry.id === id);
+  if (!task) {
+    process.exit(1);
+  }
+  const metadataIndex = args.indexOf("--metadata");
+  if (metadataIndex >= 0) {
+    task.metadata = {
+      ...task.metadata,
+      ...JSON.parse(args[metadataIndex + 1]),
+    };
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--unset-metadata") {
+      delete task.metadata[args[index + 1]];
+    }
+  }
+  fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+  process.exit(0);
+}
+
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const { stdout } = await runCli(
+      "tasks pull --json",
+      hostDir,
+      withBdEnv(bdPath, hostDir, { BD_STATE_FILE: stateFile }),
+    );
+
+    const payload = JSON.parse(stdout) as {
+      entries: Array<{
+        id: string;
+        direction: string;
+        outcome: string;
+        title: string;
+        remoteRef: string;
+      }>;
+      pull: { value: string };
+    };
+    expect(payload.pull.value).toBe("1 created");
+    expect(payload.entries).toEqual([
+      {
+        id: "bd-68",
+        direction: "pulled",
+        outcome: "created",
+        title: "Sync Hub task state",
+        remoteRef: "github#68",
+      },
+    ]);
   });
 
   it("tasks sync requires --yes or --dry-run in non-interactive mode", async () => {
@@ -3083,6 +3213,9 @@ process.exit(1);
     expect(stdout).toContain("↑ pushed");
     expect(stdout).toContain("1 closed");
     expect(stdout).toContain("nothing new");
+    expect(stdout).toContain("bd-done");
+    expect(stdout).toContain("Done task");
+    expect(stdout).toContain("github#11");
     const ghArgs = await readFile(ghArgsFile, "utf-8");
     expect(ghArgs).toContain("issue close 11");
     expect(ghArgs).not.toContain("issue close 12");

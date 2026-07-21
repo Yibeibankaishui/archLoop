@@ -1028,11 +1028,13 @@ Use explicit direction commands for GitHub issue exchange:
 - `archloop tasks push` sends linked local Hub collaboration state to GitHub. Local `ready_for_agent`, `ready_for_human`, `needs_info`, and `blocked` update GitHub labels; local `done` / `wontfix` closes the linked GitHub issue. It does not pull remote issues or create local tasks.
 - `archloop tasks sync --dry-run` previews the combined pull/push plan. `archloop tasks sync` asks for confirmation in a TTY, and non-interactive sync requires `--yes`.
 
-Successful pull/push/sync results render as a directional `section` (↓ pulled / ↑ pushed), with a `fix` footer when conflicts need `archloop tasks resolve <id>`:
+Successful pull/push/sync results render as a directional `section` (↓ pulled / ↑ pushed). Non-empty sides list each changed task as an indented `<id> <title> <github#N>` row; conflict rows add a dim reason continuation line. Empty sides (`nothing new` / `nothing to push`) stay count-only. A `fix` footer appears when conflicts need `archloop tasks resolve <id>`. Pass `--json` for a structured payload including `entries[]`. Global `--plain` (or `NO_COLOR`) keeps the same layout without color:
 
 ```text
   archLoop · sync · autotuneagent                                           Yibeibankaishui/archLoop
   ↓ pulled  4 created  0 updated · 0 conflicts · 0 dup-candidates
+     arch-abc  Import open issues into Beads                                 github#101
+     arch-def  Refresh linked titles                                         github#102
   ↑ pushed  nothing to push  0 synced · 0 closed · 0 pending
     done in 1.4s
   next  archloop tasks list

@@ -9,11 +9,14 @@ import {
   buildSyncResultModel,
   detectSemanticSyncConflict,
   formatGithubRemoteRef,
+  formatSyncResultJson,
   isHubExecutionStatus,
   parseGithubRemoteRef,
+  renderSyncResultText,
   resolveRemoteCollaborationLabel,
   resolveRemoteCollaborationStatus,
   syncHubTasksWithGithub,
+  syncResultModelToBlocks,
   type GithubIssueClient,
   type GithubIssueRecord,
   type SyncHubTasksResult,
@@ -1076,7 +1079,7 @@ const emptySyncResult = (): SyncHubTasksResult => ({
 });
 
 describe("buildSyncResultModel", () => {
-  it("builds a clean sync model with directional kv rows and a next footer", () => {
+  it("builds a clean sync model with directional kv rows, entries, and a next footer", () => {
     const result: SyncHubTasksResult = {
       ...emptySyncResult(),
       pulled: {
@@ -1092,6 +1095,32 @@ describe("buildSyncResultModel", () => {
       projectName: "autotuneagent",
       remote: "Yibeibankaishui/archLoop",
       durationSeconds: 1.4,
+      tasks: [
+        {
+          id: "bd-1",
+          title: "First created task",
+          remoteRefs: ["github#101"],
+          metadata: {},
+        },
+        {
+          id: "bd-2",
+          title: "Second created task",
+          remoteRefs: ["github#102"],
+          metadata: {},
+        },
+        {
+          id: "bd-3",
+          title: "Third created task",
+          remoteRefs: ["github#103"],
+          metadata: {},
+        },
+        {
+          id: "bd-4",
+          title: "Fourth created task",
+          remoteRefs: ["github#104"],
+          metadata: {},
+        },
+      ],
     });
 
     expect(model.header).toEqual({
@@ -1122,6 +1151,36 @@ describe("buildSyncResultModel", () => {
         },
       ],
     });
+    expect(model.entries).toEqual([
+      {
+        id: "bd-1",
+        direction: "pulled",
+        outcome: "created",
+        title: "First created task",
+        remoteRef: "github#101",
+      },
+      {
+        id: "bd-2",
+        direction: "pulled",
+        outcome: "created",
+        title: "Second created task",
+        remoteRef: "github#102",
+      },
+      {
+        id: "bd-3",
+        direction: "pulled",
+        outcome: "created",
+        title: "Third created task",
+        remoteRef: "github#103",
+      },
+      {
+        id: "bd-4",
+        direction: "pulled",
+        outcome: "created",
+        title: "Fourth created task",
+        remoteRef: "github#104",
+      },
+    ]);
     expect(model.duration).toEqual({
       kind: "prose",
       body: "done in 1.4s",
@@ -1134,7 +1193,8 @@ describe("buildSyncResultModel", () => {
     });
   });
 
-  it("builds a conflicted sync model with a conflicts group and fix footer", () => {
+
+  it("builds a conflicted sync model with entries including conflict reasons", () => {
     const result: SyncHubTasksResult = {
       pulled: {
         created: ["bd-new"],
@@ -1159,6 +1219,51 @@ describe("buildSyncResultModel", () => {
       result,
       projectName: "demo",
       durationSeconds: 2,
+      tasks: [
+        {
+          id: "bd-new",
+          title: "Brand new task",
+          remoteRefs: ["github#10"],
+          metadata: {},
+        },
+        {
+          id: "bd-u1",
+          title: "Updated one",
+          remoteRefs: ["github#11"],
+          metadata: {},
+        },
+        {
+          id: "bd-u2",
+          title: "Updated two",
+          remoteRefs: ["github#12"],
+          metadata: {},
+        },
+        {
+          id: "AutoTuneAgent-2mr",
+          title: "Conflicted A",
+          remoteRefs: ["github#21"],
+          metadata: {
+            sync_conflict_reason: "local todo disagrees with remote closed",
+          },
+        },
+        {
+          id: "AutoTuneAgent-2mp",
+          title: "Conflicted B",
+          remoteRefs: ["github#22"],
+          metadata: {
+            sync_conflict_reason:
+              "local ready_for_agent disagrees with remote needs_info",
+          },
+        },
+        {
+          id: "AutoTuneAgent-2mq",
+          title: "Conflicted C",
+          remoteRefs: ["github#23"],
+          metadata: {
+            sync_conflict_reason: "local blocked disagrees with remote inbox",
+          },
+        },
+      ],
     });
 
     expect(model.pullLine.rows[0]).toEqual({
@@ -1166,6 +1271,60 @@ describe("buildSyncResultModel", () => {
       value: "1 created",
       secondary: "2 updated · 3 conflicts · 1 dup-candidates",
     });
+    expect(model.entries).toEqual([
+      {
+        id: "bd-new",
+        direction: "pulled",
+        outcome: "created",
+        title: "Brand new task",
+        remoteRef: "github#10",
+      },
+      {
+        id: "bd-u1",
+        direction: "pulled",
+        outcome: "updated",
+        title: "Updated one",
+        remoteRef: "github#11",
+      },
+      {
+        id: "bd-u2",
+        direction: "pulled",
+        outcome: "updated",
+        title: "Updated two",
+        remoteRef: "github#12",
+      },
+      {
+        id: "AutoTuneAgent-2mr",
+        direction: "pulled",
+        outcome: "conflict",
+        title: "Conflicted A",
+        remoteRef: "github#21",
+        reason: "local todo disagrees with remote closed",
+      },
+      {
+        id: "AutoTuneAgent-2mp",
+        direction: "pulled",
+        outcome: "conflict",
+        title: "Conflicted B",
+        remoteRef: "github#22",
+        reason: "local ready_for_agent disagrees with remote needs_info",
+      },
+      {
+        id: "AutoTuneAgent-2mq",
+        direction: "pulled",
+        outcome: "conflict",
+        title: "Conflicted C",
+        remoteRef: "github#23",
+        reason: "local blocked disagrees with remote inbox",
+      },
+      {
+        id: "bd-a",
+        direction: "pulled",
+        outcome: "duplicate",
+        title: "Dup title",
+        remoteRef: "github#99",
+      },
+    ]);
     expect(model.conflicts).toEqual({
       kind: "group",
       symbol: "!",
@@ -1185,28 +1344,302 @@ describe("buildSyncResultModel", () => {
     });
   });
 
-  it("highlights push activity in the main value and dims pending-only details", () => {
+  it("builds pushed entries for synced, closed, and pending outcomes", () => {
     const result: SyncHubTasksResult = {
       ...emptySyncResult(),
       pushed: {
         synced: ["bd-1", "bd-2", "bd-3"],
         closed: ["bd-4"],
-        pushPending: [],
+        pushPending: ["bd-5"],
       },
     };
 
     const model = buildSyncResultModel({
       result,
       projectName: "demo",
+      tasks: [
+        {
+          id: "bd-1",
+          title: "Synced one",
+          remoteRefs: ["github#1"],
+          metadata: {},
+        },
+        {
+          id: "bd-2",
+          title: "Synced two",
+          remoteRefs: ["github#2"],
+          metadata: {},
+        },
+        {
+          id: "bd-3",
+          title: "Synced three",
+          remoteRefs: ["github#3"],
+          metadata: {},
+        },
+        {
+          id: "bd-4",
+          title: "Closed task",
+          remoteRefs: ["github#4"],
+          metadata: {},
+        },
+        {
+          id: "bd-5",
+          title: "Still pending",
+          remoteRefs: ["github#5"],
+          metadata: {},
+        },
+      ],
     });
 
     expect(model.pullLine.rows[0]?.value).toBe("nothing new");
     expect(model.pushLine.rows[0]).toEqual({
       key: "↑ pushed",
       value: "3 synced · 1 closed",
-      secondary: "0 pending",
+      secondary: "1 pending",
     });
+    expect(model.entries).toEqual([
+      {
+        id: "bd-1",
+        direction: "pushed",
+        outcome: "synced",
+        title: "Synced one",
+        remoteRef: "github#1",
+      },
+      {
+        id: "bd-2",
+        direction: "pushed",
+        outcome: "synced",
+        title: "Synced two",
+        remoteRef: "github#2",
+      },
+      {
+        id: "bd-3",
+        direction: "pushed",
+        outcome: "synced",
+        title: "Synced three",
+        remoteRef: "github#3",
+      },
+      {
+        id: "bd-4",
+        direction: "pushed",
+        outcome: "closed",
+        title: "Closed task",
+        remoteRef: "github#4",
+      },
+      {
+        id: "bd-5",
+        direction: "pushed",
+        outcome: "pending",
+        title: "Still pending",
+        remoteRef: "github#5",
+      },
+    ]);
     expect(model.duration).toBeUndefined();
     expect(model.footer.label).toBe("next");
+  });
+
+  it("omits entries when both sides are empty summaries", () => {
+    const model = buildSyncResultModel({
+      result: emptySyncResult(),
+      projectName: "demo",
+    });
+    expect(model.entries).toEqual([]);
+    expect(model.pullLine.rows[0]?.value).toBe("nothing new");
+    expect(model.pushLine.rows[0]?.value).toBe("nothing to push");
+  });
+});
+
+describe("syncResultModelToBlocks entry lists", () => {
+  it("renders indented entry rows under pull/push headers and conflict reason lines", () => {
+    const model = buildSyncResultModel({
+      result: {
+        pulled: {
+          created: ["bd-new"],
+          updated: [],
+          conflicts: ["bd-conflict"],
+          duplicateCandidates: [],
+        },
+        pushed: {
+          synced: ["bd-synced"],
+          closed: [],
+          pushPending: [],
+        },
+      },
+      projectName: "demo",
+      tasks: [
+        {
+          id: "bd-new",
+          title: "Brand new task",
+          remoteRefs: ["github#10"],
+          metadata: {},
+        },
+        {
+          id: "bd-conflict",
+          title: "Conflicted task",
+          remoteRefs: ["github#20"],
+          metadata: {
+            sync_conflict_reason: "local todo disagrees with remote closed",
+          },
+        },
+        {
+          id: "bd-synced",
+          title: "Synced task",
+          remoteRefs: ["github#30"],
+          metadata: {},
+        },
+      ],
+    });
+
+    const blocks = syncResultModelToBlocks(model);
+    expect(blocks.map((block) => block.kind)).toEqual([
+      "header",
+      "kv",
+      "group",
+      "kv",
+      "group",
+      "group",
+      "footer",
+    ]);
+
+    const pulledEntries = blocks[2];
+    expect(pulledEntries).toMatchObject({
+      kind: "group",
+      hideHeading: true,
+      items: [
+        {
+          id: "bd-new",
+          title: "Brand new task",
+          trailingDim: "github#10",
+        },
+        {
+          id: "bd-conflict",
+          title: "Conflicted task",
+          trailingDim: "github#20",
+          detailDim: "local todo disagrees with remote closed",
+        },
+      ],
+    });
+
+    const pushedEntries = blocks[4];
+    expect(pushedEntries).toMatchObject({
+      kind: "group",
+      hideHeading: true,
+      items: [
+        {
+          id: "bd-synced",
+          title: "Synced task",
+          trailingDim: "github#30",
+        },
+      ],
+    });
+
+    const lines = renderSyncResultText(model, {
+      width: 100,
+      colorEnabled: false,
+    });
+    expect(lines.some((line) => line.includes("bd-new"))).toBe(true);
+    expect(lines.some((line) => line.includes("Brand new task"))).toBe(true);
+    expect(lines.some((line) => line.includes("github#10"))).toBe(true);
+    expect(
+      lines.some((line) =>
+        line.includes("local todo disagrees with remote closed"),
+      ),
+    ).toBe(true);
+    expect(lines.some((line) => line.includes("bd-synced"))).toBe(true);
+  });
+
+  it("does not print entry lists for empty nothing-new / nothing-to-push summaries", () => {
+    const model = buildSyncResultModel({
+      result: emptySyncResult(),
+      projectName: "demo",
+    });
+    const blocks = syncResultModelToBlocks(model);
+    expect(blocks.map((block) => block.kind)).toEqual([
+      "header",
+      "kv",
+      "kv",
+      "footer",
+    ]);
+  });
+
+  it("formatSyncResultJson exposes the full entries array", () => {
+    const model = buildSyncResultModel({
+      result: {
+        ...emptySyncResult(),
+        pulled: {
+          created: ["bd-1"],
+          updated: [],
+          conflicts: [],
+          duplicateCandidates: [],
+        },
+      },
+      projectName: "demo",
+      remote: "owner/repo",
+      tasks: [
+        {
+          id: "bd-1",
+          title: "Created",
+          remoteRefs: ["github#1"],
+          metadata: {},
+        },
+      ],
+    });
+    const payload = JSON.parse(formatSyncResultJson(model)) as {
+      entries: unknown[];
+      project: string;
+      remote: string;
+    };
+    expect(payload.project).toBe("demo");
+    expect(payload.remote).toBe("owner/repo");
+    expect(payload.entries).toEqual([
+      {
+        id: "bd-1",
+        direction: "pulled",
+        outcome: "created",
+        title: "Created",
+        remoteRef: "github#1",
+      },
+    ]);
+  });
+
+  it("plain render keeps entry ids and conflict reasons without color", () => {
+    const model = buildSyncResultModel({
+      result: {
+        pulled: {
+          created: [],
+          updated: [],
+          conflicts: ["bd-conflict"],
+          duplicateCandidates: [],
+        },
+        pushed: {
+          synced: [],
+          closed: [],
+          pushPending: [],
+        },
+      },
+      projectName: "demo",
+      tasks: [
+        {
+          id: "bd-conflict",
+          title: "Conflicted",
+          remoteRefs: ["github#9"],
+          metadata: {
+            sync_conflict_reason: "local todo disagrees with remote closed",
+          },
+        },
+      ],
+    });
+    const lines = renderSyncResultText(model, {
+      width: 100,
+      colorEnabled: false,
+    });
+    const joined = lines.join("\n");
+    expect(joined).not.toMatch(/\x1b\[/);
+    expect(joined).toContain("bd-conflict");
+    expect(joined).toContain("Conflicted");
+    expect(joined).toContain("github#9");
+    expect(joined).toContain("local todo disagrees with remote closed");
+    expect(joined).toContain("fix");
+    expect(joined).toContain("archloop tasks resolve <id>");
   });
 });
