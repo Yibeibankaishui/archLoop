@@ -1937,6 +1937,7 @@ export const mapHubStatusToTaskBoardBucket = (
     case "blocked":
     case "failed":
     case "sync_conflict":
+    case "needs_info":
       return "attention";
     case "done":
     case "wontfix":
@@ -2015,6 +2016,16 @@ const ATTENTION_HUB_STATUSES: readonly HubTaskStatus[] = [
   "needs_info",
 ];
 
+// Underscored hub status names read poorly as visible labels — `sync_conflict`
+// on screen becomes `sync-conflict`, matching the CLI's kebab-case label
+// convention (`ready-for-agent`, `needs-info`).
+const ATTENTION_STATUS_DISPLAY: Readonly<
+  Partial<Record<HubTaskStatus, string>>
+> = {
+  sync_conflict: "sync-conflict",
+  needs_info: "needs-info",
+};
+
 const resolveAttentionDisplay = (
   attentionTasks: readonly HubTaskProjection[],
 ): { readonly label: string; readonly symbol: SectionGroupBlock["symbol"] } => {
@@ -2040,7 +2051,7 @@ const resolveAttentionDisplay = (
   // even before the text; other single-kind attention buckets stay on `!`.
   const symbol =
     only === "failed" ? "✗" : TASK_BOARD_BUCKET_META.attention.symbol;
-  return { label: only, symbol };
+  return { label: ATTENTION_STATUS_DISPLAY[only] ?? only, symbol };
 };
 
 export const buildHubTaskBoardModel = (

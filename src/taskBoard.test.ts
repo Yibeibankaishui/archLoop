@@ -488,10 +488,11 @@ fs.writeSync(1, JSON.stringify(tasks));
     expect(mapHubStatusToTaskBoardBucket("ready_for_agent")).toBe("todo");
   });
 
-  it("routes blocked, failed, and sync_conflict tasks to the attention bucket", () => {
+  it("routes blocked, failed, sync_conflict, and needs_info tasks to the attention bucket", () => {
     expect(mapHubStatusToTaskBoardBucket("blocked")).toBe("attention");
     expect(mapHubStatusToTaskBoardBucket("failed")).toBe("attention");
     expect(mapHubStatusToTaskBoardBucket("sync_conflict")).toBe("attention");
+    expect(mapHubStatusToTaskBoardBucket("needs_info")).toBe("attention");
     expect(mapHubStatusToTaskBoardBucket("implementing")).toBe("in_progress");
     expect(mapHubStatusToTaskBoardBucket("done")).toBe("done");
     expect(mapHubStatusToTaskBoardBucket("wontfix")).toBe("done");
@@ -622,6 +623,54 @@ fs.writeSync(1, JSON.stringify(tasks));
     const attentionGroup = model.groups.find((g) => g.severity === "error");
     expect(attentionGroup?.name).toBe("failed");
     expect(attentionGroup?.symbol).toBe("✗");
+  });
+
+  it("renders sync_conflict and needs_info as kebab-case labels in the attention bucket", () => {
+    const conflictBoard = projectHubTaskBoard([
+      {
+        id: "bd-1",
+        title: "Conflicted task",
+        status: "blocked",
+        labels: [],
+        metadata: { sync_conflict: true, sync_conflict_reason: "diverged" },
+      },
+    ]);
+    const conflictModel = buildHubTaskBoardModel({
+      projectName: "sample",
+      board: conflictBoard,
+      showAll: false,
+    });
+    const conflictBadge = conflictModel.badges.badges.find(
+      (b) => b.severity === "error",
+    );
+    expect(conflictBadge?.label).toBe("sync-conflict");
+    const conflictGroup = conflictModel.groups.find(
+      (g) => g.severity === "error",
+    );
+    expect(conflictGroup?.name).toBe("sync-conflict");
+
+    const needsInfoBoard = projectHubTaskBoard([
+      {
+        id: "bd-2",
+        title: "Awaiting details",
+        status: "open",
+        labels: ["needs-info"],
+        metadata: {},
+      },
+    ]);
+    const needsInfoModel = buildHubTaskBoardModel({
+      projectName: "sample",
+      board: needsInfoBoard,
+      showAll: false,
+    });
+    const needsInfoBadge = needsInfoModel.badges.badges.find(
+      (b) => b.severity === "error",
+    );
+    expect(needsInfoBadge?.label).toBe("needs-info");
+    const needsInfoGroup = needsInfoModel.groups.find(
+      (g) => g.severity === "error",
+    );
+    expect(needsInfoGroup?.name).toBe("needs-info");
   });
 
   it("falls back to the generic attention label when multiple trouble kinds coexist", () => {
