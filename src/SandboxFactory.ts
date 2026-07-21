@@ -46,6 +46,7 @@ export interface SandboxService {
     command: string,
     options?: {
       onLine?: (line: string) => void;
+      onSpawn?: (pid: number) => void;
       cwd?: string;
       sudo?: boolean;
       stdin?: string;

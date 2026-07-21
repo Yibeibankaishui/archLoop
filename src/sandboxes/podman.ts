@@ -248,6 +248,7 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
           command: string,
           opts?: {
             onLine?: (line: string) => void;
+            onSpawn?: (pid: number) => void;
             cwd?: string;
             sudo?: boolean;
             stdin?: string;
@@ -277,6 +278,10 @@ export const podman = (options?: PodmanOptions): SandboxProvider => {
                 "pipe",
               ],
             });
+
+            if (proc.pid !== undefined) {
+              opts?.onSpawn?.(proc.pid);
+            }
 
             if (opts?.stdin !== undefined) {
               proc.stdin!.write(opts.stdin);

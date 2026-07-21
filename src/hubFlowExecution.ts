@@ -315,6 +315,24 @@ export const parseHubFlowMaxBatches = (raw: string): number => {
   return parsed;
 };
 
+export const parseHubFlowIdleTimeoutSeconds = (raw: string): number => {
+  const trimmed = raw.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    throw new HubFlowError({
+      message: `Invalid --idle-timeout value "${raw}". Expected a positive integer number of seconds.`,
+    });
+  }
+
+  const parsed = Number.parseInt(trimmed, 10);
+  if (parsed < 1) {
+    throw new HubFlowError({
+      message: `Invalid --idle-timeout value "${raw}". Expected a positive integer number of seconds.`,
+    });
+  }
+
+  return parsed;
+};
+
 const resolveHubFlowMaxBatches = (input: {
   readonly maxBatches?: number;
 }): number => {
@@ -624,6 +642,7 @@ const runHubAgent = async (input: {
   readonly retryContext?: string;
   readonly projectDevelopmentContract?: HubProjectDevelopmentContractState;
   readonly showAgentStartup?: boolean;
+  readonly idleTimeoutSeconds?: number;
   readonly signal?: AbortSignal;
 }) => {
   await assertAgentCredentialsConfigured({
@@ -656,6 +675,7 @@ const runHubAgent = async (input: {
     branchStrategy: { type: "branch", branch: input.branch },
     name: input.name,
     maxIterations,
+    idleTimeoutSeconds: input.idleTimeoutSeconds,
     worktreeLeaseOwner: {
       kind: "hub",
       taskId: input.taskId,
@@ -1483,6 +1503,7 @@ export const createHubFlowRunImplementer = (options: {
   readonly homeDir?: string;
   readonly roleEntry?: HubAgentRoleEntry;
   readonly showAgentStartup?: boolean;
+  readonly idleTimeoutSeconds?: number;
 }): HubFlowImplementer => {
   const agent = resolveHubFlowRunnerAgent("implementation", options);
 
@@ -1504,6 +1525,7 @@ export const createHubFlowRunImplementer = (options: {
         retryContext: input.retryContext,
         projectDevelopmentContract: input.projectDevelopmentContract,
         showAgentStartup: options.showAgentStartup,
+        idleTimeoutSeconds: options.idleTimeoutSeconds,
         signal: input.signal,
       });
 
@@ -1548,6 +1570,7 @@ export const createHubFlowRunReviewer = (options: {
   readonly homeDir?: string;
   readonly roleEntry?: HubAgentRoleEntry;
   readonly showAgentStartup?: boolean;
+  readonly idleTimeoutSeconds?: number;
 }): HubFlowReviewer => {
   const agent = resolveHubFlowRunnerAgent("review", options);
 
@@ -1567,6 +1590,7 @@ export const createHubFlowRunReviewer = (options: {
         logFileName: `${input.taskId}-review.log`,
         env: options.env,
         showAgentStartup: options.showAgentStartup,
+        idleTimeoutSeconds: options.idleTimeoutSeconds,
         signal: input.signal,
       });
 

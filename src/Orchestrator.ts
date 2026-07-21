@@ -17,6 +17,7 @@ import type {
   IterationUsage,
 } from "./AgentProvider.js";
 import { enrichAgentFailureDetail } from "./agentAuthGuidance.js";
+import { hasActiveAgentChildProcesses } from "./agentChildProcesses.js";
 import { TextDeltaBuffer } from "./TextDeltaBuffer.js";
 import {
   hostSessionStore,
@@ -60,6 +61,7 @@ const invokeAgent = (
   idleWarningIntervalMs: number = IDLE_WARNING_INTERVAL_MS,
   resumeSession?: string,
   signal?: AbortSignal,
+  hasActiveChildProcesses?: () => boolean,
 ): Effect.Effect<
   { result: string; sessionId?: string },
   SandboxError,
@@ -68,11 +70,22 @@ const invokeAgent = (
   Effect.gen(function* () {
     let resultText = "";
     let sessionId: string | undefined;
+    let agentRootPid: number | undefined;
     const execAbortController = new AbortController();
     const abortExec = (reason: unknown) => {
       if (!execAbortController.signal.aborted) {
         execAbortController.abort(reason);
       }
+    };
+
+    const checkActiveChildProcesses = (): boolean => {
+      if (hasActiveChildProcesses) {
+        return hasActiveChildProcesses();
+      }
+      if (agentRootPid === undefined) {
+        return false;
+      }
+      return hasActiveAgentChildProcesses(agentRootPid);
     };
 
     // Deferred that will be failed when the idle timer fires
@@ -87,6 +100,11 @@ const invokeAgent = (
       if (warningHandle !== null) clearInterval(warningHandle);
       idleMinuteCounter = 0;
       warningHandle = setInterval(() => {
+        if (checkActiveChildProcesses()) {
+          // A long-running tool child is activity — do not warn as idle.
+          idleMinuteCounter = 0;
+          return;
+        }
         idleMinuteCounter++;
         onIdleWarning(idleMinuteCounter);
       }, idleWarningIntervalMs);
@@ -95,6 +113,11 @@ const invokeAgent = (
     const resetIdleTimer = () => {
       if (timeoutHandle !== null) clearTimeout(timeoutHandle);
       timeoutHandle = setTimeout(() => {
+        if (checkActiveChildProcesses()) {
+          // Agent-spawned child still running (e.g. npm test) — keep waiting.
+          resetIdleTimer();
+          return;
+        }
         const error = new AgentIdleTimeoutError({
           message: `Agent idle for ${idleTimeoutMs / 1000} seconds — no output received. Consider increasing the idle timeout with --idle-timeout.`,
           timeoutMs: idleTimeoutMs,
@@ -147,6 +170,9 @@ const invokeAgent = (
               sessionId = parsed.sessionId;
             }
           }
+        },
+        onSpawn: (pid) => {
+          agentRootPid = pid;
         },
         cwd: sandboxRepoDir,
         stdin: printCmd.stdin,
@@ -245,6 +271,11 @@ export interface OrchestrateOptions {
   readonly name?: string;
   /** @internal Test-only override for the idle warning interval in milliseconds. Default: 60000 (1 minute). */
   readonly _idleWarningIntervalMs?: number;
+  /**
+   * @internal Test-only override for whether the agent currently has an active
+   * child process. Production uses the sandbox exec root PID + process tree.
+   */
+  readonly _hasActiveChildProcesses?: () => boolean;
   /** Resume a prior Claude Code session by ID. Applied to iteration 1 only. */
   readonly resumeSession?: string;
   /** An AbortSignal that cancels the orchestration when aborted. */
@@ -414,6 +445,7 @@ export const orchestrate = (
                   options._idleWarningIntervalMs,
                   iterationResumeSession,
                   options.signal,
+                  options._hasActiveChildProcesses,
                 );
 
                 // Flush any remaining buffered text deltas
