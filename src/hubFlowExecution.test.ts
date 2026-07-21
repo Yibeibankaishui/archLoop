@@ -1,4 +1,5 @@
 import { exec, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +19,7 @@ import {
   createHubFlowRunImplementer,
   createHubFlowRunReviewer,
   formatHubFlowResultLines,
+  matchProviderTransientReason,
   parseHubFlowIdleTimeoutSeconds,
   runHubFlow,
   type HubFlowImplementer,
@@ -46,6 +48,34 @@ import * as WorktreeManager from "./WorktreeManager.js";
 import { leaseLockPath, leaseNameFromBranch } from "./WorktreeLease.js";
 
 const execAsync = promisify(exec);
+
+describe("matchProviderTransientReason", () => {
+  it("recognises well-known provider transient markers", () => {
+    expect(
+      matchProviderTransientReason(
+        "claude-code exited with code 1:\nAPI Error: 400 Invalid request parameters (request id: abc)",
+      ),
+    ).toBe("API Error: 400 Invalid request parameters");
+    expect(
+      matchProviderTransientReason(
+        "cursor exited with code 1:\nRetriableError: Connection stalled",
+      ),
+    ).toBe("RetriableError: Connection stalled");
+    expect(
+      matchProviderTransientReason(
+        "cursor exited with code 1:\nRetriableError: [unavailable] PING timed out",
+      ),
+    ).toBe("RetriableError: [unavailable] PING timed out");
+  });
+
+  it("ignores non-transient provider exits", () => {
+    expect(
+      matchProviderTransientReason(
+        "cursor exited with code 1:\nAuthentication failed",
+      ),
+    ).toBeUndefined();
+  });
+});
 
 const runLeaseEffect = <A, E>(
   effect: Effect.Effect<A, E, FileSystem.FileSystem>,
@@ -2958,7 +2988,10 @@ describe("with-review Hub flow execution", () => {
     );
     const implementer = createHubFlowRunImplementer({
       cwd,
-      env: { OPENAI_KEY: "test-openai-key" },
+      env: {
+        OPENAI_KEY: "test-openai-key",
+        ARCHLOOP_PROVIDER_RETRY_ATTEMPTS: "1",
+      },
       roleEntry: { provider: "codex", model: "gpt-5.4-mini" },
     });
 
@@ -3104,6 +3137,296 @@ describe("with-review Hub flow execution", () => {
       expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
       expect(result.commits.map((commit) => commit.sha)).toEqual(expectedShas);
       expect(result.commits).toHaveLength(2);
+    } finally {
+      runSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("createHubFlowRunImplementer retries on provider transient without completion signal", async () => {
+    const cwd = await mkdtemp(join(tmpdir(), "hub-flow-implementer-retry-"));
+    await initRepo(cwd);
+    await commitFile(cwd, "hello.txt", "hello", "initial commit");
+    const branch = "archloop/bd-1-test-task";
+    await execAsync(`git checkout -b "${branch}"`, { cwd });
+    await commitFile(cwd, "work.txt", "work", "RALPH: work");
+    await execAsync("git checkout main", { cwd });
+
+    const runDir = join(cwd, "run");
+    await mkdir(join(runDir, "logs"), { recursive: true });
+    await writeFile(
+      join(runDir, "logs", "bd-1.log"),
+      "agent still working; no completion signal yet\n",
+      "utf-8",
+    );
+
+    const projectDevelopmentContract =
+      resolveHubProjectDevelopmentContractState({
+        repoRoot: cwd,
+        hubProjectDir: join(cwd, "hub-project"),
+        now: new Date("2026-07-22T00:00:00.000Z"),
+      });
+    const runSpy = vi
+      .spyOn(runModule, "run")
+      .mockRejectedValueOnce(
+        new AgentError({
+          message:
+            "cursor exited with code 1:\nRetriableError: Connection stalled",
+        }),
+      )
+      .mockResolvedValueOnce({
+        completionSignal: "<promise>COMPLETE</promise>",
+        commits: [{ sha: "abc123" }],
+        branch,
+        iterations: [],
+        stdout: "<promise>COMPLETE</promise>",
+      });
+    const implementer = createHubFlowRunImplementer({
+      cwd,
+      env: {
+        OPENAI_KEY: "test-openai-key",
+        ARCHLOOP_PROVIDER_RETRY_ATTEMPTS: "3",
+        ARCHLOOP_PROVIDER_RETRY_BASE_MS: "0",
+      },
+      roleEntry: { provider: "codex", model: "gpt-5.4-mini" },
+    });
+
+    vi.stubEnv("OPENAI_KEY", "");
+    vi.stubEnv("CODEX_HOME", "");
+    try {
+      const result = await implementer({
+        flowId: "no-review",
+        batchId: "batch-test",
+        taskId: "bd-1",
+        title: "Test task",
+        branch,
+        promptFile: "/tmp/prompt.md",
+        cwd,
+        runDir,
+        projectDevelopmentContract,
+      });
+
+      expect(result.outcome).toBe("success");
+      expect(runSpy).toHaveBeenCalledTimes(2);
+
+      const taskEvents = (
+        await readFile(join(runDir, "events", "task.jsonl"), "utf-8")
+      )
+        .trim()
+        .split("\n")
+        .map(
+          (line) =>
+            JSON.parse(line) as {
+              type: string;
+              diagnostics?: Record<string, unknown>;
+              reason?: string;
+            },
+        );
+      const retryEvents = taskEvents.filter(
+        (event) => event.type === "task_provider_retry",
+      );
+      expect(retryEvents).toHaveLength(1);
+      expect(retryEvents[0]?.reason).toContain("Connection stalled");
+      expect(retryEvents[0]?.diagnostics).toMatchObject({
+        attempt: 1,
+        backoffSeconds: 0,
+      });
+    } finally {
+      runSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("createHubFlowRunImplementer does not retry non-transient provider exits", async () => {
+    const cwd = await mkdtemp(
+      join(tmpdir(), "hub-flow-implementer-no-retry-"),
+    );
+    await initRepo(cwd);
+    await commitFile(cwd, "hello.txt", "hello", "initial commit");
+    const branch = "archloop/bd-1-test-task";
+    await execAsync(`git branch "${branch}"`, { cwd });
+
+    const runDir = join(cwd, "run");
+    await mkdir(join(runDir, "logs"), { recursive: true });
+    await writeFile(
+      join(runDir, "logs", "bd-1.log"),
+      "agent still working\n",
+      "utf-8",
+    );
+
+    const projectDevelopmentContract =
+      resolveHubProjectDevelopmentContractState({
+        repoRoot: cwd,
+        hubProjectDir: join(cwd, "hub-project"),
+        now: new Date("2026-07-22T00:00:00.000Z"),
+      });
+    const runSpy = vi.spyOn(runModule, "run").mockRejectedValue(
+      new AgentError({
+        message: "cursor exited with code 1:\nAuthentication failed",
+      }),
+    );
+    const implementer = createHubFlowRunImplementer({
+      cwd,
+      env: {
+        OPENAI_KEY: "test-openai-key",
+        ARCHLOOP_PROVIDER_RETRY_ATTEMPTS: "3",
+        ARCHLOOP_PROVIDER_RETRY_BASE_MS: "0",
+      },
+      roleEntry: { provider: "codex", model: "gpt-5.4-mini" },
+    });
+
+    vi.stubEnv("OPENAI_KEY", "");
+    vi.stubEnv("CODEX_HOME", "");
+    try {
+      const result = await implementer({
+        flowId: "no-review",
+        batchId: "batch-test",
+        taskId: "bd-1",
+        title: "Test task",
+        branch,
+        promptFile: "/tmp/prompt.md",
+        cwd,
+        runDir,
+        projectDevelopmentContract,
+      });
+
+      expect(result.outcome).toBe("agent_failed");
+      expect(result.message).toContain("Authentication failed");
+      expect(runSpy).toHaveBeenCalledTimes(1);
+      expect(existsSync(join(runDir, "events", "task.jsonl"))).toBe(false);
+    } finally {
+      runSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("createHubFlowRunImplementer skips retry when COMPLETE already emitted", async () => {
+    const cwd = await mkdtemp(
+      join(tmpdir(), "hub-flow-implementer-retry-complete-"),
+    );
+    await initRepo(cwd);
+    await commitFile(cwd, "hello.txt", "hello", "initial commit");
+    const branch = "archloop/bd-1-test-task";
+    await execAsync(`git checkout -b "${branch}"`, { cwd });
+    await commitFile(cwd, "work.txt", "work", "RALPH: work");
+    await execAsync("git checkout main", { cwd });
+
+    const runDir = join(cwd, "run");
+    await mkdir(join(runDir, "logs"), { recursive: true });
+    await writeFile(
+      join(runDir, "logs", "bd-1.log"),
+      "agent work...\n<promise>COMPLETE</promise>\n",
+      "utf-8",
+    );
+
+    const projectDevelopmentContract =
+      resolveHubProjectDevelopmentContractState({
+        repoRoot: cwd,
+        hubProjectDir: join(cwd, "hub-project"),
+        now: new Date("2026-07-22T00:00:00.000Z"),
+      });
+    const runSpy = vi.spyOn(runModule, "run").mockRejectedValue(
+      new AgentError({
+        message:
+          "cursor exited with code 1:\nRetriableError: [unavailable] PING timed out",
+      }),
+    );
+    const implementer = createHubFlowRunImplementer({
+      cwd,
+      env: {
+        OPENAI_KEY: "test-openai-key",
+        ARCHLOOP_PROVIDER_RETRY_ATTEMPTS: "3",
+        ARCHLOOP_PROVIDER_RETRY_BASE_MS: "0",
+      },
+      roleEntry: { provider: "codex", model: "gpt-5.4-mini" },
+    });
+
+    vi.stubEnv("OPENAI_KEY", "");
+    vi.stubEnv("CODEX_HOME", "");
+    try {
+      const result = await implementer({
+        flowId: "no-review",
+        batchId: "batch-test",
+        taskId: "bd-1",
+        title: "Test task",
+        branch,
+        promptFile: "/tmp/prompt.md",
+        cwd,
+        runDir,
+        projectDevelopmentContract,
+      });
+
+      expect(result.outcome).toBe("success");
+      expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
+      expect(runSpy).toHaveBeenCalledTimes(1);
+      expect(existsSync(join(runDir, "events", "task.jsonl"))).toBe(false);
+    } finally {
+      runSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("createHubFlowRunImplementer surfaces the original transient after retries are exhausted", async () => {
+    const cwd = await mkdtemp(
+      join(tmpdir(), "hub-flow-implementer-retry-exhaust-"),
+    );
+    await initRepo(cwd);
+    await commitFile(cwd, "hello.txt", "hello", "initial commit");
+    const branch = "archloop/bd-1-test-task";
+    await execAsync(`git branch "${branch}"`, { cwd });
+
+    const runDir = join(cwd, "run");
+    await mkdir(join(runDir, "logs"), { recursive: true });
+    await writeFile(join(runDir, "logs", "bd-1.log"), "still working\n", "utf-8");
+
+    const projectDevelopmentContract =
+      resolveHubProjectDevelopmentContractState({
+        repoRoot: cwd,
+        hubProjectDir: join(cwd, "hub-project"),
+        now: new Date("2026-07-22T00:00:00.000Z"),
+      });
+    const originalMessage =
+      "claude-code exited with code 1:\nAPI Error: 400 Invalid request parameters (request id: abc)";
+    const runSpy = vi
+      .spyOn(runModule, "run")
+      .mockRejectedValue(new AgentError({ message: originalMessage }));
+    const implementer = createHubFlowRunImplementer({
+      cwd,
+      env: {
+        OPENAI_KEY: "test-openai-key",
+        ARCHLOOP_PROVIDER_RETRY_ATTEMPTS: "3",
+        ARCHLOOP_PROVIDER_RETRY_BASE_MS: "0",
+      },
+      roleEntry: { provider: "codex", model: "gpt-5.4-mini" },
+    });
+
+    vi.stubEnv("OPENAI_KEY", "");
+    vi.stubEnv("CODEX_HOME", "");
+    try {
+      const result = await implementer({
+        flowId: "no-review",
+        batchId: "batch-test",
+        taskId: "bd-1",
+        title: "Test task",
+        branch,
+        promptFile: "/tmp/prompt.md",
+        cwd,
+        runDir,
+        projectDevelopmentContract,
+      });
+
+      expect(result.outcome).toBe("agent_failed");
+      expect(result.message).toBe(originalMessage);
+      expect(runSpy).toHaveBeenCalledTimes(3);
+
+      const retryEvents = (
+        await readFile(join(runDir, "events", "task.jsonl"), "utf-8")
+      )
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { type: string })
+        .filter((event) => event.type === "task_provider_retry");
+      expect(retryEvents).toHaveLength(2);
     } finally {
       runSpy.mockRestore();
       vi.unstubAllEnvs();
