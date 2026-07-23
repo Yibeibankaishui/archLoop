@@ -8,8 +8,11 @@ import { claimHubTask } from "./taskBoard.js";
 import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
 import {
   createHubRunContext,
+  isHubTaskClaimActive,
   observeHubRunEvents,
   resolveHubRunDirectory,
+  resolveHubTaskClaimState,
+  type HubTaskClaimMetadata,
 } from "./hubExecution.js";
 
 const execAsync = promisify(exec);
@@ -499,5 +502,71 @@ process.exit(1);
       taskId: "bd-70",
       reason: "active_claim",
     });
+  });
+});
+
+const sampleClaim = {
+  runId: "run-1",
+  batchId: "batch-1",
+  taskId: "bd-1",
+  branch: "archloop/bd-1",
+  claimedAt: "2026-07-23T09:39:47.333Z",
+  baseHead: "abc123",
+  branchExistedBeforeClaim: false,
+  raw: {},
+} satisfies HubTaskClaimMetadata;
+
+describe("isHubTaskClaimActive", () => {
+  it("treats every execution-phase status as an active claim", () => {
+    // reviewing / waiting_for_merge / merging are still mid-flight Hub flow
+    // work that holds the original claim — they must not be re-claimed.
+    for (const status of [
+      "implementing",
+      "reviewing",
+      "waiting_for_merge",
+      "merging",
+    ]) {
+      expect(isHubTaskClaimActive(status)).toBe(true);
+    }
+  });
+
+  it("treats non-execution statuses as inactive", () => {
+    for (const status of [
+      "inbox",
+      "needs_info",
+      "ready_for_agent",
+      "ready_for_human",
+      "blocked",
+      "done",
+      "wontfix",
+      "failed",
+      "sync_conflict",
+    ]) {
+      expect(isHubTaskClaimActive(status)).toBe(false);
+    }
+  });
+});
+
+describe("resolveHubTaskClaimState", () => {
+  it("reports reviewing, waiting_for_merge, and merging claims as active", () => {
+    for (const status of [
+      "implementing",
+      "reviewing",
+      "waiting_for_merge",
+      "merging",
+    ]) {
+      expect(resolveHubTaskClaimState(status, sampleClaim)).toBe("active");
+    }
+  });
+
+  it("reports terminal and collaboration-status claims as stale", () => {
+    for (const status of ["ready_for_agent", "done", "failed"]) {
+      expect(resolveHubTaskClaimState(status, sampleClaim)).toBe("stale");
+    }
+  });
+
+  it("returns undefined when there is no claim", () => {
+    expect(resolveHubTaskClaimState("implementing", undefined)).toBeUndefined();
+    expect(resolveHubTaskClaimState("reviewing", undefined)).toBeUndefined();
   });
 });
