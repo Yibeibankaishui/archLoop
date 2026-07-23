@@ -1,8 +1,5 @@
-import type { HubTaskProjection, HubTaskStatus } from "./taskBoard.js";
-import {
-  branchToWorktreeName,
-  type WorktreeLeaseRecord,
-} from "./worktreeLeaseStore.js";
+import { resolveHubTaskBranch, type HubTaskProjection, type HubTaskStatus } from "./taskBoard.js";
+import { branchToWorktreeName, type WorktreeLeaseRecord } from "./worktreeLeaseStore.js";
 
 /**
  * The interrupted-execution detector is the shared, read-only predicate that
@@ -85,18 +82,14 @@ export const isInterruptedHubTaskExecution = (
 
 /**
  * Resolve the task's branch, preferring the recorded claim branch and falling
- * back to the derived `archloop/<id>-<slug>` convention so a task with no
- * claim can still be matched to a lease by its worktree name.
+ * back to the canonical `archloop/<id>-<slug>` convention so a task with no
+ * claim can still be matched to a lease by its worktree name. Reuses
+ * `resolveHubTaskBranch` — the same helper `hubWorktreeLeaseDiagnostics`,
+ * `hubBatchMerge`, `hubTaskRecover`, and `hubTaskStateDoctor` use — so every
+ * surface agrees on the derived branch instead of drifting.
  */
 const resolveTaskBranch = (task: HubTaskProjection): string =>
-  task.claim?.branch ?? `archloop/${task.id}-${slugify(task.title)}`;
-
-const slugify = (title: string): string =>
-  title
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+  task.claim?.branch ?? resolveHubTaskBranch(task.id, task.title);
 
 /**
  * Find the worktree lease for a task, reusing the existing task-to-lease

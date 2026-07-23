@@ -7,7 +7,7 @@ import {
   type InterruptedExecutionDetection,
   type InterruptedExecutionPhase,
 } from "./hubTaskInterruptedExecutionDetector.js";
-import type { HubTaskProjection } from "./taskBoard.js";
+import { resolveHubTaskBranch, type HubTaskProjection } from "./taskBoard.js";
 import type { WorktreeLeaseRecord } from "./worktreeLeaseStore.js";
 
 const createTask = (
@@ -269,6 +269,24 @@ describe("findWorktreeLeaseForTask", () => {
     });
     const branch = branchFor(task);
     const lease = createLease({ branch, state: "stale" });
+
+    expect(findWorktreeLeaseForTask(task, [lease])).toBe(lease);
+  });
+
+  it("derives the branch via the canonical resolveHubTaskBranch, so an uppercase id and a title over 48 chars still match their lease", () => {
+    // A claimless task's branch is derived, not recorded. The detector must use
+    // the same convention every other surface uses (resolveHubTaskBranch:
+    // lowercase the id, cap the title slug at 48 chars), not a parallel slug —
+    // otherwise long titles or non-lowercase ids derive a different branch and
+    // the lease never matches, falsely flagging a live execution as interrupted.
+    const task = createTask({
+      id: "BD-3",
+      title: "A very long task title that exceeds the forty eight char slug cap",
+      hubStatus: "implementing",
+      claim: undefined,
+    });
+    const branch = resolveHubTaskBranch(task.id, task.title);
+    const lease = createLease({ branch, state: "active" });
 
     expect(findWorktreeLeaseForTask(task, [lease])).toBe(lease);
   });
