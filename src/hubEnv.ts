@@ -14,6 +14,12 @@ import {
   getHubEnvKeyGuidance,
 } from "./hubEnvKeyGuidance.js";
 import { resolveArchloopUserDataDir } from "./projectStatus.js";
+import type {
+  SectionBlock,
+  SectionFooterBlock,
+  SectionHeaderBlock,
+  SectionKvBlock,
+} from "./section.js";
 
 export const HUB_ENV_KNOWN_KEYS = [
   "CURSOR_API_KEY",
@@ -268,3 +274,48 @@ export const listHubEnvKeyDescriptions = (): readonly {
       label: agent?.label ?? backlogLabel ?? guidance.service,
     };
   });
+
+// ---------------------------------------------------------------------------
+// env set summary model (Variant C section primitive)
+// ---------------------------------------------------------------------------
+
+const ENV_SET_KV_GUTTER = 8;
+
+export interface HubEnvSetSummaryModel {
+  readonly header: SectionHeaderBlock;
+  readonly identity: SectionKvBlock;
+  readonly footer: SectionFooterBlock;
+}
+
+export interface BuildHubEnvSetSummaryModelInput {
+  readonly key: string;
+  readonly path: string;
+}
+
+export const buildHubEnvSetSummaryModel = (
+  input: BuildHubEnvSetSummaryModelInput,
+): HubEnvSetSummaryModel => ({
+  header: {
+    kind: "header",
+    title: "archLoop",
+    subtitle: `env · set`,
+    right: input.key,
+  },
+  identity: {
+    kind: "kv",
+    gutter: ENV_SET_KV_GUTTER,
+    rows: [
+      { key: "Key", value: input.key },
+      { key: "Path", value: input.path },
+    ],
+  },
+  footer: {
+    kind: "footer",
+    label: "next",
+    command: "archloop env show",
+  },
+});
+
+export const hubEnvSetSummaryModelToBlocks = (
+  model: HubEnvSetSummaryModel,
+): readonly SectionBlock[] => [model.header, model.identity, model.footer];

@@ -7,6 +7,12 @@ import {
   getProjectProfile,
   type ProjectProfileEntry,
 } from "./InitService.js";
+import type {
+  SectionBlock,
+  SectionFooterBlock,
+  SectionHeaderBlock,
+  SectionKvBlock,
+} from "./section.js";
 
 export const HUB_PROJECT_DEVELOPMENT_CONTRACT_FILE_NAME =
   "development-contract.json";
@@ -505,3 +511,87 @@ export const configureHubProjectDevelopmentContract = (
     refreshedProjectFacts: true,
   };
 };
+
+// ---------------------------------------------------------------------------
+// project configure summary model (Variant C section primitive)
+// ---------------------------------------------------------------------------
+
+const PROJECT_CONFIGURE_KV_GUTTER = 32;
+
+export interface HubProjectConfigureSummaryModel {
+  readonly header: SectionHeaderBlock;
+  readonly identity: SectionKvBlock;
+  readonly footer: SectionFooterBlock;
+}
+
+export interface BuildHubProjectConfigureSummaryModelInput {
+  readonly repoRoot: string;
+  readonly hubProjectDir: string;
+  readonly contract: ConfigureHubProjectDevelopmentContractResult;
+  readonly editOutcome: string;
+}
+
+const describeContractConfigureAction = (
+  contract: ConfigureHubProjectDevelopmentContractResult,
+): string => {
+  if (contract.backupPath) {
+    return "replaced (backup created)";
+  }
+  if (contract.preservedUserEdits) {
+    return "refreshed (user edits preserved)";
+  }
+  return "wrote new contract";
+};
+
+export const buildHubProjectConfigureSummaryModel = (
+  input: BuildHubProjectConfigureSummaryModelInput,
+): HubProjectConfigureSummaryModel => {
+  const { repoRoot, hubProjectDir, contract, editOutcome } = input;
+  const rows: SectionKvBlock["rows"][number][] = [
+    { key: "Repository root", value: repoRoot },
+    { key: "Hub project dir", value: hubProjectDir },
+    { key: "Hub project profile", value: contract.contract.projectProfile },
+    {
+      key: "Hub project development contract",
+      value: contract.contractPath,
+    },
+    {
+      key: "Project facts refreshed",
+      value: formatHubProjectDevelopmentContractFactsSummary(
+        contract.contract.projectFacts,
+      ),
+    },
+    {
+      key: "User-edited setup/verify/context",
+      value: editOutcome,
+    },
+    {
+      key: "Previous contract backup",
+      value: contract.backupPath ?? "none",
+    },
+    { key: "Outcome", value: describeContractConfigureAction(contract) },
+  ];
+
+  return {
+    header: {
+      kind: "header",
+      title: "archLoop",
+      subtitle: "project · configure",
+      right: contract.contract.projectProfile,
+    },
+    identity: {
+      kind: "kv",
+      gutter: PROJECT_CONFIGURE_KV_GUTTER,
+      rows,
+    },
+    footer: {
+      kind: "footer",
+      label: "next",
+      command: "archloop project status",
+    },
+  };
+};
+
+export const hubProjectConfigureSummaryModelToBlocks = (
+  model: HubProjectConfigureSummaryModel,
+): readonly SectionBlock[] => [model.header, model.identity, model.footer];

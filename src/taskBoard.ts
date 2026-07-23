@@ -1990,7 +1990,9 @@ const readRemoteRefForBadge = (task: HubTaskProjection): string | undefined => {
   if (singular) {
     return singular;
   }
-  return task.remoteRefs.find((ref) => isGithubRemoteRef(ref)) ?? task.remoteRefs[0];
+  return (
+    task.remoteRefs.find((ref) => isGithubRemoteRef(ref)) ?? task.remoteRefs[0]
+  );
 };
 
 /**
@@ -2468,3 +2470,58 @@ export const renderHubTaskDetailText = (
 export const isCanonicalHubTaskStatus = (
   value: unknown,
 ): value is HubTaskStatus => normalizeHubTaskStatus(value) !== undefined;
+
+// ---------------------------------------------------------------------------
+// tasks create summary model (Variant C section primitive)
+// ---------------------------------------------------------------------------
+
+const TASK_CREATE_KV_GUTTER = 12;
+
+export interface HubTaskCreateSummaryModel {
+  readonly header: SectionHeaderBlock;
+  readonly identity: SectionKvBlock;
+  readonly footer: SectionFooterBlock;
+}
+
+export interface BuildHubTaskCreateSummaryModelInput {
+  readonly id: string;
+  readonly title: string;
+  readonly origin: string;
+  readonly kind?: string;
+}
+
+export const buildHubTaskCreateSummaryModel = (
+  input: BuildHubTaskCreateSummaryModelInput,
+): HubTaskCreateSummaryModel => {
+  const rows: SectionKvBlock["rows"][number][] = [
+    { key: "id", value: input.id },
+    { key: "title", value: input.title },
+    { key: "origin", value: input.origin },
+  ];
+  if (input.kind !== undefined) {
+    rows.push({ key: "kind", value: input.kind });
+  }
+
+  return {
+    header: {
+      kind: "header",
+      title: "archLoop",
+      subtitle: `tasks · create`,
+      right: input.id,
+    },
+    identity: {
+      kind: "kv",
+      gutter: TASK_CREATE_KV_GUTTER,
+      rows,
+    },
+    footer: {
+      kind: "footer",
+      label: "next",
+      command: `archloop tasks show ${input.id}`,
+    },
+  };
+};
+
+export const hubTaskCreateSummaryModelToBlocks = (
+  model: HubTaskCreateSummaryModel,
+): readonly SectionBlock[] => [model.header, model.identity, model.footer];

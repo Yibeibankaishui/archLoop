@@ -13,6 +13,12 @@ import {
   type HubLoginProviderId,
 } from "./hubAuthPaths.js";
 import { resolveArchloopUserDataDir } from "./projectStatus.js";
+import type {
+  SectionBlock,
+  SectionFooterBlock,
+  SectionHeaderBlock,
+  SectionKvBlock,
+} from "./section.js";
 
 export type HubAuthProviderId =
   | "codex"
@@ -207,3 +213,56 @@ export const resolveHubAuthSessionEnv = (
 
   return resolved;
 };
+
+// ---------------------------------------------------------------------------
+// auth login summary model (Variant C section primitive)
+// ---------------------------------------------------------------------------
+
+const AUTH_LOGIN_KV_GUTTER = 14;
+
+export interface HubAuthLoginSummaryModel {
+  readonly header: SectionHeaderBlock;
+  readonly identity: SectionKvBlock;
+  readonly footer: SectionFooterBlock;
+}
+
+export interface BuildHubAuthLoginSummaryModelInput {
+  readonly provider: "codex" | "github";
+  readonly envVar: string;
+  readonly authDir: string;
+}
+
+const providerDisplayName = (provider: "codex" | "github"): string =>
+  provider === "codex" ? "Codex" : "GitHub";
+
+export const buildHubAuthLoginSummaryModel = (
+  input: BuildHubAuthLoginSummaryModelInput,
+): HubAuthLoginSummaryModel => {
+  const displayName = providerDisplayName(input.provider);
+
+  return {
+    header: {
+      kind: "header",
+      title: "archLoop",
+      subtitle: `auth · login · ${input.provider}`,
+      right: `${displayName} auth saved`,
+    },
+    identity: {
+      kind: "kv",
+      gutter: AUTH_LOGIN_KV_GUTTER,
+      rows: [
+        { key: "Provider", value: displayName },
+        { key: input.envVar, value: input.authDir },
+      ],
+    },
+    footer: {
+      kind: "footer",
+      label: "next",
+      command: "archloop auth show",
+    },
+  };
+};
+
+export const hubAuthLoginSummaryModelToBlocks = (
+  model: HubAuthLoginSummaryModel,
+): readonly SectionBlock[] => [model.header, model.identity, model.footer];

@@ -115,7 +115,7 @@ const cliFailureOutput = (err: unknown): string => {
 };
 
 const flattenCliOutput = (output: string): string =>
-  output.replace(/[│\s]+/g, "");
+  output.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").replace(/[│\s]+/g, "");
 
 const hasInitialCommit = (repoDir: string): boolean => {
   try {
@@ -456,7 +456,8 @@ describe("archloop CLI", () => {
       hostDir,
       env,
     );
-    expect(stdout).toContain("Saved CURSOR_API_KEY");
+    expect(stdout).toContain("env · set");
+    expect(stdout).toContain("CURSOR_API_KEY");
 
     const show = await runCli("env show", hostDir, {
       ...env,
@@ -593,7 +594,7 @@ describe("archloop CLI", () => {
       hostDir,
       env,
     );
-    expect(stdout).toContain("Saved Hub agent role planning");
+    expect(stdout).toContain("agent-config · set-role · planning");
     expect(stdout).toContain("codex");
     expect(stdout).toContain("effort=medium");
 
@@ -1250,7 +1251,7 @@ process.exit(1);
       XDG_DATA_HOME: dataDir,
     });
 
-    expect(stdout).toContain("Hub project status");
+    expect(stdout).toContain("project · status");
     expect(flattenCliOutput(stdout)).toContain(
       flattenCliOutput(selectedProject!.repoRoot),
     );
@@ -1307,18 +1308,24 @@ process.exit(1);
     expect(stdout).toContain("Managed branch cleanup diagnostics");
     expect(stdout).toContain("Safe managed candidates (1)");
     expect(stdout).toContain(safeBranch);
-    expect(stdout).toContain(
-      "Next action: Run `archloop tasks cleanup --yes` to delete this safe managed branch.",
+    expect(flattenCliOutput(stdout)).toContain(
+      flattenCliOutput(
+        "Next action: Run `archloop tasks cleanup --yes` to delete this safe managed branch.",
+      ),
     );
     expect(stdout).toContain("Blocked managed candidates (1)");
     expect(stdout).toContain(blockedBranch);
-    expect(stdout).toContain(
-      "Preserve this branch; it existed before Hub claimed the task.",
+    expect(flattenCliOutput(stdout)).toContain(
+      flattenCliOutput(
+        "Preserve this branch; it existed before Hub claimed the task.",
+      ),
     );
     expect(stdout).toContain("Historical unowned candidates (1)");
     expect(stdout).toContain(historicalBranch);
-    expect(stdout).toContain(
-      "Use `archloop tasks cleanup --yes --include-unowned` to include this safe historical branch.",
+    expect(flattenCliOutput(stdout)).toContain(
+      flattenCliOutput(
+        "Use `archloop tasks cleanup --yes --include-unowned` to include this safe historical branch.",
+      ),
     );
   });
 
@@ -1716,7 +1723,8 @@ process.exit(1);
       XDG_DATA_HOME: dataDir,
     });
     expect(renameResult.stdout).toContain("Renamed Hub project alpha to omega");
-    expect(renameResult.stdout).toContain("Project id:");
+    expect(renameResult.stdout).toContain("project · rename");
+    expect(renameResult.stdout).toContain("Project id");
 
     const relinkResult = await runCli(
       `project relink omega --path "${repoB}"`,
@@ -1727,7 +1735,8 @@ process.exit(1);
       },
     );
     expect(relinkResult.stdout).toContain("Relinked Hub project omega");
-    expect(relinkResult.stdout).toContain("Project id:");
+    expect(relinkResult.stdout).toContain("project · relink");
+    expect(relinkResult.stdout).toContain("Project id");
 
     const listResult = await runCli("project list", otherDir, {
       ...process.env,
@@ -2496,7 +2505,9 @@ exit 1
       expect.fail("Expected command to fail");
     } catch (err: unknown) {
       const output = cliFailureOutput(err);
-      expect(output).toContain("did not match a Beads id or an exact task title");
+      expect(output).toContain(
+        "did not match a Beads id or an exact task title",
+      );
       expect(output).not.toContain("out of range");
     }
   });
@@ -2551,7 +2562,7 @@ exit 1
     expect(args).toContain("--metadata");
     expect(args).toContain('"origin":"manual"');
     expect(args).toContain("--json");
-    expect(stdout).toContain("Created Beads task");
+    expect(stdout).toContain("tasks · create");
     expect(stdout).toContain("bd-99");
     expect(stdout).toContain("Manual task");
     expect(stdout).toContain("manual");
@@ -3622,9 +3633,7 @@ exit 1
       hostDir,
       withBdEnv(bdPath, hostDir),
     );
-    expect(idResult.stdout).toContain(
-      "Appended a comment to Beads task bd-2.",
-    );
+    expect(idResult.stdout).toContain("Appended a comment to Beads task bd-2.");
 
     const commentArgs = await readFile(commentArgsFile, "utf-8");
     expect(commentArgs).toContain("comments add bd-2 Comment from title");

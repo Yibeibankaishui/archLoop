@@ -76,11 +76,13 @@ import {
 } from "./presetAgents.js";
 import {
   resolveGitRepoRoot,
-  formatHubProjectStatusLines,
+  buildHubProjectStatusSummaryModel,
+  hubProjectStatusSummaryModelToBlocks,
   resolveHubProjectStatus,
 } from "./projectStatus.js";
 import {
-  formatHubProjectListLines,
+  buildHubProjectListSummaryModel,
+  hubProjectListSummaryModelToBlocks,
   resolveHubProjectListProjections,
 } from "./hubProjectList.js";
 import {
@@ -92,6 +94,12 @@ import {
   formatHubProjectReadinessCheckLines,
 } from "./hubProjectReadinessCheck.js";
 import {
+  buildHubProjectRegisterSummaryModel,
+  buildHubProjectRelinkSummaryModel,
+  buildHubProjectRenameSummaryModel,
+  hubProjectRegisterSummaryModelToBlocks,
+  hubProjectRelinkSummaryModelToBlocks,
+  hubProjectRenameSummaryModelToBlocks,
   listHubProjects,
   registerHubProject,
   relinkHubProject,
@@ -109,9 +117,9 @@ import {
   suggestHubProjectName,
 } from "./hubProjectOnboarding.js";
 import {
+  buildHubProjectConfigureSummaryModel,
   configureHubProjectDevelopmentContract,
-  formatHubProjectDevelopmentContractFactsSummary,
-  resolveHubProjectDevelopmentContractPath,
+  hubProjectConfigureSummaryModelToBlocks,
 } from "./hubProjectDevelopmentContract.js";
 import {
   createHubFlowRunImplementer,
@@ -185,8 +193,10 @@ import type {
 } from "./hubPrdDecomposition.js";
 import {
   buildHubTaskBoardModel,
+  buildHubTaskCreateSummaryModel,
   buildHubTaskDetailModel,
   formatTaskBoardJson,
+  hubTaskCreateSummaryModelToBlocks,
   taskBoardModelToBlocks,
   taskDetailModelToBlocks,
   appendHubTaskComment,
@@ -220,7 +230,12 @@ import {
   syncHubTasksWithGithub,
   syncResultModelToBlocks,
 } from "./hubTaskSync.js";
-import { formatHubRecoveryComment, recoverHubTask } from "./hubTaskRecover.js";
+import {
+  buildHubTaskRecoverSummaryModel,
+  formatHubRecoveryComment,
+  hubTaskRecoverSummaryModelToBlocks,
+  recoverHubTask,
+} from "./hubTaskRecover.js";
 import {
   buildConflictFieldValues,
   buildHubTaskConflictResolveModel,
@@ -239,8 +254,11 @@ import {
   repairHubTaskState,
 } from "./hubTaskStateDoctor.js";
 import {
+  buildHubAgentConfigInitSummaryModel,
+  buildHubAgentConfigSetRoleSummaryModel,
   formatHubAgentConfigShowLines,
-  formatHubAgentRoleOptions,
+  hubAgentConfigInitSummaryModelToBlocks,
+  hubAgentConfigSetRoleSummaryModelToBlocks,
   HUB_AGENT_ROLES,
   listMissingHubAgentRoles,
   readHubAgentConfig,
@@ -256,8 +274,10 @@ import {
   promptInitializeHubAgentConfig,
 } from "./hubAgentConfigPrompt.js";
 import {
+  buildHubEnvSetSummaryModel,
   collectHubEnvKeysForSetup,
   formatHubEnvShowLines,
+  hubEnvSetSummaryModelToBlocks,
   isHubEnvKnownKey,
   normalizeHubEnvValue,
   resolveHubEnv,
@@ -266,10 +286,12 @@ import {
 } from "./hubEnv.js";
 import { promptInitHubEnv, promptInitializeHubEnv } from "./hubEnvPrompt.js";
 import {
+  buildHubAuthLoginSummaryModel,
   ensureHubAuthDir,
   formatHubAuthShowLines,
   getHubAuthEnvVar,
   getHubAuthLoginCommand,
+  hubAuthLoginSummaryModelToBlocks,
   resolveProviderHubAuthDir,
 } from "./hubAuth.js";
 import { isBdAvailable } from "./resolveBdExecutable.js";
@@ -1710,23 +1732,6 @@ const removeImageCommand = Command.make(
 
 // --- Project status command ---
 
-const formatHubProjectStatusRows = (
-  status: Awaited<ReturnType<typeof resolveHubProjectStatus>>,
-): Record<string, string> => ({
-  "Repository root": status.repoRoot,
-  "archLoop user data dir": status.archloopUserDataDir,
-  "Hub project dir": status.hubProjectDir,
-  "Hub project profile": status.projectProfile ?? DEFAULT_PROJECT_PROFILE_NAME,
-  "Hub project development contract": status.projectDevelopmentContractPath
-    ? status.projectDevelopmentContractPath
-    : resolveHubProjectDevelopmentContractPath(status.hubProjectDir),
-  "Hub project registration": status.projectRegistered ? "existing" : "created",
-  "Beads available": status.beadsAvailable ? "yes" : "no",
-  "Task store initialized": status.taskStoreInitialized ? "yes" : "no",
-  "Task board ready": String(status.taskCounts.ready),
-  "Task board total": String(status.taskCounts.total),
-});
-
 const projectTargetOption = Options.text("project").pipe(
   Options.withDescription("Hub project name"),
   Options.optional,
@@ -2108,12 +2113,17 @@ const tasksCreateCommand = Command.make(
         catch: toTaskBoardError,
       });
 
-      yield* d.summary("Created Beads task", {
-        "Beads id": created.id,
-        Title: created.title,
-        Origin: resolvedOrigin,
-        ...(kindValue !== undefined ? { Kind: kindValue } : {}),
-      });
+      yield* d.section(
+        "",
+        hubTaskCreateSummaryModelToBlocks(
+          buildHubTaskCreateSummaryModel({
+            id: created.id,
+            title: created.title,
+            origin: resolvedOrigin,
+            ...(kindValue !== undefined ? { kind: kindValue } : {}),
+          }),
+        ),
+      );
     }),
 );
 
@@ -2550,12 +2560,12 @@ const tasksRecoverCommand = Command.make(
         catch: toTaskBoardError,
       });
 
-      yield* d.summary(`Recovered Beads task ${task.id}`, {
-        Outcome: result.outcome,
-        "Prior status": result.priorStatus,
-        "Hub status": result.hubStatus,
-        Summary: result.summary,
-      });
+      yield* d.section(
+        "",
+        hubTaskRecoverSummaryModelToBlocks(
+          buildHubTaskRecoverSummaryModel({ taskId: task.id, result }),
+        ),
+      );
       yield* d.status(formatHubRecoveryComment(result.summary), "info");
     }),
 );
@@ -3020,16 +3030,16 @@ const projectStatusCommand = Command.make(
         catch: toTaskBoardError,
       });
 
-      yield* d.summary(
-        "Hub project status",
-        formatHubProjectStatusRows(status),
+      yield* d.section(
+        "",
+        hubProjectStatusSummaryModelToBlocks(
+          buildHubProjectStatusSummaryModel({
+            status,
+            cleanupDiagnosticsLines:
+              formatHubManagedBranchCleanupDiagnosticsLines(cleanupEvaluation),
+          }),
+        ),
       );
-      for (const line of formatHubProjectStatusLines(
-        status,
-        formatHubManagedBranchCleanupDiagnosticsLines(cleanupEvaluation),
-      )) {
-        yield* d.text(line);
-      }
     }),
 );
 
@@ -3604,17 +3614,15 @@ const projectAddCommand = Command.make(
         }
       }
 
-      yield* d.summary("Hub project registered", {
-        Name: result.project.name,
-        "Project id": result.project.id,
-        "Repo root": result.project.repoRoot,
-        "Hub project dir": result.project.hubProjectDir,
-        "Project profile": result.project.projectProfile,
-        "Hub project development contract":
-          result.projectDevelopmentContractPath,
-        "Task store initialized": taskStoreInitialized ? "yes" : "no",
-        Selected: result.project.name,
-      });
+      yield* d.section(
+        "",
+        hubProjectRegisterSummaryModelToBlocks(
+          buildHubProjectRegisterSummaryModel({
+            result,
+            taskStoreInitialized,
+          }),
+        ),
+      );
       yield* d.status(
         `Registered Hub project ${result.project.name} and selected it for this CLI.`,
         "success",
@@ -3646,14 +3654,12 @@ const projectListCommand = Command.make("list", {}, () =>
       catch: toHubProjectRegistryError,
     });
 
-    yield* d.summary("Registered Hub projects", {
-      Projects: String(projects.length),
-      Selected: projects.find((project) => project.selected)?.name ?? "none",
-    });
-
-    for (const line of formatHubProjectListLines(projections)) {
-      yield* d.text(line);
-    }
+    yield* d.section(
+      "",
+      hubProjectListSummaryModelToBlocks(
+        buildHubProjectListSummaryModel(projections),
+      ),
+    );
   }),
 );
 
@@ -3722,14 +3728,12 @@ const projectRenameCommand = Command.make(
         catch: toHubProjectRegistryError,
       });
 
-      yield* d.summary("Hub project renamed", {
-        "Project id": result.project.id,
-        "Previous name": result.previousProjectName,
-        "New name": result.project.name,
-        "Repo root": result.project.repoRoot,
-        "Hub project dir": result.project.hubProjectDir,
-        Selected: result.project.name,
-      });
+      yield* d.section(
+        "",
+        hubProjectRenameSummaryModelToBlocks(
+          buildHubProjectRenameSummaryModel(result),
+        ),
+      );
       yield* d.status(
         `Renamed Hub project ${result.previousProjectName} to ${result.project.name}.`,
         "success",
@@ -3756,13 +3760,12 @@ const projectRelinkCommand = Command.make(
         catch: toHubProjectRegistryError,
       });
 
-      yield* d.summary("Hub project relinked", {
-        "Project id": result.project.id,
-        "Previous repo root": result.previousRepoRoot,
-        "New repo root": result.project.repoRoot,
-        "Hub project dir": result.project.hubProjectDir,
-        Selected: result.project.name,
-      });
+      yield* d.section(
+        "",
+        hubProjectRelinkSummaryModelToBlocks(
+          buildHubProjectRelinkSummaryModel(result),
+        ),
+      );
       yield* d.status(
         `Relinked Hub project ${result.project.name} to ${result.project.repoRoot}.`,
         "success",
@@ -3814,19 +3817,17 @@ const projectConfigureCommand = Command.make(
         catch: toProjectStatusError,
       });
 
-      yield* d.summary("Hub project development contract", {
-        "Repository root": status.repoRoot,
-        "Hub project dir": status.hubProjectDir,
-        "Hub project profile": contract.contract.projectProfile,
-        "Hub project development contract": contract.contractPath,
-        "Project facts refreshed":
-          formatHubProjectDevelopmentContractFactsSummary(
-            contract.contract.projectFacts,
-          ),
-        "User-edited setup/verify/context":
-          describeProjectConfigureEditOutcome(contract),
-        "Previous contract backup": contract.backupPath ?? "none",
-      });
+      yield* d.section(
+        "",
+        hubProjectConfigureSummaryModelToBlocks(
+          buildHubProjectConfigureSummaryModel({
+            repoRoot: status.repoRoot,
+            hubProjectDir: status.hubProjectDir,
+            contract,
+            editOutcome: describeProjectConfigureEditOutcome(contract),
+          }),
+        ),
+      );
 
       yield* d.status(describeProjectConfigureStatus(contract), "success");
     }),
@@ -4231,13 +4232,15 @@ const runAgentConfigInit = () =>
       try: () => promptInitHubAgentConfig(),
       catch: toHubAgentConfigError,
     });
-    const configuredRoleCount = HUB_AGENT_ROLES.filter(
-      (role) => config.roles[role] !== undefined,
-    ).length;
-    yield* d.summary("Configured Hub agent roles", {
-      Roles: String(configuredRoleCount),
-      Config: resolveHubAgentConfigPath(),
-    });
+    yield* d.section(
+      "",
+      hubAgentConfigInitSummaryModelToBlocks(
+        buildHubAgentConfigInitSummaryModel({
+          config,
+          configPath: resolveHubAgentConfigPath(),
+        }),
+      ),
+    );
   });
 
 const agentConfigInitCommand = Command.make("init", {}, runAgentConfigInit);
@@ -4283,11 +4286,15 @@ const agentConfigSetRoleCommand = Command.make(
         try: () => setHubAgentRole(role, entry),
         catch: toHubAgentConfigError,
       });
-      yield* d.summary(`Saved Hub agent role ${saved.role}`, {
-        Provider: saved.entry.provider,
-        Model: saved.entry.model,
-        Options: formatHubAgentRoleOptions(saved.entry.options) ?? "(none)",
-      });
+      yield* d.section(
+        "",
+        hubAgentConfigSetRoleSummaryModelToBlocks(
+          buildHubAgentConfigSetRoleSummaryModel({
+            role: saved.role,
+            entry: saved.entry,
+          }),
+        ),
+      );
     }),
 );
 
@@ -4415,7 +4422,12 @@ const envSetCommand = Command.make(
         try: () => upsertHubEnvKey(envKey, envValue),
         catch: toHubEnvError,
       });
-      yield* d.summary(`Saved ${envKey}`, { Path: savedPath });
+      yield* d.section(
+        "",
+        hubEnvSetSummaryModelToBlocks(
+          buildHubEnvSetSummaryModel({ key: envKey, path: savedPath }),
+        ),
+      );
     }),
 );
 
@@ -4511,11 +4523,11 @@ const runHubAuthLogin = (provider: "codex" | "github") =>
           }`,
         }),
     });
-    yield* d.summary(
-      `${provider === "codex" ? "Codex" : "GitHub"} auth saved`,
-      {
-        [envVar]: authDir,
-      },
+    yield* d.section(
+      "",
+      hubAuthLoginSummaryModelToBlocks(
+        buildHubAuthLoginSummaryModel({ provider, envVar, authDir }),
+      ),
     );
   });
 

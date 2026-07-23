@@ -172,13 +172,23 @@ describe("archloop project add interactive onboarding", () => {
     );
     expect(entries).toContainEqual(
       expect.objectContaining({
-        _tag: "summary",
-        title: "Hub project registered",
-        rows: expect.objectContaining({
-          Name: "alpha",
-          "Project profile": "node",
-          "Task store initialized": "yes",
-        }),
+        _tag: "section",
+        blocks: expect.arrayContaining([
+          expect.objectContaining({
+            kind: "kv",
+            rows: expect.arrayContaining([
+              expect.objectContaining({ key: "Name", value: "alpha" }),
+              expect.objectContaining({
+                key: "Project profile",
+                value: "node",
+              }),
+              expect.objectContaining({
+                key: "Task store initialized",
+                value: "yes",
+              }),
+            ]),
+          }),
+        ]),
       }),
     );
 
@@ -251,13 +261,23 @@ describe("archloop project add interactive onboarding", () => {
     expect(mockInitHubTaskStore).not.toHaveBeenCalled();
     expect(entries).toContainEqual(
       expect.objectContaining({
-        _tag: "summary",
-        title: "Hub project registered",
-        rows: expect.objectContaining({
-          Name: "beta",
-          "Project profile": "python",
-          "Task store initialized": "no",
-        }),
+        _tag: "section",
+        blocks: expect.arrayContaining([
+          expect.objectContaining({
+            kind: "kv",
+            rows: expect.arrayContaining([
+              expect.objectContaining({ key: "Name", value: "beta" }),
+              expect.objectContaining({
+                key: "Project profile",
+                value: "python",
+              }),
+              expect.objectContaining({
+                key: "Task store initialized",
+                value: "no",
+              }),
+            ]),
+          }),
+        ]),
       }),
     );
 
@@ -319,12 +339,19 @@ describe("archloop project add interactive onboarding", () => {
     );
     expect(entries).toContainEqual(
       expect.objectContaining({
-        _tag: "summary",
-        title: "Hub project registered",
-        rows: expect.objectContaining({
-          Name: "gamma",
-          "Task store initialized": "no",
-        }),
+        _tag: "section",
+        blocks: expect.arrayContaining([
+          expect.objectContaining({
+            kind: "kv",
+            rows: expect.arrayContaining([
+              expect.objectContaining({ key: "Name", value: "gamma" }),
+              expect.objectContaining({
+                key: "Task store initialized",
+                value: "no",
+              }),
+            ]),
+          }),
+        ]),
       }),
     );
   });

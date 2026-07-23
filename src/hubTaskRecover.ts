@@ -26,6 +26,13 @@ import {
   type HubTaskProjection,
   type HubTaskStatus,
 } from "./taskBoard.js";
+import type {
+  SectionBlock,
+  SectionFooterBlock,
+  SectionHeaderBlock,
+  SectionKvBlock,
+  SectionProseBlock,
+} from "./section.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -439,3 +446,65 @@ export const recoverHubTask = async (
     message: `archloop tasks recover ${input.taskId} found no recoverable failed or stale execution state (status: ${task.hubStatus})`,
   });
 };
+
+// ---------------------------------------------------------------------------
+// tasks recover summary model (Variant C section primitive)
+// ---------------------------------------------------------------------------
+
+const RECOVER_KV_GUTTER = 14;
+
+export interface HubTaskRecoverSummaryModel {
+  readonly header: SectionHeaderBlock;
+  readonly identity: SectionKvBlock;
+  readonly summary: SectionProseBlock;
+  readonly footer: SectionFooterBlock;
+}
+
+export interface BuildHubTaskRecoverSummaryModelInput {
+  readonly taskId: string;
+  readonly result: RecoverHubTaskResult;
+}
+
+export const buildHubTaskRecoverSummaryModel = (
+  input: BuildHubTaskRecoverSummaryModelInput,
+): HubTaskRecoverSummaryModel => {
+  const { taskId, result } = input;
+  const rows: SectionKvBlock["rows"][number][] = [
+    { key: "outcome", value: result.outcome },
+    { key: "prior status", value: result.priorStatus },
+    { key: "hub status", value: result.hubStatus },
+  ];
+
+  return {
+    header: {
+      kind: "header",
+      title: "archLoop",
+      subtitle: `tasks · recover · ${taskId}`,
+      right: result.outcome,
+    },
+    identity: {
+      kind: "kv",
+      gutter: RECOVER_KV_GUTTER,
+      rows,
+    },
+    summary: {
+      kind: "prose",
+      title: "summary",
+      body: result.summary,
+    },
+    footer: {
+      kind: "footer",
+      label: "next",
+      command: `archloop tasks show ${taskId}`,
+    },
+  };
+};
+
+export const hubTaskRecoverSummaryModelToBlocks = (
+  model: HubTaskRecoverSummaryModel,
+): readonly SectionBlock[] => [
+  model.header,
+  model.identity,
+  model.summary,
+  model.footer,
+];
