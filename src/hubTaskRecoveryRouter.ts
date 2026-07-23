@@ -111,17 +111,16 @@ export const routeInterruptedTaskRecovery = (
   const { hubStatus, latestEvent, branchHasUnmergedWork } = input;
 
   const completedPhase = resolvePhaseCompletionStatus(latestEvent);
-  if (completedPhase) {
+  if (completedPhase && latestEvent) {
     // A finished phase is preserved: the task resumes at the phase the
     // success event was advancing it to, and its claim metadata is kept so
     // the resumed-batch merge path (which keys off claim.runId /
     // claim.batchId) can find it. reviewing and waiting_for_merge are
     // claim-required statuses, so the claim must be preserved here.
-    // completedPhase is only defined when latestEvent is present.
     return {
       targetStatus: completedPhase,
       preserveClaim: true,
-      reason: `Recovered interrupted ${hubStatus} task to ${completedPhase} because the ${latestEvent!.type} event shows that phase already completed; preserved claim metadata to resume the remaining phase.`,
+      reason: `Recovered interrupted ${hubStatus} task to ${completedPhase} because the ${latestEvent.type} event shows that phase already completed; preserved claim metadata to resume the remaining phase.`,
     };
   }
 
