@@ -3870,6 +3870,391 @@ process.exit(1);
     });
   });
 
+  it("tasks recover --stale previews batch recovery without mutating (dry run)", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const branch = "archloop/bd-stale-stale-batch-task";
+    const stateFile = join(hostDir, "bd-state.json");
+    const updateArgsFile = join(hostDir, "recover-update-args.txt");
+    await writeFile(updateArgsFile, "");
+    await writeFile(
+      stateFile,
+      JSON.stringify(
+        [
+          {
+            id: "bd-stale",
+            title: "Stale batch task",
+            status: "open",
+            labels: ["reviewing"],
+            metadata: {
+              hubStatus: "reviewing",
+              claim: {
+                runId: "run-stale",
+                batchId: "batch-stale",
+                taskId: "bd-stale",
+                branch,
+                claimedAt: "2026-07-23T00:00:00Z",
+              },
+            },
+          },
+        ],
+        null,
+        2,
+      ),
+    );
+
+    const bdPath = await createMockTool(
+      binDir,
+      "bd",
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = ${JSON.stringify(stateFile)};
+const updateArgsFile = ${JSON.stringify(updateArgsFile)};
+const args = process.argv.slice(2);
+const command = args[0];
+const readState = () => JSON.parse(fs.readFileSync(stateFile, "utf8"));
+const writeState = (state) => fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+const findTask = (state, taskId) => state.find((task) => task.id === taskId);
+
+if (command === "list" && args.includes("--json")) {
+  process.stdout.write(fs.readFileSync(stateFile, "utf8"));
+  process.exit(0);
+}
+if (command === "show") {
+  const task = findTask(readState(), args[1]);
+  if (!task) process.exit(1);
+  process.stdout.write(JSON.stringify([task]));
+  process.exit(0);
+}
+if (command === "update") {
+  fs.appendFileSync(updateArgsFile, args.join(" ") + "\\n");
+  const state = readState();
+  const task = findTask(state, args[1]);
+  if (!task) process.exit(1);
+  const statusIndex = args.indexOf("--status");
+  if (statusIndex >= 0) task.status = args[statusIndex + 1];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") task.labels = [];
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      const label = args[index + 1];
+      if (!task.labels.includes(label)) task.labels.push(label);
+    }
+  }
+  const metadataIndex = args.indexOf("--metadata");
+  if (metadataIndex >= 0) {
+    task.metadata = { ...task.metadata, ...JSON.parse(args[metadataIndex + 1]) };
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--unset-metadata") delete task.metadata[args[index + 1]];
+  }
+  writeState(state);
+  process.exit(0);
+}
+if (command === "comments" && args[1] === "add") {
+  process.exit(0);
+}
+process.exit(1);
+`,
+    );
+
+    const env = withBdEnv(bdPath, hostDir, {
+      XDG_DATA_HOME: join(hostDir, ".test-xdg-data"),
+    });
+    // Seed a run event log showing review already succeeded so the route
+    // advances to waiting_for_merge (claim preserved) rather than re-implement.
+    const context = createHubRunContext({
+      cwd: hostDir,
+      env,
+      branch: "flow/with-review",
+      runId: "run-stale",
+      batchId: "batch-stale",
+    });
+    await writeFile(
+      join(context.runDir, "events", "task.jsonl"),
+      `${JSON.stringify({
+        type: "task_review_succeeded",
+        runId: "run-stale",
+        batchId: "batch-stale",
+        taskId: "bd-stale",
+        branch,
+        createdAt: "2026-07-23T00:00:00.000Z",
+        status: "waiting_for_merge",
+        commitCount: 1,
+      })}\n`,
+    );
+
+    const output = cliFailureOutput(
+      await runCli("tasks recover --stale", hostDir, {
+        ...env,
+        // Non-interactive: no TTY on stdin for the spawned CLI process.
+      }).catch((error) => error),
+    );
+
+    // The dry-run preview is printed before the non-interactive gate fires.
+    expect(output).toContain("Stale execution recovery");
+    expect(output).toContain("Planned recovery for 1 interrupted task");
+    expect(output).toContain("bd-stale: reviewing -> waiting_for_merge");
+    expect(output).toContain("preserve claim");
+    expect(output).toContain("Re-run with --yes to apply");
+    // Dry run did not mutate the task store (no update args recorded).
+    expect(await readFile(updateArgsFile, "utf-8")).toBe("");
+    const [task] = JSON.parse(await readFile(stateFile, "utf-8"));
+    expect(task).toMatchObject({ labels: ["reviewing"] });
+  });
+
+  it("tasks recover --stale --yes applies the batch recovery through the CLI", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const branch = "archloop/bd-stale-stale-batch-task";
+    const stateFile = join(hostDir, "bd-state.json");
+    const updateArgsFile = join(hostDir, "recover-update-args.txt");
+    await writeFile(updateArgsFile, "");
+    await writeFile(
+      stateFile,
+      JSON.stringify(
+        [
+          {
+            id: "bd-stale",
+            title: "Stale batch task",
+            status: "open",
+            labels: ["reviewing"],
+            metadata: {
+              hubStatus: "reviewing",
+              claim: {
+                runId: "run-stale",
+                batchId: "batch-stale",
+                taskId: "bd-stale",
+                branch,
+                claimedAt: "2026-07-23T00:00:00Z",
+              },
+            },
+          },
+        ],
+        null,
+        2,
+      ),
+    );
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = ${JSON.stringify(stateFile)};
+const updateArgsFile = ${JSON.stringify(updateArgsFile)};
+const args = process.argv.slice(2);
+const command = args[0];
+const readState = () => JSON.parse(fs.readFileSync(stateFile, "utf8"));
+const writeState = (state) => fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+const findTask = (state, taskId) => state.find((task) => task.id === taskId);
+
+if (command === "list" && args.includes("--json")) {
+  process.stdout.write(fs.readFileSync(stateFile, "utf8"));
+  process.exit(0);
+}
+if (command === "show") {
+  const task = findTask(readState(), args[1]);
+  if (!task) process.exit(1);
+  process.stdout.write(JSON.stringify([task]));
+  process.exit(0);
+}
+if (command === "update") {
+  fs.appendFileSync(updateArgsFile, args.join(" ") + "\\n");
+  const state = readState();
+  const task = findTask(state, args[1]);
+  if (!task) process.exit(1);
+  const statusIndex = args.indexOf("--status");
+  if (statusIndex >= 0) task.status = args[statusIndex + 1];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") task.labels = [];
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--set-labels") {
+      const label = args[index + 1];
+      if (!task.labels.includes(label)) task.labels.push(label);
+    }
+  }
+  const metadataIndex = args.indexOf("--metadata");
+  if (metadataIndex >= 0) {
+    task.metadata = { ...task.metadata, ...JSON.parse(args[metadataIndex + 1]) };
+  }
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--unset-metadata") delete task.metadata[args[index + 1]];
+  }
+  writeState(state);
+  process.exit(0);
+}
+if (command === "comments" && args[1] === "add") {
+  process.exit(0);
+}
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const env = withBdEnv(bdPath, hostDir, {
+      XDG_DATA_HOME: join(hostDir, ".test-xdg-data"),
+    });
+    const context = createHubRunContext({
+      cwd: hostDir,
+      env,
+      branch: "flow/with-review",
+      runId: "run-stale",
+      batchId: "batch-stale",
+    });
+    await writeFile(
+      join(context.runDir, "events", "task.jsonl"),
+      `${JSON.stringify({
+        type: "task_review_succeeded",
+        runId: "run-stale",
+        batchId: "batch-stale",
+        taskId: "bd-stale",
+        branch,
+        createdAt: "2026-07-23T00:00:00.000Z",
+        status: "waiting_for_merge",
+        commitCount: 1,
+      })}\n`,
+    );
+
+    const { stdout } = await runCli(
+      "tasks recover --stale --yes",
+      hostDir,
+      env,
+    );
+
+    expect(stdout).toContain("Stale execution recovery");
+    expect(stdout).toContain("Applied recovery for 1 task");
+    expect(stdout).toContain("bd-stale: reviewing -> waiting_for_merge");
+    expect(await readFile(updateArgsFile, "utf-8")).toContain(
+      "--set-labels waiting-for-merge",
+    );
+    const [task] = JSON.parse(await readFile(stateFile, "utf-8"));
+    expect(task).toMatchObject({
+      status: "in_progress",
+      labels: ["waiting-for-merge"],
+      metadata: { hubStatus: "waiting_for_merge" },
+    });
+  });
+
+  it("tasks recover --stale requires --yes in non-interactive mode after previewing", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    const branch = "archloop/bd-stale-stale-batch-task";
+    const stateFile = join(hostDir, "bd-state.json");
+    await writeFile(
+      stateFile,
+      JSON.stringify(
+        [
+          {
+            id: "bd-stale",
+            title: "Stale batch task",
+            status: "open",
+            labels: ["reviewing"],
+            metadata: {
+              hubStatus: "reviewing",
+              claim: {
+                runId: "run-stale",
+                batchId: "batch-stale",
+                taskId: "bd-stale",
+                branch,
+                claimedAt: "2026-07-23T00:00:00Z",
+              },
+            },
+          },
+        ],
+        null,
+        2,
+      ),
+    );
+
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/usr/bin/env node
+const fs = require("node:fs");
+const stateFile = ${JSON.stringify(stateFile)};
+const args = process.argv.slice(2);
+const command = args[0];
+if (command === "list" && args.includes("--json")) {
+  process.stdout.write(fs.readFileSync(stateFile, "utf8"));
+  process.exit(0);
+}
+if (command === "show") {
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  const task = state.find((entry) => entry.id === args[1]);
+  if (!task) process.exit(1);
+  process.stdout.write(JSON.stringify([task]));
+  process.exit(0);
+}
+if (command === "comments" && args[1] === "add") {
+  process.exit(0);
+}
+process.exit(1);
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const env = withBdEnv(bdPath, hostDir, {
+      XDG_DATA_HOME: join(hostDir, ".test-xdg-data"),
+    });
+    const context = createHubRunContext({
+      cwd: hostDir,
+      env,
+      branch: "flow/with-review",
+      runId: "run-stale",
+      batchId: "batch-stale",
+    });
+    await writeFile(
+      join(context.runDir, "events", "task.jsonl"),
+      `${JSON.stringify({
+        type: "task_review_succeeded",
+        runId: "run-stale",
+        batchId: "batch-stale",
+        taskId: "bd-stale",
+        branch,
+        createdAt: "2026-07-23T00:00:00.000Z",
+        status: "waiting_for_merge",
+        commitCount: 1,
+      })}\n`,
+    );
+
+    const output = cliFailureOutput(
+      await runCli("tasks recover --stale", hostDir, {
+        ...env,
+        // Non-interactive: no TTY on stdin for the spawned CLI process.
+      }).catch((error) => error),
+    );
+
+    expect(output).toContain("Stale execution recovery");
+    expect(output).toContain("Planned recovery for 1 interrupted task");
+    expect(output).toContain(
+      "Re-run with --yes in non-interactive mode after reviewing the preview",
+    );
+  });
+
   it("tasks delete removes local Beads tasks with --yes", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
     await initRepo(hostDir);

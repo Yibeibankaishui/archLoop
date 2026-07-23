@@ -16,10 +16,14 @@ import {
 } from "./WorktreeLease.js";
 import {
   formatHubRecoveryComment,
+  formatStaleHubTaskRecoveryLines,
   isHubRecoveryComment,
+  planStaleExecutionRecovery,
   recoverHubTask,
+  recoverStaleHubTasks,
 } from "./hubTaskRecover.js";
-import { loadHubTask } from "./taskBoard.js";
+import { loadHubTask, type HubTaskProjection, type HubTaskBoard } from "./taskBoard.js";
+import type { WorktreeLeaseRecord } from "./worktreeLeaseStore.js";
 
 const execAsync = promisify(exec);
 
@@ -87,6 +91,11 @@ const command = args[0];
 const readState = () => JSON.parse(fs.readFileSync(stateFile, "utf8"));
 const writeState = (state) => fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
 const findTask = (state, taskId) => state.find((task) => task.id === taskId);
+
+if (command === "list" && args.includes("--json")) {
+  process.stdout.write(fs.readFileSync(stateFile, "utf8"));
+  process.exit(0);
+}
 
 if (command === "show" && args[1]) {
   const state = readState();
@@ -921,5 +930,350 @@ describe("recoverHubTask event-aware stale execution", () => {
     expect(await readFile(commentArgsFile, "utf-8")).toContain(
       "task_review_succeeded",
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// recoverStaleHubTasks — the `tasks recover --stale` batch path (arch-6y9).
+// Loads the board + worktree leases + run events, detects interrupted
+// executions via the shared detector, and routes each through the event-aware
+// router. Dry-runs by default; applies only with `yes`. Tests inject the board,
+// leases, event resolver, and a capturing recoverTask fake so the orchestration
+// is exercised without a real Beads store (matching the PRD testing guidance).
+// ---------------------------------------------------------------------------
+
+const projection = (
+  overrides: Partial<HubTaskProjection> & { id: string; title: string },
+): HubTaskProjection => ({
+  beadsStatus: "open",
+  hubStatus: "ready_for_agent",
+  claim: undefined,
+  claimState: undefined,
+  labels: [],
+  metadata: {},
+  description: undefined,
+  notes: undefined,
+  comments: [],
+  remoteRefs: [],
+  runRefs: [],
+  ...overrides,
+});
+
+const claim = (taskId: string, branch: string) => ({
+  runId: "run-stale",
+  batchId: "batch-stale",
+  taskId,
+  branch,
+  claimedAt: "2026-07-23T00:00:00Z",
+  raw: {
+    runId: "run-stale",
+    batchId: "batch-stale",
+    taskId,
+    branch,
+    claimedAt: "2026-07-23T00:00:00Z",
+  },
+});
+
+const activeLease = (taskId: string, branch: string): WorktreeLeaseRecord => ({
+  lockFileName: `${branch.replace(/\//g, "-")}.lock`,
+  worktreeName: branch.replace(/\//g, "-"),
+  branch,
+  pid: 999_999,
+  acquiredAt: "2026-07-23T00:00:00Z",
+  owner: { kind: "hub", taskId, runId: "run-stale", batchId: "batch-stale" },
+  state: "active",
+  malformed: false,
+});
+
+describe("recoverStaleHubTasks", () => {
+  it("dry-run previews the planned routing per interrupted task without mutating (story 10)", async () => {
+    const reviewing = projection({
+      id: "bd-review",
+      title: "Review interrupted",
+      hubStatus: "reviewing",
+      claim: claim("bd-review", "archloop/bd-review-review-interrupted"),
+      labels: ["reviewing"],
+    });
+    const implementing = projection({
+      id: "bd-impl",
+      title: "Implement interrupted",
+      hubStatus: "implementing",
+      claim: claim("bd-impl", "archloop/bd-impl-implement-interrupted"),
+      labels: ["implementing"],
+    });
+    const live = projection({
+      id: "bd-live",
+      title: "Still running",
+      hubStatus: "implementing",
+      claim: claim("bd-live", "archloop/bd-live-still-running"),
+      labels: ["implementing"],
+    });
+    const ready = projection({
+      id: "bd-ready",
+      title: "Ready task",
+      hubStatus: "ready_for_agent",
+      labels: ["ready-for-agent"],
+    });
+
+    const applied: string[] = [];
+    const result = await recoverStaleHubTasks({
+      cwd: "/repo",
+      loadBoard: () => ({
+        tasks: [reviewing, implementing, live, ready],
+        groups: [],
+      }),
+      listLeases: () => [activeLease("bd-live", "archloop/bd-live-still-running")],
+      resolveLatestPhaseCompletionEvent: async ({ taskId }) =>
+        taskId === "bd-review"
+          ? phaseCompletionEvent({
+              type: "task_review_succeeded",
+              status: "waiting_for_merge",
+              taskId: "bd-review",
+              branch: "archloop/bd-review-review-interrupted",
+            })
+          : undefined,
+      recoverTask: async () => {
+        applied.push("called");
+        return {} as never;
+      },
+    });
+
+    expect(result.applied).toBe(false);
+    expect(applied).toEqual([]); // dry run never mutates
+    const byId = new Map(result.entries.map((entry) => [entry.taskId, entry]));
+    expect([...byId.keys()].sort()).toEqual(["bd-impl", "bd-review"]);
+
+    const reviewEntry = byId.get("bd-review");
+    expect(reviewEntry?.phase).toBe("reviewing");
+    expect(reviewEntry?.priorStatus).toBe("reviewing");
+    expect(reviewEntry?.targetStatus).toBe("waiting_for_merge");
+    expect(reviewEntry?.preserveClaim).toBe(true);
+    expect(reviewEntry?.reason).toContain("task_review_succeeded");
+    expect(reviewEntry?.outcome).toBeUndefined();
+
+    const implEntry = byId.get("bd-impl");
+    expect(implEntry?.phase).toBe("implementing");
+    expect(implEntry?.targetStatus).toBe("ready_for_agent");
+    expect(implEntry?.preserveClaim).toBe(false);
+  });
+
+  it("applies the recovery per task only when yes is passed and records outcomes (story 9, 11)", async () => {
+    const merging = projection({
+      id: "bd-merge",
+      title: "Merge interrupted",
+      hubStatus: "merging",
+      claim: claim("bd-merge", "archloop/bd-merge-merge-interrupted"),
+      labels: ["merging"],
+    });
+
+    const calls: string[] = [];
+    const result = await recoverStaleHubTasks({
+      cwd: "/repo",
+      yes: true,
+      loadBoard: () => ({ tasks: [merging], groups: [] }),
+      listLeases: () => [],
+      resolveLatestPhaseCompletionEvent: async () =>
+        phaseCompletionEvent({
+          type: "task_review_succeeded",
+          status: "waiting_for_merge",
+          taskId: "bd-merge",
+          branch: "archloop/bd-merge-merge-interrupted",
+        }),
+      recoverTask: async (input) => {
+        calls.push(input.taskId);
+        return {
+          outcome: "recovered_failed",
+          priorStatus: "merging",
+          hubStatus: "waiting_for_merge",
+          summary: "recovered",
+          task: merging,
+        };
+      },
+    });
+
+    expect(result.applied).toBe(true);
+    expect(calls).toEqual(["bd-merge"]);
+    expect(result.entries[0]?.outcome).toBe("recovered_failed");
+  });
+
+  it("reports no interrupted tasks as an empty plan without applying", async () => {
+    const result = await recoverStaleHubTasks({
+      cwd: "/repo",
+      yes: true,
+      loadBoard: () => ({
+        tasks: [
+          projection({
+            id: "bd-ready",
+            title: "Ready",
+            hubStatus: "ready_for_agent",
+          }),
+        ],
+        groups: [],
+      }),
+      listLeases: () => [],
+      recoverTask: async () => {
+        throw new Error("should not be called");
+      },
+    });
+
+    expect(result.applied).toBe(false);
+    expect(result.entries).toEqual([]);
+  });
+
+  it("uses the default board and lease loaders against a real repo (no lease => interrupted)", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-recover-stale-default-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const taskId = "bd-stale-batch";
+    const title = "Stale batch task";
+    const branch = `archloop/${taskId}-stale-batch-task`;
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: taskId,
+        title,
+        status: "open",
+        labels: ["reviewing"],
+        metadata: {
+          hubStatus: "reviewing",
+          claim: claim(taskId, branch),
+        },
+      },
+    ]);
+
+    // No worktree lease exists, so the task is interrupted. Seed a run event log
+    // showing review already succeeded so the route preserves the claim and
+    // advances to waiting_for_merge rather than re-implementing.
+    const { createHash } = await import("node:crypto");
+    const projectId = createHash("sha256")
+      .update(repoDir)
+      .digest("hex")
+      .slice(0, 12);
+    const runDir = join(
+      repoDir,
+      ".test-xdg-data",
+      "archloop",
+      "hub",
+      "projects",
+      projectId,
+      "runs",
+      "run-stale",
+    );
+    mkdirSync(join(runDir, "events"), { recursive: true });
+    writeFileSync(
+      join(runDir, "events", "task.jsonl"),
+      `${JSON.stringify(
+        phaseCompletionEvent({
+          type: "task_review_succeeded",
+          status: "waiting_for_merge",
+          taskId,
+          branch,
+        }),
+      )}\n`,
+    );
+
+    const plan = await recoverStaleHubTasks({
+      cwd: repoDir,
+      env: { ...env, XDG_DATA_HOME: join(repoDir, ".test-xdg-data") },
+      branchHasUnmergedWork: async () => true,
+    });
+
+    expect(plan.applied).toBe(false);
+    expect(plan.entries).toHaveLength(1);
+    expect(plan.entries[0]?.taskId).toBe(taskId);
+    expect(plan.entries[0]?.targetStatus).toBe("waiting_for_merge");
+    expect(plan.entries[0]?.preserveClaim).toBe(true);
+
+    // Dry run did not mutate the task store.
+    const task = loadHubTask(repoDir, taskId, env);
+    expect(task.hubStatus).toBe("reviewing");
+  });
+});
+
+describe("planStaleExecutionRecovery", () => {
+  it("preserves the claim and advances to waiting_for_merge when review succeeded", () => {
+    const task = projection({
+      id: "bd-x",
+      title: "T",
+      hubStatus: "merging",
+    });
+    const plan = planStaleExecutionRecovery(
+      task,
+      phaseCompletionEvent({
+        type: "task_review_succeeded",
+        status: "waiting_for_merge",
+        taskId: "bd-x",
+      }),
+      true,
+    );
+    expect(plan).toMatchObject({
+      priorStatus: "merging",
+      targetStatus: "waiting_for_merge",
+      preserveClaim: true,
+    });
+  });
+
+  it("routes an interrupted task with no event to ready_for_agent and drops the claim", () => {
+    const plan = planStaleExecutionRecovery(
+      projection({ id: "bd-y", title: "T", hubStatus: "implementing" }),
+      undefined,
+      false,
+    );
+    expect(plan.targetStatus).toBe("ready_for_agent");
+    expect(plan.preserveClaim).toBe(false);
+  });
+});
+
+describe("formatStaleHubTaskRecoveryLines", () => {
+  it("reports no interrupted tasks for an empty plan", () => {
+    const lines = formatStaleHubTaskRecoveryLines({ applied: false, entries: [] });
+    expect(lines).toContain("Stale execution recovery");
+    expect(lines).toContain("No interrupted tasks found on the board.");
+  });
+
+  it("labels a dry-run plan as planned and hints at --yes", () => {
+    const lines = formatStaleHubTaskRecoveryLines({
+      applied: false,
+      entries: [
+        {
+          taskId: "bd-a",
+          title: "T",
+          phase: "reviewing",
+          priorStatus: "reviewing",
+          targetStatus: "waiting_for_merge",
+          preserveClaim: true,
+          reason: "review finished",
+        },
+      ],
+    });
+    expect(lines.some((l) => l.includes("Planned recovery for 1"))).toBe(true);
+    expect(lines.some((l) => l.includes("bd-a: reviewing -> waiting_for_merge"))).toBe(
+      true,
+    );
+    expect(lines.some((l) => l.includes("preserve claim"))).toBe(true);
+    expect(lines.some((l) => l.includes("Re-run with --yes"))).toBe(true);
+  });
+
+  it("labels an applied result as applied with the recorded outcome", () => {
+    const lines = formatStaleHubTaskRecoveryLines({
+      applied: true,
+      entries: [
+        {
+          taskId: "bd-a",
+          title: "T",
+          phase: "implementing",
+          priorStatus: "implementing",
+          targetStatus: "ready_for_agent",
+          preserveClaim: false,
+          reason: "fresh retry",
+          outcome: "recovered_failed",
+        },
+      ],
+    });
+    expect(lines.some((l) => l.includes("Applied recovery for 1"))).toBe(true);
+    expect(lines.some((l) => l.includes("release claim"))).toBe(true);
+    expect(lines.some((l) => l.includes("[recovered_failed]"))).toBe(true);
+    expect(lines.some((l) => l.includes("Re-run with --yes"))).toBe(false);
   });
 });
