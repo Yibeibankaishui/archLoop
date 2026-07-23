@@ -797,6 +797,57 @@ describe("recoverHubTask event-aware stale execution", () => {
     );
   });
 
+  it("routes a reviewing HITL-slice task with no success event to ready_for_human and does not claim a human-failure reason", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-recover-hitl-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const taskId = "bd-stale-hitl";
+    const title = "Stale execution task";
+    const branch = `archloop/${taskId}-stale-execution-task`;
+    const stateFile = join(repoDir, "bd-state.json");
+    // A reviewing task with no failure metadata projects as `reviewing` (it
+    // takes the stale-execution path, not the failed path). Its HITL slice
+    // type makes resolveFailedRecoveryTarget diverge from the router's base
+    // ready_for_agent destination to ready_for_human. The override summary
+    // must not claim the divergence came from a human-failure reason.
+    const { env, commentArgsFile } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: taskId,
+        title,
+        status: "open",
+        labels: ["reviewing"],
+        metadata: {
+          hubStatus: "reviewing",
+          slice_type: "HITL",
+          claim: {
+            runId: "run-stale",
+            batchId: "batch-stale",
+            branch,
+            claimedAt: "2026-07-23T00:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const result = await recoverHubTask({
+      cwd: repoDir,
+      taskId,
+      env,
+      resolveLatestPhaseCompletionEvent: async () => undefined,
+      branchHasUnmergedWork: async () => false,
+    });
+
+    const task = loadHubTask(repoDir, taskId, env);
+    expect(result.outcome).toBe("recovered_failed");
+    expect(task.hubStatus).toBe("ready_for_human");
+    expect(task.claim).toBeUndefined();
+    const comment = await readFile(commentArgsFile, "utf-8");
+    expect(comment).toContain("ready_for_human");
+    expect(comment).toContain("overrides the default ready_for_agent");
+    expect(comment).not.toContain("human-failure reason");
+  });
+
   it("reads the phase-completion event from the run event log by default (no injected resolver)", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-recover-rundir-"));
     await initRepo(repoDir);

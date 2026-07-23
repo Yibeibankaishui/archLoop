@@ -28,6 +28,7 @@ import {
 import {
   latestPhaseCompletionEventByTask,
   routeInterruptedTaskRecovery,
+  type InterruptedTaskRecoveryRoute,
 } from "./hubTaskRecoveryRouter.js";
 import {
   appendHubTaskComment,
@@ -426,9 +427,9 @@ const recoverGenericFailedTask = async (
   failureReason: HubFailureReason | undefined,
 ): Promise<RecoverHubTaskResult> => {
   const branch = resolveTaskBranch(task);
-  const branchHasWork = await (
-    input.branchHasUnmergedWork ?? hasBranchUnmergedWork
-  )(input.cwd, branch);
+  const resolveBranchHasUnmergedWork =
+    input.branchHasUnmergedWork ?? hasBranchUnmergedWork;
+  const branchHasWork = await resolveBranchHasUnmergedWork(input.cwd, branch);
 
   if (branchHasWork && task.claim !== undefined) {
     const targetStatus = "waiting_for_merge";
@@ -485,6 +486,31 @@ const releaseStaleClaim = (
   });
 };
 
+/**
+ * Builds the recovery summary for the no-event (fresh retry) stale-execution
+ * branch. The router resolves a base destination of `ready_for_agent`;
+ * `resolveFailedRecoveryTarget` may then override it to `ready_for_human`
+ * (human-failure reason), `wontfix`, or `blocked`. Describe the actual
+ * override rather than assuming every divergence is a human-failure reason.
+ */
+const resolveStaleExecutionSummary = (
+  route: InterruptedTaskRecoveryRoute,
+  targetStatus: HubTaskStatus,
+  failureReason: HubFailureReason | undefined,
+): string => {
+  if (targetStatus === route.targetStatus) {
+    return route.reason;
+  }
+  if (
+    targetStatus === "ready_for_human" &&
+    failureReason !== undefined &&
+    HUMAN_FAILURE_REASONS.has(failureReason)
+  ) {
+    return `${route.reason} Routed to ready_for_human because the task carries a human-failure reason (${failureReason}).`;
+  }
+  return `${route.reason} Routed to ${targetStatus} because the task's metadata overrides the default ready_for_agent destination.`;
+};
+
 const recoverStaleExecutionStatus = async (
   input: RecoverHubTaskInput,
   task: HubTaskProjection,
@@ -502,12 +528,11 @@ const recoverStaleExecutionStatus = async (
   // path, so skip the git call entirely when a finished-phase event is
   // present (it would not change the route).
   const branch = resolveTaskBranch(task);
+  const resolveBranchHasUnmergedWork =
+    input.branchHasUnmergedWork ?? hasBranchUnmergedWork;
   const branchHasUnmergedWork =
     latestEvent === undefined
-      ? await (input.branchHasUnmergedWork ?? hasBranchUnmergedWork)(
-          input.cwd,
-          branch,
-        )
+      ? await resolveBranchHasUnmergedWork(input.cwd, branch)
       : false;
 
   const route = routeInterruptedTaskRecovery({
@@ -546,17 +571,13 @@ const recoverStaleExecutionStatus = async (
   // task whose metadata carries a human-failure reason routes to
   // ready_for_human rather than ready_for_agent. The claim is stripped
   // (ready_for_agent is not claim-preserving).
-  const targetStatus = resolveFailedRecoveryTarget(
-    task,
-    readFailureReason(task),
-  );
+  const failureReason = readFailureReason(task);
+  const targetStatus = resolveFailedRecoveryTarget(task, failureReason);
   const result = recoverToTargetStatus(
     input,
     task,
     targetStatus,
-    targetStatus === route.targetStatus
-      ? route.reason
-      : `${route.reason} Routed to ${targetStatus} because the task carries a human-failure reason.`,
+    resolveStaleExecutionSummary(route, targetStatus, failureReason),
   );
   return recordRecoveryResult(input, result);
 };
