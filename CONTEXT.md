@@ -226,6 +226,10 @@ _Avoid_: "chat" (too generic), "approval prompt" (too narrow), "one-shot proposa
 A group of **tasks** selected together by a **flow** and coordinated through the same implement/review/merge cycle.
 _Avoid_: "iteration" (already one agent invocation), "run" (too broad), "sprint"
 
+**Interrupted execution**:
+A **task** whose **hub status** is still an execution state (`implementing`, `reviewing`, `merging`) but whose owning **worktree lease** is no longer active — the run process died before the phase completed. archLoop routes recovery by consulting the run event log (`task_implementation_succeeded` / `task_review_succeeded`): a finished phase is preserved, an unfinished one retries from `ready_for_agent` reusing the preserved **worktree**.
+_Avoid_: "stuck task" (vague about cause), "orphaned task" (implies no owner metadata, which may still be present), "failed task" (a distinct **hub status** with its own recovery path)
+
 **Flow prompt**:
 A **prompt** owned by a **flow**, used when archLoop runs that **flow** through **archLoop Hub**.
 _Avoid_: "prompt template" (ambiguous with scaffolded prompts), "project prompt"
