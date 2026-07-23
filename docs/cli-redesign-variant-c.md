@@ -326,7 +326,7 @@ Logs /home/bai/.local/share/archloop/hub/projects/8b382f29c45d/runs/run-74cc88e3
     [dim]codex  · 2026-07-19[/]  applied fix for missing null guard in batch dispatch
     [dim]yc.bai · 2026-07-18[/]  spun this off from the parent PRD, see #181
 
-  [dim]next[/]   archloop tasks update 2mr ...   ·   gh pr view 182
+  [dim]tip[/]    archloop tasks comment 2mr   ·   archloop tasks recover 2mr   ·   gh issue view 182
 ```
 
 ### 设计说明

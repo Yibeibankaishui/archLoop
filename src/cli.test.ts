@@ -2269,7 +2269,8 @@ exit 1
     expect(stdout).toContain("comments · 1");
     expect(stdout).toContain("alice");
     expect(stdout).toContain("Looks good");
-    expect(stdout).toContain("archloop tasks update bd-3");
+    expect(stdout).toContain("archloop tasks comment bd-3");
+    expect(stdout).toContain("archloop tasks recover bd-3");
     expect(stdout).toContain("gh issue view 64");
   });
 

@@ -1,9 +1,9 @@
 # CLI task references drop 1-based ordinal input
 
-`archloop tasks show`, `archloop tasks update`, and other task-selecting commands no longer accept a
-"1-based number from `tasks list`" as a task selector. Task selectors are now **Beads id** (e.g.
-`AutoTuneAgent-2mr`) or **exact task title** only. The **Hub task board view** stops displaying the
-ordinal column that produced those numbers.
+`archloop tasks show`, `archloop tasks comment`, `archloop tasks recover`, and other task-selecting
+commands no longer accept a "1-based number from `tasks list`" as a task selector. Task selectors
+are now **Beads id** (e.g. `AutoTuneAgent-2mr`) or **exact task title** only. The **Hub task board
+view** stops displaying the ordinal column that produced those numbers.
 
 ## Decision
 

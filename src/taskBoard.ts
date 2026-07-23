@@ -941,7 +941,7 @@ const assertProjectedHubStatus = (
 ): void => {
   if (task.hubStatus !== expectedStatus) {
     throw new TaskBoardError({
-      message: `archloop tasks update ${task.id} wrote ${expectedStatus}, but the projected Hub task board status is ${task.hubStatus}. Clear stale Beads labels/metadata and retry.`,
+      message: `Hub task transition for ${task.id} wrote ${expectedStatus}, but the projected Hub task board status is ${task.hubStatus}. Run archloop tasks doctor to diagnose, or archloop tasks repair-state ${task.id} to realign state.`,
     });
   }
 };
@@ -959,7 +959,7 @@ const assertCanonicalHubStatusLabel = (
     normalizeKey(statusLabels[0]!) !== normalizeKey(expectedLabel)
   ) {
     throw new TaskBoardError({
-      message: `archloop tasks update ${task.id} wrote ${expectedStatus}, but Beads labels contain ${statusLabels.length} archLoop status labels (${statusLabels.join(", ")}). Expected exactly ${expectedLabel}.`,
+      message: `Hub task transition for ${task.id} wrote ${expectedStatus}, but Beads labels contain ${statusLabels.length} archLoop status labels (${statusLabels.join(", ")}). Expected exactly ${expectedLabel}. Run archloop tasks repair-state ${task.id} to realign labels.`,
     });
   }
 };
@@ -988,7 +988,7 @@ const assertHubTaskClaimPolicy = (
 ): void => {
   if (shouldClearClaimForStatus(expectedStatus) && task.claim !== undefined) {
     throw new TaskBoardError({
-      message: `archloop tasks update ${task.id} wrote ${expectedStatus}, but claim metadata was not cleared.`,
+      message: `Hub task transition for ${task.id} wrote ${expectedStatus}, but claim metadata was not cleared. Run archloop tasks repair-state ${task.id} to realign claim metadata.`,
     });
   }
 
@@ -997,7 +997,7 @@ const assertHubTaskClaimPolicy = (
     (!task.claim?.runId || !task.claim.batchId || !task.claim.branch)
   ) {
     throw new TaskBoardError({
-      message: `archloop tasks update ${task.id} wrote ${expectedStatus}, but claim metadata is missing runId, batchId, or branch.`,
+      message: `Hub task transition for ${task.id} wrote ${expectedStatus}, but claim metadata is missing runId, batchId, or branch. Run archloop tasks recover ${task.id} to re-establish the claim, or archloop tasks repair-state ${task.id} to realign state.`,
     });
   }
 };
@@ -1012,7 +1012,7 @@ const assertHubFailureMetadataPolicy = (
       typeof task.metadata.failureReason !== "string"
     ) {
       throw new TaskBoardError({
-        message: `archloop tasks update ${task.id} wrote failed, but failure metadata is incomplete.`,
+        message: `Hub task transition for ${task.id} wrote failed, but failure metadata is incomplete. Run archloop tasks recover ${task.id} to retry, or archloop tasks repair-state ${task.id} to realign state.`,
       });
     }
     return;
@@ -1024,7 +1024,7 @@ const assertHubFailureMetadataPolicy = (
     task.metadata.failure_reason !== undefined
   ) {
     throw new TaskBoardError({
-      message: `archloop tasks update ${task.id} wrote ${expectedStatus}, but stale failure metadata remains.`,
+      message: `Hub task transition for ${task.id} wrote ${expectedStatus}, but stale failure metadata remains. Run archloop tasks repair-state ${task.id} to clear stale metadata.`,
     });
   }
 };
@@ -1157,13 +1157,18 @@ export const transitionHubTaskStatus = (
   );
 
   appendBdMetadataArg(args, metadata);
-  runBdText(input.cwd, args, `tasks update ${input.taskId}`, input.env);
+  runBdText(input.cwd, args, `tasks transition ${input.taskId}`, input.env);
 
   const metadataKeysToUnset = removedMetadataKeys(task.metadata, metadata);
   if (metadataKeysToUnset.length > 0) {
     const unsetArgs = ["update", input.taskId];
     appendBdUnsetMetadataArgs(unsetArgs, metadataKeysToUnset);
-    runBdText(input.cwd, unsetArgs, `tasks update ${input.taskId}`, input.env);
+    runBdText(
+      input.cwd,
+      unsetArgs,
+      `tasks transition ${input.taskId}`,
+      input.env,
+    );
   }
 
   const updatedTask = loadHubTask(input.cwd, input.taskId, input.env);
@@ -2409,18 +2414,23 @@ const buildTaskDetailFooter = (task: HubTaskProjection): SectionFooterBlock => {
     })
     .find((value): value is number => value !== undefined);
 
+  // `archloop tasks` has no single "update this task" subcommand. Route the
+  // footer to real registered subcommands that mutate or progress a task:
+  // `comment` (add a note) and `recover` (rescue a stale claim). Use a `tip`
+  // (multi-command, exploratory) rather than `next` (single strong pointer)
+  // per ADR-0030, because the right next action depends on the task's state.
+  const commands = [
+    `archloop tasks comment ${task.id}`,
+    `archloop tasks recover ${task.id}`,
+  ];
   if (githubIssue !== undefined) {
-    return {
-      kind: "footer",
-      label: "next",
-      command: `archloop tasks update ${task.id} ... · gh issue view ${githubIssue}`,
-    };
+    commands.push(`gh issue view ${githubIssue}`);
   }
 
   return {
     kind: "footer",
-    label: "next",
-    command: `archloop tasks update ${task.id} ...`,
+    label: "tip",
+    commands,
   };
 };
 

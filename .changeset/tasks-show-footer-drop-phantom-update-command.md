@@ -1,0 +1,5 @@
+---
+"@yibeibankaishui/archloop": patch
+---
+
+Fix phantom `archloop tasks update` command references in the `tasks show` footer and Hub task transition error messages. `archloop tasks update` was never a registered subcommand (running it produced `CommandMismatch: Invalid subcommand`). The `tasks show` footer now points at real registered subcommands (`tip` with `archloop tasks comment <id>` and `archloop tasks recover <id>`, plus `gh issue view <n>` when a `github#` remote ref is present) instead of a non-existent `next` pointer to `archloop tasks update <id> ...`. Hub task transition assertion errors (raised by `recover` / `resolve` / `repair-state` / `triage` / `sync` / `from-prd` / `doctor`) no longer attribute the write to `archloop tasks update`; they now name the transition itself and point at `archloop tasks repair-state <id>` / `archloop tasks recover <id>` / `archloop tasks doctor` for recovery. The internal `bd update` failure label is renamed from `tasks update` to `tasks transition` so user-facing `archloop <label> failed` messages no longer advertise a phantom subcommand.

@@ -323,8 +323,12 @@ describe("task status projection", () => {
     });
     expect(model.footer).toEqual({
       kind: "footer",
-      label: "next",
-      command: "archloop tasks update bd-42 ... · gh issue view 64",
+      label: "tip",
+      commands: [
+        "archloop tasks comment bd-42",
+        "archloop tasks recover bd-42",
+        "gh issue view 64",
+      ],
     });
   });
 
@@ -882,8 +886,8 @@ fs.writeSync(1, JSON.stringify(tasks));
     });
     expect(model.footer).toEqual({
       kind: "footer",
-      label: "next",
-      command: "archloop tasks update bd-7 ...",
+      label: "tip",
+      commands: ["archloop tasks comment bd-7", "archloop tasks recover bd-7"],
     });
   });
 
