@@ -104,6 +104,19 @@ export type ResolveLatestPhaseCompletionEvent = (
   input: Readonly<{ cwd: string; taskId: string; env?: NodeJS.ProcessEnv }>,
 ) => Promise<HubTaskEvent | undefined>;
 
+/**
+ * Build a {@link ResolveLatestPhaseCompletionEvent} that reads a specific Hub
+ * project dir's run event logs. The run-startup auto-recover step uses this with
+ * the `hubProjectDir` it already resolved, so recovery reads the same event log
+ * the run writes to — instead of re-deriving the dir from `cwd` / `env`, which
+ * can diverge when the run uses an explicit `hubProjectDir` (e.g. tests, or a
+ * custom `ARCHLOOP_USER_DATA_DIR`).
+ */
+export const createHubProjectDirPhaseCompletionEventResolver = (
+  hubProjectDir: string,
+): ResolveLatestPhaseCompletionEvent =>
+  async ({ taskId }) => readPhaseCompletionEventsByTask(hubProjectDir).get(taskId);
+
 const defaultResolveLatestPhaseCompletionEvent: ResolveLatestPhaseCompletionEvent =
   async ({ cwd, taskId, env }) => {
     const repoRoot = resolveGitRepoRoot(cwd);

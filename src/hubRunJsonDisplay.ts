@@ -222,6 +222,22 @@ export const createHubRunJsonRenderer = (input: {
           stopReason: result.stopReason,
           exitCode: projection.exitCode,
           logs: result.runDir,
+          ...(result.autoRecoverSummary
+            ? {
+                autoRecover: {
+                  recoveredCount: result.autoRecoverSummary.recoveredCount,
+                  failedCount: result.autoRecoverSummary.failedCount,
+                  recoveries: result.autoRecoverSummary.recoveries.map(
+                    (entry) => ({
+                      taskId: entry.taskId,
+                      priorStatus: entry.priorStatus,
+                      hubStatus: entry.hubStatus,
+                      interruptedPhase: entry.interruptedPhase,
+                    }),
+                  ),
+                },
+              }
+            : {}),
         }),
       ];
     },
