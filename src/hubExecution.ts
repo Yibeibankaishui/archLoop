@@ -559,9 +559,15 @@ export const readHubTaskClaim = (
 // Execution-phase Hub statuses during which a task holds an active claim and
 // is still being worked by a Hub flow (implement -> review -> waiting-for-merge
 // -> merge). A claim held against any of these is in-flight, not stale, and the
-// task must not be re-claimed. Mirrors the execution-phase sets in taskBoard.ts
-// (CLAIM_PRESERVING_STATUSES / CLAIM_REQUIRED_STATUSES) and
-// hubTaskRecover.ts (STALE_EXECUTION_STATUSES).
+// task must not be re-claimed.
+//
+// Matches CLAIM_REQUIRED_STATUSES in taskBoard.ts and hubTaskStateDoctor.ts
+// exactly. It deliberately diverges from two related sets, so do not
+// "reconcile" them: CLAIM_PRESERVING_STATUSES (taskBoard.ts) additionally
+// preserves `failed`, whose claim metadata is kept but treated as stale and
+// released by recovery; STALE_EXECUTION_STATUSES (hubTaskRecover.ts) omits
+// `waiting_for_merge`, a stable external-wait pause rather than an orphaned
+// process state needing reset.
 const ACTIVE_HUB_TASK_CLAIM_STATUSES = new Set([
   "implementing",
   "reviewing",
