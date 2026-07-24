@@ -570,6 +570,42 @@ export const planStaleExecutionRecovery = (
   };
 };
 
+/**
+ * Resolves the task's latest phase-completion event and branch-unmerged-work
+ * signal, then plans the recovery. The router only consults
+ * `branchHasUnmergedWork` on the no-event retry path, so the git call is
+ * skipped entirely when a finished-phase event is present (it would not
+ * change the route).
+ *
+ * Shared by the per-task recover path (`recoverStaleExecutionStatus`) and the
+ * `tasks recover --stale` batch path (`recoverStaleHubTasks`) so the dry-run
+ * preview the user reviews is computed the same way the apply path computes
+ * it — one resolver for both surfaces, no two copies to keep in sync.
+ */
+const resolveStaleExecutionPlan = async (
+  cwd: string,
+  task: HubTaskProjection,
+  env: NodeJS.ProcessEnv | undefined,
+  resolveLatestPhaseCompletionEvent: ResolveLatestPhaseCompletionEvent,
+  branchHasUnmergedWorkResolver:
+    | ((cwd: string, branch: string) => Promise<boolean>)
+    | undefined,
+): Promise<StaleExecutionRecoveryPlan> => {
+  const latestEvent = await resolveLatestPhaseCompletionEvent({
+    cwd,
+    taskId: task.id,
+    env,
+  });
+  const resolveBranchHasUnmergedWork =
+    branchHasUnmergedWorkResolver ?? hasBranchUnmergedWork;
+  const branch = resolveTaskBranch(task);
+  const branchHasUnmergedWork =
+    latestEvent === undefined
+      ? await resolveBranchHasUnmergedWork(cwd, branch)
+      : false;
+  return planStaleExecutionRecovery(task, latestEvent, branchHasUnmergedWork);
+};
+
 const recoverStaleExecutionStatus = async (
   input: RecoverHubTaskInput,
   task: HubTaskProjection,
@@ -577,27 +613,13 @@ const recoverStaleExecutionStatus = async (
   const resolveLatestPhaseCompletionEvent =
     input.resolveLatestPhaseCompletionEvent ??
     defaultResolveLatestPhaseCompletionEvent;
-  const latestEvent = await resolveLatestPhaseCompletionEvent({
-    cwd: input.cwd,
-    taskId: task.id,
-    env: input.env,
-  });
 
-  // The router only consults branchHasUnmergedWork on the no-event retry
-  // path, so skip the git call entirely when a finished-phase event is
-  // present (it would not change the route).
-  const branch = resolveTaskBranch(task);
-  const resolveBranchHasUnmergedWork =
-    input.branchHasUnmergedWork ?? hasBranchUnmergedWork;
-  const branchHasUnmergedWork =
-    latestEvent === undefined
-      ? await resolveBranchHasUnmergedWork(input.cwd, branch)
-      : false;
-
-  const plan = planStaleExecutionRecovery(
+  const plan = await resolveStaleExecutionPlan(
+    input.cwd,
     task,
-    latestEvent,
-    branchHasUnmergedWork,
+    input.env,
+    resolveLatestPhaseCompletionEvent,
+    input.branchHasUnmergedWork,
   );
 
   if (plan.preserveClaim) {
@@ -754,33 +776,21 @@ export const recoverStaleHubTasks = async (
   const interrupted = detectInterruptedHubTaskExecutions(board.tasks, leases);
 
   // Build the dry-run plan first (read-only), so even when applying we return
-  // the same routing the user reviewed. The event + branch lookups are needed
-  // to compute the route; reuse the per-task resolver conventions. `cwd` is the
-  // repo root in the CLI path (resolved before this function is called); the
-  // injected-fake tests bypass these defaults with a non-git cwd.
+  // the same routing the user reviewed. `resolveStaleExecutionPlan` is the
+  // shared resolver used by the per-task path, so the preview and the apply
+  // compute the route the same way. `cwd` is the repo root in the CLI path
+  // (resolved before this function is called); the injected-fake tests bypass
+  // these defaults with a non-git cwd.
   const plans = await Promise.all(
     interrupted.map(async (entry: InterruptedHubTaskExecution) => {
-      const latestEvent = await resolveLatestPhaseCompletionEvent({
+      const plan = await resolveStaleExecutionPlan(
         cwd,
-        taskId: entry.taskId,
-        env: input.env,
-      });
-      const branch = resolveTaskBranch(entry.task);
-      const branchHasUnmergedWork =
-        latestEvent === undefined
-          ? await resolveBranchHasUnmergedWork(cwd, branch)
-          : false;
-      const plan = planStaleExecutionRecovery(
         entry.task,
-        latestEvent,
-        branchHasUnmergedWork,
+        input.env,
+        resolveLatestPhaseCompletionEvent,
+        resolveBranchHasUnmergedWork,
       );
-      return {
-        entry,
-        plan,
-        latestEvent,
-        branchHasUnmergedWork,
-      };
+      return { entry, plan };
     }),
   );
 
