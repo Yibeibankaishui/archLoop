@@ -1927,6 +1927,49 @@ describe("buildHubManagedBranchCleanupModel", () => {
       "safe historical branch included by --include-unowned",
     );
   });
+
+  it("keeps unowned skip reasons in detailDim without duplicating the trailing hint", () => {
+    const evaluation: HubManagedBranchCleanupEvaluation = {
+      ...sampleCleanupEvaluation,
+      unownedCandidates: [
+        {
+          branch: "archloop/unowned-dirty",
+          exists: true,
+          mergedIntoTarget: false,
+          worktreePaths: [],
+          activeLeases: [],
+          skipReasons: [
+            {
+              reason: "missing_ownership",
+              message:
+                "Branch archloop/unowned-dirty has no Hub-managed ownership record.",
+            },
+            {
+              reason: "unmerged_work",
+              message: "Branch archloop/unowned-dirty has unmerged commits.",
+            },
+          ],
+        },
+      ],
+    };
+
+    const withoutFlag = buildHubManagedBranchCleanupModel(evaluation);
+    expect(withoutFlag.groups[2]?.items[0]).toEqual({
+      id: "historical",
+      title: "archloop/unowned-dirty",
+      trailingDim: "Use --include-unowned to delete safe historical branches",
+      detailDim: "Branch archloop/unowned-dirty has unmerged commits.",
+    });
+
+    const withFlag = buildHubManagedBranchCleanupModel(evaluation, {
+      includeUnowned: true,
+    });
+    expect(withFlag.groups[2]?.items[0]).toEqual({
+      id: "historical",
+      title: "archloop/unowned-dirty",
+      detailDim: "Branch archloop/unowned-dirty has unmerged commits.",
+    });
+  });
 });
 
 describe("hubManagedBranchCleanupModelToBlocks / formatHubManagedBranchCleanupLines (presentation)", () => {

@@ -1359,28 +1359,33 @@ const selectSafeHistoricalCleanupCandidates = (
 ): readonly HubManagedBranchCleanupCandidate[] =>
   evaluation.unownedCandidates.filter(canDeleteHistoricalCandidate);
 
-const formatHistoricalCleanupCandidateNote = (
+/** Opt-in hint for the unowned group; skip reasons live in `detailDim`. */
+const formatUnownedCleanupTrailingHint = (
   candidate: HubManagedBranchCleanupCandidate,
   includeUnowned: boolean,
 ): string => {
-  const historicalSafe = canDeleteHistoricalCandidate(candidate);
-  const reasonSuffix = formatCleanupReasonSuffix(candidate.skipReasons);
-
-  if (includeUnowned && historicalSafe) {
-    return "safe historical branch included by --include-unowned";
+  if (canDeleteHistoricalCandidate(candidate)) {
+    return includeUnowned
+      ? "safe historical branch included by --include-unowned"
+      : "Use --include-unowned to delete safe historical branches";
   }
 
-  if (historicalSafe) {
-    return "Use --include-unowned to delete safe historical branches";
-  }
-
-  if (includeUnowned) {
-    return reasonSuffix;
-  }
-
-  const prefix = "Use --include-unowned to delete safe historical branches";
-  return reasonSuffix.length > 0 ? `${prefix}; ${reasonSuffix}` : prefix;
+  // Unsafe historical branches cannot be deleted via --include-unowned.
+  // Keep the opt-in hint only when the flag is off; when it is on, reasons alone
+  // explain why the branch stays (see `detailDim`).
+  return includeUnowned
+    ? ""
+    : "Use --include-unowned to delete safe historical branches";
 };
+
+const formatNonOwnershipCleanupReasons = (
+  candidate: HubManagedBranchCleanupCandidate,
+): string =>
+  formatCleanupReasonSuffix(
+    candidate.skipReasons.filter(
+      (detail) => detail.reason !== "missing_ownership",
+    ),
+  );
 
 const formatHistoricalCleanupNextAction = (
   options?: FormatHubManagedBranchCleanupDiagnosticsLinesOptions,
@@ -1476,45 +1481,78 @@ const appendCleanupDiagnosticsSection = (
 
 const CLEANUP_KV_GUTTER = 8;
 
+type CleanupGroupItem = SectionGroupBlock["items"][number];
+
 const cleanupOwnershipLabel = (
   candidate: HubManagedBranchCleanupCandidate,
 ): string => (candidate.ownership ? candidate.ownership.taskId : "managed");
 
-const toCleanupSafeGroupItem = (
+const toCleanupManagedGroupItem = (
   candidate: HubManagedBranchCleanupCandidate,
-): SectionGroupBlock["items"][number] => ({
+  detailDim?: string,
+): CleanupGroupItem => ({
   id: cleanupOwnershipLabel(candidate),
   title: candidate.branch,
+  ...(detailDim && detailDim.length > 0 ? { detailDim } : {}),
 });
+
+const toCleanupSafeGroupItem = (
+  candidate: HubManagedBranchCleanupCandidate,
+): CleanupGroupItem => toCleanupManagedGroupItem(candidate);
 
 const toCleanupBlockedGroupItem = (
   candidate: HubManagedBranchCleanupCandidate,
-): SectionGroupBlock["items"][number] => {
-  const reasons = formatCleanupReasonSuffix(candidate.skipReasons);
-  return {
-    id: cleanupOwnershipLabel(candidate),
-    title: candidate.branch,
-    ...(reasons.length > 0 ? { detailDim: reasons } : {}),
-  };
-};
+): CleanupGroupItem =>
+  toCleanupManagedGroupItem(
+    candidate,
+    formatCleanupReasonSuffix(candidate.skipReasons),
+  );
 
 const toCleanupUnownedGroupItem = (
   candidate: HubManagedBranchCleanupCandidate,
   includeUnowned: boolean,
-): SectionGroupBlock["items"][number] => {
-  const note = formatHistoricalCleanupCandidateNote(candidate, includeUnowned);
-  const reasons = formatCleanupReasonSuffix(
-    candidate.skipReasons.filter(
-      (detail) => detail.reason !== "missing_ownership",
-    ),
+): CleanupGroupItem => {
+  const trailingDim = formatUnownedCleanupTrailingHint(
+    candidate,
+    includeUnowned,
   );
+  const detailDim = formatNonOwnershipCleanupReasons(candidate);
   return {
     id: "historical",
     title: candidate.branch,
-    ...(note.length > 0 ? { trailingDim: note } : {}),
-    ...(reasons.length > 0 ? { detailDim: reasons } : {}),
+    ...(trailingDim.length > 0 ? { trailingDim } : {}),
+    ...(detailDim.length > 0 ? { detailDim } : {}),
   };
 };
+
+const optionalCleanupProse = (
+  body: string | undefined,
+): SectionProseBlock | undefined =>
+  body === undefined || body.length === 0
+    ? undefined
+    : { kind: "prose", body };
+
+const deletedBranchesProse = (
+  label: string,
+  branches: readonly string[] | undefined,
+): SectionProseBlock | undefined =>
+  branches && branches.length > 0
+    ? { kind: "prose", body: `${label}: ${branches.join(", ")}` }
+    : undefined;
+
+const buildCleanupGroup = (
+  symbol: SectionGroupBlock["symbol"],
+  severity: SectionSeverity,
+  name: string,
+  items: readonly CleanupGroupItem[],
+): SectionGroupBlock => ({
+  kind: "group",
+  symbol,
+  severity,
+  name,
+  count: items.length,
+  items,
+});
 
 export interface HubManagedBranchCleanupModel {
   readonly header: SectionHeaderBlock;
@@ -1557,54 +1595,23 @@ export const buildHubManagedBranchCleanupModel = (
         { key: "head", value: evaluation.targetHead },
       ],
     },
-    preview:
+    preview: optionalCleanupProse(
       options?.dryRun === true
-        ? {
-            kind: "prose",
-            body: "Preview: no git refs will be deleted.",
-          }
+        ? "Preview: no git refs will be deleted."
         : undefined,
-    deletedManaged:
-      options?.deletedManagedBranches &&
-      options.deletedManagedBranches.length > 0
-        ? {
-            kind: "prose",
-            body: `Deleted managed branches: ${options.deletedManagedBranches.join(", ")}`,
-          }
-        : undefined,
-    deletedHistorical:
-      options?.deletedHistoricalBranches &&
-      options.deletedHistoricalBranches.length > 0
-        ? {
-            kind: "prose",
-            body: `Deleted historical branches: ${options.deletedHistoricalBranches.join(", ")}`,
-          }
-        : undefined,
+    ),
+    deletedManaged: deletedBranchesProse(
+      "Deleted managed branches",
+      options?.deletedManagedBranches,
+    ),
+    deletedHistorical: deletedBranchesProse(
+      "Deleted historical branches",
+      options?.deletedHistoricalBranches,
+    ),
     groups: [
-      {
-        kind: "group",
-        symbol: "✓",
-        severity: "success",
-        name: "safe managed",
-        count: safeItems.length,
-        items: safeItems,
-      },
-      {
-        kind: "group",
-        symbol: "!",
-        severity: "warn",
-        name: "blocked managed",
-        count: blockedItems.length,
-        items: blockedItems,
-      },
-      {
-        kind: "group",
-        symbol: "●",
-        severity: "info",
-        name: "unowned historical",
-        count: unownedItems.length,
-        items: unownedItems,
-      },
+      buildCleanupGroup("✓", "success", "safe managed", safeItems),
+      buildCleanupGroup("!", "warn", "blocked managed", blockedItems),
+      buildCleanupGroup("●", "info", "unowned historical", unownedItems),
     ],
   };
 };
@@ -1621,11 +1628,7 @@ export const hubManagedBranchCleanupModelToBlocks = (
   ...model.groups,
 ];
 
-/**
- * Plain, grep-friendly cleanup text via `flattenSectionForLog`. Live CLI uses
- * the same blocks through `d.section` (palette already degrades under NO_COLOR /
- * non-TTY / `--plain`).
- */
+/** Plain cleanup text via the same blocks the live CLI renders with `d.section`. */
 export const formatHubManagedBranchCleanupLines = (
   evaluation: HubManagedBranchCleanupEvaluation,
   options?: FormatHubManagedBranchCleanupLinesOptions,
