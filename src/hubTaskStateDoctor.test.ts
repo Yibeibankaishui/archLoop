@@ -248,7 +248,7 @@ describe("doctorHubTaskState", () => {
       branch,
       pid: 4242,
       acquiredAt: "2026-06-22T10:00:00.000Z",
-      owner: { kind: "hub", taskId: "", branch },
+      owner: { kind: "hub", taskId: "" },
       state: "stale",
       malformed: false,
     },
@@ -407,7 +407,7 @@ describe("doctorHubTaskState", () => {
           branch,
           pid: 4242,
           acquiredAt: "2026-06-22T10:00:00.000Z",
-          owner: { kind: "hub", taskId: "bd-live-review", branch },
+          owner: { kind: "hub", taskId: "bd-live-review" },
           state: "active",
           malformed: false,
         },
@@ -553,6 +553,91 @@ describe("doctorHubTaskState", () => {
           "Review/merge already finished — run archloop tasks recover bd-evt-review to advance.",
       }),
     );
+  });
+
+  it("reports an interrupted merging task with a stale lease as interrupted_execution", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-task-doctor-interrupted-merging-"),
+    );
+    await initRepo(repoDir);
+    const branch = "archloop/bd-int-merging-interrupted-merge";
+
+    const { env } = await writeMockBd(repoDir, [
+      {
+        id: "bd-int-merging",
+        title: "Interrupted merge",
+        status: "in_progress",
+        labels: ["merging"],
+        metadata: {
+          hubStatus: "merging",
+          claim: {
+            runId: "run-int-merging",
+            batchId: "batch-int-merging",
+            branch,
+            claimedAt: "2026-06-22T10:00:00.000Z",
+          },
+        },
+      },
+    ]);
+
+    const result = await doctorHubTaskState({
+      cwd: repoDir,
+      env,
+      branchInspector: async () => ({
+        exists: true,
+        hasUnmergedWork: false,
+      }),
+      worktreeInspector: async () => ({
+        dirtySourceFiles: [],
+        dirtyTaskStoreFiles: [],
+      }),
+      listWorktreeLeases: () => buildStaleLease(branch),
+    });
+
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-int-merging",
+        reason: "interrupted_execution",
+        repairable: false,
+        currentStatus: "merging",
+        branch,
+        nextAction:
+          "Implement was interrupted — run archloop tasks recover bd-int-merging to retry.",
+      }),
+    );
+    expect(
+      result.diagnostics.filter(
+        (diagnostic) => diagnostic.taskId === "bd-int-merging",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("labels interrupted_execution diagnostics with a recover action, not 'rerun flow'", () => {
+    // The interrupted_execution nextAction leads with prose ("Implement was
+    // interrupted — run archloop tasks recover <id>"), not the recover command
+    // prefix, so the formatter must still classify it as a recovery action and
+    // not fall through to the generic "rerun flow" label.
+    const lines = formatHubTaskStateDoctorLines({
+      diagnostics: [
+        {
+          taskId: "bd-render",
+          title: "Render check",
+          reason: "interrupted_execution",
+          message:
+            "Task bd-render is stuck in reviewing with a stale worktree lease and no phase-completion event; recover to retry the interrupted execution.",
+          nextAction:
+            "Implement was interrupted — run archloop tasks recover bd-render to retry.",
+          repairable: false,
+          currentStatus: "reviewing",
+          branch: "archloop/bd-render-render-check",
+        },
+      ],
+      managedBranchCleanupDiagnostics: [],
+    });
+
+    expect(lines.join("\n")).toContain("bd-render: interrupted_execution");
+    expect(lines.join("\n")).toContain("archloop tasks recover bd-render");
+    expect(lines.join("\n")).not.toContain("next action: rerun flow");
   });
 
   it("previews repair-state mutations without mutating Beads by default", async () => {

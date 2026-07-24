@@ -740,6 +740,13 @@ const actionLabel = (diagnostic: HubTaskStateDiagnostic): string => {
   if (diagnostic.nextAction.startsWith("archloop tasks push")) {
     return "push task sync";
   }
+  if (diagnostic.reason === "interrupted_execution") {
+    // The interrupted_execution nextAction leads with prose ("Implement was
+    // interrupted — run archloop tasks recover <id>"), so the recover-prefix
+    // check above does not match it. Classify it by reason so the rendered
+    // action reflects recovery, not the generic "rerun flow" fallback.
+    return "recover interrupted task";
+  }
   if (diagnostic.nextAction.startsWith("Wait")) {
     return "wait for execution";
   }
