@@ -8,7 +8,7 @@ import { Effect } from "effect";
 import { FileSystem } from "@effect/platform";
 import { NodeFileSystem } from "@effect/platform-node";
 import { describe, expect, it, vi } from "vitest";
-import { appendHubBatchEvent, createHubRunContext } from "./hubExecution.js";
+import { appendHubBatchEvent, appendHubTaskEvent, createHubRunContext } from "./hubExecution.js";
 import {
   createHubRunDisplayState,
   formatPlainHubRunEvent,
@@ -155,7 +155,7 @@ const writeMockBd = async (
   repoDir: string,
   stateFile: string,
   initialTasks: MockBeadsTask[],
-  options: { readonly argsFile?: string } = {},
+  options: { readonly argsFile?: string; readonly commentsFile?: string } = {},
 ) => {
   seedHubTaskStoreMetadata(repoDir);
   const binDir = join(repoDir, "bin");
@@ -246,21 +246,44 @@ if (command === "update" && id) {
   process.exit(0);
 }
 
+if (command === "comments" && id === "add") {
+  const taskId = args[2];
+  const body = args.slice(3).join(" ");
+  const commentsFile =
+    process.env.BD_COMMENT_ARGS_FILE ??
+    require("node:path").join(stateFile, "..", "bd-comments.txt");
+  fs.appendFileSync(commentsFile, body + "\\n");
+  const state = readState();
+  const task = findTask(state, taskId);
+  if (task) {
+    task.comments = task.comments ?? [];
+    task.comments.push({ body });
+    writeState(state);
+  }
+  process.exit(0);
+}
+
 process.exit(1);
 `,
   );
   await chmod(bdPath, 0o755);
 
+  const commentsFile =
+    options.commentsFile ?? join(repoDir, ".beads", "bd-comments.txt");
+  await writeFile(commentsFile, "");
+
   return {
     binDir,
     argsFile,
     stateFile,
+    commentsFile,
     env: {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH ?? ""}`,
       ARCHLOOP_BD_PATH: bdPath,
       BD_STATE_FILE: stateFile,
       BD_ARGS_FILE: argsFile,
+      BD_COMMENT_ARGS_FILE: commentsFile,
     },
   };
 };
@@ -1258,6 +1281,13 @@ describe("Hub flow planner", () => {
       env,
       batchStrategy: "limited",
       maxTasks: 2,
+      // This test exercises the planner's max-tasks selection in isolation.
+      // bd-claimed is an in-progress (implementing) fixture the planner must
+      // skip; without this flag the run-startup auto-recover step would recover
+      // it (it has no live lease, so the detector treats it as interrupted) and
+      // the planner would select it, conflating two features. Auto-recover is
+      // covered by its own dedicated tests below.
+      autoRecover: false,
       implementer: async (input) => {
         invocations.push(input);
         return {
@@ -3961,4 +3991,363 @@ describe("with-review Hub flow execution", () => {
       implementationWork: "existing_unmerged_work",
     });
   });
+});
+
+describe("run startup auto-recover of interrupted tasks", () => {
+  it("auto-recovers a merging task whose review already succeeded to waiting_for_merge and resumes the merge", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-autorecover-merge-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const oldRunId = "run-auto-merge";
+    const oldBatchId = "batch-auto-merge";
+    const taskId = "bd-auto-merge";
+    const title = "Auto recover merge";
+    const branch = resolveHubTaskBranch(taskId, title);
+    const stateFile = join(repoDir, "bd-state.json");
+    // A merging task whose run was interrupted mid-merge. Its review already
+    // completed (the task_review_succeeded event fired), so the event-aware
+    // router must recover it to waiting_for_merge — preserving the claim so the
+    // resumed-batch merge path can find it — rather than resetting it to
+    // ready_for_agent and re-implementing finished work.
+    const { env, commentsFile } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: taskId,
+        title,
+        status: "in_progress",
+        labels: ["merging"],
+        metadata: {
+          hubStatus: "merging",
+          claim: {
+            runId: oldRunId,
+            batchId: oldBatchId,
+            branch,
+            claimedAt: "2026-07-23T00:00:00Z",
+          },
+        },
+      },
+    ]);
+    await execAsync("git add bin bd-state.json bd-args.txt", {
+      cwd: repoDir,
+    });
+    await execAsync('git commit -m "add mock task store"', { cwd: repoDir });
+
+    const hubProjectDir = await mkdtemp(
+      join(tmpdir(), "hub-flow-autorecover-merge-data-"),
+    );
+    const oldContext = createHubRunContext({
+      cwd: repoDir,
+      hubProjectDir,
+      branch: "flow/no-review",
+      runId: oldRunId,
+      batchId: oldBatchId,
+    });
+    // The interrupted run had already planned the batch and recorded the review
+    // success before being killed mid-merge.
+    appendHubBatchEvent(oldContext.runDir, {
+      type: "batch_planned",
+      runId: oldRunId,
+      batchId: oldBatchId,
+      flowId: "no-review",
+      createdAt: "2026-07-23T00:00:00Z",
+      taskIds: [taskId],
+    });
+    appendHubTaskEvent(oldContext.runDir, {
+      type: "task_review_succeeded",
+      runId: oldRunId,
+      batchId: oldBatchId,
+      taskId,
+      branch,
+      createdAt: "2026-07-23T00:01:00Z",
+      status: "waiting_for_merge",
+    });
+
+    // The branch carries the finished work the interrupted merge never landed.
+    await execAsync(`git checkout -b ${branch}`, { cwd: repoDir });
+    await commitFile(repoDir, "work.txt", "work", "finished work");
+    await execAsync("git checkout main", { cwd: repoDir });
+
+    const mergedTaskIds: string[] = [];
+    const result = await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      implementer: async () => {
+        throw new Error("implementer should not run for an interrupted merge");
+      },
+      merger: async (input) => {
+        mergedTaskIds.push(input.taskId);
+        return { outcome: "success" };
+      },
+      verifier: async () => ({ outcome: "success" }),
+    });
+
+    // Auto-recover ran at startup and reported the single recovery.
+    expect(result.autoRecoverSummary).toBeDefined();
+    expect(result.autoRecoverSummary?.recoveredCount).toBe(1);
+    expect(result.autoRecoverSummary?.recoveries[0]).toMatchObject({
+      taskId,
+      priorStatus: "merging",
+      hubStatus: "waiting_for_merge",
+    });
+
+    // The recovered waiting_for_merge task was resumed by the merge path, not
+    // re-implemented.
+    expect(mergedTaskIds).toEqual([taskId]);
+    expect(result.resumedBatchId).toBe(oldBatchId);
+    expect(result.completedTaskCount).toBe(1);
+    expect(result.stopReason).toBe("no_ready_tasks");
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(finalState[0]?.metadata.hubStatus).not.toBe("merging");
+    expect(await readFile(commentsFile, "utf-8")).toContain(
+      "task_review_succeeded",
+    );
+  }, 20000);
+
+  it("auto-recovers a reviewing task whose implementation already succeeded to reviewing and does not re-implement it", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-autorecover-review-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const oldRunId = "run-auto-review";
+    const oldBatchId = "batch-auto-review";
+    const taskId = "bd-auto-review";
+    const title = "Auto recover review";
+    const branch = resolveHubTaskBranch(taskId, title);
+    const stateFile = join(repoDir, "bd-state.json");
+    // A reviewing task whose run was interrupted mid-review. Its implementation
+    // already completed (the reviewer-flow task_implementation_succeeded event
+    // with status=reviewing fired), so the router must recover it to reviewing
+    // and preserve the claim — never re-implementing the finished work (story 3).
+    const { env, commentsFile } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: taskId,
+        title,
+        status: "in_progress",
+        labels: ["reviewing"],
+        metadata: {
+          hubStatus: "reviewing",
+          claim: {
+            runId: oldRunId,
+            batchId: oldBatchId,
+            branch,
+            claimedAt: "2026-07-23T00:00:00Z",
+          },
+        },
+      },
+    ]);
+    await execAsync("git add bin bd-state.json bd-args.txt", {
+      cwd: repoDir,
+    });
+    await execAsync('git commit -m "add mock task store"', { cwd: repoDir });
+
+    const hubProjectDir = await mkdtemp(
+      join(tmpdir(), "hub-flow-autorecover-review-data-"),
+    );
+    const oldContext = createHubRunContext({
+      cwd: repoDir,
+      hubProjectDir,
+      branch: "flow/with-review",
+      runId: oldRunId,
+      batchId: oldBatchId,
+    });
+    appendHubTaskEvent(oldContext.runDir, {
+      type: "task_implementation_succeeded",
+      runId: oldRunId,
+      batchId: oldBatchId,
+      taskId,
+      branch,
+      createdAt: "2026-07-23T00:01:00Z",
+      status: "reviewing",
+    });
+
+    const implementer = vi.fn<HubFlowImplementer>(async () => ({
+      outcome: "success",
+      commits: [{ sha: "abc" }],
+      completionSignal: "<promise>COMPLETE</promise>",
+    }));
+    const result = await runHubFlow({
+      flowId: "with-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      implementer,
+      reviewer: async () => {
+        throw new Error("reviewer should not run for an auto-recovered review");
+      },
+      runMergePhase: false,
+    });
+
+    expect(result.autoRecoverSummary?.recoveredCount).toBe(1);
+    expect(result.autoRecoverSummary?.recoveries[0]).toMatchObject({
+      taskId,
+      priorStatus: "reviewing",
+      hubStatus: "reviewing",
+    });
+
+    // The finished implementation was never re-implemented: the planner does not
+    // select reviewing tasks, so nothing ran.
+    expect(implementer).not.toHaveBeenCalled();
+    expect(result.selectedTaskIds).toEqual([]);
+    expect(result.stopReason).toBe("no_ready_tasks");
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(finalState[0]?.metadata.hubStatus).toBe("reviewing");
+    expect(
+      (finalState[0]?.metadata.claim as { runId?: string } | undefined)?.runId,
+    ).toBe(oldRunId);
+    expect(await readFile(commentsFile, "utf-8")).toContain(
+      "task_implementation_succeeded",
+    );
+  }, 20000);
+
+  it("auto-recovers an interrupted implementing task with no success event to ready_for_agent and the planner re-implements it", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-autorecover-retry-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const oldRunId = "run-auto-retry";
+    const oldBatchId = "batch-auto-retry";
+    const taskId = "bd-auto-retry";
+    const title = "Auto recover retry";
+    const branch = resolveHubTaskBranch(taskId, title);
+    const stateFile = join(repoDir, "bd-state.json");
+    // An implementing task interrupted before any phase finished (no success
+    // event, no branch commits). The router recovers it to ready_for_agent and
+    // drops the claim; the planner then selects it and re-implements it.
+    const { env, commentsFile } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: taskId,
+        title,
+        status: "in_progress",
+        labels: ["implementing"],
+        metadata: {
+          hubStatus: "implementing",
+          claim: {
+            runId: oldRunId,
+            batchId: oldBatchId,
+            branch,
+            claimedAt: "2026-07-23T00:00:00Z",
+          },
+        },
+      },
+    ]);
+    await execAsync("git add bin bd-state.json bd-args.txt", {
+      cwd: repoDir,
+    });
+    await execAsync('git commit -m "add mock task store"', { cwd: repoDir });
+
+    const hubProjectDir = await mkdtemp(
+      join(tmpdir(), "hub-flow-autorecover-retry-data-"),
+    );
+    createHubRunContext({
+      cwd: repoDir,
+      hubProjectDir,
+      branch: "flow/no-review",
+      runId: oldRunId,
+      batchId: oldBatchId,
+    });
+    // No phase-completion event and no branch commits: the task retries fresh.
+
+    const implementer = vi.fn<HubFlowImplementer>(async () => ({
+      outcome: "success",
+      commits: [{ sha: "abc" }],
+      completionSignal: "<promise>COMPLETE</promise>",
+    }));
+    const result = await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      implementer,
+      runMergePhase: false,
+    });
+
+    expect(result.autoRecoverSummary?.recoveredCount).toBe(1);
+    expect(result.autoRecoverSummary?.recoveries[0]).toMatchObject({
+      taskId,
+      priorStatus: "implementing",
+      hubStatus: "ready_for_agent",
+    });
+
+    // The recovered ready_for_agent task was selected and re-implemented.
+    expect(implementer).toHaveBeenCalledTimes(1);
+    expect(result.selectedTaskIds).toEqual([taskId]);
+    expect(result.results[0]).toMatchObject({
+      taskId,
+      outcome: "implemented",
+      hubStatus: "waiting_for_merge",
+    });
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    // The stale interrupted claim was released by recovery, then re-implementation
+    // claimed the task fresh for this run — so the old run's claim is gone.
+    expect(
+      (finalState[0]?.metadata.claim as { runId?: string } | undefined)?.runId,
+    ).not.toBe(oldRunId);
+    expect(await readFile(commentsFile, "utf-8")).toContain(
+      "fresh implement",
+    );
+  }, 20000);
+
+  it("reports zero recoveries and no summary detail when no tasks are interrupted", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-autorecover-clean-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const taskId = "bd-clean";
+    const stateFile = join(repoDir, "bd-state.json");
+    // A healthy ready_for_agent task with no interrupted executions: auto-recover
+    // must be a no-op that does not mutate state or emit a recovery summary.
+    const { env, commentsFile } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: taskId,
+        title: "Clean ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+    await execAsync("git add bin bd-state.json bd-args.txt", {
+      cwd: repoDir,
+    });
+    await execAsync('git commit -m "add mock task store"', { cwd: repoDir });
+
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "autorecover-clean",
+    );
+
+    const implementer = vi.fn<HubFlowImplementer>(async () => ({
+      outcome: "success",
+      commits: [{ sha: "abc" }],
+      completionSignal: "<promise>COMPLETE</promise>",
+    }));
+    const result = await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      implementer,
+      runMergePhase: false,
+    });
+
+    expect(result.autoRecoverSummary?.recoveredCount).toBe(0);
+    expect(result.autoRecoverSummary?.recoveries).toEqual([]);
+    expect(await readFile(commentsFile, "utf-8")).toBe("");
+    // The normal flow still ran the ready task.
+    expect(result.selectedTaskIds).toEqual([taskId]);
+  }, 20000);
 });

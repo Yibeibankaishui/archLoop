@@ -32,6 +32,15 @@ import {
 } from "./hubBatchMerge.js";
 import { getHubFlowDefinition, resolveHubFlowPromptPath } from "./hubFlows.js";
 import {
+  autoRecoverInterruptedHubTasks,
+  formatHubRunAutoRecoverLines,
+  type HubRunAutoRecoverSummary,
+} from "./hubRunAutoRecover.js";
+import {
+  createHubProjectDirPhaseCompletionEventResolver,
+  type RecoverHubTaskInput,
+} from "./hubTaskRecover.js";
+import {
   resolveGitRepoRoot,
   resolveHubProjectDir,
   resolveArchloopUserDataDir,
@@ -167,6 +176,21 @@ export interface RunHubFlowInput {
   readonly batchPlanner?: HubBatchPlannerInvoker;
   readonly onEvent?: HubRunEventObserver;
   readonly signal?: AbortSignal;
+  /**
+   * Disables the run-startup auto-recover step. Auto-recover is on by default;
+   * tests that want to exercise the run without the startup recovery mutation
+   * (or that pre-stage interrupted tasks they do not want recovered) pass
+   * `false`.
+   */
+  readonly autoRecover?: boolean;
+  /**
+   * Forwarded to the startup auto-recover step's per-task recovery; resolves a
+   * task's latest phase-completion event from the run event log. Injectable so
+   * tests supply events without a real Hub run dir.
+   */
+  readonly resolveLatestPhaseCompletionEvent?: RecoverHubTaskInput["resolveLatestPhaseCompletionEvent"];
+  /** Forwarded to the startup auto-recover step's per-task recovery. */
+  readonly branchHasUnmergedWork?: RecoverHubTaskInput["branchHasUnmergedWork"];
 }
 
 export interface HubFlowTaskResult {
@@ -218,6 +242,13 @@ export interface RunHubFlowResult {
   readonly worktreeWarning?: HubFlowWorktreeWarning;
   readonly projectDevelopmentContractPath: string;
   readonly projectDevelopmentContractCreatedGenericFallback: boolean;
+  /**
+   * Summary of the run-startup auto-recover step: which interrupted tasks were
+   * detected and where the event-aware router sent each one. Present on every
+   * task-board run (zero recoveries when nothing was interrupted) so callers can
+   * render the count unconditionally.
+   */
+  readonly autoRecoverSummary?: HubRunAutoRecoverSummary;
 }
 
 type HubFlowLifecycleMutation = <T>(
@@ -1255,6 +1286,27 @@ const runObservedHubFlow = async (
   const hubProjectDir =
     input.hubProjectDir ??
     resolveHubProjectDir(resolveArchloopUserDataDir(input.env), repoRoot);
+  // Run-startup auto-recover: detect tasks left stuck in an execution status by
+  // a previously-interrupted run and route each one through the event-aware
+  // recovery wiring before the run loads the board for the resumed-batch scan.
+  // This must precede findResumableHubFlowBatches so a `merging` task recovered
+  // to `waiting_for_merge` (claim preserved) is picked up by the resumed-batch
+  // merge path, and a `ready_for_agent` recovery is selected by the planner.
+  const autoRecoverSummary =
+    input.autoRecover === false
+      ? undefined
+      : await autoRecoverInterruptedHubTasks({
+          cwd: repoRoot,
+          env: input.env,
+          // Read the event log from the same Hub project dir this run writes to,
+          // so recovery sees the phase-completion events the interrupted run
+          // recorded — rather than re-deriving the dir, which diverges when the
+          // run uses an explicit hubProjectDir.
+          resolveLatestPhaseCompletionEvent:
+            input.resolveLatestPhaseCompletionEvent ??
+            createHubProjectDirPhaseCompletionEventResolver(hubProjectDir),
+          branchHasUnmergedWork: input.branchHasUnmergedWork,
+        });
   const startedAt = input.startedAt ?? new Date();
   const projectDevelopmentContract =
     input.projectDevelopmentContract ??
@@ -1556,6 +1608,7 @@ const runObservedHubFlow = async (
     projectDevelopmentContractPath: projectDevelopmentContract.contractPath,
     projectDevelopmentContractCreatedGenericFallback:
       projectDevelopmentContract.createdGenericFallback,
+    autoRecoverSummary,
   };
 };
 
@@ -1576,6 +1629,9 @@ export const formatHubFlowResultLines = (
     `Stop reason: ${result.stopReason}`,
     `Selected tasks: ${selectedTaskCount}`,
   ];
+  for (const line of formatHubRunAutoRecoverLines(result.autoRecoverSummary)) {
+    lines.push(line);
+  }
   if (result.worktreeWarning) {
     lines.push(
       `Worktree warning: dirty source files detected before flow start: ${result.worktreeWarning.dirtySourceFiles.join(", ")}`,
