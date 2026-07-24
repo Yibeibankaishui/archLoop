@@ -4,6 +4,14 @@ import { promisify } from "node:util";
 import type { HubTaskEvent } from "./hubExecution.js";
 import { readTaskEvents } from "./hubRunEventLog.js";
 import {
+  flattenSectionForLog,
+  type SectionBadgesBlock,
+  type SectionBlock,
+  type SectionGroupBlock,
+  type SectionHeaderBlock,
+  type SectionProseBlock,
+} from "./section.js";
+import {
   collectHubWorktreeLeaseDiagnosticsForTasks,
   type HubWorktreeLeaseDiagnostic,
   type HubWorktreeLeaseDiagnosticReason,
@@ -684,52 +692,202 @@ export const repairHubTaskState = async (
   return { applied: plannedRepairs.length > 0, plannedRepairs };
 };
 
-const actionLabel = (diagnostic: HubTaskStateDiagnostic): string => {
-  if (diagnostic.nextAction.startsWith("archloop tasks repair-state")) {
-    return "repair state";
-  }
-  if (diagnostic.nextAction.startsWith("archloop tasks recover")) {
-    return "recover failed task";
-  }
-  if (diagnostic.nextAction.startsWith("archloop tasks push")) {
-    return "push task sync";
-  }
-  if (diagnostic.reason === "interrupted_execution") {
-    // The interrupted_execution nextAction leads with prose ("Implement was
-    // interrupted — run archloop tasks recover <id>"), so the recover-prefix
-    // check above does not match it. Classify it by reason so the rendered
-    // action reflects recovery, not the generic "rerun flow" fallback.
-    return "recover interrupted task";
-  }
-  if (diagnostic.nextAction.startsWith("Wait")) {
-    return "wait for execution";
-  }
-  if (diagnostic.nextAction.includes("Rerun the flow")) {
-    return "rerun flow";
-  }
-  return "rerun flow";
+// ---------------------------------------------------------------------------
+// Doctor presentation model (arch-3ej): severity-colored section blocks
+// ---------------------------------------------------------------------------
+
+/**
+ * Doctor diagnostic severity. The presentation layer (this module) maps each
+ * `HubTaskStateDiagnosticReason` to one of these so `archloop tasks doctor` can
+ * group diagnostics by severity and render a badges summary row. Detection
+ * logic in `doctorHubTaskState` is untouched — only the presentation moves.
+ *
+ * Reuses the repo's existing severity vocabulary (`severityColor` in
+ * `src/ansi.ts`): error → red, warn → yellow, info → cyan.
+ */
+export type HubTaskStateDiagnosticSeverity = "error" | "warn" | "info";
+
+/**
+ * Map a diagnostic reason to its severity. Interrupted/failed work is an error;
+ * stale claims and pending sync are warnings; orphaned/informational cleanup
+ * is info. The `repairable` flag may inform grouping but severity is the
+ * primary axis — a task is reported once under the severity of its reason.
+ */
+const DOCTOR_SEVERITY_BY_REASON: Record<
+  HubTaskStateDiagnosticReason,
+  HubTaskStateDiagnosticSeverity
+> = {
+  // Interrupted / failed work — something broke or is stuck mid-execution.
+  interrupted_execution: "error",
+  failed_branch_work: "error",
+  worktree_lease_missing: "error",
+  worktree_lease_active_with_failed_claim: "error",
+  worktree_lease_stale_with_failed_claim: "error",
+  // Stale claims / pending sync / needs user attention.
+  state_inconsistent: "warn",
+  multiple_status_labels: "warn",
+  stale_hub_status_metadata: "warn",
+  missing_claim_fields: "warn",
+  dirty_worktree: "warn",
+  task_sync_push_pending: "warn",
+  worktree_lease_active_without_claim: "warn",
+  // Orphaned / informational cleanup / normally-running execution.
+  terminal_stale_execution_metadata: "info",
+  worktree_lease_active_execution: "info",
 };
 
+/** Severity → group/badge symbol, reusing the section primitive's glyph set. */
+const DOCTOR_SEVERITY_SYMBOL: Record<
+  HubTaskStateDiagnosticSeverity,
+  SectionGroupBlock["symbol"]
+> = {
+  error: "✗",
+  warn: "!",
+  info: "●",
+};
+
+/** Fixed render order: most severe first so errors read before warnings. */
+const DOCTOR_SEVERITY_ORDER: readonly HubTaskStateDiagnosticSeverity[] = [
+  "error",
+  "warn",
+  "info",
+];
+
+const doctorDiagnosticSeverity = (
+  reason: HubTaskStateDiagnosticReason,
+): HubTaskStateDiagnosticSeverity => DOCTOR_SEVERITY_BY_REASON[reason];
+
+export interface HubTaskStateDoctorModel {
+  readonly header: SectionHeaderBlock;
+  readonly badges: SectionBadgesBlock;
+  readonly emptyMessage?: SectionProseBlock;
+  readonly groups: readonly SectionGroupBlock[];
+}
+
+export interface DoctorDiagnosticItem {
+  readonly id: string;
+  readonly title: string;
+  readonly trailingDim: string;
+  readonly detailDim: string;
+}
+
+/**
+ * Project a single diagnostic onto a group item: the task id is the row id, the
+ * reason is the title, the recommended next action is a dim trailing hint, and
+ * the human message is a dim continuation line.
+ */
+const toDoctorGroupItem = (
+  diagnostic: HubTaskStateDiagnostic,
+): DoctorDiagnosticItem => ({
+  id: diagnostic.taskId,
+  title: diagnostic.reason,
+  trailingDim: diagnostic.nextAction,
+  detailDim: diagnostic.message,
+});
+
+const buildDoctorGroup = (
+  severity: HubTaskStateDiagnosticSeverity,
+  items: readonly DoctorDiagnosticItem[],
+): SectionGroupBlock => ({
+  kind: "group",
+  symbol: DOCTOR_SEVERITY_SYMBOL[severity],
+  severity,
+  name: severity,
+  count: items.length,
+  items: [...items].sort((left, right) => left.id.localeCompare(right.id)),
+});
+
+/**
+ * Build the doctor detail model from a doctor result: a header summarizing the
+ * issue count, a badges row with one pill per severity present, and one group
+ * block per severity (in error → warn → info order). Empty results yield a
+ * "No task state issues found." prose block. The managed branch cleanup
+ * diagnostics are intentionally left out — they are a separate pre-formatted
+ * report rendered after the section, preserving their existing formatting.
+ */
+export const buildHubTaskStateDoctorModel = (
+  result: DoctorHubTaskStateResult,
+): HubTaskStateDoctorModel => {
+  const bySeverity = new Map<
+    HubTaskStateDiagnosticSeverity,
+    DoctorDiagnosticItem[]
+  >();
+  for (const diagnostic of result.diagnostics) {
+    const severity = doctorDiagnosticSeverity(diagnostic.reason);
+    const items = bySeverity.get(severity) ?? [];
+    items.push(toDoctorGroupItem(diagnostic));
+    bySeverity.set(severity, items);
+  }
+
+  const presentSeverities = DOCTOR_SEVERITY_ORDER.filter((severity) =>
+    bySeverity.has(severity),
+  );
+
+  const badges: SectionBadgesBlock = {
+    kind: "badges",
+    badges: presentSeverities.map((severity) => ({
+      symbol: DOCTOR_SEVERITY_SYMBOL[severity],
+      count: bySeverity.get(severity)!.length,
+      label: severity,
+      severity,
+    })),
+  };
+
+  const groups = presentSeverities.map((severity) =>
+    buildDoctorGroup(severity, bySeverity.get(severity)!),
+  );
+
+  const emptyMessage: SectionProseBlock | undefined =
+    result.diagnostics.length === 0
+      ? { kind: "prose", body: "No task state issues found." }
+      : undefined;
+
+  return {
+    header: {
+      kind: "header",
+      title: "Hub task state doctor",
+      right: `${result.diagnostics.length} issues`,
+    },
+    badges,
+    ...(emptyMessage ? { emptyMessage } : {}),
+    groups,
+  };
+};
+
+/**
+ * Map the doctor model to `SectionBlock`s for `d.section` / `renderSection`.
+ */
+export const hubTaskStateDoctorModelToBlocks = (
+  model: HubTaskStateDoctorModel,
+): readonly SectionBlock[] => {
+  const blocks: SectionBlock[] = [model.header];
+  if (model.emptyMessage) {
+    blocks.push(model.emptyMessage);
+    return blocks;
+  }
+  blocks.push(model.badges);
+  blocks.push(...model.groups);
+  return blocks;
+};
+
+/**
+ * Flatten the doctor model to plain, grep-friendly text (no ANSI, no
+ * truncation) preserving every task id, reason, message, and next-action
+ * string — the `flattenSectionForLog` equivalence required for plain mode
+ * (`NO_COLOR` / non-TTY / `--plain`). Managed branch cleanup diagnostics are
+ * appended verbatim after the flattened section. Used by tests and log-style
+ * rendering; the live command renders the same blocks through `d.section`.
+ */
 export const formatHubTaskStateDoctorLines = (
   result: DoctorHubTaskStateResult,
 ): readonly string[] => {
-  const lines = ["Hub task state doctor"];
-  if (result.diagnostics.length === 0) {
-    lines.push("No task state issues found.");
-  } else {
-    lines.push(`Issues found: ${result.diagnostics.length}`);
-    for (const diagnostic of result.diagnostics) {
-      const branch = diagnostic.branch ? ` ${diagnostic.branch}` : "";
-      lines.push(
-        `  ${diagnostic.taskId}: ${diagnostic.reason}${branch}; next action: ${actionLabel(diagnostic)} (${diagnostic.nextAction})`,
-      );
-      lines.push(`    ${diagnostic.message}`);
-    }
-  }
-  for (const line of result.managedBranchCleanupDiagnostics) {
-    lines.push(line);
-  }
-  return lines;
+  const blocks = hubTaskStateDoctorModelToBlocks(
+    buildHubTaskStateDoctorModel(result),
+  );
+  return [
+    ...flattenSectionForLog(blocks),
+    ...result.managedBranchCleanupDiagnostics,
+  ];
 };
 
 export const formatHubTaskStateRepairLines = (

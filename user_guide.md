@@ -283,7 +283,7 @@ archloop run --flow triage --input inbox,needs_info
 archloop tasks doctor
 ```
 
-`tasks doctor` 只读检查本地 Beads task board、Hub run events、git 分支和工作区状态，不会修改 Beads、git 或远端 GitHub Issues。它会报告多重 archLoop 状态标签、过期的 `metadata.hubStatus`、缺失的 execution claim、failed 任务上仍存在的分支工作、已 review 但无法被 merge 选择的任务、terminal 任务里残留的 execution metadata、dirty worktree gate、需要 `tasks push` 的同步状态，以及 managed branch cleanup diagnostics。
+`tasks doctor` 只读检查本地 Beads task board、Hub run events、git 分支和工作区状态，不会修改 Beads、git 或远端 GitHub Issues。它会报告多重 archLoop 状态标签、过期的 `metadata.hubStatus`、缺失的 execution claim、failed 任务上仍存在的分支工作、已 review 但无法被 merge 选择的任务、terminal 任务里残留的 execution metadata、dirty worktree gate、需要 `tasks push` 的同步状态，以及 managed branch cleanup diagnostics。输出按严重程度分组并着色（error = 中断/失败，warn = 过期/待同步，info = 信息性清理）：顶部 badges 行汇总各级别数量，每个分组显示该级别的符号、颜色与计数，每条诊断显示 task id、原因、作为 dim trailing hint 的下一步动作，以及作为 dim 续行的说明。在 `NO_COLOR` / 非 TTY / `--plain` 下退化为 grep 友好的纯文本，仍保留全部 task id、原因、说明与下一步动作。
 
 每条输出都会说明下一步：重新运行 flow、执行 `archloop tasks recover <selector>`、执行 `archloop tasks repair-state <selector>`、推送 task sync，或按需运行 `archloop tasks cleanup --yes` / `--include-unowned`。dirty source files 是 Git 安全提示，不是可修复的 Beads 状态污染。后续 `run --flow` 只有在待合并分支会改到同一路径时才会阻塞；按输出列出的 blocking files 先 commit、stash 或 discard，再重新运行同一个 flow，archLoop 会优先恢复 `waiting_for_merge` 批次。
 

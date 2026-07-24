@@ -250,9 +250,10 @@ import {
   type HubConflictKeep,
 } from "./hubTaskResolve.js";
 import {
+  buildHubTaskStateDoctorModel,
   doctorHubTaskState,
-  formatHubTaskStateDoctorLines,
   formatHubTaskStateRepairLines,
+  hubTaskStateDoctorModelToBlocks,
   repairHubTaskState,
 } from "./hubTaskStateDoctor.js";
 import {
@@ -2808,7 +2809,9 @@ const tasksDoctorCommand = Command.make(
         catch: toTaskBoardError,
       });
 
-      for (const line of formatHubTaskStateDoctorLines(result)) {
+      const model = buildHubTaskStateDoctorModel(result);
+      yield* d.section("", hubTaskStateDoctorModelToBlocks(model));
+      for (const line of result.managedBranchCleanupDiagnostics) {
         yield* d.text(line);
       }
     }),
