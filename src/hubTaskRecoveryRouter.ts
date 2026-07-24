@@ -64,20 +64,20 @@ const resolvePhaseCompletionStatus = (
     return undefined;
   }
 
-  if (event.type === "task_review_succeeded") {
-    return "waiting_for_merge";
-  }
-
-  if (event.type === "task_implementation_succeeded") {
-    if (event.status === "reviewing") {
-      return "reviewing";
-    }
-    if (event.status === "waiting_for_merge") {
+  switch (event.type) {
+    case "task_review_succeeded":
       return "waiting_for_merge";
-    }
+    case "task_implementation_succeeded":
+      switch (event.status) {
+        case "reviewing":
+        case "waiting_for_merge":
+          return event.status;
+        default:
+          return undefined;
+      }
+    default:
+      return undefined;
   }
-
-  return undefined;
 };
 
 /**

@@ -170,7 +170,7 @@ export const autoRecoverInterruptedHubTasks = async (
 /** Whether the summary reports any recovery activity worth surfacing. */
 export const hasHubRunAutoRecoverActivity = (
   summary: HubRunAutoRecoverSummary | undefined,
-): boolean =>
+): summary is HubRunAutoRecoverSummary =>
   summary !== undefined && summary.recoveredCount + summary.failedCount > 0;
 
 /**
@@ -184,17 +184,16 @@ export const formatHubRunAutoRecoverLines = (
   if (!hasHubRunAutoRecoverActivity(summary)) {
     return [];
   }
-  const { recoveredCount, recoveries, failures } = summary!;
 
   const lines: string[] = [
-    `Auto-recovered ${recoveredCount} interrupted task(s) at run startup:`,
+    `Auto-recovered ${summary.recoveredCount} interrupted task(s) at run startup:`,
   ];
-  for (const entry of recoveries) {
+  for (const entry of summary.recoveries) {
     lines.push(
       `  ${entry.taskId}: ${entry.priorStatus} -> ${entry.hubStatus} (was ${entry.interruptedPhase})`,
     );
   }
-  for (const failure of failures) {
+  for (const failure of summary.failures) {
     lines.push(
       `  ${failure.taskId}: failed to recover from ${failure.interruptedPhase} — ${failure.message}`,
     );
