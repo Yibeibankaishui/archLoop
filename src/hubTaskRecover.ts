@@ -89,10 +89,10 @@ export type ResolveLatestPhaseCompletionEvent = (
  * can diverge when the run uses an explicit `hubProjectDir` (e.g. tests, or a
  * custom `ARCHLOOP_USER_DATA_DIR`).
  */
-export const createHubProjectDirPhaseCompletionEventResolver = (
-  hubProjectDir: string,
-): ResolveLatestPhaseCompletionEvent =>
-  async ({ taskId }) => readPhaseCompletionEventsByTask(hubProjectDir).get(taskId);
+export const createHubProjectDirPhaseCompletionEventResolver =
+  (hubProjectDir: string): ResolveLatestPhaseCompletionEvent =>
+  async ({ taskId }) =>
+    latestPhaseCompletionEventByTask(readTaskEvents(hubProjectDir)).get(taskId);
 
 const defaultResolveLatestPhaseCompletionEvent: ResolveLatestPhaseCompletionEvent =
   async ({ cwd, taskId, env }) => {
@@ -884,9 +884,7 @@ export const hubTaskRecoverSummaryModelToBlocks = (
 // ---------------------------------------------------------------------------
 
 const claimLabel = (entry: StaleHubTaskRecoveryEntry): string =>
-  entry.preserveClaim
-    ? "preserve claim"
-    : "release claim";
+  entry.preserveClaim ? "preserve claim" : "release claim";
 
 /**
  * Formats a `tasks recover --stale` result as plain lines for the CLI. The
@@ -905,7 +903,9 @@ export const formatStaleHubTaskRecoveryLines = (
   }
 
   lines.push(
-    result.applied ? `Applied recovery for ${result.entries.length} task(s):` : `Planned recovery for ${result.entries.length} interrupted task(s):`,
+    result.applied
+      ? `Applied recovery for ${result.entries.length} task(s):`
+      : `Planned recovery for ${result.entries.length} interrupted task(s):`,
   );
   for (const entry of result.entries) {
     const outcome =
