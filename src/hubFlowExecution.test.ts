@@ -1882,6 +1882,83 @@ describe("no-review Hub flow execution", () => {
     );
   });
 
+  it("treats a completion signal on an already-merged task as done instead of agent_failed (arch-d0c)", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-already-merged-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const taskId = "bd-merged-rerun";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: taskId,
+        title: "Already merged rerun",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "already-merged",
+    );
+
+    // The implementer recognizes the already-merged re-run (a prior
+    // merge_succeeded event plus a completion signal with no new branch work)
+    // and reports success with alreadyMerged set. The per-task driver then
+    // closes the task as done directly instead of advancing it to
+    // waiting_for_merge (where the merge phase would strand a branch with no
+    // unmerged work) or marking it agent_failed. The alreadyMerged detection
+    // itself is exercised by the createHubFlowRunImplementer unit test below.
+    const result = await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      implementer: async () => ({
+        outcome: "success",
+        commits: [],
+        completionSignal: "<promise>COMPLETE</promise>",
+        branchHasUnmergedWork: false,
+        alreadyMerged: true,
+      }),
+      runMergePhase: false,
+    });
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    // The task reaches done, not failed — the work was already merged.
+    expect(finalState[0]?.labels).toContain("done");
+    expect(finalState[0]?.metadata.hubStatus).toBe("done");
+    expect(finalState[0]?.metadata.failureReason).toBeUndefined();
+    expect(result.results[0]).toMatchObject({
+      taskId,
+      outcome: "implemented",
+      hubStatus: "done",
+      commitCount: 0,
+    });
+
+    const taskEvents = await readJsonl(
+      join(result.runDir, "events", "task.jsonl"),
+    );
+    // The run records success/done, never an implementation failure.
+    expect(taskEvents).not.toContainEqual(
+      expect.objectContaining({
+        type: "task_implementation_failed",
+        taskId,
+      }),
+    );
+    expect(taskEvents).toContainEqual(
+      expect.objectContaining({ type: "task_closed", taskId, status: "done" }),
+    );
+  });
+
   it("marks agent failures as failed with agent_failed", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-agent-fail-"));
     await initRepo(repoDir);
@@ -3046,6 +3123,7 @@ describe("with-review Hub flow execution", () => {
       cwd,
       env: { OPENAI_KEY: "test-openai-key" },
       roleEntry: { provider: "codex", model: "gpt-5.4-mini" },
+      resolvePriorMergedCompletion: async () => false,
     });
 
     vi.stubEnv("OPENAI_KEY", "");
@@ -3067,6 +3145,112 @@ describe("with-review Hub flow execution", () => {
       expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
       expect(result.commits).toEqual([]);
       expect(result.message).toBe("Implementer completed without commits");
+    } finally {
+      runSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("createHubFlowRunImplementer treats COMPLETE without commits as alreadyMerged success when a prior merge event exists (arch-d0c)", async () => {
+    const cwd = await mkdtemp(
+      join(tmpdir(), "hub-flow-implementer-already-merged-"),
+    );
+    await initRepo(cwd);
+    await commitFile(cwd, "hello.txt", "hello", "initial commit");
+    const branch = "archloop/bd-1-test-task";
+    // The branch sits at HEAD with no new commits — the already-merged shape:
+    // the implementation is already in HEAD, so a faithful re-run produces
+    // zero new commits.
+    await execAsync(`git branch "${branch}"`, { cwd });
+
+    // Lay out a prior Hub run dir under a controlled XDG_DATA_HOME so the
+    // default prior-merge resolver scans it. The project id is
+    // sha256(repoRoot)[:12], matching resolveHubProjectDir.
+    const { createHash } = await import("node:crypto");
+    const projectId = createHash("sha256")
+      .update(cwd)
+      .digest("hex")
+      .slice(0, 12);
+    const priorRunDir = join(
+      cwd,
+      ".test-xdg-data",
+      "archloop",
+      "hub",
+      "projects",
+      projectId,
+      "runs",
+      "run-prior-merged",
+    );
+    await mkdir(join(priorRunDir, "events"), { recursive: true });
+    const priorEvent = (type: string, status: string) =>
+      JSON.stringify({
+        type,
+        runId: "run-prior-merged",
+        batchId: "batch-prior",
+        taskId: "bd-1",
+        branch,
+        createdAt: "2026-07-23T09:39:32.000Z",
+        status,
+        commitCount: 1,
+      });
+    await writeFile(
+      join(priorRunDir, "events", "task.jsonl"),
+      [
+        priorEvent("task_implementation_succeeded", "waiting_for_merge"),
+        priorEvent("merge_succeeded", "merging"),
+        priorEvent("task_closed", "done"),
+      ].join("\n") + "\n",
+      "utf-8",
+    );
+
+    const projectDevelopmentContract =
+      resolveHubProjectDevelopmentContractState({
+        repoRoot: cwd,
+        hubProjectDir: join(cwd, "hub-project"),
+        now: new Date("2026-07-21T12:00:00.000Z"),
+      });
+    const runSpy = vi.spyOn(runModule, "run").mockResolvedValue({
+      completionSignal: "<promise>COMPLETE</promise>",
+      commits: [],
+      branch,
+      iterations: [],
+      stdout: "<promise>COMPLETE</promise>",
+    });
+    const implementer = createHubFlowRunImplementer({
+      cwd,
+      env: { OPENAI_KEY: "test-openai-key" },
+      roleEntry: { provider: "codex", model: "gpt-5.4-mini" },
+    });
+
+    vi.stubEnv("OPENAI_KEY", "");
+    vi.stubEnv("CODEX_HOME", "");
+    try {
+      const result = await implementer({
+        flowId: "no-review",
+        batchId: "batch-test",
+        taskId: "bd-1",
+        title: "Test task",
+        branch,
+        promptFile: "/tmp/prompt.md",
+        cwd,
+        runDir: cwd,
+        hubProjectDir: join(
+          cwd,
+          ".test-xdg-data",
+          "archloop",
+          "hub",
+          "projects",
+          projectId,
+        ),
+        projectDevelopmentContract,
+      });
+
+      expect(result.outcome).toBe("success");
+      expect(result.alreadyMerged).toBe(true);
+      expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
+      expect(result.commits).toEqual([]);
+      expect(result.branchHasUnmergedWork).toBe(false);
+      expect(result.message).toContain("already merged");
     } finally {
       runSpy.mockRestore();
       vi.unstubAllEnvs();
@@ -3238,9 +3422,7 @@ describe("with-review Hub flow execution", () => {
   });
 
   it("createHubFlowRunImplementer does not retry non-transient provider exits", async () => {
-    const cwd = await mkdtemp(
-      join(tmpdir(), "hub-flow-implementer-no-retry-"),
-    );
+    const cwd = await mkdtemp(join(tmpdir(), "hub-flow-implementer-no-retry-"));
     await initRepo(cwd);
     await commitFile(cwd, "hello.txt", "hello", "initial commit");
     const branch = "archloop/bd-1-test-task";
@@ -3377,7 +3559,11 @@ describe("with-review Hub flow execution", () => {
 
     const runDir = join(cwd, "run");
     await mkdir(join(runDir, "logs"), { recursive: true });
-    await writeFile(join(runDir, "logs", "bd-1.log"), "still working\n", "utf-8");
+    await writeFile(
+      join(runDir, "logs", "bd-1.log"),
+      "still working\n",
+      "utf-8",
+    );
 
     const projectDevelopmentContract =
       resolveHubProjectDevelopmentContractState({
