@@ -1094,6 +1094,8 @@ Doctor output groups diagnostics by severity and colors them when the terminal s
 
 Previews local Beads mutations that would repair task-state pollution for one task. In a TTY it asks for confirmation; in non-interactive mode, pass `--yes` after reviewing the preview. The command does not mutate remote GitHub Issues.
 
+Output uses the shared section-block renderer: a header distinguishes **Planned repairs** vs **Applied repairs**, and each repair is grouped under its target Hub status with the board-bucket severity color (todo = info/cyan ●, in_progress = warn/yellow ◐, attention = error/red !, done = success/green ✓). Each item shows the task id, the diagnostic reason, and the branch as a dim trailing hint. When repairs are planned but not yet applied, a guidance line reminds you to re-run with `--yes`. Under `NO_COLOR`, non-TTY, or `--plain`, the same blocks flatten to grep-friendly plain text that still preserves every task id, reason, target status, and branch.
+
 Repair uses the same canonical task transition path as normal Hub lifecycle changes, preserving user custom labels while rewriting only archLoop-managed status labels and metadata. It can restore the QA incident shape where Hub events show `task_review_succeeded`, branch work is still unmerged, but Beads labels/metadata or claim fields are stale, moving the task back to `waiting_for_merge` with the correct claim. Failed agent attempts with `commitCount=0` and no branch work are not promoted by repair-state; use normal recovery policy for failed tasks.
 
 ### `archloop tasks cleanup`

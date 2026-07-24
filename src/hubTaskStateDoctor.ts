@@ -30,8 +30,11 @@ import {
 import {
   isCompletedHubStatus,
   loadHubTaskBoard,
+  hubTaskStatusBoardPresentation,
+  mapHubStatusToTaskBoardBucket,
   resolveHubTaskBranch,
   resolveHubTaskSelector,
+  TASK_BOARD_BUCKETS,
   transitionHubTaskStatus,
   formatHubManagedBranchCleanupDiagnosticsLines,
   type HubTaskProjection,
@@ -861,25 +864,131 @@ export const formatHubTaskStateDoctorLines = (
   ];
 };
 
-export const formatHubTaskStateRepairLines = (
+export interface HubTaskStateRepairModel {
+  readonly header: SectionHeaderBlock;
+  readonly emptyMessage?: SectionProseBlock;
+  readonly groups: readonly SectionGroupBlock[];
+  readonly guidance?: SectionProseBlock;
+}
+
+interface RepairGroupItem {
+  readonly id: string;
+  readonly title: string;
+  readonly trailingDim: string;
+}
+
+const resolveRepairBranch = (repair: HubTaskStatePlannedRepair): string =>
+  repair.branch ?? resolveHubTaskBranch(repair.taskId, repair.title);
+
+const toRepairGroupItem = (
+  repair: HubTaskStatePlannedRepair,
+): RepairGroupItem => ({
+  id: repair.taskId,
+  title: repair.reason,
+  trailingDim: resolveRepairBranch(repair),
+});
+
+const buildRepairStatusGroup = (
+  targetStatus: HubTaskStatus,
+  items: readonly RepairGroupItem[],
+): SectionGroupBlock => {
+  const { symbol, severity } = hubTaskStatusBoardPresentation(targetStatus);
+  return {
+    kind: "group",
+    symbol,
+    severity,
+    name: targetStatus,
+    count: items.length,
+    items: [...items].sort((left, right) => left.id.localeCompare(right.id)),
+  };
+};
+
+const formatRepairCount = (count: number): string =>
+  count === 1 ? "1 repair" : `${count} repairs`;
+
+const compareRepairTargetStatuses = (
+  left: HubTaskStatus,
+  right: HubTaskStatus,
+): number => {
+  const bucketDiff =
+    TASK_BOARD_BUCKETS.indexOf(mapHubStatusToTaskBoardBucket(left)) -
+    TASK_BOARD_BUCKETS.indexOf(mapHubStatusToTaskBoardBucket(right));
+  return bucketDiff !== 0 ? bucketDiff : left.localeCompare(right);
+};
+
+/**
+ * Build the repair-state section model. Groups planned/applied repairs by
+ * target Hub status; each group's severity/symbol comes from the shared
+ * board-bucket presentation (`hubTaskStatusBoardPresentation`).
+ */
+export const buildHubTaskStateRepairModel = (
   result: RepairHubTaskStateResult,
-): readonly string[] => {
-  const lines = ["Hub task state repair"];
+): HubTaskStateRepairModel => {
+  const header: SectionHeaderBlock = {
+    kind: "header",
+    title: "Hub task state repair",
+  };
+
   if (result.plannedRepairs.length === 0) {
-    lines.push("No repairable task state issues found.");
-    return lines;
+    return {
+      header,
+      emptyMessage: {
+        kind: "prose",
+        body: "No repairable task state issues found.",
+      },
+      groups: [],
+    };
   }
 
-  lines.push(result.applied ? "Applied repairs:" : "Planned repairs:");
+  const byTarget = new Map<HubTaskStatus, RepairGroupItem[]>();
   for (const repair of result.plannedRepairs) {
-    const branch =
-      repair.branch ?? resolveHubTaskBranch(repair.taskId, repair.title);
-    lines.push(
-      `  ${repair.taskId}: ${repair.reason} -> ${repair.targetStatus} (${branch})`,
-    );
+    const items = byTarget.get(repair.targetStatus) ?? [];
+    items.push(toRepairGroupItem(repair));
+    byTarget.set(repair.targetStatus, items);
   }
-  if (!result.applied) {
-    lines.push("Re-run with --yes to apply these local Beads mutations.");
-  }
-  return lines;
+
+  const groups = [...byTarget.entries()]
+    .sort(([left], [right]) => compareRepairTargetStatuses(left, right))
+    .map(([status, items]) => buildRepairStatusGroup(status, items));
+
+  return {
+    header: {
+      ...header,
+      subtitle: result.applied ? "Applied repairs" : "Planned repairs",
+      right: formatRepairCount(result.plannedRepairs.length),
+    },
+    groups,
+    guidance: result.applied
+      ? undefined
+      : {
+          kind: "prose",
+          body: "Re-run with --yes to apply these local Beads mutations.",
+        },
+  };
 };
+
+/** Map the repair model to blocks for `d.section` / `renderSection`. */
+export const hubTaskStateRepairModelToBlocks = (
+  model: HubTaskStateRepairModel,
+): readonly SectionBlock[] => {
+  if (model.emptyMessage) {
+    return [model.header, model.emptyMessage];
+  }
+  return [
+    model.header,
+    ...model.groups,
+    ...(model.guidance ? [model.guidance] : []),
+  ];
+};
+
+/**
+ * Plain, grep-friendly repair text via `flattenSectionForLog`. Live CLI uses
+ * the same blocks through `d.section` (palette already degrades under NO_COLOR /
+ * non-TTY / `--plain`).
+ */
+export const formatHubTaskStateRepairLines = (
+  result: RepairHubTaskStateResult,
+): readonly string[] =>
+  flattenSectionForLog(
+    hubTaskStateRepairModelToBlocks(buildHubTaskStateRepairModel(result)),
+  );

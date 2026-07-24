@@ -258,9 +258,10 @@ import {
 } from "./hubTaskResolve.js";
 import {
   buildHubTaskStateDoctorModel,
+  buildHubTaskStateRepairModel,
   doctorHubTaskState,
-  formatHubTaskStateRepairLines,
   hubTaskStateDoctorModelToBlocks,
+  hubTaskStateRepairModelToBlocks,
   repairHubTaskState,
 } from "./hubTaskStateDoctor.js";
 import {
@@ -2976,9 +2977,10 @@ const tasksRepairStateCommand = Command.make(
         catch: toTaskBoardError,
       });
 
-      for (const line of formatHubTaskStateRepairLines(preview)) {
-        yield* d.text(line);
-      }
+      yield* d.section(
+        "",
+        hubTaskStateRepairModelToBlocks(buildHubTaskStateRepairModel(preview)),
+      );
 
       if (preview.plannedRepairs.length === 0) {
         return;
@@ -3024,9 +3026,10 @@ const tasksRepairStateCommand = Command.make(
         try: () => repairHubTaskState({ cwd, taskSelector: id, yes: true }),
         catch: toTaskBoardError,
       });
-      for (const line of formatHubTaskStateRepairLines(applied)) {
-        yield* d.text(line);
-      }
+      yield* d.section(
+        "",
+        hubTaskStateRepairModelToBlocks(buildHubTaskStateRepairModel(applied)),
+      );
     }),
 );
 

@@ -9,14 +9,19 @@ import { describe, expect, it } from "vitest";
 import { createHubRunContext } from "./hubExecution.js";
 import {
   buildHubTaskStateDoctorModel,
+  buildHubTaskStateRepairModel,
   doctorHubTaskState,
   formatHubTaskStateDoctorLines,
+  formatHubTaskStateRepairLines,
   hubTaskStateDoctorModelToBlocks,
+  hubTaskStateRepairModelToBlocks,
   repairHubTaskState,
   type HubTaskStateDiagnostic,
+  type HubTaskStatePlannedRepair,
+  type RepairHubTaskStateResult,
 } from "./hubTaskStateDoctor.js";
 import { createPalette } from "./ansi.js";
-import { renderSection } from "./section.js";
+import { flattenSectionForLog, renderSection } from "./section.js";
 import { formatHubManagedBranchCleanupDiagnosticsLines } from "./taskBoard.js";
 import type { HubManagedBranchCleanupEvaluation } from "./hubManagedBranchCleanup.js";
 import type { WorktreeLeaseRecord } from "./worktreeLeaseStore.js";
@@ -1659,5 +1664,172 @@ describe("hubTaskStateDoctorModelToBlocks / formatHubTaskStateDoctorLines (prese
 
     expect(lines.join("\n")).toContain("Managed branch cleanup diagnostics");
     expect(lines.join("\n")).toContain("Target branch: main");
+  });
+});
+
+describe("buildHubTaskStateRepairModel", () => {
+  const sampleRepairs: HubTaskStatePlannedRepair[] = [
+    {
+      taskId: "bd-merge",
+      title: "Merge-ready repair",
+      reason: "state_inconsistent",
+      targetStatus: "waiting_for_merge",
+      branch: "archloop/bd-merge-merge-ready-repair",
+    },
+    {
+      taskId: "bd-ready",
+      title: "Ready repair",
+      reason: "interrupted_execution",
+      targetStatus: "ready_for_agent",
+      branch: "archloop/bd-ready-ready-repair",
+    },
+    {
+      taskId: "bd-done",
+      title: "Terminal repair",
+      reason: "terminal_stale_execution_metadata",
+      targetStatus: "done",
+      branch: "archloop/bd-done-terminal-repair",
+    },
+  ];
+
+  it("groups repairs by target status with board-bucket severity and planned heading", () => {
+    const model = buildHubTaskStateRepairModel({
+      applied: false,
+      plannedRepairs: sampleRepairs,
+    });
+
+    expect(model.header).toMatchObject({
+      kind: "header",
+      title: "Hub task state repair",
+      subtitle: "Planned repairs",
+      right: "3 repairs",
+    });
+    expect(model.emptyMessage).toBeUndefined();
+    expect(model.guidance?.body).toContain("Re-run with --yes");
+    // Bucket order: todo (ready_for_agent) → in_progress (waiting_for_merge) → done.
+    expect(model.groups.map((group) => group.name)).toEqual([
+      "ready_for_agent",
+      "waiting_for_merge",
+      "done",
+    ]);
+    expect(model.groups.map((group) => group.severity)).toEqual([
+      "info",
+      "warn",
+      "success",
+    ]);
+    expect(model.groups.map((group) => group.symbol)).toEqual(["●", "◐", "✓"]);
+    expect(model.groups[0]?.items).toEqual([
+      {
+        id: "bd-ready",
+        title: "interrupted_execution",
+        trailingDim: "archloop/bd-ready-ready-repair",
+      },
+    ]);
+  });
+
+  it("uses Applied repairs heading and omits guidance when applied", () => {
+    const model = buildHubTaskStateRepairModel({
+      applied: true,
+      plannedRepairs: [sampleRepairs[0]!],
+    });
+
+    expect(model.header.subtitle).toBe("Applied repairs");
+    expect(model.header.right).toBe("1 repair");
+    expect(model.guidance).toBeUndefined();
+  });
+
+  it("returns empty prose when there are no planned repairs", () => {
+    const model = buildHubTaskStateRepairModel({
+      applied: false,
+      plannedRepairs: [],
+    });
+
+    expect(model.header.title).toBe("Hub task state repair");
+    expect(model.header.subtitle).toBeUndefined();
+    expect(model.header.right).toBeUndefined();
+    expect(model.emptyMessage?.body).toBe(
+      "No repairable task state issues found.",
+    );
+    expect(model.groups).toEqual([]);
+    expect(model.guidance).toBeUndefined();
+  });
+});
+
+describe("hubTaskStateRepairModelToBlocks / formatHubTaskStateRepairLines (presentation)", () => {
+  const plannedResult: RepairHubTaskStateResult = {
+    applied: false,
+    plannedRepairs: [
+      {
+        taskId: "bd-merge",
+        title: "Merge-ready repair",
+        reason: "state_inconsistent",
+        targetStatus: "waiting_for_merge",
+        branch: "archloop/bd-merge-merge-ready-repair",
+      },
+      {
+        taskId: "bd-fail",
+        title: "Failed repair",
+        reason: "stale_hub_status_metadata",
+        targetStatus: "failed",
+        branch: "archloop/bd-fail-failed-repair",
+      },
+    ],
+  };
+
+  it("plain (flattenSectionForLog) preserves every id, reason, target status, and branch with no ANSI", () => {
+    const lines = formatHubTaskStateRepairLines(plannedResult);
+    const text = lines.join("\n");
+
+    expect(text).not.toMatch(/\x1b\[/);
+    expect(text).toContain("Hub task state repair");
+    expect(text).toContain("Planned repairs");
+    expect(text).toContain(
+      "Re-run with --yes to apply these local Beads mutations.",
+    );
+    for (const repair of plannedResult.plannedRepairs) {
+      expect(text).toContain(repair.taskId);
+      expect(text).toContain(repair.reason);
+      expect(text).toContain(repair.targetStatus);
+      expect(text).toContain(repair.branch!);
+    }
+
+    // formatHubTaskStateRepairLines is flattenSectionForLog of the same blocks.
+    expect(lines).toEqual(
+      flattenSectionForLog(
+        hubTaskStateRepairModelToBlocks(
+          buildHubTaskStateRepairModel(plannedResult),
+        ),
+      ),
+    );
+  });
+
+  it("color render distinguishes target-status severity and planned vs applied headings", () => {
+    const palette = createPalette(true);
+    const plannedBlocks = hubTaskStateRepairModelToBlocks(
+      buildHubTaskStateRepairModel(plannedResult),
+    );
+    const plannedRendered = renderSection("", plannedBlocks, {
+      width: 100,
+      colorEnabled: true,
+    }).join("\n");
+
+    expect(plannedRendered).toContain("Planned repairs");
+    // waiting_for_merge → in_progress → warn (yellow ◐); failed → attention → error (red !).
+    expect(plannedRendered).toContain(palette.yellow("◐"));
+    expect(plannedRendered).toContain(palette.red("!"));
+
+    const appliedBlocks = hubTaskStateRepairModelToBlocks(
+      buildHubTaskStateRepairModel({
+        ...plannedResult,
+        applied: true,
+      }),
+    );
+    const appliedRendered = renderSection("", appliedBlocks, {
+      width: 100,
+      colorEnabled: true,
+    }).join("\n");
+
+    expect(appliedRendered).toContain("Applied repairs");
+    expect(appliedRendered).not.toContain("Re-run with --yes");
   });
 });
