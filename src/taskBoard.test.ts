@@ -6,13 +6,18 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { createPalette } from "./ansi.js";
+import type { HubManagedBranchCleanupEvaluation } from "./hubManagedBranchCleanup.js";
+import { flattenSectionForLog, renderSection } from "./section.js";
 import {
+  buildHubManagedBranchCleanupModel,
   claimHubTask,
   deleteHubTasks,
   buildHubTaskBoardModel,
   buildHubTaskDetailModel,
   deriveTaskBoardRemoteBadge,
+  formatHubManagedBranchCleanupLines,
   formatTaskBoardJson,
+  hubManagedBranchCleanupModelToBlocks,
   isCanonicalHubTaskStatus,
   loadHubTaskBoard,
   mapHubStatusToTaskBoardBucket,
@@ -1785,5 +1790,190 @@ process.exit(1);
         env,
       }),
     ).toThrow(/dependents not in deletion set/);
+  });
+});
+
+const sampleCleanupEvaluation = {
+  repoRoot: "/tmp/repo",
+  hubProjectDir: "/tmp/data/archloop/hub/projects/demo",
+  targetBranch: "main",
+  targetHead: "abc123def456",
+  managedSafeCandidates: [
+    {
+      branch: "archloop/bd-safe-cleanup",
+      ownership: {
+        taskId: "bd-safe",
+        runId: "run-safe",
+        batchId: "batch-safe",
+        branch: "archloop/bd-safe-cleanup",
+        claimedAt: "2026-07-05T10:00:00.000Z",
+        baseHead: "abc123",
+        branchExistedBeforeClaim: false,
+      },
+      exists: true,
+      mergedIntoTarget: true,
+      worktreePaths: [],
+      activeLeases: [],
+      skipReasons: [],
+    },
+  ],
+  managedBlockedBranches: [
+    {
+      branch: "archloop/bd-blocked-cleanup",
+      ownership: {
+        taskId: "bd-blocked",
+        runId: "run-blocked",
+        batchId: "batch-blocked",
+        branch: "archloop/bd-blocked-cleanup",
+        claimedAt: "2026-07-05T10:05:00.000Z",
+        baseHead: "abc123",
+        branchExistedBeforeClaim: true,
+      },
+      exists: true,
+      mergedIntoTarget: false,
+      worktreePaths: [],
+      activeLeases: [],
+      skipReasons: [
+        {
+          reason: "branch_existed_before_claim",
+          message:
+            "Branch archloop/bd-blocked-cleanup existed before Hub claimed task bd-blocked; keep it out of automatic cleanup.",
+        },
+      ],
+    },
+  ],
+  unownedCandidates: [
+    {
+      branch: "archloop/unowned-history",
+      exists: true,
+      mergedIntoTarget: true,
+      worktreePaths: [],
+      activeLeases: [],
+      skipReasons: [
+        {
+          reason: "missing_ownership",
+          message:
+            "Branch archloop/unowned-history has no Hub-managed ownership record.",
+        },
+      ],
+    },
+  ],
+} satisfies HubManagedBranchCleanupEvaluation;
+
+describe("buildHubManagedBranchCleanupModel", () => {
+  it("groups safe/blocked/unowned branches with severity assignment", () => {
+    const model = buildHubManagedBranchCleanupModel(sampleCleanupEvaluation);
+
+    expect(model.header).toMatchObject({
+      kind: "header",
+      title: "Hub managed branch cleanup",
+    });
+    expect(model.identity.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: "target", value: "main" }),
+        expect.objectContaining({ key: "head", value: "abc123def456" }),
+      ]),
+    );
+    expect(model.groups.map((group) => group.name)).toEqual([
+      "safe managed",
+      "blocked managed",
+      "unowned historical",
+    ]);
+    expect(model.groups.map((group) => group.severity)).toEqual([
+      "success",
+      "warn",
+      "info",
+    ]);
+    expect(model.groups.map((group) => group.symbol)).toEqual(["✓", "!", "●"]);
+    expect(model.groups.map((group) => group.count)).toEqual([1, 1, 1]);
+
+    expect(model.groups[0]?.items).toEqual([
+      {
+        id: "bd-safe",
+        title: "archloop/bd-safe-cleanup",
+      },
+    ]);
+    expect(model.groups[1]?.items).toEqual([
+      {
+        id: "bd-blocked",
+        title: "archloop/bd-blocked-cleanup",
+        detailDim:
+          "Branch archloop/bd-blocked-cleanup existed before Hub claimed task bd-blocked; keep it out of automatic cleanup.",
+      },
+    ]);
+    expect(model.groups[2]?.items[0]).toMatchObject({
+      id: "historical",
+      title: "archloop/unowned-history",
+      trailingDim: "Use --include-unowned to delete safe historical branches",
+    });
+  });
+
+  it("surfaces dry-run preview and deleted-branch summaries", () => {
+    const model = buildHubManagedBranchCleanupModel(sampleCleanupEvaluation, {
+      dryRun: true,
+      deletedManagedBranches: ["archloop/bd-safe-cleanup"],
+      deletedHistoricalBranches: ["archloop/unowned-history"],
+      includeUnowned: true,
+    });
+
+    expect(model.preview?.body).toBe("Preview: no git refs will be deleted.");
+    expect(model.deletedManaged?.body).toBe(
+      "Deleted managed branches: archloop/bd-safe-cleanup",
+    );
+    expect(model.deletedHistorical?.body).toBe(
+      "Deleted historical branches: archloop/unowned-history",
+    );
+    expect(model.groups[2]?.items[0]?.trailingDim).toBe(
+      "safe historical branch included by --include-unowned",
+    );
+  });
+});
+
+describe("hubManagedBranchCleanupModelToBlocks / formatHubManagedBranchCleanupLines (presentation)", () => {
+  it("plain (flattenSectionForLog) preserves every branch, task id, and skip reason with no ANSI", () => {
+    const lines = formatHubManagedBranchCleanupLines(sampleCleanupEvaluation, {
+      dryRun: true,
+    });
+    const text = lines.join("\n");
+
+    expect(text).not.toMatch(/\x1b\[/);
+    expect(text).toContain("Hub managed branch cleanup");
+    expect(text).toContain("Preview: no git refs will be deleted.");
+    expect(text).toContain("main");
+    expect(text).toContain("abc123def456");
+    expect(text).toContain("archloop/bd-safe-cleanup");
+    expect(text).toContain("bd-safe");
+    expect(text).toContain("archloop/bd-blocked-cleanup");
+    expect(text).toContain("bd-blocked");
+    expect(text).toContain(
+      "existed before Hub claimed task bd-blocked; keep it out of automatic cleanup",
+    );
+    expect(text).toContain("archloop/unowned-history");
+    expect(text).toContain("--include-unowned");
+
+    expect(lines).toEqual(
+      flattenSectionForLog(
+        hubManagedBranchCleanupModelToBlocks(
+          buildHubManagedBranchCleanupModel(sampleCleanupEvaluation, {
+            dryRun: true,
+          }),
+        ),
+      ),
+    );
+  });
+
+  it("color render distinguishes safe/blocked/unowned severity symbols", () => {
+    const palette = createPalette(true);
+    const rendered = renderSection(
+      "",
+      hubManagedBranchCleanupModelToBlocks(
+        buildHubManagedBranchCleanupModel(sampleCleanupEvaluation),
+      ),
+      { width: 100, colorEnabled: true },
+    ).join("\n");
+
+    expect(rendered).toContain(palette.green("✓"));
+    expect(rendered).toContain(palette.yellow("!"));
+    expect(rendered).toContain(palette.cyan("●"));
   });
 });

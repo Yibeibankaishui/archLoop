@@ -296,6 +296,14 @@ archloop tasks repair-state <selector> --yes
 
 `repair-state` 会先预览本地 Beads mutation；TTY 中需要确认，非交互模式需要 `--yes`。输出走 section-block 渲染器：标题区分 Planned repairs / Applied repairs，按目标 Hub status 分组，并用看板 bucket severity 着色（todo = info/cyan ●，in_progress = warn/yellow ◐，attention = error/red !，done = success/green ✓）；每条显示 task id、诊断原因、以及作为 dim trailing hint 的 branch。未应用时保留 “Re-run with --yes …” 引导；`NO_COLOR` / 非 TTY / `--plain` 下退化为保留全部 id/原因/目标 status/branch 的纯文本。它使用和正常 Hub lifecycle 相同的 canonical transition path，只重写 archLoop 管理的状态标签和 metadata，保留用户自定义标签，不会修改远端 GitHub Issues。典型用途是修复 Hub event 已记录 `task_review_succeeded`、分支仍有未合并工作，但 Beads labels/metadata/claim 过期导致无法 merge 的 QA incident。`commitCount=0` 且没有 branch work 的 agent failure 不会被提升到 `waiting_for_merge`，应通过 recovery policy 处理。
 
+```bash
+archloop tasks cleanup --dry-run
+archloop tasks cleanup --yes
+archloop tasks cleanup --yes --include-unowned
+```
+
+`tasks cleanup` 预览/确认清理 Hub-managed 任务分支。默认只删除已合并且可证明由 Hub 拥有的 safe managed 分支；历史 unowned `archloop/...` 候选默认保留，需显式 `--include-unowned`。`--dry-run` 只预览、不删任何 git ref。输出走 section-block 渲染器：展示 target branch / head，再分三个 severity 着色分组——**safe managed**（success/green ✓）、**blocked managed**（warn/yellow !）、**unowned historical**（info/cyan ●）；每条显示 owning task id（或 `managed` / `historical`）、branch，以及相关 skip reason 作为 dim 续行（unowned 保留 `--include-unowned` 提示作 dim trailing）。dry-run 预览与已删除 managed/historical 分支摘要在存在时仍可见；`NO_COLOR` / 非 TTY / `--plain` 下退化为保留全部 branch / task id / skip reason 的纯文本。评估与删除计划逻辑不变，仅迁移展示层。
+
 ## 7 执行 Flow
 
 ### 7.1 无 reviewer flow

@@ -1102,6 +1102,8 @@ Repair uses the same canonical task transition path as normal Hub lifecycle chan
 
 Previews and confirms cleanup of Hub-managed task branches. By default, archLoop only deletes safe managed branches that are already merged and proven to be Hub-owned. Historical unowned `archloop/...` branches remain listed as candidates but are preserved unless you pass `--include-unowned`. Use `--dry-run` to preview without deleting any git refs.
 
+Output uses the shared section-block renderer: a header with target branch / head, then three severity-colored groups — **safe managed** (success/green ✓), **blocked managed** (warn/yellow !), and **unowned historical** (info/cyan ●). Each item shows the owning task id (or `managed` / `historical`), the branch, and where relevant the skip reason as a dim continuation line (unowned candidates keep the `--include-unowned` note as a dim trailing hint). Dry-run preview and deleted managed/historical branch summaries stay visible when present. Under `NO_COLOR`, non-TTY, or `--plain`, the same blocks flatten to grep-friendly plain text that still preserves every branch name, task id, and skip reason.
+
 ### `archloop tasks delete <task-selector> [task-selector...]`
 
 Permanently deletes one or more local Beads tasks. This is destructive removal, not lifecycle close: Hub merge/triage/recovery use close to mark work done locally while keeping the Beads record. Delete removes the task from Beads and does not delete remote GitHub issues.
