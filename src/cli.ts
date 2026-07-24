@@ -233,8 +233,10 @@ import {
 import {
   buildHubTaskRecoverSummaryModel,
   formatHubRecoveryComment,
+  formatStaleHubTaskRecoveryLines,
   hubTaskRecoverSummaryModelToBlocks,
   recoverHubTask,
+  recoverStaleHubTasks,
 } from "./hubTaskRecover.js";
 import {
   buildConflictFieldValues,
@@ -1804,6 +1806,9 @@ const resolveProjectTargetStatus = (
   });
 
 const taskIdArg = Args.text({ name: "id" });
+// `tasks recover` accepts an optional id: required for single-task recovery,
+// omitted with --stale for batch recovery across the whole board.
+const taskRecoverIdArg = Args.text({ name: "id" }).pipe(Args.optional);
 const taskTitleArg = Args.text({ name: "title" });
 const taskOriginOption = Options.text("origin").pipe(
   Options.withDescription(
@@ -1848,6 +1853,18 @@ const taskDeleteYesOption = Options.boolean("yes").pipe(
 const taskRepairStateYesOption = Options.boolean("yes").pipe(
   Options.withDescription(
     "Apply local Beads task-state repair after previewing planned changes.",
+  ),
+  Options.withDefault(false),
+);
+const taskRecoverStaleOption = Options.boolean("stale").pipe(
+  Options.withDescription(
+    "Recover every interrupted-execution task on the board in one batch (dry-run preview by default; apply with --yes).",
+  ),
+  Options.withDefault(false),
+);
+const taskRecoverYesOption = Options.boolean("yes").pipe(
+  Options.withDescription(
+    "Apply a batch --stale recovery after previewing the planned routing. Required for non-interactive batch recovery.",
   ),
   Options.withDefault(false),
 );
@@ -2546,13 +2563,98 @@ const tasksCommentCommand = Command.make(
 
 const tasksRecoverCommand = Command.make(
   "recover",
-  { id: taskIdArg, project: projectTargetOption },
-  ({ id, project }) =>
+  {
+    id: taskRecoverIdArg,
+    stale: taskRecoverStaleOption,
+    yes: taskRecoverYesOption,
+    project: projectTargetOption,
+  },
+  ({ id, stale, yes, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
       const cwd = yield* resolveTaskCommandRepoRoot(project);
+
+      if (stale) {
+        const idValue = optionalTextValue(id);
+        if (idValue !== undefined) {
+          return yield* Effect.fail(
+            new TaskBoardError({
+              message:
+                "archloop tasks recover --stale recovers every interrupted task on the board; pass a task id without --stale for single-task recovery.",
+            }),
+          );
+        }
+
+        const preview = yield* Effect.tryPromise({
+          try: () => recoverStaleHubTasks({ cwd }),
+          catch: toTaskBoardError,
+        });
+
+        for (const line of formatStaleHubTaskRecoveryLines(preview)) {
+          yield* d.text(line);
+        }
+
+        if (preview.entries.length === 0) {
+          return;
+        }
+
+        const isTTY = process.stdin.isTTY === true;
+        if (!yes && !isTTY) {
+          return yield* Effect.fail(
+            new TaskBoardError({
+              message:
+                "archloop tasks recover --stale mutates local Beads state. Re-run with --yes in non-interactive mode after reviewing the preview.",
+            }),
+          );
+        }
+
+        if (!yes && isTTY) {
+          const approved = yield* Effect.tryPromise({
+            try: async () => {
+              const result = await clack.confirm({
+                message: `Apply batch recovery to ${preview.entries.length} interrupted task${preview.entries.length === 1 ? "" : "s"}?`,
+                initialValue: false,
+              });
+              if (clack.isCancel(result)) {
+                throw new TaskBoardError({
+                  message: "Batch stale recovery cancelled.",
+                });
+              }
+              return result === true;
+            },
+            catch: toTaskBoardError,
+          });
+
+          if (!approved) {
+            return yield* Effect.fail(
+              new TaskBoardError({
+                message: "Batch stale recovery cancelled.",
+              }),
+            );
+          }
+        }
+
+        const applied = yield* Effect.tryPromise({
+          try: () => recoverStaleHubTasks({ cwd, yes: true }),
+          catch: toTaskBoardError,
+        });
+        for (const line of formatStaleHubTaskRecoveryLines(applied)) {
+          yield* d.text(line);
+        }
+        return;
+      }
+
+      const idValue = optionalTextValue(id);
+      if (idValue === undefined) {
+        return yield* Effect.fail(
+          new TaskBoardError({
+            message:
+              "archloop tasks recover requires a task id, or --stale to recover every interrupted task on the board.",
+          }),
+        );
+      }
       const task = yield* Effect.try({
-        try: () => resolveHubTaskSelector(cwd, id),
+        try: () => resolveHubTaskSelector(cwd, idValue),
         catch: toTaskBoardError,
       });
       const result = yield* Effect.tryPromise({

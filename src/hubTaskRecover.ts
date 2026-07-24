@@ -30,14 +30,25 @@ import {
 } from "./hubTaskRecoveryRouter.js";
 import { readTaskEvents } from "./hubRunEventLog.js";
 import {
+  detectInterruptedHubTaskExecutions,
+  type InterruptedExecutionPhase,
+  type InterruptedHubTaskExecution,
+} from "./hubTaskInterruptedExecutionDetector.js";
+import {
   appendHubTaskComment,
   loadHubTask,
+  loadHubTaskBoard,
   resolveHubTaskBranch,
   updateHubTaskStatus,
   type HubFailureReason,
+  type HubTaskBoard,
   type HubTaskProjection,
   type HubTaskStatus,
 } from "./taskBoard.js";
+import {
+  listWorktreeLeases,
+  type WorktreeLeaseRecord,
+} from "./worktreeLeaseStore.js";
 import type {
   SectionBlock,
   SectionFooterBlock,
@@ -479,30 +490,29 @@ const resolveStaleExecutionSummary = (
   return `${route.reason} Routed to ${targetStatus} because the task's metadata overrides the default ready_for_agent destination.`;
 };
 
-const recoverStaleExecutionStatus = async (
-  input: RecoverHubTaskInput,
+/**
+ * The pure recovery plan for a single interrupted task: the destination the
+ * event-aware router + failure-reason override resolve, whether the claim is
+ * preserved, and a human-readable reason. Shared by the per-task recover path
+ * (`recoverStaleExecutionStatus`) and the `tasks recover --stale` batch path
+ * (`recoverStaleHubTasks`) so the two surfaces never diverge on routing.
+ *
+ * Pure over the already-resolved `latestEvent` and `branchHasUnmergedWork` —
+ * the caller resolves those (consulting the run event log and git) and the
+ * router + override do the rest. No mutation.
+ */
+export interface StaleExecutionRecoveryPlan {
+  readonly priorStatus: HubTaskStatus;
+  readonly targetStatus: HubTaskStatus;
+  readonly preserveClaim: boolean;
+  readonly reason: string;
+}
+
+export const planStaleExecutionRecovery = (
   task: HubTaskProjection,
-): Promise<RecoverHubTaskResult> => {
-  const resolveLatestPhaseCompletionEvent =
-    input.resolveLatestPhaseCompletionEvent ??
-    defaultResolveLatestPhaseCompletionEvent;
-  const latestEvent = await resolveLatestPhaseCompletionEvent({
-    cwd: input.cwd,
-    taskId: task.id,
-    env: input.env,
-  });
-
-  // The router only consults branchHasUnmergedWork on the no-event retry
-  // path, so skip the git call entirely when a finished-phase event is
-  // present (it would not change the route).
-  const branch = resolveTaskBranch(task);
-  const resolveBranchHasUnmergedWork =
-    input.branchHasUnmergedWork ?? hasBranchUnmergedWork;
-  const branchHasUnmergedWork =
-    latestEvent === undefined
-      ? await resolveBranchHasUnmergedWork(input.cwd, branch)
-      : false;
-
+  latestEvent: HubTaskEvent | undefined,
+  branchHasUnmergedWork: boolean,
+): StaleExecutionRecoveryPlan => {
   const route = routeInterruptedTaskRecovery({
     hubStatus: task.hubStatus,
     latestEvent,
@@ -510,6 +520,77 @@ const recoverStaleExecutionStatus = async (
   });
 
   if (route.preserveClaim) {
+    return {
+      priorStatus: task.hubStatus,
+      targetStatus: route.targetStatus,
+      preserveClaim: true,
+      reason: route.reason,
+    };
+  }
+
+  const failureReason = readFailureReason(task);
+  const targetStatus = resolveFailedRecoveryTarget(task, failureReason);
+  return {
+    priorStatus: task.hubStatus,
+    targetStatus,
+    preserveClaim: false,
+    reason: resolveStaleExecutionSummary(route, targetStatus, failureReason),
+  };
+};
+
+/**
+ * Resolves the task's latest phase-completion event and branch-unmerged-work
+ * signal, then plans the recovery. The router only consults
+ * `branchHasUnmergedWork` on the no-event retry path, so the git call is
+ * skipped entirely when a finished-phase event is present (it would not
+ * change the route).
+ *
+ * Shared by the per-task recover path (`recoverStaleExecutionStatus`) and the
+ * `tasks recover --stale` batch path (`recoverStaleHubTasks`) so the dry-run
+ * preview the user reviews is computed the same way the apply path computes
+ * it — one resolver for both surfaces, no two copies to keep in sync.
+ */
+const resolveStaleExecutionPlan = async (
+  cwd: string,
+  task: HubTaskProjection,
+  env: NodeJS.ProcessEnv | undefined,
+  resolveLatestPhaseCompletionEvent: ResolveLatestPhaseCompletionEvent,
+  branchHasUnmergedWorkResolver:
+    | ((cwd: string, branch: string) => Promise<boolean>)
+    | undefined,
+): Promise<StaleExecutionRecoveryPlan> => {
+  const latestEvent = await resolveLatestPhaseCompletionEvent({
+    cwd,
+    taskId: task.id,
+    env,
+  });
+  const resolveBranchHasUnmergedWork =
+    branchHasUnmergedWorkResolver ?? hasBranchUnmergedWork;
+  const branch = resolveTaskBranch(task);
+  const branchHasUnmergedWork =
+    latestEvent === undefined
+      ? await resolveBranchHasUnmergedWork(cwd, branch)
+      : false;
+  return planStaleExecutionRecovery(task, latestEvent, branchHasUnmergedWork);
+};
+
+const recoverStaleExecutionStatus = async (
+  input: RecoverHubTaskInput,
+  task: HubTaskProjection,
+): Promise<RecoverHubTaskResult> => {
+  const resolveLatestPhaseCompletionEvent =
+    input.resolveLatestPhaseCompletionEvent ??
+    defaultResolveLatestPhaseCompletionEvent;
+
+  const plan = await resolveStaleExecutionPlan(
+    input.cwd,
+    task,
+    input.env,
+    resolveLatestPhaseCompletionEvent,
+    input.branchHasUnmergedWork,
+  );
+
+  if (plan.preserveClaim) {
     // A finished phase is preserved: the task resumes at the phase the success
     // event was advancing it to, and its claim metadata is kept so the
     // resumed-batch merge path (which keys off claim.runId / claim.batchId)
@@ -519,7 +600,7 @@ const recoverStaleExecutionStatus = async (
     const updatedTask = updateHubTaskStatus({
       cwd: input.cwd,
       taskId: input.taskId,
-      hubStatus: route.targetStatus,
+      hubStatus: plan.targetStatus,
       metadata: { ...task.metadata },
       env: input.env,
     });
@@ -527,7 +608,7 @@ const recoverStaleExecutionStatus = async (
       outcome: "recovered_failed",
       priorStatus: task.hubStatus,
       hubStatus: updatedTask.hubStatus,
-      summary: route.reason,
+      summary: plan.reason,
       task: updatedTask,
     });
   }
@@ -539,13 +620,11 @@ const recoverStaleExecutionStatus = async (
   // task whose metadata carries a human-failure reason routes to
   // ready_for_human rather than ready_for_agent. The claim is stripped
   // (ready_for_agent is not claim-preserving).
-  const failureReason = readFailureReason(task);
-  const targetStatus = resolveFailedRecoveryTarget(task, failureReason);
   const result = recoverToTargetStatus(
     input,
     task,
-    targetStatus,
-    resolveStaleExecutionSummary(route, targetStatus, failureReason),
+    plan.targetStatus,
+    plan.reason,
   );
   return recordRecoveryResult(input, result);
 };
@@ -577,6 +656,152 @@ export const recoverHubTask = async (
   throw new TaskBoardError({
     message: `archloop tasks recover ${input.taskId} found no recoverable failed or stale execution state (status: ${task.hubStatus})`,
   });
+};
+
+// ---------------------------------------------------------------------------
+// tasks recover --stale — batch recovery with dry-run preview (arch-6y9)
+// ---------------------------------------------------------------------------
+
+/**
+ * One task's planned (or, after `yes`, applied) stale-execution recovery in a
+ * `tasks recover --stale` batch. The routing is identical to the per-task path
+ * (`planStaleExecutionRecovery`), so the preview the user reviews matches what
+ * `recoverHubTask` will do when applied.
+ */
+export interface StaleHubTaskRecoveryEntry {
+  readonly taskId: string;
+  readonly title: string;
+  /** The execution phase the task was stuck in (`implementing`/`reviewing`/`merging`). */
+  readonly phase: InterruptedExecutionPhase;
+  readonly priorStatus: HubTaskStatus;
+  readonly targetStatus: HubTaskStatus;
+  readonly preserveClaim: boolean;
+  readonly reason: string;
+  /** Present after the recovery is applied; `undefined` in a dry-run preview. */
+  readonly outcome?: HubTaskRecoveryOutcome;
+}
+
+export interface RecoverStaleHubTasksInput {
+  readonly cwd: string;
+  readonly env?: NodeJS.ProcessEnv;
+  /**
+   * Apply the recovery after previewing. When false (default) the function is
+   * read-only: it builds and returns the plan without mutating task state.
+   */
+  readonly yes?: boolean;
+  /** Injectable board loader (defaults to `loadHubTaskBoard`). */
+  readonly loadBoard?: (cwd: string, env: NodeJS.ProcessEnv) => HubTaskBoard;
+  /** Injectable worktree-lease loader (defaults to `listWorktreeLeases`). */
+  readonly listLeases?: (repoRoot: string) => readonly WorktreeLeaseRecord[];
+  /**
+   * Injectable per-task recovery. Defaults to `recoverHubTask` so the batch
+   * path shares the single source of truth for routing + mutation. Only called
+   * when `yes` is set; the dry-run preview is computed from
+   * `planStaleExecutionRecovery` without invoking this.
+   */
+  readonly recoverTask?: (
+    input: RecoverHubTaskInput,
+  ) => Promise<RecoverHubTaskResult>;
+  readonly resolveLatestPhaseCompletionEvent?: ResolveLatestPhaseCompletionEvent;
+  readonly branchHasUnmergedWork?: (
+    cwd: string,
+    branch: string,
+  ) => Promise<boolean>;
+}
+
+export interface RecoverStaleHubTasksResult {
+  /** Whether the recovery was applied (true only when `yes` was passed). */
+  readonly applied: boolean;
+  readonly entries: readonly StaleHubTaskRecoveryEntry[];
+}
+
+/**
+ * Recover every interrupted-execution task on the board in one command
+ * (`tasks recover --stale`). Loads the board, worktree leases, and run event
+ * log; runs the shared interrupted-execution detector across the board; and
+ * routes each interrupted task through the event-aware recovery router.
+ *
+ * By default (`yes` unset) this is a read-only dry run: it returns the planned
+ * routing per task so the user can verify nothing will be re-implemented
+ * unnecessarily (story 10). The recovery is applied only when `yes` is set
+ * (story 11), by delegating to `recoverHubTask` per task so the batch path and
+ * the per-task path can never diverge on routing or mutation.
+ */
+export const recoverStaleHubTasks = async (
+  input: RecoverStaleHubTasksInput,
+): Promise<RecoverStaleHubTasksResult> => {
+  const cwd = input.cwd;
+  const loadBoard = input.loadBoard ?? loadHubTaskBoard;
+  const listLeases = input.listLeases ?? listWorktreeLeases;
+  const resolveLatestPhaseCompletionEvent =
+    input.resolveLatestPhaseCompletionEvent ??
+    defaultResolveLatestPhaseCompletionEvent;
+  const resolveBranchHasUnmergedWork =
+    input.branchHasUnmergedWork ?? hasBranchUnmergedWork;
+
+  const board = loadBoard(cwd, input.env ?? process.env);
+  const leases = listLeases(cwd);
+  const interrupted = detectInterruptedHubTaskExecutions(board.tasks, leases);
+
+  // Build the dry-run plan first (read-only), so even when applying we return
+  // the same routing the user reviewed. `resolveStaleExecutionPlan` is the
+  // shared resolver used by the per-task path, so the preview and the apply
+  // compute the route the same way. `cwd` is the repo root in the CLI path
+  // (resolved before this function is called); the injected-fake tests bypass
+  // these defaults with a non-git cwd.
+  const plans = await Promise.all(
+    interrupted.map(async (entry: InterruptedHubTaskExecution) => {
+      const plan = await resolveStaleExecutionPlan(
+        cwd,
+        entry.task,
+        input.env,
+        resolveLatestPhaseCompletionEvent,
+        resolveBranchHasUnmergedWork,
+      );
+      return { entry, plan };
+    }),
+  );
+
+  const entries: StaleHubTaskRecoveryEntry[] = plans.map(({ entry, plan }) => ({
+    taskId: entry.taskId,
+    title: entry.task.title,
+    phase: entry.phase,
+    priorStatus: plan.priorStatus,
+    targetStatus: plan.targetStatus,
+    preserveClaim: plan.preserveClaim,
+    reason: plan.reason,
+  }));
+
+  if (!input.yes || entries.length === 0) {
+    return { applied: false, entries };
+  }
+
+  // Apply: delegate to recoverHubTask per task so the batch path reuses the
+  // single mutation source (routing, claim strip/preserve, recovery comment).
+  const recoverTask = input.recoverTask ?? recoverHubTask;
+  const results = await Promise.all(
+    plans.map(async ({ entry }) => {
+      const result = await recoverTask({
+        cwd,
+        taskId: entry.taskId,
+        env: input.env,
+        resolveLatestPhaseCompletionEvent,
+        branchHasUnmergedWork: resolveBranchHasUnmergedWork,
+      });
+      return { taskId: entry.taskId, result };
+    }),
+  );
+
+  const outcomeByTask = new Map(
+    results.map(({ taskId, result }) => [taskId, result.outcome]),
+  );
+  return {
+    applied: true,
+    entries: entries.map((entry) => ({
+      ...entry,
+      outcome: outcomeByTask.get(entry.taskId),
+    })),
+  };
 };
 
 // ---------------------------------------------------------------------------
@@ -640,3 +865,47 @@ export const hubTaskRecoverSummaryModelToBlocks = (
   model.summary,
   model.footer,
 ];
+
+// ---------------------------------------------------------------------------
+// tasks recover --stale preview/applied formatting
+// ---------------------------------------------------------------------------
+
+const claimLabel = (entry: StaleHubTaskRecoveryEntry): string =>
+  entry.preserveClaim
+    ? "preserve claim"
+    : "release claim";
+
+/**
+ * Formats a `tasks recover --stale` result as plain lines for the CLI. The
+ * dry-run preview lists the planned routing per task so the user can verify
+ * nothing will be re-implemented unnecessarily; the applied view mirrors it
+ * with the recorded outcome. Mirrors the `formatHubTaskStateRepairLines`
+ * shape so the two batch surfaces read consistently.
+ */
+export const formatStaleHubTaskRecoveryLines = (
+  result: RecoverStaleHubTasksResult,
+): readonly string[] => {
+  const lines: string[] = ["Stale execution recovery"];
+  if (result.entries.length === 0) {
+    lines.push("No interrupted tasks found on the board.");
+    return lines;
+  }
+
+  lines.push(
+    result.applied ? `Applied recovery for ${result.entries.length} task(s):` : `Planned recovery for ${result.entries.length} interrupted task(s):`,
+  );
+  for (const entry of result.entries) {
+    const outcome =
+      result.applied && entry.outcome !== undefined
+        ? ` [${entry.outcome}]`
+        : "";
+    lines.push(
+      `  ${entry.taskId}: ${entry.priorStatus} -> ${entry.targetStatus} (${claimLabel(entry)})${outcome}`,
+    );
+    lines.push(`    ${entry.reason}`);
+  }
+  if (!result.applied) {
+    lines.push("Re-run with --yes to apply this batch recovery.");
+  }
+  return lines;
+};

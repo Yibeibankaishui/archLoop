@@ -404,6 +404,14 @@ archloop tasks resolve <id> --keep local|remote
 archloop tasks recover 1
 ```
 
+要一次性恢复所有被中断的任务（`implementing` / `reviewing` / `merging` 且没有活跃 worktree lease），使用 `--stale`：
+
+```bash
+archloop tasks recover --stale
+```
+
+`--stale` 会加载 task board、worktree leases 与 run event log，经共享的 interrupted-execution detector 标记中断任务，再按 event-aware recovery router 逐个路由——与单任务 `recover` 走完全相同的路由逻辑，已完成阶段不会被重做。默认只打印 dry-run 预览（每任务列出 prior status -> target、claim 保留或释放、原因），传 `--yes`（或在 TTY 中交互确认）后才会落地，行为镜像 `tasks repair-state` 的确认模式；非交互/CI 环境不传 `--yes` 时只预览并退出，不修改状态。
+
 常见用途：
 
 | 场景                 | 结果                                       |
