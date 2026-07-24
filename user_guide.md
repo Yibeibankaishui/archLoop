@@ -168,6 +168,8 @@ archloop tasks show "Fix login redirect"
 archloop tasks show todo-list-demo-mv2
 ```
 
+`tasks show` 用 section 展示单条任务：status 按看板 bucket 着色（todo 青 / in_progress 黄 / attention 红 / done 绿），评论时间线加粗作者、dim 时间戳、正文保持普通字重，剩余 metadata 以带标签的 kv 行展示（不再 dump 整段 JSON）。`--plain` / `NO_COLOR` 下去掉强调，文字内容不变。
+
 示例详情：
 
 ```text

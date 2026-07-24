@@ -312,4 +312,103 @@ describe("prose newlines", () => {
       "    bob · 2026-06-12: second",
     ]);
   });
+
+  it("renders structured comment entries with bold author and dim timestamp", () => {
+    const colored = renderSection(
+      "",
+      [
+        {
+          kind: "prose",
+          title: "comments · 1",
+          body: "alice · 2026-06-11T15:00:00Z: Looks good",
+          entries: [
+            {
+              lead: "alice",
+              meta: "2026-06-11T15:00:00Z",
+              body: "Looks good",
+            },
+          ],
+        },
+      ],
+      { width: 80, colorEnabled: true },
+    );
+    const joined = colored.join("\n");
+    expect(joined).toMatch(/\x1b\[/);
+    expect(stripAnsi(joined)).toContain("alice");
+    expect(stripAnsi(joined)).toContain("2026-06-11T15:00:00Z");
+    expect(stripAnsi(joined)).toContain("Looks good");
+
+    const plain = renderSection(
+      "",
+      [
+        {
+          kind: "prose",
+          title: "comments · 1",
+          body: "alice · 2026-06-11T15:00:00Z: Looks good",
+          entries: [
+            {
+              lead: "alice",
+              meta: "2026-06-11T15:00:00Z",
+              body: "Looks good",
+            },
+          ],
+        },
+      ],
+      { width: 80, colorEnabled: false },
+    );
+    expect(plain.join("\n")).not.toMatch(/\x1b\[/);
+    expect(plain).toEqual([
+      "  comments · 1",
+      "    alice · 2026-06-11T15:00:00Z: Looks good",
+    ]);
+  });
+});
+
+describe("kv valueSeverity", () => {
+  it("colors the value by severity and keeps secondary dim", () => {
+    const colored = renderSection(
+      "",
+      [
+        {
+          kind: "kv",
+          gutter: 12,
+          rows: [
+            {
+              key: "status",
+              value: "needs_info",
+              secondary: "(beads: open)",
+              valueSeverity: "error",
+            },
+          ],
+        },
+      ],
+      { width: 80, colorEnabled: true },
+    );
+    const joined = colored.join("\n");
+    expect(joined).toMatch(/\x1b\[/);
+    expect(stripAnsi(joined)).toContain("status");
+    expect(stripAnsi(joined)).toContain("needs_info");
+    expect(stripAnsi(joined)).toContain("(beads: open)");
+
+    const plain = renderSection(
+      "",
+      [
+        {
+          kind: "kv",
+          gutter: 12,
+          rows: [
+            {
+              key: "status",
+              value: "needs_info",
+              secondary: "(beads: open)",
+              valueSeverity: "error",
+            },
+          ],
+        },
+      ],
+      { width: 80, colorEnabled: false },
+    );
+    expect(plain.join("\n")).not.toMatch(/\x1b\[/);
+    expect(stripAnsi(plain.join("\n"))).toContain("needs_info");
+  });
 });
