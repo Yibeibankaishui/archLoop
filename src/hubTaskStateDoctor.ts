@@ -4,6 +4,14 @@ import { promisify } from "node:util";
 import type { HubTaskEvent } from "./hubExecution.js";
 import { readTaskEvents } from "./hubRunEventLog.js";
 import {
+  flattenSectionForLog,
+  type SectionBadgesBlock,
+  type SectionBlock,
+  type SectionGroupBlock,
+  type SectionHeaderBlock,
+  type SectionProseBlock,
+} from "./section.js";
+import {
   collectHubWorktreeLeaseDiagnosticsForTasks,
   type HubWorktreeLeaseDiagnostic,
   type HubWorktreeLeaseDiagnosticReason,
@@ -684,52 +692,169 @@ export const repairHubTaskState = async (
   return { applied: plannedRepairs.length > 0, plannedRepairs };
 };
 
-const actionLabel = (diagnostic: HubTaskStateDiagnostic): string => {
-  if (diagnostic.nextAction.startsWith("archloop tasks repair-state")) {
-    return "repair state";
-  }
-  if (diagnostic.nextAction.startsWith("archloop tasks recover")) {
-    return "recover failed task";
-  }
-  if (diagnostic.nextAction.startsWith("archloop tasks push")) {
-    return "push task sync";
-  }
-  if (diagnostic.reason === "interrupted_execution") {
-    // The interrupted_execution nextAction leads with prose ("Implement was
-    // interrupted — run archloop tasks recover <id>"), so the recover-prefix
-    // check above does not match it. Classify it by reason so the rendered
-    // action reflects recovery, not the generic "rerun flow" fallback.
-    return "recover interrupted task";
-  }
-  if (diagnostic.nextAction.startsWith("Wait")) {
-    return "wait for execution";
-  }
-  if (diagnostic.nextAction.includes("Rerun the flow")) {
-    return "rerun flow";
-  }
-  return "rerun flow";
+/** Presentation severity for `archloop tasks doctor` (see `severityColor` in ansi.ts). */
+export type HubTaskStateDiagnosticSeverity = "error" | "warn" | "info";
+
+/**
+ * Reason → severity. Interrupted/failed work is error; stale claims / pending
+ * sync are warn; orphaned or informational cleanup is info. Severity is the
+ * grouping axis (`repairable` is not used here).
+ */
+const DOCTOR_SEVERITY_BY_REASON: Record<
+  HubTaskStateDiagnosticReason,
+  HubTaskStateDiagnosticSeverity
+> = {
+  interrupted_execution: "error",
+  failed_branch_work: "error",
+  worktree_lease_missing: "error",
+  worktree_lease_active_with_failed_claim: "error",
+  worktree_lease_stale_with_failed_claim: "error",
+  state_inconsistent: "warn",
+  multiple_status_labels: "warn",
+  stale_hub_status_metadata: "warn",
+  missing_claim_fields: "warn",
+  dirty_worktree: "warn",
+  task_sync_push_pending: "warn",
+  worktree_lease_active_without_claim: "warn",
+  terminal_stale_execution_metadata: "info",
+  worktree_lease_active_execution: "info",
 };
 
+const DOCTOR_SEVERITY_SYMBOL: Record<
+  HubTaskStateDiagnosticSeverity,
+  SectionGroupBlock["symbol"]
+> = {
+  error: "✗",
+  warn: "!",
+  info: "●",
+};
+
+/** Fixed group/badge order: most severe first. */
+const DOCTOR_SEVERITY_ORDER: readonly HubTaskStateDiagnosticSeverity[] = [
+  "error",
+  "warn",
+  "info",
+];
+
+export interface HubTaskStateDoctorModel {
+  readonly header: SectionHeaderBlock;
+  readonly badges: SectionBadgesBlock;
+  readonly emptyMessage?: SectionProseBlock;
+  readonly groups: readonly SectionGroupBlock[];
+}
+
+/** Group item shape: id=taskId, title=reason, trailing=nextAction, detail=message. */
+interface DoctorDiagnosticItem {
+  readonly id: string;
+  readonly title: string;
+  readonly trailingDim: string;
+  readonly detailDim: string;
+}
+
+const toDoctorGroupItem = (
+  diagnostic: HubTaskStateDiagnostic,
+): DoctorDiagnosticItem => ({
+  id: diagnostic.taskId,
+  title: diagnostic.reason,
+  trailingDim: diagnostic.nextAction,
+  detailDim: diagnostic.message,
+});
+
+const buildDoctorGroup = (
+  severity: HubTaskStateDiagnosticSeverity,
+  items: readonly DoctorDiagnosticItem[],
+): SectionGroupBlock => ({
+  kind: "group",
+  symbol: DOCTOR_SEVERITY_SYMBOL[severity],
+  severity,
+  name: severity,
+  count: items.length,
+  items: [...items].sort((left, right) => left.id.localeCompare(right.id)),
+});
+
+const EMPTY_DOCTOR_BADGES: SectionBadgesBlock = {
+  kind: "badges",
+  badges: [],
+};
+
+/**
+ * Build the doctor section model from diagnostics. Managed branch cleanup lines
+ * stay out of the model — the CLI appends them after `d.section`.
+ */
+export const buildHubTaskStateDoctorModel = (
+  result: DoctorHubTaskStateResult,
+): HubTaskStateDoctorModel => {
+  const header: SectionHeaderBlock = {
+    kind: "header",
+    title: "Hub task state doctor",
+    right: `${result.diagnostics.length} issues`,
+  };
+
+  if (result.diagnostics.length === 0) {
+    return {
+      header,
+      badges: EMPTY_DOCTOR_BADGES,
+      emptyMessage: { kind: "prose", body: "No task state issues found." },
+      groups: [],
+    };
+  }
+
+  const bySeverity = new Map<
+    HubTaskStateDiagnosticSeverity,
+    DoctorDiagnosticItem[]
+  >();
+  for (const diagnostic of result.diagnostics) {
+    const severity = DOCTOR_SEVERITY_BY_REASON[diagnostic.reason];
+    const items = bySeverity.get(severity) ?? [];
+    items.push(toDoctorGroupItem(diagnostic));
+    bySeverity.set(severity, items);
+  }
+
+  const groups = DOCTOR_SEVERITY_ORDER.flatMap((severity) => {
+    const items = bySeverity.get(severity);
+    return items === undefined ? [] : [buildDoctorGroup(severity, items)];
+  });
+
+  return {
+    header,
+    badges: {
+      kind: "badges",
+      badges: groups.map((group) => ({
+        symbol: group.symbol,
+        count: group.count,
+        label: group.name,
+        severity: group.severity,
+      })),
+    },
+    groups,
+  };
+};
+
+/** Map the doctor model to blocks for `d.section` / `renderSection`. */
+export const hubTaskStateDoctorModelToBlocks = (
+  model: HubTaskStateDoctorModel,
+): readonly SectionBlock[] => [
+  model.header,
+  ...(model.emptyMessage
+    ? [model.emptyMessage]
+    : [model.badges, ...model.groups]),
+];
+
+/**
+ * Plain, grep-friendly doctor text via `flattenSectionForLog`, then append
+ * managed branch cleanup lines verbatim. Live CLI uses the same blocks through
+ * `d.section` (palette already degrades under NO_COLOR / non-TTY / `--plain`).
+ */
 export const formatHubTaskStateDoctorLines = (
   result: DoctorHubTaskStateResult,
 ): readonly string[] => {
-  const lines = ["Hub task state doctor"];
-  if (result.diagnostics.length === 0) {
-    lines.push("No task state issues found.");
-  } else {
-    lines.push(`Issues found: ${result.diagnostics.length}`);
-    for (const diagnostic of result.diagnostics) {
-      const branch = diagnostic.branch ? ` ${diagnostic.branch}` : "";
-      lines.push(
-        `  ${diagnostic.taskId}: ${diagnostic.reason}${branch}; next action: ${actionLabel(diagnostic)} (${diagnostic.nextAction})`,
-      );
-      lines.push(`    ${diagnostic.message}`);
-    }
-  }
-  for (const line of result.managedBranchCleanupDiagnostics) {
-    lines.push(line);
-  }
-  return lines;
+  const blocks = hubTaskStateDoctorModelToBlocks(
+    buildHubTaskStateDoctorModel(result),
+  );
+  return [
+    ...flattenSectionForLog(blocks),
+    ...result.managedBranchCleanupDiagnostics,
+  ];
 };
 
 export const formatHubTaskStateRepairLines = (

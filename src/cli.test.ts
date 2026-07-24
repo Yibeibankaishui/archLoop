@@ -3841,8 +3841,12 @@ exit 1
 
     const { stdout } = await runCli("tasks doctor", hostDir, env);
 
+    // The doctor renders a section block (header + badges + severity group).
+    // state_inconsistent maps to the warn severity; the task id, reason, and
+    // recommended next action all survive in the rendered output.
     expect(stdout).toContain("Hub task state doctor");
-    expect(stdout).toContain("bd-cli: state_inconsistent");
+    expect(stdout).toContain("bd-cli");
+    expect(stdout).toContain("state_inconsistent");
     expect(stdout).toContain("archloop tasks repair-state bd-cli");
     expect(JSON.parse(await readFile(stateFile, "utf-8"))[0]).toMatchObject({
       labels: ["ready-for-agent", "customer-label"],
