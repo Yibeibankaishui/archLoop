@@ -1,9 +1,8 @@
 import { execFile } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { promisify } from "node:util";
 
 import type { HubTaskEvent } from "./hubExecution.js";
+import { readTaskEvents } from "./hubRunEventLog.js";
 import {
   collectHubWorktreeLeaseDiagnosticsForTasks,
   type HubWorktreeLeaseDiagnostic,
@@ -106,28 +105,6 @@ export interface RepairHubTaskStateResult {
   readonly plannedRepairs: readonly HubTaskStatePlannedRepair[];
 }
 
-const readObject = (value: unknown): Record<string, unknown> =>
-  value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
-
-const readJsonl = (path: string): unknown[] => {
-  if (!existsSync(path)) {
-    return [];
-  }
-
-  return readFileSync(path, "utf8")
-    .split(/\r?\n/)
-    .filter((line) => line.trim().length > 0)
-    .flatMap((line) => {
-      try {
-        return [JSON.parse(line) as unknown];
-      } catch {
-        return [];
-      }
-    });
-};
-
 const HUB_STATUS_LABELS: Readonly<Record<HubTaskStatus, string>> = {
   inbox: "needs-triage",
   needs_info: "needs-info",
@@ -185,29 +162,6 @@ const normalizeHubStatusValue = (value: unknown): HubTaskStatus | undefined => {
     ? (normalized as HubTaskStatus)
     : undefined;
 };
-
-const listRunDirs = (hubProjectDir: string): readonly string[] => {
-  const runsDir = join(hubProjectDir, "runs");
-  if (!existsSync(runsDir)) {
-    return [];
-  }
-
-  return readdirSync(runsDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => join(runsDir, entry.name))
-    .sort();
-};
-
-const readTaskEvents = (hubProjectDir: string): readonly HubTaskEvent[] =>
-  listRunDirs(hubProjectDir).flatMap((runDir) =>
-    readJsonl(join(runDir, "events", "task.jsonl")).flatMap((event) => {
-      const record = readObject(event);
-      return typeof record.type === "string" &&
-        typeof record.taskId === "string"
-        ? [record as unknown as HubTaskEvent]
-        : [];
-    }),
-  );
 
 const isMergeReadyEvent = (event: HubTaskEvent): boolean =>
   event.type === "task_review_succeeded" ||

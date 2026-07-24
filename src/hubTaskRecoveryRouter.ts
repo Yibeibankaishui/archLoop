@@ -13,9 +13,10 @@ import type { HubTaskStatus } from "./taskBoard.js";
  * - `hubStatus` — the interrupted task's current hub status
  *   (`implementing` / `reviewing` / `merging`).
  * - `latestEvent` — the task's latest phase-completion signal from the run
- *   event log, already resolved by the caller (reusing the doctor's
- *   `latestMergeReadyEventsByTask` helper). `undefined` when no success
- *   event has fired.
+ *   event log. The caller resolves it with the doctor's shared `readTaskEvents`
+ *   reader (the single event-log reader, so no reading code is duplicated),
+ *   then this module's pure `latestPhaseCompletionEventByTask` selector picks
+ *   the latest phase-completion event. `undefined` when no phase has completed.
  * - `branchHasUnmergedWork` — whether the task's branch still carries
  *   commits ahead of HEAD, used only to flavor the no-event retry route.
  *
@@ -23,6 +24,16 @@ import type { HubTaskStatus } from "./taskBoard.js";
  * override to `ready_for_human` is applied by the recovery wiring
  * (`resolveFailedRecoveryTarget`) after this router resolves the base
  * destination, so this module stays a pure phase-completion decision table.
+ *
+ * Note on selection: this module's phase-completion selector is deliberately
+ * wider than the doctor's `latestMergeReadyEventsByTask` (it also recognizes
+ * the reviewer-flow `task_implementation_succeeded` with status `reviewing`,
+ * so a task whose implementation finished resumes at review rather than being
+ * re-implemented — story 3). Both selectors read the same underlying events
+ * via the shared reader; they answer different questions — "is a phase
+ * finished, so recovery should preserve it?" (router) vs "did the task reach
+ * a merge-ready milestone, so the doctor's state-inconsistent check applies?"
+ * (doctor) — so neither subsumes the other.
  */
 
 export interface RouteInterruptedTaskRecoveryInput {
@@ -86,11 +97,21 @@ export const isPhaseCompletionEvent = (event: HubTaskEvent): boolean =>
 /**
  * Selects each task's latest phase-completion event from a run event log.
  *
- * Pure over the supplied events — no filesystem access. The recovery wiring
- * reads the event log and calls this, then passes the per-task result to
- * {@link routeInterruptedTaskRecovery}. Later events overwrite earlier ones,
+ * Pure over the supplied events — no filesystem access. The caller reads the
+ * event log with the doctor's shared `readTaskEvents` reader (no duplicated
+ * reading code) and passes the events here, then passes the per-task result
+ * to {@link routeInterruptedTaskRecovery}. Later events overwrite earlier ones,
  * matching the doctor's `latestMergeReadyEventsByTask` convention (the event
  * log is append-only and chronological).
+ *
+ * This selector is wider than the doctor's `latestMergeReadyEventsByTask`:
+ * it also recognizes the reviewer-flow implementation-succeeded event
+ * (`status: "reviewing"`), so a task whose implementation completed but whose
+ * review was interrupted resumes at review instead of being re-implemented
+ * (story 3). The doctor's own selector intentionally treats only the review-less
+ * `waiting_for_merge` implementation-succeeded event as merge-ready (its
+ * `state_inconsistent` repair target is `waiting_for_merge`, which a reviewing
+ * task is not), so it is left narrower; the router owns this wider selection.
  */
 export const latestPhaseCompletionEventByTask = (
   events: readonly HubTaskEvent[],
