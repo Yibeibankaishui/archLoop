@@ -1941,7 +1941,8 @@ export interface BuildTaskBoardModelInput {
   readonly interruptedTaskIds?: ReadonlySet<string>;
 }
 
-const TASK_BOARD_BUCKETS = [
+/** Stable board-bucket axis order (todo → in_progress → attention → done). */
+export const TASK_BOARD_BUCKETS = [
   "todo",
   "in_progress",
   "attention",
@@ -1989,11 +1990,23 @@ export const mapHubStatusToTaskBoardBucket = (
   }
 };
 
+/** Symbol + severity for a Hub status on the board-bucket axis. */
+export const hubTaskStatusBoardPresentation = (
+  status: HubTaskStatus,
+): {
+  readonly bucket: TaskBoardDisplayBucket;
+  readonly symbol: SectionGroupBlock["symbol"];
+  readonly severity: SectionSeverity;
+} => {
+  const bucket = mapHubStatusToTaskBoardBucket(status);
+  const meta = TASK_BOARD_BUCKET_META[bucket];
+  return { bucket, symbol: meta.symbol, severity: meta.severity };
+};
+
 /** Presentation severity for a Hub status value on `tasks show` (board-bucket axis). */
 export const hubTaskStatusValueSeverity = (
   status: HubTaskStatus,
-): SectionSeverity =>
-  TASK_BOARD_BUCKET_META[mapHubStatusToTaskBoardBucket(status)].severity;
+): SectionSeverity => hubTaskStatusBoardPresentation(status).severity;
 
 const formatTaskCountLabel = (count: number): string =>
   count === 1 ? "1 task" : `${count} tasks`;

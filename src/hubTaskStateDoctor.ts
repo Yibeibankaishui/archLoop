@@ -30,15 +30,15 @@ import {
 import {
   isCompletedHubStatus,
   loadHubTaskBoard,
-  hubTaskStatusValueSeverity,
+  hubTaskStatusBoardPresentation,
   mapHubStatusToTaskBoardBucket,
   resolveHubTaskBranch,
   resolveHubTaskSelector,
+  TASK_BOARD_BUCKETS,
   transitionHubTaskStatus,
   formatHubManagedBranchCleanupDiagnosticsLines,
   type HubTaskProjection,
   type HubTaskStatus,
-  type TaskBoardDisplayBucket,
 } from "./taskBoard.js";
 import { listWorktreeLeases } from "./worktreeLeaseStore.js";
 
@@ -864,24 +864,6 @@ export const formatHubTaskStateDoctorLines = (
   ];
 };
 
-/** Board-bucket symbol for a repair target-status group heading. */
-const REPAIR_STATUS_SYMBOL: Readonly<
-  Record<TaskBoardDisplayBucket, SectionGroupBlock["symbol"]>
-> = {
-  todo: "●",
-  in_progress: "◐",
-  attention: "!",
-  done: "✓",
-};
-
-/** Stable group order mirrors the task board bucket axis. */
-const REPAIR_BUCKET_ORDER: readonly TaskBoardDisplayBucket[] = [
-  "todo",
-  "in_progress",
-  "attention",
-  "done",
-];
-
 export interface HubTaskStateRepairModel {
   readonly header: SectionHeaderBlock;
   readonly emptyMessage?: SectionProseBlock;
@@ -910,11 +892,11 @@ const buildRepairStatusGroup = (
   targetStatus: HubTaskStatus,
   items: readonly RepairGroupItem[],
 ): SectionGroupBlock => {
-  const bucket = mapHubStatusToTaskBoardBucket(targetStatus);
+  const { symbol, severity } = hubTaskStatusBoardPresentation(targetStatus);
   return {
     kind: "group",
-    symbol: REPAIR_STATUS_SYMBOL[bucket],
-    severity: hubTaskStatusValueSeverity(targetStatus),
+    symbol,
+    severity,
     name: targetStatus,
     count: items.length,
     items: [...items].sort((left, right) => left.id.localeCompare(right.id)),
@@ -924,10 +906,20 @@ const buildRepairStatusGroup = (
 const formatRepairCount = (count: number): string =>
   count === 1 ? "1 repair" : `${count} repairs`;
 
+const compareRepairTargetStatuses = (
+  left: HubTaskStatus,
+  right: HubTaskStatus,
+): number => {
+  const bucketDiff =
+    TASK_BOARD_BUCKETS.indexOf(mapHubStatusToTaskBoardBucket(left)) -
+    TASK_BOARD_BUCKETS.indexOf(mapHubStatusToTaskBoardBucket(right));
+  return bucketDiff !== 0 ? bucketDiff : left.localeCompare(right);
+};
+
 /**
  * Build the repair-state section model. Groups planned/applied repairs by
- * target Hub status; each group's severity/symbol comes from
- * `mapHubStatusToTaskBoardBucket` via `hubTaskStatusValueSeverity`.
+ * target Hub status; each group's severity/symbol comes from the shared
+ * board-bucket presentation (`hubTaskStatusBoardPresentation`).
  */
 export const buildHubTaskStateRepairModel = (
   result: RepairHubTaskStateResult,
@@ -955,14 +947,9 @@ export const buildHubTaskStateRepairModel = (
     byTarget.set(repair.targetStatus, items);
   }
 
-  const groups = REPAIR_BUCKET_ORDER.flatMap((bucket) => {
-    const statuses = [...byTarget.keys()]
-      .filter((status) => mapHubStatusToTaskBoardBucket(status) === bucket)
-      .sort((left, right) => left.localeCompare(right));
-    return statuses.map((status) =>
-      buildRepairStatusGroup(status, byTarget.get(status)!),
-    );
-  });
+  const groups = [...byTarget.entries()]
+    .sort(([left], [right]) => compareRepairTargetStatuses(left, right))
+    .map(([status, items]) => buildRepairStatusGroup(status, items));
 
   return {
     header: {
@@ -971,26 +958,28 @@ export const buildHubTaskStateRepairModel = (
       right: formatRepairCount(result.plannedRepairs.length),
     },
     groups,
-    ...(result.applied
-      ? {}
+    guidance: result.applied
+      ? undefined
       : {
-          guidance: {
-            kind: "prose",
-            body: "Re-run with --yes to apply these local Beads mutations.",
-          },
-        }),
+          kind: "prose",
+          body: "Re-run with --yes to apply these local Beads mutations.",
+        },
   };
 };
 
 /** Map the repair model to blocks for `d.section` / `renderSection`. */
 export const hubTaskStateRepairModelToBlocks = (
   model: HubTaskStateRepairModel,
-): readonly SectionBlock[] => [
-  model.header,
-  ...(model.emptyMessage
-    ? [model.emptyMessage]
-    : [...model.groups, ...(model.guidance ? [model.guidance] : [])]),
-];
+): readonly SectionBlock[] => {
+  if (model.emptyMessage) {
+    return [model.header, model.emptyMessage];
+  }
+  return [
+    model.header,
+    ...model.groups,
+    ...(model.guidance ? [model.guidance] : []),
+  ];
+};
 
 /**
  * Plain, grep-friendly repair text via `flattenSectionForLog`. Live CLI uses
