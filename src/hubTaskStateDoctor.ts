@@ -10,6 +10,11 @@ import {
 } from "./hubWorktreeLeaseDiagnostics.js";
 import { evaluateHubManagedBranchCleanup } from "./hubManagedBranchCleanup.js";
 import {
+  findWorktreeLeaseForTask,
+  isInterruptedHubTaskExecution,
+} from "./hubTaskInterruptedExecutionDetector.js";
+import { latestPhaseCompletionEventByTask } from "./hubTaskRecoveryRouter.js";
+import {
   resolveGitRepoRoot,
   resolveHubProjectDir,
   resolveArchloopUserDataDir,
@@ -56,6 +61,7 @@ export type HubTaskStateDiagnosticReason =
   | "terminal_stale_execution_metadata"
   | "dirty_worktree"
   | "task_sync_push_pending"
+  | "interrupted_execution"
   | HubWorktreeLeaseDiagnosticReason;
 
 export interface HubTaskStateDiagnostic {
@@ -417,6 +423,47 @@ const buildTaskSyncPushPendingDiagnostic = (
     "Local task state is pending remote sync. Use task sync push; doctor and repair-state do not mutate remote GitHub issues.",
 });
 
+/**
+ * Build the `interrupted_execution` diagnostic for a task the shared detector
+ * flags as an interrupted run (an executing status with no live worktree lease).
+ *
+ * It is `repairable: false`: the next action is `archloop tasks recover <id>`,
+ * not `repair-state`, so `repairHubTaskState` leaves it alone. The `nextAction`
+ * reflects the task's latest phase-completion event (read through the recovery
+ * router's wider phase-completion selection, the same source `recoverHubTask`
+ * uses, so the doctor's suggested route and the actual recovery route agree): a
+ * finished-phase event means a phase already completed and recovery should
+ * advance past it; no event means the execution was interrupted mid-flight and
+ * recovery should retry it.
+ */
+const buildInterruptedExecutionDiagnostic = (
+  task: HubTaskProjection,
+  leaseState: "active" | "stale" | "missing",
+  latestEvent: HubTaskEvent | undefined,
+  branch: string,
+): HubTaskStateDiagnostic => {
+  const phase = task.hubStatus;
+  const hasFinishedPhase = latestEvent !== undefined;
+  const nextAction = hasFinishedPhase
+    ? `Review/merge already finished — run archloop tasks recover ${task.id} to advance.`
+    : `Implement was interrupted — run archloop tasks recover ${task.id} to retry.`;
+  const message = hasFinishedPhase
+    ? `Task ${task.id} is stuck in ${phase} with a ${leaseState} worktree lease, but its ${latestEvent!.type} event shows a phase already finished; recover to advance instead of redoing finished work.`
+    : `Task ${task.id} is stuck in ${phase} with a ${leaseState} worktree lease and no phase-completion event; recover to retry the interrupted execution.`;
+
+  return {
+    taskId: task.id,
+    title: task.title,
+    reason: "interrupted_execution",
+    repairable: false,
+    currentStatus: task.hubStatus,
+    branch,
+    eventType: latestEvent?.type,
+    nextAction,
+    message,
+  };
+};
+
 const buildWorktreeLeaseDiagnostic = (
   diagnostic: HubWorktreeLeaseDiagnostic,
   task: HubTaskProjection | undefined,
@@ -448,9 +495,15 @@ export const doctorHubTaskState = async (
     repoRoot,
   );
   const board = loadHubTaskBoard(repoRoot, input.env);
-  const mergeReadyEvents = latestMergeReadyEventsByTask(
-    readTaskEvents(hubProjectDir),
-  );
+  const taskEvents = readTaskEvents(hubProjectDir);
+  const mergeReadyEvents = latestMergeReadyEventsByTask(taskEvents);
+  // The interrupted-execution next action is enriched with the task's latest
+  // phase-completion event via the recovery router's wider selection (it also
+  // recognizes the reviewer-flow `task_implementation_succeeded` → reviewing
+  // signal), so the doctor's suggested route matches the route `recoverHubTask`
+  // would actually take. The doctor's own `mergeReadyEvents` (narrower) stays
+  // unchanged for the state_inconsistent / missing_claim_fields paths.
+  const phaseCompletionEvents = latestPhaseCompletionEventByTask(taskEvents);
   const branchInspector = input.branchInspector ?? defaultBranchInspector;
   const worktreeState = await (
     input.worktreeInspector ?? defaultWorktreeInspector
@@ -463,10 +516,15 @@ export const doctorHubTaskState = async (
   });
 
   const diagnostics: HubTaskStateDiagnostic[] = [];
+  // Tasks already covered by a worktree-lease diagnostic. interrupted_execution
+  // dedupes against these (e.g. implementing + active claim + absent lease is
+  // already worktree_lease_missing) so a task is never reported twice.
+  const leaseDiagnosedTaskIds = new Set<string>();
   for (const leaseDiagnostic of collectHubWorktreeLeaseDiagnosticsForTasks(
     board.tasks,
     leases,
   )) {
+    leaseDiagnosedTaskIds.add(leaseDiagnostic.taskId);
     diagnostics.push(
       buildWorktreeLeaseDiagnostic(
         leaseDiagnostic,
@@ -479,6 +537,28 @@ export const doctorHubTaskState = async (
     const statusLabels = collectArchLoopStatusLabels(task);
     if (statusLabels.length > 1) {
       diagnostics.push(buildMultipleStatusLabelsDiagnostic(task, statusLabels));
+    }
+
+    // An interrupted execution (executing status with no live worktree lease)
+    // that no lease diagnostic already covers falls through to
+    // interrupted_execution — the fall-through cases like implementing with a
+    // stale lease, or reviewing/merging with a claim and a missing or stale
+    // lease. It dedupes against the lease diagnostics above (which already
+    // cover implementing + active claim + absent lease as worktree_lease_missing).
+    if (!leaseDiagnosedTaskIds.has(task.id)) {
+      const lease = findWorktreeLeaseForTask(task, leases);
+      const detection = isInterruptedHubTaskExecution(task, lease);
+      if (detection.interrupted) {
+        const leaseState = lease?.state ?? "missing";
+        diagnostics.push(
+          buildInterruptedExecutionDiagnostic(
+            task,
+            leaseState,
+            phaseCompletionEvents.get(task.id),
+            lease?.branch ?? task.claim?.branch ?? resolveHubTaskBranch(task.id, task.title),
+          ),
+        );
+      }
     }
 
     if (task.hubStatus === "failed" && task.claim?.branch) {
@@ -613,6 +693,13 @@ const actionLabel = (diagnostic: HubTaskStateDiagnostic): string => {
   }
   if (diagnostic.nextAction.startsWith("archloop tasks push")) {
     return "push task sync";
+  }
+  if (diagnostic.reason === "interrupted_execution") {
+    // The interrupted_execution nextAction leads with prose ("Implement was
+    // interrupted — run archloop tasks recover <id>"), so the recover-prefix
+    // check above does not match it. Classify it by reason so the rendered
+    // action reflects recovery, not the generic "rerun flow" fallback.
+    return "recover interrupted task";
   }
   if (diagnostic.nextAction.startsWith("Wait")) {
     return "wait for execution";

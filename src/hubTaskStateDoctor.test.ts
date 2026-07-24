@@ -14,6 +14,7 @@ import {
 } from "./hubTaskStateDoctor.js";
 import { formatHubManagedBranchCleanupDiagnosticsLines } from "./taskBoard.js";
 import type { HubManagedBranchCleanupEvaluation } from "./hubManagedBranchCleanup.js";
+import type { WorktreeLeaseRecord } from "./worktreeLeaseStore.js";
 
 const execAsync = promisify(exec);
 
@@ -238,6 +239,405 @@ describe("doctorHubTaskState", () => {
         nextAction: expect.stringContaining("Rerun the flow"),
       }),
     );
+  });
+
+  const buildStaleLease = (branch: string): readonly WorktreeLeaseRecord[] => [
+    {
+      lockFileName: `${branch.replace(/\//g, "-")}.lock`,
+      worktreeName: branch.replace(/\//g, "-"),
+      branch,
+      pid: 4242,
+      acquiredAt: "2026-06-22T10:00:00.000Z",
+      owner: { kind: "hub", taskId: "" },
+      state: "stale",
+      malformed: false,
+    },
+  ];
+
+  it("reports an interrupted reviewing task with a stale lease as interrupted_execution", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-task-doctor-interrupted-reviewing-"),
+    );
+    await initRepo(repoDir);
+    const branch = "archloop/bd-int-reviewing-interrupted-review";
+
+    const { env } = await writeMockBd(repoDir, [
+      {
+        id: "bd-int-reviewing",
+        title: "Interrupted review",
+        status: "in_progress",
+        labels: ["reviewing"],
+        metadata: {
+          hubStatus: "reviewing",
+          claim: {
+            runId: "run-int",
+            batchId: "batch-int",
+            branch,
+            claimedAt: "2026-06-22T10:00:00.000Z",
+          },
+        },
+      },
+    ]);
+
+    const result = await doctorHubTaskState({
+      cwd: repoDir,
+      env,
+      branchInspector: async () => ({
+        exists: true,
+        hasUnmergedWork: false,
+      }),
+      worktreeInspector: async () => ({
+        dirtySourceFiles: [],
+        dirtyTaskStoreFiles: [],
+      }),
+      listWorktreeLeases: () => buildStaleLease(branch),
+    });
+
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-int-reviewing",
+        reason: "interrupted_execution",
+        repairable: false,
+        currentStatus: "reviewing",
+        branch,
+        nextAction:
+          "Implement was interrupted — run archloop tasks recover bd-int-reviewing to retry.",
+      }),
+    );
+    // No lease diagnostic should fire for an active-claim + stale-lease task, so
+    // interrupted_execution is the sole diagnostic (no worktree_lease_* duplicate).
+    expect(
+      result.diagnostics.filter(
+        (diagnostic) => diagnostic.taskId === "bd-int-reviewing",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("reports an interrupted implementing task with a stale lease as interrupted_execution", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-task-doctor-interrupted-implementing-"),
+    );
+    await initRepo(repoDir);
+    const branch = "archloop/bd-int-impl-interrupted-impl";
+
+    const { env } = await writeMockBd(repoDir, [
+      {
+        id: "bd-int-impl",
+        title: "Interrupted implement",
+        status: "in_progress",
+        labels: ["implementing"],
+        metadata: {
+          hubStatus: "implementing",
+          claim: {
+            runId: "run-int-impl",
+            batchId: "batch-int-impl",
+            branch,
+            claimedAt: "2026-06-22T10:00:00.000Z",
+          },
+        },
+      },
+    ]);
+
+    const result = await doctorHubTaskState({
+      cwd: repoDir,
+      env,
+      branchInspector: async () => ({
+        exists: true,
+        hasUnmergedWork: false,
+      }),
+      worktreeInspector: async () => ({
+        dirtySourceFiles: [],
+        dirtyTaskStoreFiles: [],
+      }),
+      listWorktreeLeases: () => buildStaleLease(branch),
+    });
+
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-int-impl",
+        reason: "interrupted_execution",
+        repairable: false,
+        currentStatus: "implementing",
+        nextAction:
+          "Implement was interrupted — run archloop tasks recover bd-int-impl to retry.",
+      }),
+    );
+  });
+
+  it("does not report interrupted_execution when a live worktree lease exists", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-task-doctor-interrupted-live-"),
+    );
+    await initRepo(repoDir);
+    const branch = "archloop/bd-live-review-live-review";
+
+    const { env } = await writeMockBd(repoDir, [
+      {
+        id: "bd-live-review",
+        title: "Live review",
+        status: "in_progress",
+        labels: ["reviewing"],
+        metadata: {
+          hubStatus: "reviewing",
+          claim: {
+            runId: "run-live",
+            batchId: "batch-live",
+            branch,
+            claimedAt: "2026-06-22T10:00:00.000Z",
+          },
+        },
+      },
+    ]);
+
+    const result = await doctorHubTaskState({
+      cwd: repoDir,
+      env,
+      branchInspector: async () => ({
+        exists: true,
+        hasUnmergedWork: false,
+      }),
+      worktreeInspector: async () => ({
+        dirtySourceFiles: [],
+        dirtyTaskStoreFiles: [],
+      }),
+      listWorktreeLeases: () => [
+        {
+          lockFileName: `${branch.replace(/\//g, "-")}.lock`,
+          worktreeName: branch.replace(/\//g, "-"),
+          branch,
+          pid: 4242,
+          acquiredAt: "2026-06-22T10:00:00.000Z",
+          owner: { kind: "hub", taskId: "bd-live-review" },
+          state: "active",
+          malformed: false,
+        },
+      ],
+    });
+
+    expect(
+      result.diagnostics.some(
+        (diagnostic) => diagnostic.reason === "interrupted_execution",
+      ),
+    ).toBe(false);
+  });
+
+  it("dedupes interrupted_execution against worktree_lease_missing for an implementing task with no lease", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-task-doctor-interrupted-dedupe-"),
+    );
+    await initRepo(repoDir);
+    const branch = "archloop/bd-dedupe-impl-dedupe";
+
+    const { env } = await writeMockBd(repoDir, [
+      {
+        id: "bd-dedupe-impl",
+        title: "Dedupe impl",
+        status: "in_progress",
+        labels: ["implementing"],
+        metadata: {
+          hubStatus: "implementing",
+          claim: {
+            runId: "run-dedupe",
+            batchId: "batch-dedupe",
+            branch,
+            claimedAt: "2026-06-22T10:00:00.000Z",
+          },
+        },
+      },
+    ]);
+
+    const result = await doctorHubTaskState({
+      cwd: repoDir,
+      env,
+      branchInspector: async () => ({
+        exists: true,
+        hasUnmergedWork: false,
+      }),
+      worktreeInspector: async () => ({
+        dirtySourceFiles: [],
+        dirtyTaskStoreFiles: [],
+      }),
+      listWorktreeLeases: () => [],
+    });
+
+    // implementing + active claim + absent lease is already worktree_lease_missing;
+    // interrupted_execution must NOT also fire for the same task.
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-dedupe-impl",
+        reason: "worktree_lease_missing",
+      }),
+    );
+    expect(
+      result.diagnostics.filter(
+        (diagnostic) => diagnostic.taskId === "bd-dedupe-impl",
+      ),
+    ).toHaveLength(1);
+    expect(
+      result.diagnostics.some(
+        (diagnostic) => diagnostic.reason === "interrupted_execution",
+      ),
+    ).toBe(false);
+  });
+
+  it("enriches the interrupted_execution next action when a finished-phase event is present", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-task-doctor-interrupted-event-"),
+    );
+    await initRepo(repoDir);
+    const branch = "archloop/bd-evt-review-interrupted-review";
+
+    const { env } = await writeMockBd(repoDir, [
+      {
+        id: "bd-evt-review",
+        title: "Interrupted review",
+        status: "in_progress",
+        labels: ["reviewing"],
+        metadata: {
+          hubStatus: "reviewing",
+          claim: {
+            runId: "run-evt",
+            batchId: "batch-evt",
+            branch,
+            claimedAt: "2026-06-22T10:00:00.000Z",
+          },
+        },
+      },
+    ]);
+    const context = createHubRunContext({
+      cwd: repoDir,
+      env,
+      branch: "flow/with-review",
+      batchId: "batch-evt",
+      runId: "run-evt",
+    });
+    // task_implementation_succeeded with status "reviewing" is the reviewer-flow
+    // phase-completion signal (implementation finished, review was next). It is
+    // NOT a merge-ready event, so it does not collide with the doctor's
+    // state_inconsistent path; the interrupted_execution next action reflects it.
+    writeFileSync(
+      join(context.runDir, "events", "task.jsonl"),
+      `${JSON.stringify({
+        type: "task_implementation_succeeded",
+        runId: context.runId,
+        batchId: context.batchId,
+        taskId: "bd-evt-review",
+        branch,
+        createdAt: "2026-06-22T10:15:00.000Z",
+        status: "reviewing",
+        commitCount: 1,
+      })}\n`,
+    );
+
+    const result = await doctorHubTaskState({
+      cwd: repoDir,
+      env,
+      branchInspector: async () => ({
+        exists: true,
+        hasUnmergedWork: false,
+      }),
+      worktreeInspector: async () => ({
+        dirtySourceFiles: [],
+        dirtyTaskStoreFiles: [],
+      }),
+      listWorktreeLeases: () => buildStaleLease(branch),
+    });
+
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-evt-review",
+        reason: "interrupted_execution",
+        repairable: false,
+        currentStatus: "reviewing",
+        nextAction:
+          "Review/merge already finished — run archloop tasks recover bd-evt-review to advance.",
+      }),
+    );
+  });
+
+  it("reports an interrupted merging task with a stale lease as interrupted_execution", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-task-doctor-interrupted-merging-"),
+    );
+    await initRepo(repoDir);
+    const branch = "archloop/bd-int-merging-interrupted-merge";
+
+    const { env } = await writeMockBd(repoDir, [
+      {
+        id: "bd-int-merging",
+        title: "Interrupted merge",
+        status: "in_progress",
+        labels: ["merging"],
+        metadata: {
+          hubStatus: "merging",
+          claim: {
+            runId: "run-int-merging",
+            batchId: "batch-int-merging",
+            branch,
+            claimedAt: "2026-06-22T10:00:00.000Z",
+          },
+        },
+      },
+    ]);
+
+    const result = await doctorHubTaskState({
+      cwd: repoDir,
+      env,
+      branchInspector: async () => ({
+        exists: true,
+        hasUnmergedWork: false,
+      }),
+      worktreeInspector: async () => ({
+        dirtySourceFiles: [],
+        dirtyTaskStoreFiles: [],
+      }),
+      listWorktreeLeases: () => buildStaleLease(branch),
+    });
+
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-int-merging",
+        reason: "interrupted_execution",
+        repairable: false,
+        currentStatus: "merging",
+        branch,
+        nextAction:
+          "Implement was interrupted — run archloop tasks recover bd-int-merging to retry.",
+      }),
+    );
+    expect(
+      result.diagnostics.filter(
+        (diagnostic) => diagnostic.taskId === "bd-int-merging",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("labels interrupted_execution diagnostics with a recover action, not 'rerun flow'", () => {
+    // The interrupted_execution nextAction leads with prose ("Implement was
+    // interrupted — run archloop tasks recover <id>"), not the recover command
+    // prefix, so the formatter must still classify it as a recovery action and
+    // not fall through to the generic "rerun flow" label.
+    const lines = formatHubTaskStateDoctorLines({
+      diagnostics: [
+        {
+          taskId: "bd-render",
+          title: "Render check",
+          reason: "interrupted_execution",
+          message:
+            "Task bd-render is stuck in reviewing with a stale worktree lease and no phase-completion event; recover to retry the interrupted execution.",
+          nextAction:
+            "Implement was interrupted — run archloop tasks recover bd-render to retry.",
+          repairable: false,
+          currentStatus: "reviewing",
+          branch: "archloop/bd-render-render-check",
+        },
+      ],
+      managedBranchCleanupDiagnostics: [],
+    });
+
+    expect(lines.join("\n")).toContain("bd-render: interrupted_execution");
+    expect(lines.join("\n")).toContain("archloop tasks recover bd-render");
+    expect(lines.join("\n")).not.toContain("next action: rerun flow");
   });
 
   it("previews repair-state mutations without mutating Beads by default", async () => {
