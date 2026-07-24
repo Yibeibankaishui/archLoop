@@ -41,6 +41,8 @@ import {
   type SectionHeaderBlock,
   type SectionKvBlock,
   type SectionProseBlock,
+  type SectionProseEntry,
+  type SectionSeverity,
 } from "./section.js";
 
 export const HUB_TASK_STATUSES = [
@@ -1866,6 +1868,20 @@ const formatInlineObject = (
   return JSON.stringify(value);
 };
 
+const formatDetailMetadataValue = (value: unknown): string => {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value === null
+  ) {
+    return String(value);
+  }
+  return JSON.stringify(value);
+};
+
 const formatComment = (comment: BeadsTaskComment): string => {
   const parts: string[] = [];
   if (comment.author) {
@@ -1877,6 +1893,12 @@ const formatComment = (comment: BeadsTaskComment): string => {
   const prefix = parts.length > 0 ? `${parts.join(" · ")}: ` : "";
   return `${prefix}${comment.body ?? ""}`.trim();
 };
+
+const toCommentProseEntry = (comment: BeadsTaskComment): SectionProseEntry => ({
+  ...(comment.author ? { lead: comment.author } : {}),
+  ...(comment.createdAt ? { meta: comment.createdAt } : {}),
+  body: comment.body ?? "",
+});
 
 export const filterHubTasksByPrdWarning = (
   tasks: readonly HubTaskProjection[],
@@ -1957,7 +1979,7 @@ const TASK_BOARD_BUCKET_META: Readonly<
     TaskBoardDisplayBucket,
     {
       readonly symbol: SectionGroupBlock["symbol"];
-      readonly severity: SectionGroupBlock["severity"];
+      readonly severity: SectionSeverity;
     }
   >
 > = {
@@ -1988,6 +2010,12 @@ export const mapHubStatusToTaskBoardBucket = (
       return "todo";
   }
 };
+
+/** Presentation severity for a Hub status value on `tasks show` (board-bucket axis). */
+export const hubTaskStatusValueSeverity = (
+  status: HubTaskStatus,
+): SectionSeverity =>
+  TASK_BOARD_BUCKET_META[mapHubStatusToTaskBoardBucket(status)].severity;
 
 const formatTaskCountLabel = (count: number): string =>
   count === 1 ? "1 task" : `${count} tasks`;
@@ -2374,6 +2402,7 @@ const buildTaskDetailIdentity = (task: HubTaskProjection): SectionKvBlock => {
   const statusRow: SectionKvBlock["rows"][number] = {
     key: "status",
     value: task.hubStatus,
+    valueSeverity: hubTaskStatusValueSeverity(task.hubStatus),
   };
   if (task.beadsStatus) {
     rows.push({
@@ -2420,8 +2449,8 @@ const buildTaskDetailIdentity = (task: HubTaskProjection): SectionKvBlock => {
   }
 
   const leftover = leftoverDetailMetadata(task.metadata);
-  if (Object.keys(leftover).length > 0) {
-    rows.push({ key: "metadata", value: formatInlineObject(leftover) });
+  for (const [key, value] of Object.entries(leftover)) {
+    rows.push({ key, value: formatDetailMetadataValue(value) });
   }
 
   return {
@@ -2437,10 +2466,12 @@ const buildTaskDetailComments = (
   if (task.comments.length === 0) {
     return undefined;
   }
+  const entries = task.comments.map(toCommentProseEntry);
   return {
     kind: "prose",
     title: `comments · ${task.comments.length}`,
     body: task.comments.map((comment) => formatComment(comment)).join("\n"),
+    entries,
   };
 };
 

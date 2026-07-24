@@ -2388,8 +2388,9 @@ exit 1
     expect(stdout).toContain("Task notes");
     expect(stdout).toContain("labels");
     expect(stdout).toContain("done");
-    expect(stdout).toContain("metadata");
+    expect(stdout).not.toContain('{"execution_mode":"agent"}');
     expect(stdout).toContain("execution_mode");
+    expect(stdout).toContain("agent");
     expect(stdout).toContain("remote");
     expect(stdout).toContain("github#64");
     expect(stdout).toContain("runs");

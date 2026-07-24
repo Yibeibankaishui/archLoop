@@ -64,6 +64,9 @@ export interface SectionGroupBlock {
   readonly footerDim?: string;
 }
 
+/** Shared severity vocabulary for colored section accents (`severityColor`). */
+export type SectionSeverity = "info" | "success" | "warn" | "error" | "muted";
+
 /** Left-aligned key/value block. Keys share a fixed gutter width. */
 export interface SectionKvBlock {
   readonly kind: "kv";
@@ -72,7 +75,19 @@ export interface SectionKvBlock {
     readonly key: string;
     readonly value: string;
     readonly secondary?: string;
+    /** Optional severity coloring for the value (keys stay bold; secondary stays dim). */
+    readonly valueSeverity?: SectionSeverity;
   }[];
+}
+
+/**
+ * Structured timeline line for prose blocks (e.g. comments): bold lead, dim meta,
+ * plain body. When `entries` is set, the renderer prefers them over `body`.
+ */
+export interface SectionProseEntry {
+  readonly lead?: string;
+  readonly meta?: string;
+  readonly body: string;
 }
 
 /** Free-flowing paragraph. Renderer only soft-wraps. */
@@ -80,6 +95,7 @@ export interface SectionProseBlock {
   readonly kind: "prose";
   readonly title?: string;
   readonly body: string;
+  readonly entries?: readonly SectionProseEntry[];
 }
 
 /**
@@ -195,8 +211,7 @@ const renderHeader = (
   const usable = cols - MARGIN.length;
   let left = palette.bold(block.title);
   if (block.subtitle) {
-    left +=
-      " " + palette.dim("·") + " " + palette.cyan(block.subtitle);
+    left += " " + palette.dim("·") + " " + palette.cyan(block.subtitle);
   }
   const right = block.right ? palette.dim(block.right) : "";
   if (!right) {
@@ -300,13 +315,9 @@ const composeGroupItemTrailing = (
   palette: Palette,
 ): { readonly plain: string; readonly rendered: string } => {
   const dimPart = item.trailingDim ?? "";
-  const badgePart = item.remoteBadge
-    ? remoteBadgeLabel(item.remoteBadge)
-    : "";
+  const badgePart = item.remoteBadge ? remoteBadgeLabel(item.remoteBadge) : "";
   const plain =
-    dimPart && badgePart
-      ? `${dimPart} · ${badgePart}`
-      : dimPart || badgePart;
+    dimPart && badgePart ? `${dimPart} · ${badgePart}` : dimPart || badgePart;
   if (!plain) {
     return { plain: "", rendered: "" };
   }
@@ -375,10 +386,7 @@ const renderGroup = (
     if (titleBudget < 4) {
       // Extreme narrow: collapse to id-only + hard-truncated title
       titleBudget = Math.max(4, cols - visibleLength(indent) - 1);
-      const title = truncateTail(
-        `${item.id}  ${item.title}`,
-        titleBudget,
-      );
+      const title = truncateTail(`${item.id}  ${item.title}`, titleBudget);
       lines.push(indent + title);
     } else {
       const title = truncateTail(item.title, titleBudget);
@@ -411,6 +419,34 @@ const renderGroup = (
   return lines;
 };
 
+const formatProseEntryPlain = (entry: SectionProseEntry): string => {
+  const parts: string[] = [];
+  if (entry.lead) {
+    parts.push(entry.lead);
+  }
+  if (entry.meta) {
+    parts.push(entry.meta);
+  }
+  const prefix = parts.length > 0 ? `${parts.join(" · ")}: ` : "";
+  return `${prefix}${entry.body}`.trim();
+};
+
+const formatProseEntryStyled = (
+  entry: SectionProseEntry,
+  palette: Palette,
+): string => {
+  const prefixParts: string[] = [];
+  if (entry.lead) {
+    prefixParts.push(palette.bold(entry.lead));
+  }
+  if (entry.meta) {
+    prefixParts.push(palette.dim(entry.meta));
+  }
+  const prefix =
+    prefixParts.length > 0 ? `${prefixParts.join(palette.dim(" · "))}: ` : "";
+  return `${prefix}${entry.body}`.trim();
+};
+
 const renderKv = (
   block: SectionKvBlock,
   cols: number,
@@ -423,9 +459,12 @@ const renderKv = (
     const keyPad = Math.max(1, gutter - visibleLength(row.key));
     const keyPadded = key + " ".repeat(keyPad);
     const valueBudget = Math.max(10, cols - MARGIN.length - gutter);
-    let value = row.value;
+    const valueColor = row.valueSeverity
+      ? severityColor(palette, row.valueSeverity)
+      : (text: string) => text;
+    let value = valueColor(row.value);
     if (row.secondary) {
-      value = `${row.value}  ${palette.dim(row.secondary)}`;
+      value = `${value}  ${palette.dim(row.secondary)}`;
     }
     const wrapped = wrapText(value, valueBudget);
     lines.push(MARGIN + keyPadded + wrapped[0]!);
@@ -448,8 +487,10 @@ const renderProse = (
   }
   const indent = MARGIN + "  ";
   const usable = Math.max(10, cols - indent.length);
-  // Preserve explicit newlines (comments timeline); soft-wrap within each paragraph line.
-  const paragraphs = block.body.trimEnd().split(/\r?\n/);
+  const paragraphs =
+    block.entries && block.entries.length > 0
+      ? block.entries.map((entry) => formatProseEntryStyled(entry, palette))
+      : block.body.trimEnd().split(/\r?\n/);
   for (const paragraph of paragraphs) {
     if (paragraph.length === 0) {
       lines.push(indent);
@@ -478,10 +519,7 @@ const renderIndentedBlock = (
   let first = headerPrefix;
   if (block.id) {
     // Never pad the id past the remaining column budget.
-    const idBudget = Math.max(
-      8,
-      cols - visibleLength(headerPrefix) - 4,
-    );
+    const idBudget = Math.max(8, cols - visibleLength(headerPrefix) - 4);
     const idText =
       visibleLength(block.id) > idBudget
         ? truncateTail(block.id, idBudget)
@@ -523,10 +561,9 @@ const renderFooter = (
   const commands =
     block.label === "tip" ? [...block.commands] : [block.command];
   const labelStr =
-    block.label === "fix"
-      ? palette.red(block.label)
-      : palette.dim(block.label);
-  const labelPadded = labelStr + " ".repeat(Math.max(1, 6 - block.label.length));
+    block.label === "fix" ? palette.red(block.label) : palette.dim(block.label);
+  const labelPadded =
+    labelStr + " ".repeat(Math.max(1, 6 - block.label.length));
   const sep = "   " + palette.dim("·") + "   ";
   const joined = commands.join(sep);
   const first = MARGIN + labelPadded + joined;
@@ -666,7 +703,15 @@ export const flattenSectionForLog = (
         if (block.title) {
           lines.push(block.title);
         }
-        lines.push(block.body);
+        if (block.entries && block.entries.length > 0) {
+          lines.push(
+            block.entries
+              .map((entry) => formatProseEntryPlain(entry))
+              .join("\n"),
+          );
+        } else {
+          lines.push(block.body);
+        }
         break;
       case "indented-block": {
         const id = block.id ? `${block.id}  ` : "";

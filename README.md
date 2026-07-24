@@ -988,7 +988,15 @@ Pass `--plain` (or set `NO_COLOR=1`) to strip bold/dim/color while keeping symbo
 
 ### `archloop tasks show <task-selector>`
 
-Shows a single Beads task as a typographic `section`: header (`archLoop · task · <id>` with status/owner), 12-char key/value identity rows, `description` / `comments · N` prose, and a `next` footer.
+Shows a single Beads task as a typographic `section`: header (`archLoop · task · <id>` with status/owner), 12-char key/value identity rows, `description` / `comments · N` prose, and a `tip` footer.
+
+Visual hierarchy on the detail view:
+
+- **Status** value is colored by the same board-bucket severity as `tasks list` (todo→cyan, in_progress→yellow, attention→red, done→green); keys stay bold and `(beads: …)` stays dim.
+- **Comments** timeline renders each comment with a bold author, dim timestamp, and plain body (chronological; heading stays `comments · N`).
+- **Leftover metadata** appears as labeled identity rows (e.g. `execution_mode`) instead of a raw JSON blob.
+
+Pass `--plain` (or set `NO_COLOR=1`) to strip emphasis while keeping the same textual content.
 
 Task selectors are an exact Beads id or exact task title. Ambiguous title matches fail with candidate ids instead of guessing. The old 1-based `tasks list` ordinal (`archloop tasks show 3`) is no longer accepted — pass the Beads id instead.
 
@@ -998,14 +1006,15 @@ Example:
   archLoop · task · AutoTuneAgent-2mr                                                ready_for_agent
   title       Slice 2 · Remove TaskOrchestrator
   status      ready_for_agent  (beads: open)
-  labels      ready_for_agent, archLoop
+  labels      ready-for-agent, archLoop
   origin      prd-decomposition
   remote      github#210
+  execution_mode  agent
   description
     Delete the old orchestrator path.
   comments · 1
     alice · 2026-06-11T15:00:00Z: Looks good
-  next  archloop tasks update AutoTuneAgent-2mr ... · gh issue view 210
+  tip   archloop tasks comment AutoTuneAgent-2mr   ·   archloop tasks recover AutoTuneAgent-2mr   ·   gh issue view 210
 ```
 
 ### `archloop tasks create <title>`

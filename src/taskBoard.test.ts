@@ -20,6 +20,7 @@ import {
   projectHubTaskBoard,
   projectHubReadyQueueBoard,
   renderHubTaskBoardText,
+  renderHubTaskDetailText,
   resolveHubTaskSelectors,
   selectHubBatchMergeTasks,
   type TaskBoardRemoteBadge,
@@ -302,13 +303,14 @@ describe("task status projection", () => {
           key: "status",
           value: "ready_for_agent",
           secondary: "(beads: open)",
+          valueSeverity: "info",
         },
         { key: "labels", value: "ready-for-agent, backend" },
         { key: "origin", value: "manual" },
         { key: "kind", value: "slice" },
         { key: "remote", value: "github#64" },
         { key: "runs", value: "run-123" },
-        { key: "metadata", value: '{"execution_mode":"agent"}' },
+        { key: "execution_mode", value: "agent" },
       ],
     });
     expect(model.description).toEqual({
@@ -320,6 +322,13 @@ describe("task status projection", () => {
       kind: "prose",
       title: "comments · 1",
       body: "alice · 2026-06-11T15:00:00Z: Looks good",
+      entries: [
+        {
+          lead: "alice",
+          meta: "2026-06-11T15:00:00Z",
+          body: "Looks good",
+        },
+      ],
     });
     expect(model.footer).toEqual({
       kind: "footer",
@@ -330,6 +339,102 @@ describe("task status projection", () => {
         "gh issue view 64",
       ],
     });
+  });
+
+  it("colors the task detail status row by board-bucket severity", () => {
+    const cases = [
+      {
+        labels: ["ready-for-agent"] as string[],
+        metadata: {},
+        status: "info" as const,
+        hubStatus: "ready_for_agent",
+      },
+      {
+        labels: ["implementing"] as string[],
+        metadata: {},
+        status: "warn" as const,
+        hubStatus: "implementing",
+      },
+      {
+        labels: ["needs-info"] as string[],
+        metadata: {},
+        status: "error" as const,
+        hubStatus: "needs_info",
+      },
+      {
+        labels: ["failed"] as string[],
+        metadata: {},
+        status: "error" as const,
+        hubStatus: "failed",
+      },
+      {
+        labels: ["done"] as string[],
+        metadata: { done: true },
+        status: "success" as const,
+        hubStatus: "done",
+      },
+      {
+        labels: ["wontfix"] as string[],
+        metadata: {},
+        status: "success" as const,
+        hubStatus: "wontfix",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const task = projectHubTask({
+        id: `bd-sev-${testCase.hubStatus}`,
+        title: testCase.hubStatus,
+        status: testCase.hubStatus === "done" ? "closed" : "open",
+        labels: testCase.labels,
+        metadata: testCase.metadata,
+      });
+      expect(task.hubStatus).toBe(testCase.hubStatus);
+      const statusRow = buildHubTaskDetailModel(task).identity.rows.find(
+        (row) => row.key === "status",
+      );
+      expect(statusRow).toMatchObject({
+        value: testCase.hubStatus,
+        valueSeverity: testCase.status,
+      });
+    }
+  });
+
+  it("renders colored status and emphasized comments while plain mode stays ANSI-free", () => {
+    const task = projectHubTask({
+      id: "bd-render",
+      title: "Render me",
+      status: "open",
+      labels: ["needs-info"],
+      metadata: { execution_mode: "agent" },
+      comments: [
+        {
+          author: "alice",
+          body: "Needs a repro",
+          createdAt: "2026-06-11T15:00:00Z",
+        },
+      ],
+    });
+    const model = buildHubTaskDetailModel(task);
+    const colored = renderHubTaskDetailText(model, {
+      width: 80,
+      colorEnabled: true,
+    }).join("\n");
+    const plain = renderHubTaskDetailText(model, {
+      width: 80,
+      colorEnabled: false,
+    }).join("\n");
+
+    expect(colored).toMatch(/\x1b\[/);
+    expect(plain).not.toMatch(/\x1b\[/);
+    expect(stripAnsi(colored)).toContain("needs_info");
+    expect(stripAnsi(colored)).toContain("alice");
+    expect(stripAnsi(colored)).toContain("Needs a repro");
+    expect(stripAnsi(colored)).toContain("execution_mode");
+    expect(stripAnsi(colored)).not.toContain('{"execution_mode":"agent"}');
+    expect(plain).toContain("needs_info");
+    expect(plain).toContain("alice · 2026-06-11T15:00:00Z: Needs a repro");
+    expect(plain).toContain("execution_mode");
   });
 
   it("loads all Beads tasks including closed tasks beyond the default list page", async () => {
@@ -883,12 +988,48 @@ fs.writeSync(1, JSON.stringify(tasks));
       kind: "prose",
       title: "comments · 2",
       body: "alice · 2026-06-11T15:00:00Z: First note\nbob · 2026-06-12T09:00:00Z: Second note",
+      entries: [
+        {
+          lead: "alice",
+          meta: "2026-06-11T15:00:00Z",
+          body: "First note",
+        },
+        {
+          lead: "bob",
+          meta: "2026-06-12T09:00:00Z",
+          body: "Second note",
+        },
+      ],
     });
     expect(model.footer).toEqual({
       kind: "footer",
       label: "tip",
       commands: ["archloop tasks comment bd-7", "archloop tasks recover bd-7"],
     });
+  });
+
+  it("does not dump leftover detail metadata as a raw JSON blob", () => {
+    const task = projectHubTask({
+      id: "bd-meta",
+      title: "Metadata task",
+      status: "open",
+      metadata: {
+        execution_mode: "agent",
+        attempt: 2,
+        nested: { ok: true },
+      },
+    });
+
+    const rows = buildHubTaskDetailModel(task).identity.rows;
+    expect(rows.find((row) => row.key === "metadata")).toBeUndefined();
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        { key: "execution_mode", value: "agent" },
+        { key: "attempt", value: "2" },
+        { key: "nested", value: '{"ok":true}' },
+      ]),
+    );
+    expect(JSON.stringify(rows)).not.toContain('"key":"metadata"');
   });
 
   it("attaches PRD warning badges on the task board model", () => {
