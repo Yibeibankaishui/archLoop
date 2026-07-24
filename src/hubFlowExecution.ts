@@ -1131,7 +1131,7 @@ const implementSelectedTask = async (
         branch,
         metadata: claimResult.task.metadata,
         claim,
-        createdAt: new Date().toISOString(),
+        createdAt: finishedAt,
       }),
     );
     return {
@@ -1707,7 +1707,10 @@ const defaultResolvePriorMergedCompletion: ResolvePriorMergedCompletion =
   async ({ cwd, taskId, hubProjectDir, env }) => {
     const projectDir =
       hubProjectDir ??
-      resolveHubProjectDir(resolveArchloopUserDataDir(env ?? process.env), cwd);
+      resolveHubProjectDir(
+        resolveArchloopUserDataDir(env ?? process.env),
+        resolveGitRepoRoot(cwd),
+      );
     return hasPriorMergedCompletion(readTaskEvents(projectDir), taskId);
   };
 
