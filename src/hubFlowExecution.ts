@@ -17,6 +17,7 @@ import {
   type HubRunEventObserver,
   type HubRunStopReason,
   type HubTaskClaimMetadata,
+  type HubTaskEvent,
 } from "./hubExecution.js";
 import {
   createHubFlowRunMerger,
@@ -48,12 +49,14 @@ import {
   recordImplementationSuccess,
   recordHubTaskReviewFailure,
   recordHubTaskReviewSuccess,
+  recordTaskClosure,
   type HubTaskLifecycleContext,
 } from "./hubTaskLifecycle.js";
 import {
   formatHubRetryPromptContext,
   prepareHubTaskRetry,
 } from "./hubTaskRetry.js";
+import { readTaskEvents } from "./hubRunEventLog.js";
 import {
   readHubAgentConfig,
   type HubAgentRole,
@@ -89,6 +92,13 @@ export interface HubImplementTaskInput {
   readonly promptFile: string;
   readonly cwd: string;
   readonly runDir: string;
+  /**
+   * The Hub project dir the run resolved to, so the default prior-merge
+   * resolver reads the same event log the run writes. Optional: when omitted
+   * (e.g. in unit tests that inject the resolver or lay out no run dir) the
+   * default resolver derives it from `cwd` / `env`.
+   */
+  readonly hubProjectDir?: string;
   readonly projectDevelopmentContract: HubProjectDevelopmentContractState;
   readonly retryContext?: string;
   readonly preservedWorktreePath?: string;
@@ -100,6 +110,14 @@ export interface HubImplementTaskResult {
   readonly commits: readonly { readonly sha: string }[];
   readonly completionSignal?: string;
   readonly branchHasUnmergedWork?: boolean;
+  /**
+   * Set when the implementer observed a completion signal but no new branch
+   * work because the task's implementation was already merged into the base
+   * branch (a faithful re-run produces zero new commits). The per-task driver
+   * closes the task as done instead of advancing it to review/merge (there is
+   * nothing left to merge) or marking it agent_failed. See arch-d0c.
+   */
+  readonly alreadyMerged?: boolean;
   readonly message?: string;
 }
 
@@ -628,9 +646,7 @@ const buildHubAgentPromptArgs = (
 
 const HUB_COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
 
-const readCompletionSignalFromLog = (
-  logPath: string,
-): string | undefined => {
+const readCompletionSignalFromLog = (logPath: string): string | undefined => {
   try {
     const content = readFileSync(logPath, "utf8");
     return content.includes(HUB_COMPLETION_SIGNAL)
@@ -813,17 +829,12 @@ const runHubAgent = async (input: {
         throw error;
       }
 
-      const transientReason = matchProviderTransientReason(
-        errorMessage(error),
-      );
+      const transientReason = matchProviderTransientReason(errorMessage(error));
       if (transientReason === undefined || attempt >= retryConfig.attempts) {
         throw error;
       }
 
-      const backoffMs = providerRetryBackoffMs(
-        retryConfig.baseMs,
-        attempt - 1,
-      );
+      const backoffMs = providerRetryBackoffMs(retryConfig.baseMs, attempt - 1);
       const backoffSeconds = backoffMs / 1000;
       appendHubTaskEvent(input.runDir, {
         type: "task_provider_retry",
@@ -1068,6 +1079,7 @@ const implementSelectedTask = async (
       promptFile,
       cwd,
       runDir: context.runDir,
+      hubProjectDir: context.hubProjectDir,
       projectDevelopmentContract: input.projectDevelopmentContract!,
       retryContext,
       preservedWorktreePath: retryPreparation.preservedWorktreePath,
@@ -1085,6 +1097,52 @@ const implementSelectedTask = async (
   }
 
   const finishedAt = new Date().toISOString();
+
+  // The implementer recognized an already-merged re-run: the agent signaled
+  // completion with no new branch work because the task's implementation was
+  // previously merged into the base branch (arch-d0c). There is nothing left to
+  // review or merge — the work is already on the lineage — so record the
+  // implementation success and close the task as done directly, instead of
+  // advancing it to reviewing/waiting_for_merge (where the merge phase would
+  // strand a branch with no unmerged work) or marking it agent_failed.
+  if (implementationResult.alreadyMerged === true) {
+    const { task: updatedTask } = await mutateLifecycle(() =>
+      recordImplementationSuccess({
+        cwd,
+        env: input.env,
+        context: lifecycleContext,
+        taskId: task.id,
+        branch,
+        metadata: claimResult.task.metadata,
+        claim,
+        commitCount: implementationResult.commits.length,
+        hasReviewer: false,
+        branchHasUnmergedWork: false,
+        implementationWork: undefined,
+        createdAt: finishedAt,
+      }),
+    );
+    const closure = await mutateLifecycle(() =>
+      recordTaskClosure({
+        cwd,
+        env: input.env,
+        context: lifecycleContext,
+        taskId: task.id,
+        branch,
+        metadata: claimResult.task.metadata,
+        claim,
+        createdAt: new Date().toISOString(),
+      }),
+    );
+    return {
+      taskId: task.id,
+      title: task.title,
+      branch,
+      outcome: "implemented",
+      hubStatus: closure.hubStatus ?? updatedTask.hubStatus,
+      commitCount: implementationResult.commits.length,
+    };
+  }
 
   if (isSuccessfulImplementation(implementationResult)) {
     const implementationWork = resolveImplementationWork(implementationResult);
@@ -1602,6 +1660,57 @@ export const formatHubFlowResultLines = (
   return lines;
 };
 
+/**
+ * Pure selector over the Hub run event log: has this task previously reached
+ * a merged/done milestone? A prior `merge_succeeded` (the implementation
+ * commit reached the base branch) or `task_closed` (the task was closed as
+ * done) proves the task's described work is already present on the branch
+ * lineage. Used by the implementer to distinguish a faithful zero-new-commit
+ * re-run on already-merged work from a genuine no-work failure (arch-d0c).
+ *
+ * Events from the *current* run do not carry these types before the
+ * implementer returns (implementation is the first phase), so only a prior,
+ * completed run can set this true — which is exactly the "already merged"
+ * signal. Phase-completion events (`task_implementation_succeeded`,
+ * `task_review_succeeded`) are deliberately NOT enough here: they prove a
+ * phase finished, not that the work reached the base branch.
+ */
+const hasPriorMergedCompletion = (
+  events: readonly HubTaskEvent[],
+  taskId: string,
+): boolean =>
+  events.some(
+    (event) =>
+      event.taskId === taskId &&
+      (event.type === "merge_succeeded" || event.type === "task_closed"),
+  );
+
+/**
+ * Resolves whether a task's implementation was previously merged/done, by
+ * reading the Hub run event log with the shared `readTaskEvents` reader (the
+ * single event-log reader, so no reading code is duplicated) and applying the
+ * pure {@link hasPriorMergedCompletion} selector. Injectable so tests supply a
+ * result without a real Hub run dir; the default scans the Hub project dir the
+ * run resolved (passed per-task as `hubProjectDir`) or, failing that, the dir
+ * derived from `cwd` / `env`.
+ */
+export type ResolvePriorMergedCompletion = (
+  input: Readonly<{
+    cwd: string;
+    taskId: string;
+    hubProjectDir?: string;
+    env?: NodeJS.ProcessEnv;
+  }>,
+) => Promise<boolean>;
+
+const defaultResolvePriorMergedCompletion: ResolvePriorMergedCompletion =
+  async ({ cwd, taskId, hubProjectDir, env }) => {
+    const projectDir =
+      hubProjectDir ??
+      resolveHubProjectDir(resolveArchloopUserDataDir(env ?? process.env), cwd);
+    return hasPriorMergedCompletion(readTaskEvents(projectDir), taskId);
+  };
+
 const hasBranchUnmergedWork = async (
   cwd: string,
   branch: string,
@@ -1681,8 +1790,16 @@ export const createHubFlowRunImplementer = (options: {
   readonly roleEntry?: HubAgentRoleEntry;
   readonly showAgentStartup?: boolean;
   readonly idleTimeoutSeconds?: number;
+  /**
+   * Override for whether the task's implementation was previously merged/done
+   * (arch-d0c). The default reads the Hub run event log; inject a stub in
+   * tests that do not lay out a real run dir.
+   */
+  readonly resolvePriorMergedCompletion?: ResolvePriorMergedCompletion;
 }): HubFlowImplementer => {
   const agent = resolveHubFlowRunnerAgent("implementation", options);
+  const resolvePriorMergedCompletion =
+    options.resolvePriorMergedCompletion ?? defaultResolvePriorMergedCompletion;
 
   return async (input) => {
     const logFileName = `${input.taskId}.log`;
@@ -1722,9 +1839,7 @@ export const createHubFlowRunImplementer = (options: {
       input.branch,
     );
     const commits =
-      observedCommits.length > 0
-        ? observedCommits
-        : (runResult?.commits ?? []);
+      observedCommits.length > 0 ? observedCommits : (runResult?.commits ?? []);
     const branchHasUnmergedWork = await hasBranchUnmergedWork(
       options.cwd,
       input.branch,
@@ -1755,6 +1870,34 @@ export const createHubFlowRunImplementer = (options: {
         commits,
         message: "Implementer finished without completion signal",
       };
+    }
+
+    // The agent signaled completion but produced no new branch work. Before
+    // attributing this as a no-work failure, check whether the task's
+    // implementation was already merged into the base branch: a faithful
+    // re-run on already-merged work legitimately produces zero new commits
+    // (arch-d0c). The prior-merge event is the only signal that distinguishes
+    // this from a genuine no-work failure — the completion signal alone is not
+    // trustworthy (a lazy agent can emit COMPLETE with no work), so trusting it
+    // unconditionally would regress the #221/#57 empty-loop guard.
+    if (!hasBranchWork) {
+      const priorMergedCompletion = await resolvePriorMergedCompletion({
+        cwd: options.cwd,
+        taskId: input.taskId,
+        hubProjectDir: input.hubProjectDir,
+        env: options.env,
+      });
+      if (priorMergedCompletion) {
+        return {
+          outcome: "success",
+          commits,
+          completionSignal,
+          branchHasUnmergedWork,
+          alreadyMerged: true,
+          message:
+            "Implementer completed without new commits; the task's implementation was already merged into the base branch.",
+        };
+      }
     }
 
     return {
