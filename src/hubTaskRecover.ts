@@ -31,6 +31,7 @@ import {
 import { readTaskEvents } from "./hubRunEventLog.js";
 import {
   detectInterruptedHubTaskExecutions,
+  isInterruptedExecutionStatus,
   type InterruptedExecutionPhase,
   type InterruptedHubTaskExecution,
 } from "./hubTaskInterruptedExecutionDetector.js";
@@ -89,10 +90,16 @@ export type ResolveLatestPhaseCompletionEvent = (
  * can diverge when the run uses an explicit `hubProjectDir` (e.g. tests, or a
  * custom `ARCHLOOP_USER_DATA_DIR`).
  */
-export const createHubProjectDirPhaseCompletionEventResolver = (
+const resolvePhaseCompletionEventFromHubProjectDir = (
   hubProjectDir: string,
-): ResolveLatestPhaseCompletionEvent =>
-  async ({ taskId }) => readPhaseCompletionEventsByTask(hubProjectDir).get(taskId);
+  taskId: string,
+): HubTaskEvent | undefined =>
+  latestPhaseCompletionEventByTask(readTaskEvents(hubProjectDir)).get(taskId);
+
+export const createHubProjectDirPhaseCompletionEventResolver =
+  (hubProjectDir: string): ResolveLatestPhaseCompletionEvent =>
+  async ({ taskId }) =>
+    resolvePhaseCompletionEventFromHubProjectDir(hubProjectDir, taskId);
 
 const defaultResolveLatestPhaseCompletionEvent: ResolveLatestPhaseCompletionEvent =
   async ({ cwd, taskId, env }) => {
@@ -101,9 +108,7 @@ const defaultResolveLatestPhaseCompletionEvent: ResolveLatestPhaseCompletionEven
       resolveArchloopUserDataDir(env ?? process.env),
       repoRoot,
     );
-    return latestPhaseCompletionEventByTask(readTaskEvents(hubProjectDir)).get(
-      taskId,
-    );
+    return resolvePhaseCompletionEventFromHubProjectDir(hubProjectDir, taskId);
   };
 
 const COLLABORATION_STATUSES = new Set<HubTaskStatus>([
@@ -113,12 +118,6 @@ const COLLABORATION_STATUSES = new Set<HubTaskStatus>([
   "ready_for_human",
   "blocked",
   "sync_conflict",
-]);
-
-const STALE_EXECUTION_STATUSES = new Set<HubTaskStatus>([
-  "implementing",
-  "reviewing",
-  "merging",
 ]);
 
 const HUMAN_FAILURE_REASONS = new Set<HubFailureReason>([
@@ -604,12 +603,9 @@ const recoverStaleExecutionStatus = async (
   );
 
   if (plan.preserveClaim) {
-    // A finished phase is preserved: the task resumes at the phase the success
-    // event was advancing it to, and its claim metadata is kept so the
-    // resumed-batch merge path (which keys off claim.runId / claim.batchId)
-    // can find it. reviewing and waiting_for_merge are claim-preserving
-    // statuses, so updateHubTaskStatus keeps the existing claim (it does not
-    // go through recoverFailedHubTask, which strips the claim).
+    // Finished phase: resume at the router's target and keep claim metadata so
+    // the resumed-batch merge path (claim.runId / claim.batchId) can find it.
+    // updateHubTaskStatus preserves the claim; recoverFailedHubTask would strip it.
     const updatedTask = updateHubTaskStatus({
       cwd: input.cwd,
       taskId: input.taskId,
@@ -626,13 +622,8 @@ const recoverStaleExecutionStatus = async (
     });
   }
 
-  // No phase-completion signal: implementation was interrupted before any
-  // phase finished, so the task retries from ready_for_agent. The real
-  // failureReason (not undefined) is passed to resolveFailedRecoveryTarget so
-  // the human-failure-reason override can fire (story 17): a stale-execution
-  // task whose metadata carries a human-failure reason routes to
-  // ready_for_human rather than ready_for_agent. The claim is stripped
-  // (ready_for_agent is not claim-preserving).
+  // Retry path: claim is stripped. Destination comes from
+  // planStaleExecutionRecovery (router + failure-reason / metadata override).
   const result = recoverToTargetStatus(
     input,
     task,
@@ -655,7 +646,7 @@ export const recoverHubTask = async (
     return recoverGenericFailedTask(input, task, failureReason);
   }
 
-  if (STALE_EXECUTION_STATUSES.has(task.hubStatus)) {
+  if (isInterruptedExecutionStatus(task.hubStatus)) {
     return recoverStaleExecutionStatus(input, task);
   }
 
@@ -884,9 +875,7 @@ export const hubTaskRecoverSummaryModelToBlocks = (
 // ---------------------------------------------------------------------------
 
 const claimLabel = (entry: StaleHubTaskRecoveryEntry): string =>
-  entry.preserveClaim
-    ? "preserve claim"
-    : "release claim";
+  entry.preserveClaim ? "preserve claim" : "release claim";
 
 /**
  * Formats a `tasks recover --stale` result as plain lines for the CLI. The
@@ -905,7 +894,9 @@ export const formatStaleHubTaskRecoveryLines = (
   }
 
   lines.push(
-    result.applied ? `Applied recovery for ${result.entries.length} task(s):` : `Planned recovery for ${result.entries.length} interrupted task(s):`,
+    result.applied
+      ? `Applied recovery for ${result.entries.length} task(s):`
+      : `Planned recovery for ${result.entries.length} interrupted task(s):`,
   );
   for (const entry of result.entries) {
     const outcome =

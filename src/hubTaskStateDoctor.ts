@@ -451,13 +451,15 @@ const buildInterruptedExecutionDiagnostic = (
   branch: string,
 ): HubTaskStateDiagnostic => {
   const phase = task.hubStatus;
-  const hasFinishedPhase = latestEvent !== undefined;
-  const nextAction = hasFinishedPhase
-    ? `Review/merge already finished — run archloop tasks recover ${task.id} to advance.`
-    : `Implement was interrupted — run archloop tasks recover ${task.id} to retry.`;
-  const message = hasFinishedPhase
-    ? `Task ${task.id} is stuck in ${phase} with a ${leaseState} worktree lease, but its ${latestEvent!.type} event shows a phase already finished; recover to advance instead of redoing finished work.`
-    : `Task ${task.id} is stuck in ${phase} with a ${leaseState} worktree lease and no phase-completion event; recover to retry the interrupted execution.`;
+  let nextAction: string;
+  let message: string;
+  if (latestEvent !== undefined) {
+    nextAction = `Review/merge already finished — run archloop tasks recover ${task.id} to advance.`;
+    message = `Task ${task.id} is stuck in ${phase} with a ${leaseState} worktree lease, but its ${latestEvent.type} event shows a phase already finished; recover to advance instead of redoing finished work.`;
+  } else {
+    nextAction = `Implement was interrupted — run archloop tasks recover ${task.id} to retry.`;
+    message = `Task ${task.id} is stuck in ${phase} with a ${leaseState} worktree lease and no phase-completion event; recover to retry the interrupted execution.`;
+  }
 
   return {
     taskId: task.id,
@@ -563,7 +565,9 @@ export const doctorHubTaskState = async (
             task,
             leaseState,
             phaseCompletionEvents.get(task.id),
-            lease?.branch ?? task.claim?.branch ?? resolveHubTaskBranch(task.id, task.title),
+            lease?.branch ??
+              task.claim?.branch ??
+              resolveHubTaskBranch(task.id, task.title),
           ),
         );
       }

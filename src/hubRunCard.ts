@@ -464,8 +464,9 @@ const buildSpinnerText = (
  *
  * The replacement is a real next step chosen by what actually went wrong:
  * - A run that failed because a task genuinely failed (`task.status ===
- *   "failed"`) points at `archloop tasks recover --stale`, which recovers the
- *   failed (and any interrupted) tasks in one batch.
+ *   "failed"`) points at `archloop tasks recover --stale` (batch recovery for
+ *   interrupted executions left behind by the failed run; per-task
+ *   `archloop tasks recover <id>` still covers `failed` tasks).
  * - A run that was interrupted (killed mid-execution) leaves tasks in an
  *   in-flight status (`implementing` / `reviewing` / `merging` /
  *   `waiting_for_merge`) with no `failed` task; re-running `archloop run`

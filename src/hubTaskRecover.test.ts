@@ -14,7 +14,9 @@ import {
   leaseNameFromBranch,
   serializeWorktreeLeaseMetadata,
 } from "./WorktreeLease.js";
+import { appendHubTaskEvent, createHubRunContext } from "./hubExecution.js";
 import {
+  createHubProjectDirPhaseCompletionEventResolver,
   formatHubRecoveryComment,
   formatStaleHubTaskRecoveryLines,
   isHubRecoveryComment,
@@ -22,7 +24,11 @@ import {
   recoverHubTask,
   recoverStaleHubTasks,
 } from "./hubTaskRecover.js";
-import { loadHubTask, type HubTaskProjection, type HubTaskBoard } from "./taskBoard.js";
+import {
+  loadHubTask,
+  type HubTaskProjection,
+  type HubTaskBoard,
+} from "./taskBoard.js";
 import type { WorktreeLeaseRecord } from "./worktreeLeaseStore.js";
 
 const execAsync = promisify(exec);
@@ -1022,7 +1028,9 @@ describe("recoverStaleHubTasks", () => {
         tasks: [reviewing, implementing, live, ready],
         groups: [],
       }),
-      listLeases: () => [activeLease("bd-live", "archloop/bd-live-still-running")],
+      listLeases: () => [
+        activeLease("bd-live", "archloop/bd-live-still-running"),
+      ],
       resolveLatestPhaseCompletionEvent: async ({ taskId }) =>
         taskId === "bd-review"
           ? phaseCompletionEvent({
@@ -1227,7 +1235,10 @@ describe("planStaleExecutionRecovery", () => {
 
 describe("formatStaleHubTaskRecoveryLines", () => {
   it("reports no interrupted tasks for an empty plan", () => {
-    const lines = formatStaleHubTaskRecoveryLines({ applied: false, entries: [] });
+    const lines = formatStaleHubTaskRecoveryLines({
+      applied: false,
+      entries: [],
+    });
     expect(lines).toContain("Stale execution recovery");
     expect(lines).toContain("No interrupted tasks found on the board.");
   });
@@ -1248,9 +1259,9 @@ describe("formatStaleHubTaskRecoveryLines", () => {
       ],
     });
     expect(lines.some((l) => l.includes("Planned recovery for 1"))).toBe(true);
-    expect(lines.some((l) => l.includes("bd-a: reviewing -> waiting_for_merge"))).toBe(
-      true,
-    );
+    expect(
+      lines.some((l) => l.includes("bd-a: reviewing -> waiting_for_merge")),
+    ).toBe(true);
     expect(lines.some((l) => l.includes("preserve claim"))).toBe(true);
     expect(lines.some((l) => l.includes("Re-run with --yes"))).toBe(true);
   });
@@ -1275,5 +1286,49 @@ describe("formatStaleHubTaskRecoveryLines", () => {
     expect(lines.some((l) => l.includes("release claim"))).toBe(true);
     expect(lines.some((l) => l.includes("[recovered_failed]"))).toBe(true);
     expect(lines.some((l) => l.includes("Re-run with --yes"))).toBe(false);
+  });
+});
+
+describe("createHubProjectDirPhaseCompletionEventResolver", () => {
+  it("reads phase-completion events from the explicit hubProjectDir event log", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-recover-resolver-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial");
+
+    const hubProjectDir = await mkdtemp(
+      join(tmpdir(), "hub-recover-resolver-data-"),
+    );
+    const context = createHubRunContext({
+      cwd: repoDir,
+      hubProjectDir,
+      branch: "flow/with-review",
+      runId: "run-resolver",
+      batchId: "batch-resolver",
+    });
+    appendHubTaskEvent(context.runDir, {
+      type: "task_implementation_succeeded",
+      runId: "run-resolver",
+      batchId: "batch-resolver",
+      taskId: "bd-resolver",
+      branch: "archloop/bd-resolver-title",
+      createdAt: "2026-07-24T00:00:00Z",
+      status: "reviewing",
+    });
+
+    const resolve =
+      createHubProjectDirPhaseCompletionEventResolver(hubProjectDir);
+    const event = await resolve({
+      cwd: repoDir,
+      taskId: "bd-resolver",
+    });
+
+    expect(event).toMatchObject({
+      type: "task_implementation_succeeded",
+      taskId: "bd-resolver",
+      status: "reviewing",
+    });
+    expect(
+      await resolve({ cwd: repoDir, taskId: "bd-missing" }),
+    ).toBeUndefined();
   });
 });

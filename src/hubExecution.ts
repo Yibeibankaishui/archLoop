@@ -565,9 +565,9 @@ export const readHubTaskClaim = (
 // exactly. It deliberately diverges from two related sets, so do not
 // "reconcile" them: CLAIM_PRESERVING_STATUSES (taskBoard.ts) additionally
 // preserves `failed`, whose claim metadata is kept but treated as stale and
-// released by recovery; STALE_EXECUTION_STATUSES (hubTaskRecover.ts) omits
-// `waiting_for_merge`, a stable external-wait pause rather than an orphaned
-// process state needing reset.
+// released by recovery; INTERRUPTED_EXECUTION_STATUSES (the shared detector,
+// also used by recoverHubTask) omits `waiting_for_merge`, a stable
+// external-wait pause rather than an orphaned process state needing reset.
 const ACTIVE_HUB_TASK_CLAIM_STATUSES = new Set([
   "implementing",
   "reviewing",
