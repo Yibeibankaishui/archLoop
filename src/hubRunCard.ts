@@ -279,10 +279,7 @@ const activeTaskBlock = (
   }
   const batch = state.batches[task.batchId];
   const title =
-    batch?.taskTitles?.[taskId] ??
-    task.detail?.stage ??
-    task.stage ??
-    taskId;
+    batch?.taskTitles?.[taskId] ?? task.detail?.stage ?? task.stage ?? taskId;
   const phase = phaseLabel(task.status);
   if (kind === "task.completed" || task.status === "done") {
     return {
@@ -294,11 +291,12 @@ const activeTaskBlock = (
       subLines: [`done · ${formatPhaseElapsed(phaseElapsedMs)}`],
     };
   }
-  if (kind === "task.failed" || kind === "run.failed" || task.status === "failed") {
-    const reason =
-      failureReason ??
-      task.detail?.diagnostic ??
-      "Task failed.";
+  if (
+    kind === "task.failed" ||
+    kind === "run.failed" ||
+    task.status === "failed"
+  ) {
+    const reason = failureReason ?? task.detail?.diagnostic ?? "Task failed.";
     return {
       kind: "indented-block",
       leading: "✗",
@@ -341,10 +339,7 @@ const buildBatchViews = (
     if (collapseThis) {
       views.push({
         kind: "collapsed",
-        summary: collapsedSummary(
-          batch,
-          batchDurationsMs?.[batch.batchId],
-        ),
+        summary: collapsedSummary(batch, batchDurationsMs?.[batch.batchId]),
       });
       continue;
     }
@@ -377,8 +372,7 @@ const buildBatchViews = (
     const task = state.tasks[input.activeTaskId];
     const alreadyShown = views.some(
       (view) =>
-        view.kind === "current" &&
-        view.current?.id === input.activeTaskId,
+        view.kind === "current" && view.current?.id === input.activeTaskId,
     );
     if (task && !alreadyShown) {
       const batch = state.batches[task.batchId];
@@ -463,6 +457,33 @@ const buildSpinnerText = (
   return `◐ waiting · plan · ${phaseElapsed} · run ${runShort}`;
 };
 
+/**
+ * Resolve the failed-run "fix" footer command from the run's failure
+ * composition. The old footer suggested `archloop run --resume <runId>
+ * --only-failed`, a flag that was never implemented and errored when run.
+ *
+ * The replacement is a real next step chosen by what actually went wrong:
+ * - A run that failed because a task genuinely failed (`task.status ===
+ *   "failed"`) points at `archloop tasks recover --stale`, which recovers the
+ *   failed (and any interrupted) tasks in one batch.
+ * - A run that was interrupted (killed mid-execution) leaves tasks in an
+ *   in-flight status (`implementing` / `reviewing` / `merging` /
+ *   `waiting_for_merge`) with no `failed` task; re-running `archloop run`
+ *   resumes the interrupted work (recovering the stuck task and resuming its
+ *   remaining phase), so that is the suggested next step.
+ *
+ * When the display state carries no tasks at all (e.g. a run that failed before
+ * any task event was projected), we fall back to `archloop run` — the run was
+ * interrupted, not a task failure.
+ */
+export const resolveRunFailureFixCommand = (
+  state: HubRunDisplayState,
+): string => {
+  const tasks = Object.values(state.tasks);
+  const hasFailedTask = tasks.some((task) => task.status === "failed");
+  return hasFailedTask ? "archloop tasks recover --stale" : "archloop run";
+};
+
 const buildFooter = (
   input: BuildRunCardSectionModelInput,
 ): {
@@ -471,12 +492,11 @@ const buildFooter = (
 } => {
   const { kind, state, outcomeCounts } = input;
   if (kind === "run.failed") {
-    const short = state.runId ? shortHubId(state.runId) : "……";
     return {
       footer: {
         kind: "footer",
         label: "fix",
-        command: `archloop run --resume ${short} --only-failed`,
+        command: resolveRunFailureFixCommand(state),
       },
     };
   }
@@ -580,8 +600,7 @@ const appendTaskDetailBlocks = (
   const views = [...batches];
   for (const detail of details) {
     const alreadyShown = views.some(
-      (view) =>
-        view.kind === "current" && view.current?.id === detail.taskId,
+      (view) => view.kind === "current" && view.current?.id === detail.taskId,
     );
     if (alreadyShown) {
       continue;
@@ -616,8 +635,7 @@ const appendTaskDetailBlocks = (
 export const renderRunCardSectionText = (
   model: RunCardSectionModel,
   options?: RenderSectionOptions,
-): readonly string[] =>
-  renderSection("", runCardModelToBlocks(model), options);
+): readonly string[] => renderSection("", runCardModelToBlocks(model), options);
 
 const CROSS_PHASE_STATUSES = new Set([
   "implementing",
@@ -642,10 +660,7 @@ export const detectRunCardTransition = (
   prev: HubRunDisplayState | undefined,
   next: HubRunDisplayState,
 ): RunCardTransitionDetection => {
-  if (
-    next.status === "failed" &&
-    prev?.status !== "failed"
-  ) {
+  if (next.status === "failed" && prev?.status !== "failed") {
     const failedTask = Object.values(next.tasks).find(
       (task) => task.status === "failed",
     );

@@ -265,7 +265,7 @@ Hub flow 默认使用 `--output auto`。交互式 TTY 在选完 flow 后会先�
   tip   starting in 3s · Ctrl+C to cancel · e to edit flow
 ```
 
-能力足够的交互式 TTY 在运行中会显示 append-only 的 Hub run card：每次状态转换追加一个 `section` 快照，底部单行 spinner 每秒刷新 phase-elapsed（ADR-0032）。任务看板 flow 显示当前 batch 与已完成 batch 折叠行；`prd-decomposition` 与 `triage` 仍使用各自的 proposal live renderer。run card 不进入 alternate screen，也不在 spinner 行之外使用 cursor-up，不显示原始 agent prose、tool 参数、百分比或 ETA；成功、失败、取消与异常清理都会恢复光标。重定向、CI、`TERM=dumb`、不支持 cursor control 或终端尺寸不安全时自动回退 plain；`NO_COLOR`、`--no-color` 或全局 `--plain` 只关闭颜色/粗体/暗色，保留符号与缩进；`FORCE_COLOR=1` 可在非 TTY 强制着色。
+能力足够的交互式 TTY 在运行中会显示 append-only 的 Hub run card：每次状态转换追加一个 `section` 快照，底部单行 spinner 每秒刷新 phase-elapsed（ADR-0032）。任务看板 flow 显示当前 batch 与已完成 batch 折叠行；`prd-decomposition` 与 `triage` 仍使用各自的 proposal live renderer。run card 不进入 alternate screen，也不在 spinner 行之外使用 cursor-up，不显示原始 agent prose、tool 参数、百分比或 ETA；成功、失败、取消与异常清理都会恢复光标。重定向、CI、`TERM=dumb`、不支持 cursor control 或终端尺寸不安全时自动回退 plain；`NO_COLOR`、`--no-color` 或全局 `--plain` 只关闭颜色/粗体/暗色，保留符号与缩进；`FORCE_COLOR=1` 可在非 TTY 强制着色。失败的 run 会在结尾给出 `fix` footer 指向真实下一步：有任务真正 failed 时提示 `archloop tasks recover --stale`，run 被中断（任务停留在 in-flight 状态且无 `failed` 任务）时提示 `archloop run`，重跑会恢复中断的工作（包括未完成的 `waiting_for_merge` 批次）。
 
 所有 Hub flow 都可显式使用 `--output plain`。该模式让每条 lifecycle 记录各占一个物理行，字段顺序稳定、值会转义，不使用 ANSI 光标重写。任务看板仍输出五类任务计数、失败诊断和恢复动作；proposal flow 只输出 canonical phase/status，以及 applied、skipped、dependencies 计数，终态区分 `applied`、`no_change`、`cancelled`、`validation_failed`、`mutation_failed`、`failed`。显式 plain/JSON 为非交互模式，proposal 写入需要 `--yes`；auto TTY 保留 refinement、status、approval 和 guarded apply prompts。agent prose 与 tool 参数只保存在 Hub run directory。
 
@@ -277,7 +277,7 @@ Hub flow 默认使用 `--output auto`。交互式 TTY 在选完 flow 后会先�
 
 任务命令默认针对已选中的 Hub project；如需覆盖，可以显式传 `--project <name>`。`.beads/issues.jsonl`、`.beads/interactions.jsonl` 等 Beads runtime/export 文件会单独报告，通常不要提交；通过 `archloop tasks pull` / `push` / `sync` 交换远端任务状态。同步冲突用 `archloop tasks resolve <id> --keep local|remote` 在本地 Beads 上解决（不直接改 GitHub；`--keep local` 后由下一次 `tasks push` 写回远端）。
 
-`archloop tasks list` / `show` / `pull` 使用 Variant C `section` 排版（无 `clack.note` 左边框、无 1-based 序号；选择器只接受 Beads id 或精确标题）。`tasks list` 行尾可带远端徽章：已同步为 dim cyan `github#N`，待推送为 dim `local-only`，冲突为 yellow `sync-conflict`；无远端链接则不显示。`--json` 输出行数组（含 `remoteBadge`）：
+`archloop tasks list` / `show` / `pull` 使用 Variant C `section` 排版（无 `clack.note` 左边框、无 1-based 序号；选择器只接受 Beads id 或精确标题）。`tasks list` 行尾可带远端徽章：已同步为 dim cyan `github#N`，待推送为 dim `local-only`，冲突为 yellow `sync-conflict`；无远端链接则不显示。被 interrupted-execution detector 判定为中断的任务（`implementing` / `reviewing` / `merging` 且无活跃 worktree lease）会额外显示 `⚠ interrupted` 徽章（`--json` 行含 `interrupted: true`），无需 `tasks doctor` 即可一眼定位；不存在 `.archloop/locks/` 目录时该检查整体跳过，健康看板无额外开销。`--json` 输出行数组（含 `remoteBadge` 与 `interrupted`）：
 
 ```text
   archLoop · demo                                                                   3 tasks
@@ -285,6 +285,8 @@ Hub flow 默认使用 `--output auto`。交互式 TTY 在选完 flow 后会先�
   ●  todo · 2
      demo-mv2  Fix login redirect                                          github#101
      demo-nx1  Improve empty state copy                                      local-only
+  ◐  in_progress · 1
+     demo-ab3  Handle expired token                                        ⚠ interrupted
   tip   archloop tasks show <id>   ·   archloop tasks pull
 ```
 

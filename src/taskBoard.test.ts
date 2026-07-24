@@ -1157,6 +1157,110 @@ fs.writeSync(1, JSON.stringify(tasks));
 
     expect(board.tasks.map((task) => task.id)).toEqual(["bd-z", "bd-a"]);
   });
+
+  it("badges interrupted-execution tasks passed via interruptedTaskIds", () => {
+    const board = projectHubTaskBoard([
+      {
+        id: "bd-stuck",
+        title: "Stuck implementing task",
+        status: "in_progress",
+        labels: ["implementing"],
+        owner: "yucheng.bai",
+        metadata: {
+          claim: { branch: "archloop/bd-stuck-stuck-implementing-task" },
+        },
+      },
+      {
+        id: "bd-live",
+        title: "Live implementing task",
+        status: "in_progress",
+        labels: ["implementing"],
+        owner: "yucheng.bai",
+        metadata: {
+          claim: { branch: "archloop/bd-live-live-implementing-task" },
+        },
+      },
+    ]);
+
+    const model = buildHubTaskBoardModel({
+      projectName: "demo",
+      showAll: true,
+      board,
+      interruptedTaskIds: new Set(["bd-stuck"]),
+    });
+
+    // The interrupted task carries an additive `interrupted: true` flag on its
+    // row; the non-interrupted task omits the field entirely so existing JSON
+    // consumers see no shape change for healthy tasks.
+    const stuckRow = model.rows.find((row) => row.id === "bd-stuck");
+    const liveRow = model.rows.find((row) => row.id === "bd-live");
+    expect(stuckRow?.interrupted).toBe(true);
+    expect(stuckRow?.trailingDim).toBe("⚠ interrupted");
+    expect(liveRow?.interrupted).toBeUndefined();
+    expect(liveRow?.trailingDim).toBe("yucheng.bai");
+
+    // The group item (human renderer) shares the same row shape, so the badge
+    // is visible at a glance in the board view, not just the JSON dump.
+    const inProgressGroup = model.groups.find(
+      (group) => group.name === "in_progress",
+    );
+    const stuckItem = inProgressGroup?.items.find(
+      (item) => item.id === "bd-stuck",
+    );
+    expect(stuckItem?.trailingDim).toBe("⚠ interrupted");
+  });
+
+  it("omits the interrupted flag when no interruptedTaskIds are supplied", () => {
+    const board = projectHubTaskBoard([
+      {
+        id: "bd-stuck",
+        title: "Stuck implementing task",
+        status: "in_progress",
+        labels: ["implementing"],
+      },
+    ]);
+
+    const model = buildHubTaskBoardModel({
+      projectName: "demo",
+      showAll: true,
+      board,
+    });
+
+    expect(model.rows[0]?.interrupted).toBeUndefined();
+  });
+
+  it("formatTaskBoardJson includes interrupted on flagged rows only", () => {
+    const board = projectHubTaskBoard([
+      {
+        id: "bd-stuck",
+        title: "Stuck reviewing task",
+        status: "in_progress",
+        labels: ["reviewing"],
+      },
+      {
+        id: "bd-plain",
+        title: "Plain task",
+        status: "open",
+      },
+    ]);
+
+    const model = buildHubTaskBoardModel({
+      projectName: "demo",
+      showAll: true,
+      board,
+      interruptedTaskIds: new Set(["bd-stuck"]),
+    });
+
+    const payload = JSON.parse(formatTaskBoardJson(model)) as Array<{
+      id: string;
+      title: string;
+      interrupted?: boolean;
+    }>;
+    const stuck = payload.find((row) => row.id === "bd-stuck");
+    const plain = payload.find((row) => row.id === "bd-plain");
+    expect(stuck?.interrupted).toBe(true);
+    expect(plain?.interrupted).toBeUndefined();
+  });
 });
 
 describe("task lifecycle transitions", () => {

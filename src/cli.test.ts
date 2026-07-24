@@ -2125,6 +2125,134 @@ exit 1
       ]),
     );
   });
+  it("tasks list badges interrupted-execution tasks when a stale lease exists", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    // An implementing task whose worktree lease is stale (dead pid) — exactly
+    // the shape the shared interrupted-execution detector flags.
+    const boardJson = JSON.stringify([
+      {
+        id: "bd-stuck",
+        title: "Stuck implementing task",
+        status: "in_progress",
+        labels: ["implementing"],
+        owner: "yucheng.bai",
+        metadata: {
+          claim: { branch: "archloop/bd-stuck-stuck-implementing-task" },
+        },
+      },
+      {
+        id: "bd-healthy",
+        title: "Healthy ready task",
+        status: "open",
+        labels: ["ready-for-agent"],
+      },
+    ]);
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "list" ]; then
+  printf '%s\\n' '${boardJson}'
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    // Seed a stale worktree lease for the stuck task's branch. The lock file
+    // name is the worktree name (branch with '/' -> '-'); a dead pid makes the
+    // lease stale so the detector classifies the task as interrupted.
+    const locksDir = join(hostDir, ".archloop", "locks");
+    await mkdir(locksDir, { recursive: true });
+    await writeFile(
+      join(locksDir, "archloop-bd-stuck-stuck-implementing-task.lock"),
+      JSON.stringify({
+        branch: "archloop/bd-stuck-stuck-implementing-task",
+        pid: 999999,
+        acquiredAt: "2026-07-24T00:00:00.000Z",
+        owner: { kind: "hub", taskId: "bd-stuck" },
+      }),
+    );
+
+    const { stdout: jsonOut } = await runCli(
+      "tasks list --json",
+      hostDir,
+      withBdEnv(bdPath, hostDir),
+    );
+    const payload = JSON.parse(jsonOut) as Array<{
+      id: string;
+      interrupted?: boolean;
+    }>;
+    const stuck = payload.find((row) => row.id === "bd-stuck");
+    const healthy = payload.find((row) => row.id === "bd-healthy");
+    expect(stuck?.interrupted).toBe(true);
+    expect(healthy?.interrupted).toBeUndefined();
+
+    const { stdout } = await runCli(
+      "tasks list",
+      hostDir,
+      withBdEnv(bdPath, hostDir),
+    );
+    expect(stdout).toContain("interrupted");
+  });
+
+  it("tasks list skips the interrupted badge when no locks directory exists", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const binDir = join(hostDir, "bin");
+    await mkdir(binDir, { recursive: true });
+    const gitPath = (await execAsync("command -v git")).stdout.trim();
+    await symlink(gitPath, join(binDir, "git"));
+
+    // No .archloop/locks directory — the common healthy-board path. The badge
+    // check is skipped entirely, so an implementing task is not flagged.
+    const boardJson = JSON.stringify([
+      {
+        id: "bd-active",
+        title: "Active implementing task",
+        status: "in_progress",
+        labels: ["implementing"],
+        owner: "yucheng.bai",
+        metadata: {
+          claim: { branch: "archloop/bd-active-active-implementing-task" },
+        },
+      },
+    ]);
+    const bdPath = join(binDir, "bd");
+    await writeFile(
+      bdPath,
+      `#!/bin/sh
+if [ "$1" = "list" ]; then
+  printf '%s\\n' '${boardJson}'
+  exit 0
+fi
+exit 1
+`,
+    );
+    await chmod(bdPath, 0o755);
+
+    const { stdout } = await runCli(
+      "tasks list --json",
+      hostDir,
+      withBdEnv(bdPath, hostDir),
+    );
+    const payload = JSON.parse(stdout) as Array<{
+      id: string;
+      interrupted?: boolean;
+    }>;
+    expect(payload[0]?.interrupted).toBeUndefined();
+  });
 
   it("tasks list --warning filters tasks by PRD warning severity", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));

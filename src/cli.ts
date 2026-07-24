@@ -211,7 +211,14 @@ import {
   resolveHubTaskSelector,
   resolveHubTaskSelectors,
   selectHubFlowTasks,
+  type HubTaskBoard,
 } from "./taskBoard.js";
+import { detectInterruptedHubTaskExecutions } from "./hubTaskInterruptedExecutionDetector.js";
+import {
+  listWorktreeLeases,
+  resolveWorktreeLeasesDir,
+} from "./worktreeLeaseStore.js";
+import { existsSync } from "node:fs";
 import { waitForKeypress } from "./keypress.js";
 import {
   RUN_START_DEBOUNCE_MS,
@@ -1996,6 +2003,34 @@ const resolveTaskCommandRepoRoot = (
     (target) => target.repoRoot,
   );
 
+// Reused empty set so the common healthy-board path (no locks directory) never
+// allocates a fresh `new Set()` for the interrupted badge.
+const EMPTY_INTERRUPTED_TASK_IDS: ReadonlySet<string> = new Set();
+
+/**
+ * Resolve the set of interrupted-execution task ids on a board, for the
+ * `tasks list` interrupted badge. The lease load the detector needs is gated
+ * behind a cheap check: if the locks directory does not exist (the common
+ * healthy-board path — no run has ever acquired a worktree lease here), the
+ * badge is skipped entirely so `tasks list` incurs no extra cost. When the
+ * directory exists, leases are loaded and the shared detector is run against
+ * the supplied board, returning exactly the interrupted task ids.
+ */
+const resolveInterruptedTaskIds = (
+  repoRoot: string,
+  board: HubTaskBoard,
+): ReadonlySet<string> => {
+  if (!existsSync(resolveWorktreeLeasesDir(repoRoot))) {
+    return EMPTY_INTERRUPTED_TASK_IDS;
+  }
+  const leases = listWorktreeLeases(repoRoot);
+  return new Set(
+    detectInterruptedHubTaskExecutions(board.tasks, leases).map(
+      (entry) => entry.taskId,
+    ),
+  );
+};
+
 const normalizeTaskOrigin = (
   value: string,
 ): "manual" | "user-feedback" | undefined => {
@@ -2090,11 +2125,16 @@ const tasksListCommand = Command.make(
         try: () => loadHubTaskBoard(target.repoRoot),
         catch: toTaskBoardError,
       });
+      const interruptedTaskIds = yield* Effect.try({
+        try: () => resolveInterruptedTaskIds(target.repoRoot, board),
+        catch: toTaskBoardError,
+      });
       const model = buildHubTaskBoardModel({
         projectName: target.projectName,
         board,
         warningFilter,
         showAll: all,
+        ...(interruptedTaskIds.size > 0 ? { interruptedTaskIds } : {}),
       });
       if (json) {
         yield* d.plain(formatTaskBoardJson(model));

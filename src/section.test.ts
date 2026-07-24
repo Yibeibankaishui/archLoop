@@ -119,11 +119,10 @@ describe("renderSection", () => {
   });
 
   it("applies a two-space left margin on content lines", () => {
-    const lines = renderSection(
-      "",
-      [{ kind: "header", title: "archLoop" }],
-      { width: 80, colorEnabled: false },
-    );
+    const lines = renderSection("", [{ kind: "header", title: "archLoop" }], {
+      width: 80,
+      colorEnabled: false,
+    });
     expect(lines[0]!.startsWith("  ")).toBe(true);
   });
 
@@ -259,13 +258,17 @@ describe("renderSection", () => {
     const fix: SectionBlock = {
       kind: "footer",
       label: "fix",
-      command: "archloop run --resume x --only-failed",
+      command: "archloop tasks recover --stale",
     };
     expect(tip.kind).toBe("footer");
     expect(next.kind).toBe("footer");
     expect(fix.kind).toBe("footer");
-    // @ts-expect-error — fourth label is not in the closed set
-    const bad: SectionBlock = { kind: "footer", label: "summary", command: "x" };
+    const bad: SectionBlock = {
+      kind: "footer",
+      // @ts-expect-error — fourth label is not in the closed set
+      label: "summary",
+      command: "x",
+    };
     void bad;
   });
 });
@@ -284,7 +287,9 @@ describe("flattenSectionForLog", () => {
     expect(text).toContain("title: Slice 2");
     expect(text).toContain("description");
     expect(text).toContain("↳ AutoTuneAgent-2mr");
-    expect(text).toContain("tip   archloop tasks show <id>   ·   archloop tasks pull");
+    expect(text).toContain(
+      "tip   archloop tasks show <id>   ·   archloop tasks pull",
+    );
   });
 });
 
