@@ -235,6 +235,13 @@ export const createHubRunJsonRenderer = (input: {
                       interruptedPhase: entry.interruptedPhase,
                     }),
                   ),
+                  failures: result.autoRecoverSummary.failures.map(
+                    (failure) => ({
+                      taskId: failure.taskId,
+                      interruptedPhase: failure.interruptedPhase,
+                      message: failure.message,
+                    }),
+                  ),
                 },
               }
             : {}),
