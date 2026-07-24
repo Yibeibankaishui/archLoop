@@ -30,12 +30,15 @@ import {
 import {
   isCompletedHubStatus,
   loadHubTaskBoard,
+  hubTaskStatusValueSeverity,
+  mapHubStatusToTaskBoardBucket,
   resolveHubTaskBranch,
   resolveHubTaskSelector,
   transitionHubTaskStatus,
   formatHubManagedBranchCleanupDiagnosticsLines,
   type HubTaskProjection,
   type HubTaskStatus,
+  type TaskBoardDisplayBucket,
 } from "./taskBoard.js";
 import { listWorktreeLeases } from "./worktreeLeaseStore.js";
 
@@ -861,25 +864,142 @@ export const formatHubTaskStateDoctorLines = (
   ];
 };
 
-export const formatHubTaskStateRepairLines = (
+/** Board-bucket symbol for a repair target-status group heading. */
+const REPAIR_STATUS_SYMBOL: Readonly<
+  Record<TaskBoardDisplayBucket, SectionGroupBlock["symbol"]>
+> = {
+  todo: "●",
+  in_progress: "◐",
+  attention: "!",
+  done: "✓",
+};
+
+/** Stable group order mirrors the task board bucket axis. */
+const REPAIR_BUCKET_ORDER: readonly TaskBoardDisplayBucket[] = [
+  "todo",
+  "in_progress",
+  "attention",
+  "done",
+];
+
+export interface HubTaskStateRepairModel {
+  readonly header: SectionHeaderBlock;
+  readonly emptyMessage?: SectionProseBlock;
+  readonly groups: readonly SectionGroupBlock[];
+  readonly guidance?: SectionProseBlock;
+}
+
+interface RepairGroupItem {
+  readonly id: string;
+  readonly title: string;
+  readonly trailingDim: string;
+}
+
+const resolveRepairBranch = (repair: HubTaskStatePlannedRepair): string =>
+  repair.branch ?? resolveHubTaskBranch(repair.taskId, repair.title);
+
+const toRepairGroupItem = (
+  repair: HubTaskStatePlannedRepair,
+): RepairGroupItem => ({
+  id: repair.taskId,
+  title: repair.reason,
+  trailingDim: resolveRepairBranch(repair),
+});
+
+const buildRepairStatusGroup = (
+  targetStatus: HubTaskStatus,
+  items: readonly RepairGroupItem[],
+): SectionGroupBlock => {
+  const bucket = mapHubStatusToTaskBoardBucket(targetStatus);
+  return {
+    kind: "group",
+    symbol: REPAIR_STATUS_SYMBOL[bucket],
+    severity: hubTaskStatusValueSeverity(targetStatus),
+    name: targetStatus,
+    count: items.length,
+    items: [...items].sort((left, right) => left.id.localeCompare(right.id)),
+  };
+};
+
+const formatRepairCount = (count: number): string =>
+  count === 1 ? "1 repair" : `${count} repairs`;
+
+/**
+ * Build the repair-state section model. Groups planned/applied repairs by
+ * target Hub status; each group's severity/symbol comes from
+ * `mapHubStatusToTaskBoardBucket` via `hubTaskStatusValueSeverity`.
+ */
+export const buildHubTaskStateRepairModel = (
   result: RepairHubTaskStateResult,
-): readonly string[] => {
-  const lines = ["Hub task state repair"];
+): HubTaskStateRepairModel => {
+  const header: SectionHeaderBlock = {
+    kind: "header",
+    title: "Hub task state repair",
+  };
+
   if (result.plannedRepairs.length === 0) {
-    lines.push("No repairable task state issues found.");
-    return lines;
+    return {
+      header,
+      emptyMessage: {
+        kind: "prose",
+        body: "No repairable task state issues found.",
+      },
+      groups: [],
+    };
   }
 
-  lines.push(result.applied ? "Applied repairs:" : "Planned repairs:");
+  const byTarget = new Map<HubTaskStatus, RepairGroupItem[]>();
   for (const repair of result.plannedRepairs) {
-    const branch =
-      repair.branch ?? resolveHubTaskBranch(repair.taskId, repair.title);
-    lines.push(
-      `  ${repair.taskId}: ${repair.reason} -> ${repair.targetStatus} (${branch})`,
+    const items = byTarget.get(repair.targetStatus) ?? [];
+    items.push(toRepairGroupItem(repair));
+    byTarget.set(repair.targetStatus, items);
+  }
+
+  const groups = REPAIR_BUCKET_ORDER.flatMap((bucket) => {
+    const statuses = [...byTarget.keys()]
+      .filter((status) => mapHubStatusToTaskBoardBucket(status) === bucket)
+      .sort((left, right) => left.localeCompare(right));
+    return statuses.map((status) =>
+      buildRepairStatusGroup(status, byTarget.get(status)!),
     );
-  }
-  if (!result.applied) {
-    lines.push("Re-run with --yes to apply these local Beads mutations.");
-  }
-  return lines;
+  });
+
+  return {
+    header: {
+      ...header,
+      subtitle: result.applied ? "Applied repairs" : "Planned repairs",
+      right: formatRepairCount(result.plannedRepairs.length),
+    },
+    groups,
+    ...(result.applied
+      ? {}
+      : {
+          guidance: {
+            kind: "prose",
+            body: "Re-run with --yes to apply these local Beads mutations.",
+          },
+        }),
+  };
 };
+
+/** Map the repair model to blocks for `d.section` / `renderSection`. */
+export const hubTaskStateRepairModelToBlocks = (
+  model: HubTaskStateRepairModel,
+): readonly SectionBlock[] => [
+  model.header,
+  ...(model.emptyMessage
+    ? [model.emptyMessage]
+    : [...model.groups, ...(model.guidance ? [model.guidance] : [])]),
+];
+
+/**
+ * Plain, grep-friendly repair text via `flattenSectionForLog`. Live CLI uses
+ * the same blocks through `d.section` (palette already degrades under NO_COLOR /
+ * non-TTY / `--plain`).
+ */
+export const formatHubTaskStateRepairLines = (
+  result: RepairHubTaskStateResult,
+): readonly string[] =>
+  flattenSectionForLog(
+    hubTaskStateRepairModelToBlocks(buildHubTaskStateRepairModel(result)),
+  );

@@ -294,7 +294,7 @@ archloop tasks repair-state <selector>
 archloop tasks repair-state <selector> --yes
 ```
 
-`repair-state` 会先预览本地 Beads mutation；TTY 中需要确认，非交互模式需要 `--yes`。它使用和正常 Hub lifecycle 相同的 canonical transition path，只重写 archLoop 管理的状态标签和 metadata，保留用户自定义标签，不会修改远端 GitHub Issues。典型用途是修复 Hub event 已记录 `task_review_succeeded`、分支仍有未合并工作，但 Beads labels/metadata/claim 过期导致无法 merge 的 QA incident。`commitCount=0` 且没有 branch work 的 agent failure 不会被提升到 `waiting_for_merge`，应通过 recovery policy 处理。
+`repair-state` 会先预览本地 Beads mutation；TTY 中需要确认，非交互模式需要 `--yes`。输出走 section-block 渲染器：标题区分 Planned repairs / Applied repairs，按目标 Hub status 分组，并用看板 bucket severity 着色（todo = info/cyan ●，in_progress = warn/yellow ◐，attention = error/red !，done = success/green ✓）；每条显示 task id、诊断原因、以及作为 dim trailing hint 的 branch。未应用时保留 “Re-run with --yes …” 引导；`NO_COLOR` / 非 TTY / `--plain` 下退化为保留全部 id/原因/目标 status/branch 的纯文本。它使用和正常 Hub lifecycle 相同的 canonical transition path，只重写 archLoop 管理的状态标签和 metadata，保留用户自定义标签，不会修改远端 GitHub Issues。典型用途是修复 Hub event 已记录 `task_review_succeeded`、分支仍有未合并工作，但 Beads labels/metadata/claim 过期导致无法 merge 的 QA incident。`commitCount=0` 且没有 branch work 的 agent failure 不会被提升到 `waiting_for_merge`，应通过 recovery policy 处理。
 
 ## 7 执行 Flow
 
