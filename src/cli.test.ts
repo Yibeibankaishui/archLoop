@@ -4617,14 +4617,12 @@ process.exit(1);
     const { stdout } = await runCli("tasks cleanup --dry-run", hostDir, env);
 
     expect(stdout).toContain("Hub managed branch cleanup");
-    expect(stdout).toContain("Safe managed branches (1)");
+    expect(stdout).toContain("safe managed");
     expect(stdout).toContain(safeBranch);
-    expect(stdout).toContain("Blocked managed branches (1)");
+    expect(stdout).toContain("blocked managed");
     expect(stdout).toContain(blockedBranch);
-    expect(stdout).toContain(
-      "existed before Hub claimed task bd-blocked; keep it out of automatic cleanup",
-    );
-    expect(stdout).toContain("Unowned historical candidates (1)");
+    expect(stdout).toContain("existed before Hub claimed");
+    expect(stdout).toContain("unowned historical");
     expect(stdout).toContain(historicalBranch);
     expect(stdout).toContain("--include-unowned");
 

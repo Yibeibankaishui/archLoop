@@ -31,6 +31,7 @@ import {
 import { TaskBoardError } from "./errors.js";
 import { runBdTextForHubTaskStore } from "./hubTaskStore.js";
 import {
+  flattenSectionForLog,
   formatSectionProseEntry,
   renderSection,
   type RenderSectionOptions,
@@ -1335,14 +1336,6 @@ export const deleteHubTasks = (input: DeleteHubTasksInput): string => {
   return output;
 };
 
-const formatCleanupCandidateLine = (
-  branch: HubManagedBranchCleanupCandidate,
-  suffix: string,
-): string =>
-  suffix.length > 0
-    ? `  - ${branch.branch} (${suffix})`
-    : `  - ${branch.branch}`;
-
 const formatCleanupReasonSuffix = (
   reasons: readonly HubManagedBranchCleanupSkipDetail[],
 ): string =>
@@ -1366,28 +1359,33 @@ const selectSafeHistoricalCleanupCandidates = (
 ): readonly HubManagedBranchCleanupCandidate[] =>
   evaluation.unownedCandidates.filter(canDeleteHistoricalCandidate);
 
-const formatHistoricalCleanupCandidateNote = (
+/** Opt-in hint for the unowned group; skip reasons live in `detailDim`. */
+const formatUnownedCleanupTrailingHint = (
   candidate: HubManagedBranchCleanupCandidate,
   includeUnowned: boolean,
 ): string => {
-  const historicalSafe = canDeleteHistoricalCandidate(candidate);
-  const reasonSuffix = formatCleanupReasonSuffix(candidate.skipReasons);
-
-  if (includeUnowned && historicalSafe) {
-    return "safe historical branch included by --include-unowned";
+  if (canDeleteHistoricalCandidate(candidate)) {
+    return includeUnowned
+      ? "safe historical branch included by --include-unowned"
+      : "Use --include-unowned to delete safe historical branches";
   }
 
-  if (historicalSafe) {
-    return "Use --include-unowned to delete safe historical branches";
-  }
-
-  if (includeUnowned) {
-    return reasonSuffix;
-  }
-
-  const prefix = "Use --include-unowned to delete safe historical branches";
-  return reasonSuffix.length > 0 ? `${prefix}; ${reasonSuffix}` : prefix;
+  // Unsafe historical branches cannot be deleted via --include-unowned.
+  // Keep the opt-in hint only when the flag is off; when it is on, reasons alone
+  // explain why the branch stays (see `detailDim`).
+  return includeUnowned
+    ? ""
+    : "Use --include-unowned to delete safe historical branches";
 };
+
+const formatNonOwnershipCleanupReasons = (
+  candidate: HubManagedBranchCleanupCandidate,
+): string =>
+  formatCleanupReasonSuffix(
+    candidate.skipReasons.filter(
+      (detail) => detail.reason !== "missing_ownership",
+    ),
+  );
 
 const formatHistoricalCleanupNextAction = (
   options?: FormatHubManagedBranchCleanupDiagnosticsLinesOptions,
@@ -1481,6 +1479,166 @@ const appendCleanupDiagnosticsSection = (
   }
 };
 
+const CLEANUP_KV_GUTTER = 8;
+
+type CleanupGroupItem = SectionGroupBlock["items"][number];
+
+const cleanupOwnershipLabel = (
+  candidate: HubManagedBranchCleanupCandidate,
+): string => (candidate.ownership ? candidate.ownership.taskId : "managed");
+
+const toCleanupManagedGroupItem = (
+  candidate: HubManagedBranchCleanupCandidate,
+  detailDim?: string,
+): CleanupGroupItem => ({
+  id: cleanupOwnershipLabel(candidate),
+  title: candidate.branch,
+  ...(detailDim && detailDim.length > 0 ? { detailDim } : {}),
+});
+
+const toCleanupSafeGroupItem = (
+  candidate: HubManagedBranchCleanupCandidate,
+): CleanupGroupItem => toCleanupManagedGroupItem(candidate);
+
+const toCleanupBlockedGroupItem = (
+  candidate: HubManagedBranchCleanupCandidate,
+): CleanupGroupItem =>
+  toCleanupManagedGroupItem(
+    candidate,
+    formatCleanupReasonSuffix(candidate.skipReasons),
+  );
+
+const toCleanupUnownedGroupItem = (
+  candidate: HubManagedBranchCleanupCandidate,
+  includeUnowned: boolean,
+): CleanupGroupItem => {
+  const trailingDim = formatUnownedCleanupTrailingHint(
+    candidate,
+    includeUnowned,
+  );
+  const detailDim = formatNonOwnershipCleanupReasons(candidate);
+  return {
+    id: "historical",
+    title: candidate.branch,
+    ...(trailingDim.length > 0 ? { trailingDim } : {}),
+    ...(detailDim.length > 0 ? { detailDim } : {}),
+  };
+};
+
+const optionalCleanupProse = (
+  body: string | undefined,
+): SectionProseBlock | undefined =>
+  body === undefined || body.length === 0
+    ? undefined
+    : { kind: "prose", body };
+
+const deletedBranchesProse = (
+  label: string,
+  branches: readonly string[] | undefined,
+): SectionProseBlock | undefined =>
+  branches && branches.length > 0
+    ? { kind: "prose", body: `${label}: ${branches.join(", ")}` }
+    : undefined;
+
+const buildCleanupGroup = (
+  symbol: SectionGroupBlock["symbol"],
+  severity: SectionSeverity,
+  name: string,
+  items: readonly CleanupGroupItem[],
+): SectionGroupBlock => ({
+  kind: "group",
+  symbol,
+  severity,
+  name,
+  count: items.length,
+  items,
+});
+
+export interface HubManagedBranchCleanupModel {
+  readonly header: SectionHeaderBlock;
+  readonly identity: SectionKvBlock;
+  readonly preview?: SectionProseBlock;
+  readonly deletedManaged?: SectionProseBlock;
+  readonly deletedHistorical?: SectionProseBlock;
+  readonly groups: readonly SectionGroupBlock[];
+}
+
+/**
+ * Build the cleanup section model. Three fixed groups map the evaluator's
+ * safe / blocked / unowned buckets onto severity-colored section blocks.
+ */
+export const buildHubManagedBranchCleanupModel = (
+  evaluation: HubManagedBranchCleanupEvaluation,
+  options?: FormatHubManagedBranchCleanupLinesOptions,
+): HubManagedBranchCleanupModel => {
+  const includeUnowned = options?.includeUnowned === true;
+  const safeItems = evaluation.managedSafeCandidates.map(
+    toCleanupSafeGroupItem,
+  );
+  const blockedItems = evaluation.managedBlockedBranches.map(
+    toCleanupBlockedGroupItem,
+  );
+  const unownedItems = evaluation.unownedCandidates.map((candidate) =>
+    toCleanupUnownedGroupItem(candidate, includeUnowned),
+  );
+
+  return {
+    header: {
+      kind: "header",
+      title: "Hub managed branch cleanup",
+    },
+    identity: {
+      kind: "kv",
+      gutter: CLEANUP_KV_GUTTER,
+      rows: [
+        { key: "target", value: evaluation.targetBranch },
+        { key: "head", value: evaluation.targetHead },
+      ],
+    },
+    preview: optionalCleanupProse(
+      options?.dryRun === true
+        ? "Preview: no git refs will be deleted."
+        : undefined,
+    ),
+    deletedManaged: deletedBranchesProse(
+      "Deleted managed branches",
+      options?.deletedManagedBranches,
+    ),
+    deletedHistorical: deletedBranchesProse(
+      "Deleted historical branches",
+      options?.deletedHistoricalBranches,
+    ),
+    groups: [
+      buildCleanupGroup("✓", "success", "safe managed", safeItems),
+      buildCleanupGroup("!", "warn", "blocked managed", blockedItems),
+      buildCleanupGroup("●", "info", "unowned historical", unownedItems),
+    ],
+  };
+};
+
+/** Map the cleanup model to blocks for `d.section` / `renderSection`. */
+export const hubManagedBranchCleanupModelToBlocks = (
+  model: HubManagedBranchCleanupModel,
+): readonly SectionBlock[] => [
+  model.header,
+  model.identity,
+  ...(model.preview ? [model.preview] : []),
+  ...(model.deletedManaged ? [model.deletedManaged] : []),
+  ...(model.deletedHistorical ? [model.deletedHistorical] : []),
+  ...model.groups,
+];
+
+/** Plain cleanup text via the same blocks the live CLI renders with `d.section`. */
+export const formatHubManagedBranchCleanupLines = (
+  evaluation: HubManagedBranchCleanupEvaluation,
+  options?: FormatHubManagedBranchCleanupLinesOptions,
+): readonly string[] =>
+  flattenSectionForLog(
+    hubManagedBranchCleanupModelToBlocks(
+      buildHubManagedBranchCleanupModel(evaluation, options),
+    ),
+  );
+
 export const planHubManagedBranchCleanup = (
   evaluation: HubManagedBranchCleanupEvaluation,
   options?: Pick<FormatHubManagedBranchCleanupLinesOptions, "includeUnowned">,
@@ -1500,90 +1658,6 @@ export const planHubManagedBranchCleanup = (
     historicalBranches,
     totalBranches: managedBranches.length + historicalBranches.length,
   };
-};
-
-export const formatHubManagedBranchCleanupLines = (
-  evaluation: HubManagedBranchCleanupEvaluation,
-  options?: FormatHubManagedBranchCleanupLinesOptions,
-): readonly string[] => {
-  const lines: string[] = ["Hub managed branch cleanup"];
-  lines.push(`Target branch: ${evaluation.targetBranch}`);
-  lines.push(`Target head: ${evaluation.targetHead}`);
-
-  if (options?.dryRun) {
-    lines.push("Preview: no git refs will be deleted.");
-  }
-
-  if (
-    options?.deletedManagedBranches &&
-    options.deletedManagedBranches.length
-  ) {
-    lines.push(
-      `Deleted managed branches: ${options.deletedManagedBranches.join(", ")}`,
-    );
-  }
-  if (
-    options?.deletedHistoricalBranches &&
-    options.deletedHistoricalBranches.length
-  ) {
-    lines.push(
-      `Deleted historical branches: ${options.deletedHistoricalBranches.join(", ")}`,
-    );
-  }
-
-  lines.push("");
-  lines.push(
-    `Safe managed branches (${evaluation.managedSafeCandidates.length})`,
-  );
-  if (evaluation.managedSafeCandidates.length === 0) {
-    lines.push("  - none");
-  } else {
-    for (const candidate of evaluation.managedSafeCandidates) {
-      const taskSuffix = candidate.ownership
-        ? `task ${candidate.ownership.taskId}`
-        : "managed";
-      lines.push(formatCleanupCandidateLine(candidate, taskSuffix));
-    }
-  }
-
-  lines.push("");
-  lines.push(
-    `Blocked managed branches (${evaluation.managedBlockedBranches.length})`,
-  );
-  if (evaluation.managedBlockedBranches.length === 0) {
-    lines.push("  - none");
-  } else {
-    for (const candidate of evaluation.managedBlockedBranches) {
-      const taskSuffix = candidate.ownership
-        ? `task ${candidate.ownership.taskId}`
-        : "managed";
-      const reasonSuffix = formatCleanupReasonSuffix(candidate.skipReasons);
-      lines.push(
-        formatCleanupCandidateLine(
-          candidate,
-          `${taskSuffix}${reasonSuffix.length > 0 ? ` - ${reasonSuffix}` : ""}`,
-        ),
-      );
-    }
-  }
-
-  lines.push("");
-  lines.push(
-    `Unowned historical candidates (${evaluation.unownedCandidates.length})`,
-  );
-  if (evaluation.unownedCandidates.length === 0) {
-    lines.push("  - none");
-  } else {
-    for (const candidate of evaluation.unownedCandidates) {
-      const note = formatHistoricalCleanupCandidateNote(
-        candidate,
-        options?.includeUnowned === true,
-      );
-      lines.push(formatCleanupCandidateLine(candidate, note));
-    }
-  }
-
-  return lines;
 };
 
 export const formatHubManagedBranchCleanupDiagnosticsLines = (

@@ -192,10 +192,12 @@ import type {
   PrdWarningSeverity,
 } from "./hubPrdDecomposition.js";
 import {
+  buildHubManagedBranchCleanupModel,
   buildHubTaskBoardModel,
   buildHubTaskCreateSummaryModel,
   buildHubTaskDetailModel,
   formatTaskBoardJson,
+  hubManagedBranchCleanupModelToBlocks,
   hubTaskCreateSummaryModelToBlocks,
   taskBoardModelToBlocks,
   taskDetailModelToBlocks,
@@ -204,7 +206,6 @@ import {
   createHubTask,
   deleteHubTasks,
   formatHubManagedBranchCleanupDiagnosticsLines,
-  formatHubManagedBranchCleanupLines,
   loadHubTask,
   loadHubTaskBoard,
   planHubManagedBranchCleanup,
@@ -2881,12 +2882,15 @@ const tasksCleanupCommand = Command.make(
       const managedDeletionCount = cleanupPlan.managedBranches.length;
       const historicalDeletionCount = cleanupPlan.historicalBranches.length;
 
-      for (const line of formatHubManagedBranchCleanupLines(evaluation, {
-        dryRun,
-        includeUnowned,
-      })) {
-        yield* d.text(line);
-      }
+      yield* d.section(
+        "",
+        hubManagedBranchCleanupModelToBlocks(
+          buildHubManagedBranchCleanupModel(evaluation, {
+            dryRun,
+            includeUnowned,
+          }),
+        ),
+      );
 
       if (dryRun) {
         yield* d.status("Dry run for managed branch cleanup.", "info");
@@ -2949,13 +2953,16 @@ const tasksCleanupCommand = Command.make(
         catch: toTaskBoardError,
       });
 
-      for (const line of formatHubManagedBranchCleanupLines(result.evaluation, {
-        includeUnowned,
-        deletedManagedBranches: result.deletedManagedBranches,
-        deletedHistoricalBranches: result.deletedHistoricalBranches,
-      })) {
-        yield* d.text(line);
-      }
+      yield* d.section(
+        "",
+        hubManagedBranchCleanupModelToBlocks(
+          buildHubManagedBranchCleanupModel(result.evaluation, {
+            includeUnowned,
+            deletedManagedBranches: result.deletedManagedBranches,
+            deletedHistoricalBranches: result.deletedHistoricalBranches,
+          }),
+        ),
+      );
 
       yield* d.status("Completed managed branch cleanup.", "success");
     }),
