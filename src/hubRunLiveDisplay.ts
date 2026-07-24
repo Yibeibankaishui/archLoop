@@ -39,6 +39,7 @@ import {
   formatClockElapsed,
   refreshRunCardSpinnerText,
   renderRunCardSectionText,
+  resolveRunFailureFixCommand,
   shortHubId,
   type RunCardSectionModel,
   type RunCardTransitionKind,
@@ -576,7 +577,7 @@ export const paintScrollbackSummary = (input: AltScreenFrameInput): string => {
   const fixFooter =
     outcome === "failed" && input.state.runId
       ? MARGIN +
-        `${input.palette.dim("fix")}   archloop run --resume ${shortHubId(input.state.runId)} --only-failed`
+        `${input.palette.dim("fix")}   ${resolveRunFailureFixCommand(input.state)}`
       : undefined;
 
   const lines = [

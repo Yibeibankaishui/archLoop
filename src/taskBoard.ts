@@ -1905,6 +1905,12 @@ export interface TaskBoardRow {
   readonly title: string;
   readonly trailingDim?: string;
   readonly remoteBadge?: TaskBoardRemoteBadge;
+  /**
+   * Whether the task is an interrupted execution (per the shared detector), so
+   * `tasks list` flags it at a glance. Additive to the JSON shape: omitted
+   * (not `false`) for healthy tasks so existing JSON consumers see no change.
+   */
+  readonly interrupted?: boolean;
 }
 
 export interface TaskBoardModel {
@@ -1925,6 +1931,14 @@ export interface BuildTaskBoardModelInput {
   readonly warningFilter?: PrdWarningSeverity;
   readonly showAll: boolean;
   readonly perGroupLimit?: number;
+  /**
+   * Tasks the shared interrupted-execution detector flags as interrupted, so
+   * the board can badge them at a glance. The caller resolves this set (loading
+   * worktree leases and running `detectInterruptedHubTaskExecutions`) so the
+   * model stays pure over its inputs and testable without a filesystem. When
+   * omitted (or empty) no task is badged — the common healthy-board path.
+   */
+  readonly interruptedTaskIds?: ReadonlySet<string>;
 }
 
 const TASK_BOARD_BUCKETS = [
@@ -1933,6 +1947,10 @@ const TASK_BOARD_BUCKETS = [
   "attention",
   "done",
 ] as const satisfies readonly TaskBoardDisplayBucket[];
+
+// Reused empty set so the common healthy-board path (no interrupted tasks)
+// never allocates a fresh `new Set()` and `interruptedTaskIds.has` is a no-op.
+const EMPTY_SET: ReadonlySet<string> = new Set();
 
 const TASK_BOARD_BUCKET_META: Readonly<
   Record<
@@ -1974,9 +1992,18 @@ export const mapHubStatusToTaskBoardBucket = (
 const formatTaskCountLabel = (count: number): string =>
   count === 1 ? "1 task" : `${count} tasks`;
 
+const INTERRUPTED_TRAILING_DIM = "⚠ interrupted";
+
 const taskBoardItemTrailingDim = (
   task: HubTaskProjection,
+  interrupted: boolean,
 ): string | undefined => {
+  // An interrupted execution is the most actionable trailing signal — the task
+  // is stuck mid-run and needs `archloop tasks recover` — so it wins over the
+  // PRD-warning and owner markers that would otherwise occupy this slot.
+  if (interrupted) {
+    return INTERRUPTED_TRAILING_DIM;
+  }
   if (readPrdWarningFromTask(task)) {
     return "⚠ prd-warn";
   }
@@ -2035,14 +2062,18 @@ export const deriveTaskBoardRemoteBadge = (
 // `TaskBoardRow` is structurally compatible with `SectionGroupBlock`'s item
 // type (`detailDim` is optional there), so the same object doubles as the
 // group-item shape — no re-projection needed.
-const toTaskBoardRow = (task: HubTaskProjection): TaskBoardRow => {
-  const trailingDim = taskBoardItemTrailingDim(task);
+const toTaskBoardRow = (
+  task: HubTaskProjection,
+  interrupted: boolean,
+): TaskBoardRow => {
+  const trailingDim = taskBoardItemTrailingDim(task, interrupted);
   const remoteBadge = deriveTaskBoardRemoteBadge(task);
   return {
     id: task.id,
     title: task.title,
     ...(trailingDim ? { trailingDim } : {}),
     ...(remoteBadge ? { remoteBadge } : {}),
+    ...(interrupted ? { interrupted: true } : {}),
   };
 };
 
@@ -2051,6 +2082,7 @@ const buildTaskBoardGroup = (
   tasks: readonly HubTaskProjection[],
   showAll: boolean,
   perGroupLimit: number,
+  interruptedTaskIds: ReadonlySet<string>,
   displayName?: string,
 ): SectionGroupBlock | undefined => {
   if (tasks.length === 0) {
@@ -2075,7 +2107,9 @@ const buildTaskBoardGroup = (
           footerDim: `… ${tasks.length - visibleTasks.length} more`,
         }
       : {}),
-    items: visibleTasks.map(toTaskBoardRow),
+    items: visibleTasks.map((task) =>
+      toTaskBoardRow(task, interruptedTaskIds.has(task.id)),
+    ),
   };
 };
 
@@ -2133,6 +2167,7 @@ export const buildHubTaskBoardModel = (
   input: BuildTaskBoardModelInput,
 ): TaskBoardModel => {
   const perGroupLimit = input.perGroupLimit ?? 5;
+  const interruptedTaskIds = input.interruptedTaskIds ?? EMPTY_SET;
   const visibleTasks = input.warningFilter
     ? filterHubTasksByPrdWarning(input.board.tasks, input.warningFilter)
     : input.board.tasks;
@@ -2178,6 +2213,7 @@ export const buildHubTaskBoardModel = (
       bucketTasks[bucket],
       input.showAll,
       perGroupLimit,
+      interruptedTaskIds,
       bucket === "attention" ? attentionDisplay.label : undefined,
     );
     if (!group) {
@@ -2227,7 +2263,9 @@ export const buildHubTaskBoardModel = (
     ...(emptyMessage ? { emptyMessage } : {}),
     groups,
     rows: TASK_BOARD_BUCKETS.flatMap((bucket) =>
-      bucketTasks[bucket].map(toTaskBoardRow),
+      bucketTasks[bucket].map((task) =>
+        toTaskBoardRow(task, interruptedTaskIds.has(task.id)),
+      ),
     ),
     footer: {
       kind: "footer",

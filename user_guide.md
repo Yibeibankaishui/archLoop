@@ -141,7 +141,7 @@ archloop tasks list
 archloop tasks list --json
 ```
 
-示例输出（`--plain` / `NO_COLOR`）。行尾远端徽章：`github#N`（已同步）、`local-only`（待推送）、`sync-conflict`（冲突）；无远端链接则省略：
+示例输出（`--plain` / `NO_COLOR`）。行尾远端徽章：`github#N`（已同步）、`local-only`（待推送）、`sync-conflict`（冲突）；无远端链接则省略。被 interrupted-execution detector 判定为中断的任务（`implementing` / `reviewing` / `merging` 且无活跃 worktree lease）会额外显示 `⚠ interrupted` 徽章（`--json` 行对应新增 `interrupted: true`），无需运行 `tasks doctor` 即可一眼定位；当不存在 `.archloop/locks/` 目录时该检查整体跳过，健康看板无额外开销：
 
 ```text
   archLoop · demo                                                                   3 tasks
@@ -150,7 +150,7 @@ archloop tasks list --json
      todo-list-demo-mv2  Fix login redirect                                github#101
      todo-list-demo-nx1  Improve empty state copy                            local-only
   ◐  in_progress · 1
-     todo-list-demo-ab3  Handle expired token
+     todo-list-demo-ab3  Handle expired token                              ⚠ interrupted
   tip   archloop tasks show <id>   ·   archloop tasks pull
 ```
 
@@ -328,7 +328,7 @@ archloop run --flow with-review
 
 脚本和 CI 可改用 `--output json`。proposal phases 使用 stdout-pure schema version 1 `proposal_phase` JSONL，最终使用 `run_completed`；应用/无变化退出 `0`，Ctrl+C 取消退出 `130`，SIGTERM 保留退出码 `143`，validation/mutation/general failure 非零。version 1 消费者应忽略未知字段。
 
-失败或阻塞任务会保留 failed stage、简短 diagnostic、相关 log path 和下一步命令。agent、sandbox、implementation 与 review 失败使用 `archloop tasks recover <selector>`；claim 或 task projection 不一致使用 `archloop tasks repair-state <selector>`；dirty-worktree overlap 会列出准确 blocking paths，并说明先 commit、stash 或 discard。仍在 `waiting_for_merge` 的工作应重新运行同一个 `archloop run --flow <id>`，由既有自动恢复逻辑继续批次；不要使用不存在的 `archloop run --resume`。
+失败或阻塞任务会保留 failed stage、简短 diagnostic、相关 log path 和下一步命令。agent、sandbox、implementation 与 review 失败使用 `archloop tasks recover <selector>`；claim 或 task projection 不一致使用 `archloop tasks repair-state <selector>`；dirty-worktree overlap 会列出准确 blocking paths，并说明先 commit、stash 或 discard。仍在 `waiting_for_merge` 的工作应重新运行同一个 `archloop run --flow <id>`，由既有自动恢复逻辑继续批次。失败的 run 会在结尾给出 `fix` footer 指向真实下一步：有任务真正 failed 时提示 `archloop tasks recover --stale`，run 被中断（任务停留在 in-flight 状态且无 `failed` 任务）时提示 `archloop run`（重跑会恢复中断的工作，包括未完成的 `waiting_for_merge` 批次）；`tasks list` 也会用 `⚠ interrupted` 徽章一眼标出被中断的任务。不存在 `archloop run --resume` / `--only-failed` 这样的 flag。
 
 Merge 阶段会在真正合并前输出 selected / skipped / blocked 诊断。若 Hub 事件显示任务已实现或审核完成、分支仍有未合并工作，但 Beads 投影状态或 claim 元数据已经过期，诊断会显示 `state_inconsistent` 并提示运行 `archloop tasks repair-state <selector>`；若任务处于 failed 或 stale execution 状态，`archloop tasks recover <selector>` 也可能适用。`run --flow` 启动时会提前提醒宿主仓库存在 dirty source files；若已有 `waiting_for_merge` 批次，会先做 overlap 检查。非重叠脏文件不会阻塞：archLoop 会在干净的 integration worktree/branch 中验证 merge，并在落回宿主前再次确认不会覆盖脏文件。若输出显示 dirty 文件会被覆盖或冲突，任务会留在 `waiting_for_merge`，按列出的 blocking files 先 commit、stash 或 discard，再重新运行同一个 flow 即可恢复批次。
 
@@ -484,5 +484,5 @@ archloop run --flow no-review
 
 | 修改日期   | 修改项                                                                                                                                       |
 | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2026-07-20 | Variant C Phase 4：对齐 `section` 示例输出、注明 1-based 序号选择器已移除、补充 run debounce / `--plain`/`NO_COLOR` 说明                       |
+| 2026-07-20 | Variant C Phase 4：对齐 `section` 示例输出、注明 1-based 序号选择器已移除、补充 run debounce / `--plain`/`NO_COLOR` 说明                     |
 | 2026-06-19 | 更新为 unified-interface 首版用户使用指南，补充 Hub 配置、任务表、PRD 拆解、triage、flow 执行、GitHub 同步、recovery 和 legacy init 兼容说明 |

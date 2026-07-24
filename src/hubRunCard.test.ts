@@ -186,8 +186,7 @@ describe("buildRunCardSectionModel", () => {
         leading: "↳",
         leadingSeverity: "info",
         id: "AutoTuneAgent-2mr",
-        title:
-          "Slice 2: Remove TaskOrchestrator and legacy Test Task model",
+        title: "Slice 2: Remove TaskOrchestrator and legacy Test Task model",
         subLines: ["implementing · 0s in this step"],
       },
     });
@@ -196,7 +195,7 @@ describe("buildRunCardSectionModel", () => {
     );
   });
 
-  it("emits run.failed with ✗ section and retry fix footer", () => {
+  it("emits run.failed with ✗ section and a recover --stale fix footer for failed tasks", () => {
     const state: HubRunDisplayState = {
       ...baseState(),
       status: "failed",
@@ -236,12 +235,59 @@ describe("buildRunCardSectionModel", () => {
 
     expect(model.header.right).toBe("run 74cc88e3 · ✗ 29m30s");
     expect(model.spinnerText).toBeUndefined();
+    // A run that failed because a task genuinely failed points at the real
+    // batch recovery command, not the never-implemented --resume --only-failed.
     expect(model.footer).toEqual({
       kind: "footer",
       label: "fix",
-      command: "archloop run --resume 74cc88e3 --only-failed",
+      command: "archloop tasks recover --stale",
     });
+    expect(JSON.stringify(model)).not.toContain("--only-failed");
     const blocks = runCardModelToBlocks(model);
     expect(blocks.some((b) => b.kind === "indented-block")).toBe(true);
+  });
+
+  it("emits run.failed with an archloop run fix footer when no task failed (interrupted run)", () => {
+    // The run was killed mid-execution: the task is still in-flight
+    // (`implementing`), not `failed`. No --resume/--only-failed flag exists, so
+    // the fix footer points at `archloop run`, which resumes the interrupted
+    // work (recovering the stuck task and resuming its remaining phase).
+    const state: HubRunDisplayState = {
+      ...baseState(),
+      status: "failed",
+      batches: {
+        "batch-fd3cdf79-1786-4647-8899-d5f80fd8255b": {
+          batchId: "batch-fd3cdf79-1786-4647-8899-d5f80fd8255b",
+          selectedTaskIds: ["AutoTuneAgent-2mr"],
+          taskTitles: {
+            "AutoTuneAgent-2mr": "Slice 2",
+          },
+          status: "merging",
+          stage: "Merging",
+        },
+      },
+      tasks: {
+        "AutoTuneAgent-2mr": {
+          taskId: "AutoTuneAgent-2mr",
+          batchId: "batch-fd3cdf79-1786-4647-8899-d5f80fd8255b",
+          status: "implementing",
+          stage: "Implementing",
+        },
+      },
+    };
+
+    const model = build({
+      kind: "run.failed",
+      state,
+      nowMs: 29 * 60_000 + 30_000,
+      activeTaskId: "AutoTuneAgent-2mr",
+    });
+
+    expect(model.footer).toEqual({
+      kind: "footer",
+      label: "fix",
+      command: "archloop run",
+    });
+    expect(JSON.stringify(model)).not.toContain("--only-failed");
   });
 });
