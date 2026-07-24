@@ -6,7 +6,10 @@ import {
   truncateTail,
   visibleLength,
   type Palette,
+  type SectionSeverity,
 } from "./ansi.js";
+
+export type { SectionSeverity };
 
 // ---------------------------------------------------------------------------
 // SectionBlock discriminated union (ADR-0030 / implementation plan §2)
@@ -32,7 +35,7 @@ export interface SectionBadgesBlock {
     readonly symbol: "●" | "◐" | "✓" | "✗" | "!" | "↓" | "↑";
     readonly count: number;
     readonly label: string;
-    readonly severity: "info" | "success" | "warn" | "error" | "muted";
+    readonly severity: SectionSeverity;
   }[];
 }
 
@@ -44,7 +47,7 @@ export interface SectionBadgesBlock {
 export interface SectionGroupBlock {
   readonly kind: "group";
   readonly symbol: "●" | "◐" | "✓" | "✗" | "!";
-  readonly severity: "info" | "success" | "warn" | "error" | "muted";
+  readonly severity: SectionSeverity;
   readonly name: string;
   readonly count: number;
   readonly rightHint?: string;
@@ -63,9 +66,6 @@ export interface SectionGroupBlock {
   }[];
   readonly footerDim?: string;
 }
-
-/** Shared severity vocabulary for colored section accents (`severityColor`). */
-export type SectionSeverity = "info" | "success" | "warn" | "error" | "muted";
 
 /** Left-aligned key/value block. Keys share a fixed gutter width. */
 export interface SectionKvBlock {
@@ -105,7 +105,7 @@ export interface SectionProseBlock {
 export interface SectionIndentedBlock {
   readonly kind: "indented-block";
   readonly leading: "↳" | "✓" | "✗" | "◐";
-  readonly leadingSeverity: "info" | "success" | "warn" | "error" | "muted";
+  readonly leadingSeverity: SectionSeverity;
   readonly id?: string;
   readonly title: string;
   readonly subLines: readonly string[];
@@ -419,32 +419,37 @@ const renderGroup = (
   return lines;
 };
 
-const formatProseEntryPlain = (entry: SectionProseEntry): string => {
-  const parts: string[] = [];
-  if (entry.lead) {
-    parts.push(entry.lead);
-  }
-  if (entry.meta) {
-    parts.push(entry.meta);
-  }
-  const prefix = parts.length > 0 ? `${parts.join(" · ")}: ` : "";
-  return `${prefix}${entry.body}`.trim();
-};
-
-const formatProseEntryStyled = (
+/**
+ * Format a prose timeline entry as plain text (lead · meta: body).
+ * Pass `palette` to bold the lead and dim the meta / separator.
+ */
+export const formatSectionProseEntry = (
   entry: SectionProseEntry,
-  palette: Palette,
+  palette?: Palette,
 ): string => {
   const prefixParts: string[] = [];
   if (entry.lead) {
-    prefixParts.push(palette.bold(entry.lead));
+    prefixParts.push(palette ? palette.bold(entry.lead) : entry.lead);
   }
   if (entry.meta) {
-    prefixParts.push(palette.dim(entry.meta));
+    prefixParts.push(palette ? palette.dim(entry.meta) : entry.meta);
   }
+  const sep = palette ? palette.dim(" · ") : " · ";
   const prefix =
-    prefixParts.length > 0 ? `${prefixParts.join(palette.dim(" · "))}: ` : "";
+    prefixParts.length > 0 ? `${prefixParts.join(sep)}: ` : "";
   return `${prefix}${entry.body}`.trim();
+};
+
+const proseBlockParagraphs = (
+  block: SectionProseBlock,
+  palette: Palette,
+): readonly string[] => {
+  if (block.entries && block.entries.length > 0) {
+    return block.entries.map((entry) =>
+      formatSectionProseEntry(entry, palette),
+    );
+  }
+  return block.body.trimEnd().split(/\r?\n/);
 };
 
 const renderKv = (
@@ -459,10 +464,9 @@ const renderKv = (
     const keyPad = Math.max(1, gutter - visibleLength(row.key));
     const keyPadded = key + " ".repeat(keyPad);
     const valueBudget = Math.max(10, cols - MARGIN.length - gutter);
-    const valueColor = row.valueSeverity
-      ? severityColor(palette, row.valueSeverity)
-      : (text: string) => text;
-    let value = valueColor(row.value);
+    let value = row.valueSeverity
+      ? severityColor(palette, row.valueSeverity)(row.value)
+      : row.value;
     if (row.secondary) {
       value = `${value}  ${palette.dim(row.secondary)}`;
     }
@@ -487,11 +491,7 @@ const renderProse = (
   }
   const indent = MARGIN + "  ";
   const usable = Math.max(10, cols - indent.length);
-  const paragraphs =
-    block.entries && block.entries.length > 0
-      ? block.entries.map((entry) => formatProseEntryStyled(entry, palette))
-      : block.body.trimEnd().split(/\r?\n/);
-  for (const paragraph of paragraphs) {
+  for (const paragraph of proseBlockParagraphs(block, palette)) {
     if (paragraph.length === 0) {
       lines.push(indent);
       continue;
@@ -706,7 +706,7 @@ export const flattenSectionForLog = (
         if (block.entries && block.entries.length > 0) {
           lines.push(
             block.entries
-              .map((entry) => formatProseEntryPlain(entry))
+              .map((entry) => formatSectionProseEntry(entry))
               .join("\n"),
           );
         } else {

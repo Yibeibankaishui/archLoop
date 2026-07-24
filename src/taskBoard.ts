@@ -31,6 +31,7 @@ import {
 import { TaskBoardError } from "./errors.js";
 import { runBdTextForHubTaskStore } from "./hubTaskStore.js";
 import {
+  formatSectionProseEntry,
   renderSection,
   type RenderSectionOptions,
   type SectionBadgesBlock,
@@ -1858,21 +1859,10 @@ export const addHubTaskDependency = (
 const cleanJoinedValues = (values: readonly string[]): string =>
   values.filter((value) => value.trim().length > 0).join(", ");
 
-const formatInlineObject = (
-  value: Readonly<Record<string, unknown>>,
-): string => {
-  const entries = Object.entries(value);
-  if (entries.length === 0) {
-    return "{}";
-  }
-  return JSON.stringify(value);
-};
-
+/** Format leftover detail metadata / claim blobs for kv rows (scalars plain, else JSON). */
 const formatDetailMetadataValue = (value: unknown): string => {
-  if (typeof value === "string") {
-    return value;
-  }
   if (
+    typeof value === "string" ||
     typeof value === "number" ||
     typeof value === "boolean" ||
     value === null
@@ -1880,18 +1870,6 @@ const formatDetailMetadataValue = (value: unknown): string => {
     return String(value);
   }
   return JSON.stringify(value);
-};
-
-const formatComment = (comment: BeadsTaskComment): string => {
-  const parts: string[] = [];
-  if (comment.author) {
-    parts.push(comment.author);
-  }
-  if (comment.createdAt) {
-    parts.push(comment.createdAt);
-  }
-  const prefix = parts.length > 0 ? `${parts.join(" · ")}: ` : "";
-  return `${prefix}${comment.body ?? ""}`.trim();
 };
 
 const toCommentProseEntry = (comment: BeadsTaskComment): SectionProseEntry => ({
@@ -2432,7 +2410,10 @@ const buildTaskDetailIdentity = (task: HubTaskProjection): SectionKvBlock => {
     rows.push({ key: "runs", value: cleanJoinedValues(task.runRefs) });
   }
   if (task.claim) {
-    rows.push({ key: "claim", value: formatInlineObject(task.claim.raw) });
+    rows.push({
+      key: "claim",
+      value: formatDetailMetadataValue(task.claim.raw),
+    });
     rows.push({ key: "claim state", value: task.claimState ?? "stale" });
   }
 
@@ -2470,7 +2451,8 @@ const buildTaskDetailComments = (
   return {
     kind: "prose",
     title: `comments · ${task.comments.length}`,
-    body: task.comments.map((comment) => formatComment(comment)).join("\n"),
+    // Keep body in lockstep with flattenSectionForLog / plain rendering.
+    body: entries.map((entry) => formatSectionProseEntry(entry)).join("\n"),
     entries,
   };
 };
