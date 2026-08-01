@@ -255,17 +255,46 @@ archLoop 使用常规容器将宿主 worktree 挂载进沙箱，agent 在容器�
 
 ## Hub flow 脏工作区诊断
 
-Hub flow 默认使用 `--output auto`。能力足够的交互式 TTY 会显示共享的紧凑 run header、elapsed、durable logs 和最终 outcome。任务看板 flow 显示当前 batch 任务行；`prd-decomposition` 与 `triage` 显示 input preparation、draft、可选 refinement、finalization、mutation detection、approval、validation、apply proposal phases，并在交互 prompt 前暂停 live region。它不进入 alternate screen，也不显示原始 agent prose、tool 参数、百分比或 ETA；resize 与成功、失败、取消、异常清理都保持有界并恢复光标。重定向、CI、`TERM=dumb`、不支持 cursor control 或终端尺寸不安全时自动回退 plain；`NO_COLOR` 或 `--no-color` 只关闭 live view 颜色。
+Hub flow 默认使用 `--output auto`。交互式 TTY 在选完 flow 后会先渲染 run plan section，并在约 3 秒后自动开始（`Ctrl+C` 取消，`e` 重选 flow）；`--yes` 跳过倒计时，`--dry-run` 只打印计划不启动：
+
+```text
+  archLoop · run
+  flow      with-review
+  project   demo  ← /path/to/repo
+  ready     1 task
+  tip   starting in 3s · Ctrl+C to cancel · e to edit flow
+```
+
+能力足够的交互式 TTY 在运行中会显示 append-only 的 Hub run card：每次状态转换追加一个 `section` 快照，底部单行 spinner 每秒刷新 phase-elapsed（ADR-0032）。任务看板 flow 显示当前 batch 与已完成 batch 折叠行；`prd-decomposition` 与 `triage` 仍使用各自的 proposal live renderer。run card 不进入 alternate screen，也不在 spinner 行之外使用 cursor-up，不显示原始 agent prose、tool 参数、百分比或 ETA；成功、失败、取消与异常清理都会恢复光标。重定向、CI、`TERM=dumb`、不支持 cursor control 或终端尺寸不安全时自动回退 plain；`NO_COLOR`、`--no-color` 或全局 `--plain` 只关闭颜色/粗体/暗色，保留符号与缩进；`FORCE_COLOR=1` 可在非 TTY 强制着色。
 
 所有 Hub flow 都可显式使用 `--output plain`。该模式让每条 lifecycle 记录各占一个物理行，字段顺序稳定、值会转义，不使用 ANSI 光标重写。任务看板仍输出五类任务计数、失败诊断和恢复动作；proposal flow 只输出 canonical phase/status，以及 applied、skipped、dependencies 计数，终态区分 `applied`、`no_change`、`cancelled`、`validation_failed`、`mutation_failed`、`failed`。显式 plain/JSON 为非交互模式，proposal 写入需要 `--yes`；auto TTY 保留 refinement、status、approval 和 guarded apply prompts。agent prose 与 tool 参数只保存在 Hub run directory。
 
 自动化消费可使用 `archloop run --flow <id> --output json`。stdout 只包含 schema version 1 JSONL；proposal 使用 `proposal_phase` 和 `run_completed` 记录同一组阶段与终态，不混入 prompt、人工装饰、ANSI、agent 启动文本或原始 agent 输出。应用/无变化退出 `0`，Ctrl+C 取消退出 `130`，SIGTERM 保留退出码 `143`，validation、mutation 或其他失败返回非零；消费者应忽略 version 1 的未知新增字段。
 
-`archloop run --flow no-review` 和 `archloop run --flow with-review` 启动时会提前提醒宿主仓库里的 dirty source files。若同一个 flow 已有未完成的 `waiting_for_merge` 批次，archLoop 会先恢复该批次，并在领取新任务前检查待合并分支是否会改到这些脏文件。
+`archloop run --flow no-review` 和 `archloop run --flow with-review` 启动时会提前提醒宿主仓库里的 dirty source files。若同一个 flow 已有未完成的 `waiting_for_merge` 批次，archLoop 会先恢复该批次，并在领取新任务前检查待合并分支是否会改到这些脏文件。实现阶段成功与否以任务分支提交（或既有未合并工作）加上 `<promise>COMPLETE</promise>` 为准；provider CLI 尾随非零退出不会覆盖该结论。运行中途的 provider 瞬态错误（如 `API Error: 400 Invalid request parameters`、Cursor `RetriableError: Connection stalled` / `PING timed out`）会按退避重试（默认 3 次、5s/20s/60s；可用 `ARCHLOOP_PROVIDER_RETRY_ATTEMPTS` / `ARCHLOOP_PROVIDER_RETRY_BASE_MS` 覆盖），并写入 `task_provider_retry` 事件；若日志里已有完成信号则不再重试。
 
 非重叠脏文件不会阻塞 merge：archLoop 会在干净的 integration worktree/branch 中验证结果，并只在不会覆盖宿主脏文件时落回当前分支。若存在重叠，CLI 会列出具体 blocking files；先 commit、stash 或 discard 这些文件，再重新运行同一个 flow，archLoop 会继续恢复 `waiting_for_merge` 任务。
 
-任务命令默认针对已选中的 Hub project；如需覆盖，可以显式传 `--project <name>`。`.beads/issues.jsonl`、`.beads/interactions.jsonl` 等 Beads runtime/export 文件会单独报告，通常不要提交；通过 `archloop tasks pull` / `push` / `sync` 交换远端任务状态。
+任务命令默认针对已选中的 Hub project；如需覆盖，可以显式传 `--project <name>`。`.beads/issues.jsonl`、`.beads/interactions.jsonl` 等 Beads runtime/export 文件会单独报告，通常不要提交；通过 `archloop tasks pull` / `push` / `sync` 交换远端任务状态。同步冲突用 `archloop tasks resolve <id> --keep local|remote` 在本地 Beads 上解决（不直接改 GitHub；`--keep local` 后由下一次 `tasks push` 写回远端）。
+
+`archloop tasks list` / `show` / `pull` 使用 Variant C `section` 排版（无 `clack.note` 左边框、无 1-based 序号；选择器只接受 Beads id 或精确标题）。`tasks list` 行尾可带远端徽章：已同步为 dim cyan `github#N`，待推送为 dim `local-only`，冲突为 yellow `sync-conflict`；无远端链接则不显示。`--json` 输出行数组（含 `remoteBadge`）：
+
+```text
+  archLoop · demo                                                                   3 tasks
+  ● 2 todo   ◐ 1 in_progress   ✓ 0 done
+  ●  todo · 2
+     demo-mv2  Fix login redirect                                          github#101
+     demo-nx1  Improve empty state copy                                      local-only
+  tip   archloop tasks show <id>   ·   archloop tasks pull
+```
+
+```text
+  archLoop · sync · demo                                                    owner/repo
+  ↓ pulled  4 created  0 updated · 0 conflicts · 0 dup-candidates
+     arch-abc  Import open issues into Beads                                 github#101
+  ↑ pushed  nothing to push  0 synced · 0 closed · 0 pending
+  next  archloop tasks list
+```
 
 ---
 

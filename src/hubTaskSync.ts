@@ -5,6 +5,16 @@ import { TaskBoardError } from "./errors.js";
 import { recordHubTaskSyncConflict } from "./hubTaskLifecycle.js";
 import { runBdTextForHubTaskStore } from "./hubTaskStore.js";
 import {
+  renderSection,
+  type RenderSectionOptions,
+  type SectionBlock,
+  type SectionFooterBlock,
+  type SectionGroupBlock,
+  type SectionHeaderBlock,
+  type SectionKvBlock,
+  type SectionProseBlock,
+} from "./section.js";
+import {
   HUB_COLLABORATION_LABELS_TO_CLEAR,
   isCompletedHubStatus,
   loadHubTaskBoard,
@@ -734,15 +744,330 @@ export const formatHubTaskSyncPreviewLines = (
   return lines;
 };
 
-export const formatHubTaskSyncSummaryLines = (
-  result: SyncHubTasksResult,
-): readonly string[] => {
-  const lines = ["Synced Hub tasks with GitHub Issues"];
-  lines.push(
-    `Pulled: ${result.pulled.created.length} created, ${result.pulled.updated.length} updated, ${result.pulled.conflicts.length} conflicts, ${result.pulled.duplicateCandidates.length} duplicate candidates`,
-  );
-  lines.push(
-    `Pushed: ${result.pushed.synced.length} synced, ${result.pushed.closed.length} closed, ${result.pushed.pushPending.length} push pending`,
-  );
-  return lines;
+export type SyncResultDirection = "pulled" | "pushed";
+
+export type SyncResultOutcome =
+  | "created"
+  | "updated"
+  | "closed"
+  | "synced"
+  | "conflict"
+  | "duplicate"
+  | "pending";
+
+export interface SyncResultEntry {
+  readonly id: string;
+  readonly direction: SyncResultDirection;
+  readonly outcome: SyncResultOutcome;
+  readonly title: string;
+  readonly remoteRef: string;
+  readonly reason?: string;
+}
+
+export interface SyncResultModel {
+  readonly header: SectionHeaderBlock;
+  readonly pullLine: SectionKvBlock;
+  readonly pushLine: SectionKvBlock;
+  readonly entries: readonly SyncResultEntry[];
+  readonly duration?: SectionProseBlock;
+  readonly conflicts?: SectionGroupBlock;
+  readonly footer: SectionFooterBlock;
+}
+
+export interface SyncResultTaskLookup {
+  readonly id: string;
+  readonly title: string;
+  readonly remoteRefs: readonly string[];
+  readonly metadata: Readonly<Record<string, unknown>>;
+}
+
+export interface BuildSyncResultModelInput {
+  readonly result: SyncHubTasksResult;
+  readonly projectName: string;
+  readonly remote?: string;
+  readonly durationSeconds?: number;
+  readonly tasks?: readonly SyncResultTaskLookup[];
+}
+
+const SYNC_KV_GUTTER = 10;
+
+const formatSyncDurationBody = (seconds: number): string => {
+  const safe = Number.isFinite(seconds) && seconds > 0 ? seconds : 0;
+  return `done in ${(Math.round(safe * 10) / 10).toFixed(1)}s`;
 };
+
+const buildPullLine = (result: SyncHubTasksResult): SectionKvBlock => {
+  const created = result.pulled.created.length;
+  const updated = result.pulled.updated.length;
+  const conflicts = result.pulled.conflicts.length;
+  const dups = result.pulled.duplicateCandidates.length;
+  return {
+    kind: "kv",
+    gutter: SYNC_KV_GUTTER,
+    rows: [
+      {
+        key: "↓ pulled",
+        value: created > 0 ? `${created} created` : "nothing new",
+        secondary: `${updated} updated · ${conflicts} conflicts · ${dups} dup-candidates`,
+      },
+    ],
+  };
+};
+
+const buildPushLine = (result: SyncHubTasksResult): SectionKvBlock => {
+  const synced = result.pushed.synced.length;
+  const closed = result.pushed.closed.length;
+  const pending = result.pushed.pushPending.length;
+  const hasPushActivity = synced > 0 || closed > 0;
+  const mainParts: string[] = [];
+  if (synced > 0) {
+    mainParts.push(`${synced} synced`);
+  }
+  if (closed > 0) {
+    mainParts.push(`${closed} closed`);
+  }
+  return {
+    kind: "kv",
+    gutter: SYNC_KV_GUTTER,
+    rows: [
+      {
+        key: "↑ pushed",
+        value: hasPushActivity ? mainParts.join(" · ") : "nothing to push",
+        secondary: hasPushActivity
+          ? `${pending} pending`
+          : `${synced} synced · ${closed} closed · ${pending} pending`,
+      },
+    ],
+  };
+};
+
+const buildConflictsGroup = (
+  conflictIds: readonly string[],
+): SectionGroupBlock => ({
+  kind: "group",
+  symbol: "!",
+  severity: "error",
+  name: "conflicts pending review",
+  count: conflictIds.length,
+  items: conflictIds.map((id) => ({
+    id,
+    title: "sync conflict",
+  })),
+});
+
+const primaryRemoteRef = (
+  remoteRefs: readonly string[],
+): string =>
+  remoteRefs.find((ref) => parseGithubRemoteRef(ref) !== undefined) ??
+  remoteRefs[0] ??
+  "";
+
+const readConflictReason = (
+  metadata: Readonly<Record<string, unknown>>,
+): string | undefined => {
+  const value = metadata.sync_conflict_reason ?? metadata.syncConflictReason;
+  return typeof value === "string" && value.trim().length > 0
+    ? value.trim()
+    : undefined;
+};
+
+const buildTaskLookup = (
+  tasks: readonly SyncResultTaskLookup[] | undefined,
+): Map<string, SyncResultTaskLookup> => {
+  const lookup = new Map<string, SyncResultTaskLookup>();
+  for (const task of tasks ?? []) {
+    lookup.set(task.id, task);
+  }
+  return lookup;
+};
+
+const entryFromTaskId = (
+  id: string,
+  direction: SyncResultDirection,
+  outcome: SyncResultOutcome,
+  lookup: Map<string, SyncResultTaskLookup>,
+): SyncResultEntry => {
+  const task = lookup.get(id);
+  const reason =
+    outcome === "conflict" && task
+      ? readConflictReason(task.metadata)
+      : undefined;
+  return {
+    id,
+    direction,
+    outcome,
+    title: task?.title ?? id,
+    remoteRef: task ? primaryRemoteRef(task.remoteRefs) : "",
+    ...(reason ? { reason } : {}),
+  };
+};
+
+export const buildSyncResultEntries = (
+  result: SyncHubTasksResult,
+  tasks?: readonly SyncResultTaskLookup[],
+): readonly SyncResultEntry[] => {
+  const lookup = buildTaskLookup(tasks);
+  const entries: SyncResultEntry[] = [];
+
+  for (const id of result.pulled.created) {
+    entries.push(entryFromTaskId(id, "pulled", "created", lookup));
+  }
+  for (const id of result.pulled.updated) {
+    entries.push(entryFromTaskId(id, "pulled", "updated", lookup));
+  }
+  for (const id of result.pulled.conflicts) {
+    entries.push(entryFromTaskId(id, "pulled", "conflict", lookup));
+  }
+  for (const candidate of result.pulled.duplicateCandidates) {
+    const id =
+      candidate.localTaskIds[0] ?? formatGithubRemoteRef(candidate.issueNumber);
+    entries.push({
+      id,
+      direction: "pulled",
+      outcome: "duplicate",
+      title: candidate.title,
+      remoteRef: formatGithubRemoteRef(candidate.issueNumber),
+    });
+  }
+  for (const id of result.pushed.synced) {
+    entries.push(entryFromTaskId(id, "pushed", "synced", lookup));
+  }
+  for (const id of result.pushed.closed) {
+    entries.push(entryFromTaskId(id, "pushed", "closed", lookup));
+  }
+  for (const id of result.pushed.pushPending) {
+    entries.push(entryFromTaskId(id, "pushed", "pending", lookup));
+  }
+
+  return entries;
+};
+
+export const buildSyncResultModel = (
+  input: BuildSyncResultModelInput,
+): SyncResultModel => {
+  const { result, projectName } = input;
+  const hasConflicts = result.pulled.conflicts.length > 0;
+  const footer: SectionFooterBlock = hasConflicts
+    ? {
+        kind: "footer",
+        label: "fix",
+        command: "archloop tasks resolve <id>",
+      }
+    : {
+        kind: "footer",
+        label: "next",
+        command: "archloop tasks list",
+      };
+
+  return {
+    header: {
+      kind: "header",
+      title: "archLoop",
+      subtitle: `sync · ${projectName}`,
+      ...(input.remote ? { right: input.remote } : {}),
+    },
+    pullLine: buildPullLine(result),
+    pushLine: buildPushLine(result),
+    entries: buildSyncResultEntries(result, input.tasks),
+    ...(input.durationSeconds !== undefined
+      ? {
+          duration: {
+            kind: "prose" as const,
+            body: formatSyncDurationBody(input.durationSeconds),
+          },
+        }
+      : {}),
+    ...(hasConflicts
+      ? { conflicts: buildConflictsGroup(result.pulled.conflicts) }
+      : {}),
+    footer,
+  };
+};
+
+const entriesToGroup = (
+  entries: readonly SyncResultEntry[],
+): SectionGroupBlock | undefined => {
+  if (entries.length === 0) {
+    return undefined;
+  }
+  return {
+    kind: "group",
+    symbol: "●",
+    severity: "muted",
+    name: "entries",
+    count: entries.length,
+    hideHeading: true,
+    items: entries.map((entry) => ({
+      id: entry.id,
+      title: entry.title,
+      ...(entry.remoteRef ? { trailingDim: entry.remoteRef } : {}),
+      ...(entry.reason ? { detailDim: entry.reason } : {}),
+    })),
+  };
+};
+
+export const syncResultModelToBlocks = (
+  model: SyncResultModel,
+): readonly SectionBlock[] => {
+  const pulledEntries = model.entries.filter(
+    (entry) => entry.direction === "pulled",
+  );
+  const pushedEntries = model.entries.filter(
+    (entry) => entry.direction === "pushed",
+  );
+  const blocks: SectionBlock[] = [model.header, model.pullLine];
+  const pulledGroup = entriesToGroup(pulledEntries);
+  if (pulledGroup) {
+    blocks.push(pulledGroup);
+  }
+  blocks.push(model.pushLine);
+  const pushedGroup = entriesToGroup(pushedEntries);
+  if (pushedGroup) {
+    blocks.push(pushedGroup);
+  }
+  if (model.duration) {
+    blocks.push(model.duration);
+  }
+  if (model.conflicts) {
+    blocks.push(model.conflicts);
+  }
+  blocks.push(model.footer);
+  return blocks;
+};
+
+export const formatSyncResultJson = (model: SyncResultModel): string =>
+  JSON.stringify(
+    {
+      project: model.header.subtitle?.replace(/^sync · /, "") ?? "",
+      ...(model.header.right ? { remote: model.header.right } : {}),
+      pull: model.pullLine.rows[0]
+        ? {
+            value: model.pullLine.rows[0].value,
+            secondary: model.pullLine.rows[0].secondary,
+          }
+        : undefined,
+      push: model.pushLine.rows[0]
+        ? {
+            value: model.pushLine.rows[0].value,
+            secondary: model.pushLine.rows[0].secondary,
+          }
+        : undefined,
+      entries: model.entries,
+      ...(model.duration ? { duration: model.duration.body } : {}),
+      footer: {
+        label: model.footer.label,
+        command:
+          model.footer.label === "tip"
+            ? model.footer.commands
+            : model.footer.command,
+      },
+    },
+    null,
+    2,
+  );
+
+export const renderSyncResultText = (
+  model: SyncResultModel,
+  options?: RenderSectionOptions,
+): readonly string[] =>
+  renderSection("", syncResultModelToBlocks(model), options);

@@ -11,6 +11,12 @@ import {
 import { DEFAULT_PROJECT_PROFILE_NAME } from "./InitService.js";
 import { initHubTaskStore } from "./hubTaskStore.js";
 import { resolveHubProjectRegistrationRepoRoot } from "./hubProjectOnboarding.js";
+import type {
+  SectionBlock,
+  SectionFooterBlock,
+  SectionHeaderBlock,
+  SectionKvBlock,
+} from "./section.js";
 
 export interface HubProjectRegistryEntry {
   readonly id: string;
@@ -529,3 +535,150 @@ export const formatHubProjectRegistrySummary = (
           return `${project.name}${selected} - ${project.repoRoot}`;
         })
         .join("\n");
+
+// ---------------------------------------------------------------------------
+// project add / rename / relink summary models (Variant C section primitive)
+// ---------------------------------------------------------------------------
+
+const PROJECT_REGISTRY_KV_GUTTER = 24;
+
+export interface HubProjectRegisterSummaryModel {
+  readonly header: SectionHeaderBlock;
+  readonly identity: SectionKvBlock;
+  readonly footer: SectionFooterBlock;
+}
+
+export interface BuildHubProjectRegisterSummaryModelInput {
+  readonly result: RegisterHubProjectResult;
+  readonly taskStoreInitialized: boolean;
+}
+
+export const buildHubProjectRegisterSummaryModel = (
+  input: BuildHubProjectRegisterSummaryModelInput,
+): HubProjectRegisterSummaryModel => {
+  const { result, taskStoreInitialized } = input;
+  const rows: SectionKvBlock["rows"][number][] = [
+    { key: "Name", value: result.project.name },
+    { key: "Project id", value: result.project.id },
+    { key: "Repo root", value: result.project.repoRoot },
+    { key: "Hub project dir", value: result.project.hubProjectDir },
+    { key: "Project profile", value: result.project.projectProfile },
+    {
+      key: "Development contract",
+      value: result.projectDevelopmentContractPath,
+    },
+    {
+      key: "Task store initialized",
+      value: taskStoreInitialized ? "yes" : "no",
+    },
+    { key: "Selected", value: result.project.name },
+  ];
+
+  return {
+    header: {
+      kind: "header",
+      title: "archLoop",
+      subtitle: "project · add",
+      right: result.project.name,
+    },
+    identity: {
+      kind: "kv",
+      gutter: PROJECT_REGISTRY_KV_GUTTER,
+      rows,
+    },
+    footer: {
+      kind: "footer",
+      label: "next",
+      command: taskStoreInitialized
+        ? "archloop tasks list"
+        : "archloop tasks init",
+    },
+  };
+};
+
+export const hubProjectRegisterSummaryModelToBlocks = (
+  model: HubProjectRegisterSummaryModel,
+): readonly SectionBlock[] => [model.header, model.identity, model.footer];
+
+export interface HubProjectRenameSummaryModel {
+  readonly header: SectionHeaderBlock;
+  readonly identity: SectionKvBlock;
+  readonly footer: SectionFooterBlock;
+}
+
+export const buildHubProjectRenameSummaryModel = (
+  result: RenameHubProjectResult,
+): HubProjectRenameSummaryModel => {
+  const rows: SectionKvBlock["rows"][number][] = [
+    { key: "Project id", value: result.project.id },
+    { key: "Previous name", value: result.previousProjectName },
+    { key: "New name", value: result.project.name },
+    { key: "Repo root", value: result.project.repoRoot },
+    { key: "Hub project dir", value: result.project.hubProjectDir },
+    { key: "Selected", value: result.project.name },
+  ];
+
+  return {
+    header: {
+      kind: "header",
+      title: "archLoop",
+      subtitle: "project · rename",
+      right: result.project.name,
+    },
+    identity: {
+      kind: "kv",
+      gutter: PROJECT_REGISTRY_KV_GUTTER,
+      rows,
+    },
+    footer: {
+      kind: "footer",
+      label: "next",
+      command: "archloop project list",
+    },
+  };
+};
+
+export const hubProjectRenameSummaryModelToBlocks = (
+  model: HubProjectRenameSummaryModel,
+): readonly SectionBlock[] => [model.header, model.identity, model.footer];
+
+export interface HubProjectRelinkSummaryModel {
+  readonly header: SectionHeaderBlock;
+  readonly identity: SectionKvBlock;
+  readonly footer: SectionFooterBlock;
+}
+
+export const buildHubProjectRelinkSummaryModel = (
+  result: RelinkHubProjectResult,
+): HubProjectRelinkSummaryModel => {
+  const rows: SectionKvBlock["rows"][number][] = [
+    { key: "Project id", value: result.project.id },
+    { key: "Previous repo root", value: result.previousRepoRoot },
+    { key: "New repo root", value: result.project.repoRoot },
+    { key: "Hub project dir", value: result.project.hubProjectDir },
+    { key: "Selected", value: result.project.name },
+  ];
+
+  return {
+    header: {
+      kind: "header",
+      title: "archLoop",
+      subtitle: "project · relink",
+      right: result.project.name,
+    },
+    identity: {
+      kind: "kv",
+      gutter: PROJECT_REGISTRY_KV_GUTTER,
+      rows,
+    },
+    footer: {
+      kind: "footer",
+      label: "next",
+      command: "archloop project status",
+    },
+  };
+};
+
+export const hubProjectRelinkSummaryModelToBlocks = (
+  model: HubProjectRelinkSummaryModel,
+): readonly SectionBlock[] => [model.header, model.identity, model.footer];

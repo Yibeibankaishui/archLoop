@@ -3,6 +3,12 @@ import { dirname } from "node:path";
 
 import { getAgent, listAgents } from "./InitService.js";
 import { resolveArchloopUserDataDir } from "./projectStatus.js";
+import type {
+  SectionBlock,
+  SectionFooterBlock,
+  SectionHeaderBlock,
+  SectionKvBlock,
+} from "./section.js";
 
 export const HUB_AGENT_ROLES = [
   "planning",
@@ -418,3 +424,103 @@ export const ensureHubAgentRolesConfigured = async (input: {
 
   throw new Error(formatMissingHubAgentRolesMessage(missingRoles));
 };
+
+// ---------------------------------------------------------------------------
+// agent-config summary models (Variant C section primitive)
+// ---------------------------------------------------------------------------
+
+const AGENT_CONFIG_KV_GUTTER = 14;
+
+export interface HubAgentConfigSetRoleSummaryModel {
+  readonly header: SectionHeaderBlock;
+  readonly identity: SectionKvBlock;
+  readonly footer: SectionFooterBlock;
+}
+
+export interface BuildHubAgentConfigSetRoleSummaryModelInput {
+  readonly role: HubAgentRole;
+  readonly entry: HubAgentRoleEntry;
+}
+
+export const buildHubAgentConfigSetRoleSummaryModel = (
+  input: BuildHubAgentConfigSetRoleSummaryModelInput,
+): HubAgentConfigSetRoleSummaryModel => {
+  const { role, entry } = input;
+  const optionSuffix = formatHubAgentRoleOptions(entry.options);
+
+  return {
+    header: {
+      kind: "header",
+      title: "archLoop",
+      subtitle: `agent-config · set-role · ${role}`,
+      right: entry.provider,
+    },
+    identity: {
+      kind: "kv",
+      gutter: AGENT_CONFIG_KV_GUTTER,
+      rows: [
+        { key: "Role", value: role },
+        { key: "Provider", value: entry.provider },
+        { key: "Model", value: entry.model },
+        { key: "Options", value: optionSuffix ?? "(none)" },
+      ],
+    },
+    footer: {
+      kind: "footer",
+      label: "next",
+      command: "archloop agent-config show",
+    },
+  };
+};
+
+export const hubAgentConfigSetRoleSummaryModelToBlocks = (
+  model: HubAgentConfigSetRoleSummaryModel,
+): readonly SectionBlock[] => [model.header, model.identity, model.footer];
+
+export interface HubAgentConfigInitSummaryModel {
+  readonly header: SectionHeaderBlock;
+  readonly identity: SectionKvBlock;
+  readonly footer: SectionFooterBlock;
+}
+
+export interface BuildHubAgentConfigInitSummaryModelInput {
+  readonly config: HubAgentConfig;
+  readonly configPath: string;
+}
+
+export const buildHubAgentConfigInitSummaryModel = (
+  input: BuildHubAgentConfigInitSummaryModelInput,
+): HubAgentConfigInitSummaryModel => {
+  const configuredRoleCount = HUB_AGENT_ROLES.filter(
+    (role) => input.config.roles[role] !== undefined,
+  ).length;
+
+  return {
+    header: {
+      kind: "header",
+      title: "archLoop",
+      subtitle: "agent-config · init",
+      right: `${configuredRoleCount}/${HUB_AGENT_ROLES.length} roles`,
+    },
+    identity: {
+      kind: "kv",
+      gutter: AGENT_CONFIG_KV_GUTTER,
+      rows: [
+        {
+          key: "Roles configured",
+          value: `${configuredRoleCount} of ${HUB_AGENT_ROLES.length}`,
+        },
+        { key: "Config", value: input.configPath },
+      ],
+    },
+    footer: {
+      kind: "footer",
+      label: "next",
+      command: "archloop agent-config show",
+    },
+  };
+};
+
+export const hubAgentConfigInitSummaryModelToBlocks = (
+  model: HubAgentConfigInitSummaryModel,
+): readonly SectionBlock[] => [model.header, model.identity, model.footer];

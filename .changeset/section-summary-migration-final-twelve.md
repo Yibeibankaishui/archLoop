@@ -1,0 +1,5 @@
+---
+"@yibeibankaishui/archloop": patch
+---
+
+Migrate 12 more command summaries to the Variant C `section` primitive for visual consistency: `tasks create`, `tasks recover`, `project status`, `project add`, `project list`, `project rename`, `project relink`, `project configure`, `agent-config init` / `agent-config configure`, `agent-config set-role`, `env set`, and `auth login codex` / `auth login github` now render with the shared `archLoop` header, kv identity block, and `next` / `tip` / `fix` footer instead of the older `d.summary` clack note. Each command grew a pure `build<Something>SummaryModel` + `<something>SummaryModelToBlocks` helper alongside its domain module (`taskBoard`, `hubTaskRecover`, `projectStatus`, `hubProjectRegistry`, `hubProjectList`, `hubProjectDevelopmentContract`, `hubAgentConfig`, `hubEnv`, `hubAuth`), giving each site a testable seam. `project status` and `project list` also fold their previous follow-up prose loops into the section so the output is a single unified block.

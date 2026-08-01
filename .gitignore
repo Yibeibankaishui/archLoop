@@ -13,3 +13,5 @@ debug/wx-preview-*
 .beads-credential-key
 .beads/interactions.jsonl
 .beads/issues.jsonl
+# Throwaway prototypes produced by the prototype skill (CLI variant mocks, etc.)
+prototype/

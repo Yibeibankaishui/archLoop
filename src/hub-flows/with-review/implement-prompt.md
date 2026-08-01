@@ -72,7 +72,8 @@ Keep it concise.
 
 This Hub flow runs **implement → review → merge → close** for each task.
 
-- **You are the implementer.** Commit your work and run tests, but **do not close the task.**
+- **You are the implementer.** Your job ends at **committing to the task branch** and running tests. **Do not close the task.**
+- Do **not** `git push` to any remote. Do **not** run `bd dolt push` or `bd dolt commit`. Do **not** sync Beads. Hub handles merge and remote sync later.
 - The task stays **open** until the merge phase closes it after branches are merged into the base branch.
 - If you cannot finish, leave a comment on the task describing what was done and what remains. Say it is **awaiting the merge phase** instead of waiting for human review.
 
@@ -87,3 +88,5 @@ Once complete, output <promise>COMPLETE</promise>.
 # FINAL RULES
 
 ONLY WORK ON A SINGLE TASK.
+
+Do not `git push`, do not run `bd dolt push` / `bd dolt commit`, and do not sync Beads — stop after the local commit on the task branch.

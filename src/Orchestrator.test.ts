@@ -2677,6 +2677,72 @@ describe("Orchestrator Display integration", () => {
     }
   }, 10_000);
 
+  it("does not idle-timeout while an active child process is present", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-idle-child-active-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    // Silent for 300ms with a 100ms idle timeout — would fail without the child-process guard.
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) =>
+      makeMockAgentLayer(dir, async () => {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return "done <promise>COMPLETE</promise>";
+      }),
+    );
+
+    const exitResult = await Effect.runPromise(
+      orchestrate({
+        provider: testProvider,
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: "test",
+        idleTimeoutSeconds: 0.1,
+        _hasActiveChildProcesses: () => true,
+      }).pipe(
+        Effect.provide(Layer.merge(factoryLayer, testDisplayLayer)),
+        Effect.exit,
+      ),
+    );
+
+    expect(exitResult._tag).toBe("Success");
+  }, 10_000);
+
+  it("idle-timeouts when silent with no active child process", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-idle-child-none-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) =>
+      makeMockAgentLayer(dir, async () => {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return "done";
+      }),
+    );
+
+    const exitResult = await Effect.runPromise(
+      orchestrate({
+        provider: testProvider,
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: "test",
+        idleTimeoutSeconds: 0.1,
+        _hasActiveChildProcesses: () => false,
+      }).pipe(
+        Effect.provide(Layer.merge(factoryLayer, testDisplayLayer)),
+        Effect.exit,
+      ),
+    );
+
+    expect(exitResult._tag).toBe("Failure");
+    if (exitResult._tag === "Failure") {
+      expect(Cause.squash(exitResult.cause)).toBeInstanceOf(
+        AgentIdleTimeoutError,
+      );
+    }
+  }, 10_000);
+
   it("aborts the active sandbox exec when idle timeout fires", async () => {
     const hostDir = await mkdtemp(join(tmpdir(), "orch-timeout-abort-"));
 

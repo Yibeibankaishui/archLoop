@@ -8,6 +8,13 @@ import {
   resolveHubProjectStatus,
   type HubProjectStatus,
 } from "./projectStatus.js";
+import type {
+  SectionBlock,
+  SectionFooterBlock,
+  SectionHeaderBlock,
+  SectionKvBlock,
+  SectionProseBlock,
+} from "./section.js";
 
 export interface HubProjectListTaskCounts {
   readonly ready: number;
@@ -38,7 +45,9 @@ export interface HubProjectListProjection extends HubProjectListEntry {
 
 export interface ResolveHubProjectListProjectionsOptions {
   readonly pathExists?: (path: string) => boolean;
-  readonly resolveProjectStatus?: (project: HubProjectListEntry) => HubProjectStatus;
+  readonly resolveProjectStatus?: (
+    project: HubProjectListEntry,
+  ) => HubProjectStatus;
 }
 
 const resolveDefaultProjectStatus = (
@@ -76,7 +85,9 @@ const createTaskStatusFromProjectStatus = (
   };
 };
 
-const formatTaskStatusLabel = (taskStatus: HubProjectListTaskStatus): string => {
+const formatTaskStatusLabel = (
+  taskStatus: HubProjectListTaskStatus,
+): string => {
   switch (taskStatus.state) {
     case "ready":
       return `ready ${taskStatus.counts.ready} / failed ${taskStatus.counts.failed} / total ${taskStatus.counts.total}`;
@@ -146,5 +157,63 @@ export const formatHubProjectListLines = (
     return [formatHubProjectRegistrySummary([])];
   }
 
-  return projects.flatMap((project) => formatHubProjectListProjectionLines(project));
+  return projects.flatMap((project) =>
+    formatHubProjectListProjectionLines(project),
+  );
 };
+
+// ---------------------------------------------------------------------------
+// project list summary model (Variant C section primitive)
+// ---------------------------------------------------------------------------
+
+const PROJECT_LIST_KV_GUTTER = 12;
+
+export interface HubProjectListSummaryModel {
+  readonly header: SectionHeaderBlock;
+  readonly identity: SectionKvBlock;
+  readonly detail: SectionProseBlock;
+  readonly footer: SectionFooterBlock;
+}
+
+export const buildHubProjectListSummaryModel = (
+  projections: readonly HubProjectListProjection[],
+): HubProjectListSummaryModel => {
+  const selected =
+    projections.find((project) => project.selected)?.name ?? "none";
+  const detailBody = formatHubProjectListLines(projections).join("\n");
+
+  return {
+    header: {
+      kind: "header",
+      title: "archLoop",
+      subtitle: "project · list",
+      right: `${projections.length} project${projections.length === 1 ? "" : "s"}`,
+    },
+    identity: {
+      kind: "kv",
+      gutter: PROJECT_LIST_KV_GUTTER,
+      rows: [
+        { key: "Projects", value: String(projections.length) },
+        { key: "Selected", value: selected },
+      ],
+    },
+    detail: {
+      kind: "prose",
+      body: detailBody,
+    },
+    footer: {
+      kind: "footer",
+      label: "tip",
+      commands: ["archloop project select <name>", "archloop project status"],
+    },
+  };
+};
+
+export const hubProjectListSummaryModelToBlocks = (
+  model: HubProjectListSummaryModel,
+): readonly SectionBlock[] => [
+  model.header,
+  model.identity,
+  model.detail,
+  model.footer,
+];

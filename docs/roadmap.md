@@ -294,7 +294,7 @@ Goal: 提供 CLI-first 的 archLoop Hub 控制面，并在同一状态模型上�
 ### Tasks
 
 - [x] 明确 Hub task board、Beads 本地任务源、远程任务源同步与状态机设计（见 [archloop-hub-task-board](./prd/archloop-hub-task-board.md)、[ADR-0021](./adr/0021-hub-task-board-uses-beads-local-store.md)、[ADR-0022](./adr/0022-hub-flows-emit-per-task-merge-events.md)、[ADR-0023](./adr/0023-hub-task-statuses.md)）。
-- [x] 实现 `archloop tasks list` / `archloop tasks show <task-selector>` 的只读 task board 投影与 Hub 状态分组；task selector 支持 Beads id、完整标题或 `tasks list` 序号。
+- [x] 实现 `archloop tasks list` / `archloop tasks show <task-selector>` 的只读 task board 投影与 Hub 状态分组；task selector 支持 Beads id 或完整标题（1-based 列表序号已按 ADR-0031 移除）。
 - [x] 实现 `archloop tasks create <title>` / `archloop tasks comment <task-selector>` 的本地任务创建与评论写入。
 - [x] 实现 `archloop tasks triage` 的 inbox / needs_info 协作状态分流与 AI triage 评论（见 [#66](https://github.com/yibeibankaishui/archloop/issues/66)）。
 - [x] 实现 `archloop tasks from-prd <prd-ref>` 的 PRD 垂直切片分解、AFK/HITL 分类、人工确认依赖与 Beads 任务创建（见 [#67](https://github.com/yibeibankaishui/archloop/issues/67)）。
@@ -304,6 +304,9 @@ Goal: 提供 CLI-first 的 archLoop Hub 控制面，并在同一状态模型上�
 - [x] 为 task-board run 增加 `completed` / `completed_with_failures` / `failed` / `cancelled` 结果投影、五类任务计数、失败诊断与精确 recovery/repair/dirty-overlap/same-flow rerun 指引，并定义 exit `0` / 非零 / `130` 行为（见 [#204](https://github.com/Yibeibankaishui/archLoop/issues/204)、parent [#202](https://github.com/Yibeibankaishui/archLoop/issues/202)）。
 - [x] 为 task-board `archloop run` 增加 `--output json`：以 schema version 1 的 stdout-pure JSONL 投影 canonical lifecycle，覆盖稳定身份/顺序、诊断、日志、恢复动作、取消、最终 outcome 与 exit code，并保持 plain contract 不变（见 [#205](https://github.com/Yibeibankaishui/archLoop/issues/205)、parent [#202](https://github.com/Yibeibankaishui/archLoop/issues/202)）。
 - [x] 将 task-board `archloop run` 默认输出升级为 `--output auto`：能力足够的 TTY 使用有界 live task board，重定向、CI、dumb/unsupported/unsafe terminal 自动回退 plain，并覆盖宽窄布局、无颜色语义、resize、终态与 cursor cleanup（见 [#206](https://github.com/Yibeibankaishui/archLoop/issues/206)、parent [#202](https://github.com/Yibeibankaishui/archLoop/issues/202)）。
+- [x] Variant C Phase 3a：Hub run live view 改为 append-only `section` + 单行 spinner heartbeat（见 [#215](https://github.com/Yibeibankaishui/archLoop/issues/215)、ADR-0032、parent [#210](https://github.com/Yibeibankaishui/archLoop/issues/210)）。
+- [x] Variant C Phase 3b：`archloop run` 用 run-plan `section` + 3 秒 debounce 替代 `confirmRunPlan`，支持 `Ctrl+C` 取消、`e` 重选 flow、`--yes` / non-TTY / `--dry-run` 跳过倒计时（见 [#216](https://github.com/Yibeibankaishui/archLoop/issues/216)、parent [#210](https://github.com/Yibeibankaishui/archLoop/issues/210)）。
+- [x] Variant C Phase 4：对齐 bundled skill / README / readme_cn / user_guide 示例输出，删除 Phase 2–3 遗留 string formatter 包装，发布 `visual-overhaul-variant-c` changeset（见 [#217](https://github.com/Yibeibankaishui/archLoop/issues/217)、parent [#210](https://github.com/Yibeibankaishui/archLoop/issues/210)）。
 - [x] 将 PRD decomposition 与 triage proposal phases 投影到共享 live/plain/JSON run output，保留 auto TTY prompts、non-interactive/`--yes` gates、mutation blocking，并区分 applied、no-change、cancelled、validation/mutation/general failure 终态（见 [#207](https://github.com/Yibeibankaishui/archLoop/issues/207)、parent [#202](https://github.com/Yibeibankaishui/archLoop/issues/202)）。
 - [x] 实现首个 no-review Hub flow：从 Beads ready queue 选择任务、claim、运行 implementer，并将成功任务推进到 `waiting_for_merge`（见 [#70](https://github.com/yibeibankaishui/archloop/issues/70)）。
 - [x] 实现 GitHub Issues 远程任务交换：`archloop tasks pull` 默认只拉 open issues，`tasks push` 将本地协作状态/关闭动作推到 GitHub，`tasks sync` 以 preview/确认方式做双向 reconcile，并避免同标题远端 issue 静默创建重复本地任务（见 [#68](https://github.com/yibeibankaishui/archloop/issues/68)、[#113](https://github.com/yibeibankaishui/archloop/issues/113)）。

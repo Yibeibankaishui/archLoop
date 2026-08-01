@@ -10,17 +10,36 @@ if (mode !== "complete" && mode !== "signal") {
 setupTerminalCleanup();
 process.stdout.write(`PTY_READY tty=${String(process.stdout.isTTY)}\n`);
 
-const state: HubRunDisplayState = {
+const runId = "run-74cc88e3-6757-4472-b152-f5cf151be9d3";
+const batch1 = "batch-daca6200-3d0a-4e48-86b4-4253a24b4056";
+const batch2 = "batch-fd3cdf79-1786-4647-8899-d5f80fd8255b";
+
+const started: HubRunDisplayState = {
   hubProjectName: "archloop",
   flowId: "no-review",
-  runId: "run-pty",
-  runDir: "/tmp/archloop/run-pty",
+  runId,
+  runDir: `/tmp/archloop/${runId}`,
   status: "running",
   completedBatchCount: 0,
   completedTaskCount: 0,
+  batches: {},
+  tasks: {},
+  seenEventIds: new Set(),
+  eventSequences: { batches: {}, tasks: {} },
+};
+
+const withCompletedBatch: HubRunDisplayState = {
+  ...started,
   batches: {
-    "batch-pty": {
-      batchId: "batch-pty",
+    [batch1]: {
+      batchId: batch1,
+      selectedTaskIds: ["task-done"],
+      taskTitles: { "task-done": "Completed earlier" },
+      status: "done",
+      stage: "Completed",
+    },
+    [batch2]: {
+      batchId: batch2,
       selectedTaskIds: ["task-pty"],
       taskTitles: { "task-pty": "Verify real PTY cleanup" },
       status: "planning",
@@ -28,17 +47,25 @@ const state: HubRunDisplayState = {
     },
   },
   tasks: {
+    "task-done": {
+      taskId: "task-done",
+      batchId: batch1,
+      status: "done",
+      stage: "Completed",
+    },
     "task-pty": {
       taskId: "task-pty",
-      batchId: "batch-pty",
+      batchId: batch2,
       status: "implementing",
       stage: "Implementing",
     },
   },
-  seenEventIds: new Set(),
-  eventSequences: { batches: {}, tasks: {} },
 };
 
+// PTY fixture uses the ALT-SCREEN dashboard path (ADR-0033).
+// Inject minimal adapters so the process does not: exit early, keep a live
+// ticker running, or block on real stdin data.
+const noop = () => undefined;
 const display = createHubRunLiveDisplay({
   terminal: {
     write: (chunk) => {
@@ -49,13 +76,70 @@ const display = createHubRunLiveDisplay({
   startedAt: 2_000,
   columns: process.stdout.columns || 80,
   rows: process.stdout.rows || 24,
-  color: false,
+  color: Boolean(process.stdout.isTTY),
+  mode: "alt-screen",
+  altScreen: {
+    stdin: process.stdin,
+    // No-op ticker — we drive frames explicitly via display.update.
+    setInterval: () => ({ unref: noop } as unknown as NodeJS.Timeout),
+    clearInterval: noop,
+    // No-op grace hold — call cleanup immediately so the process exits.
+    setTimeout: (fn) => {
+      fn();
+      return { unref: noop } as unknown as NodeJS.Timeout;
+    },
+    clearTimeout: noop,
+    // Handle signals in this process (default `process.once` would work too).
+    onSignal: (signal, handler) => {
+      process.once(signal, handler);
+    },
+    // Test-only exit — invoke real process.exit so the outer script observes
+    // the intended exit code.
+    exitProcess: (code) => {
+      process.exit(code);
+    },
+    // Belt-and-suspenders — we still need it in this real PTY fixture.
+    registerProcessExit: (handler) => {
+      process.once("exit", handler);
+    },
+  },
 });
 
-display.update(state);
+display.update(started);
+display.update({
+  ...started,
+  batches: {
+    [batch1]: {
+      batchId: batch1,
+      selectedTaskIds: ["task-done"],
+      status: "planning",
+      stage: "Planning",
+    },
+  },
+});
+display.update({
+  ...started,
+  batches: {
+    [batch1]: {
+      batchId: batch1,
+      selectedTaskIds: ["task-done"],
+      status: "done",
+      stage: "Completed",
+    },
+  },
+  tasks: {
+    "task-done": {
+      taskId: "task-done",
+      batchId: batch1,
+      status: "done",
+      stage: "Completed",
+    },
+  },
+});
+display.update(withCompletedBatch);
 
 if (mode === "complete") {
-  display.finalize(state, {
+  display.finalize(withCompletedBatch, {
     outcome: "completed",
     summary: "Run completed",
     counts: {
@@ -68,11 +152,17 @@ if (mode === "complete") {
     taskDetails: [],
     exitCode: 0,
   });
+  // If exitProcess did not fire (shouldn't happen), keep the process alive
+  // long enough to flush stdout.
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 200);
+  });
 } else {
   process.stdin.setRawMode?.(true);
   process.stdout.write("\nPTY_SIGNAL_ARMED\n");
   process.prependOnceListener("SIGINT", () => {
     process.stdout.write("\nPTY_SIGNAL_HANDLED\n");
+    display.dispose();
     process.exit(130);
   });
   await new Promise<void>(() => {

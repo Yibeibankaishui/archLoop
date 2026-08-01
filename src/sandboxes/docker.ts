@@ -207,6 +207,7 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
           command: string,
           opts?: {
             onLine?: (line: string) => void;
+            onSpawn?: (pid: number) => void;
             cwd?: string;
             sudo?: boolean;
             stdin?: string;
@@ -236,6 +237,10 @@ export const docker = (options?: DockerOptions): SandboxProvider => {
                 "pipe",
               ],
             });
+
+            if (proc.pid !== undefined) {
+              opts?.onSpawn?.(proc.pid);
+            }
 
             if (opts?.stdin !== undefined) {
               proc.stdin!.write(opts.stdin);

@@ -111,8 +111,8 @@ How a **task** entered the **local task store**, such as PRD decomposition, user
 _Avoid_: "category" (reserved for bug/enhancement), "source of truth"
 
 **Task selector**:
-A user-provided reference to one **task** in the **Hub task board**, resolved as an exact Beads id, exact task title, or the 1-based number shown by `archloop tasks list`.
-_Avoid_: "task id" when title or list number is also accepted, "query" (implies fuzzy matching)
+A user-provided reference to one **task** in the **Hub task board**, resolved as an exact Beads id or exact task title. The 1-based number formerly emitted by `archloop tasks list` is no longer a valid selector — see `docs/adr/0031-cli-task-selectors-drop-ordinal-input.md`.
+_Avoid_: "task id" when title is also accepted, "query" (implies fuzzy matching), "list number" / "ordinal" (the removed form).
 
 **Slice type**:
 Whether a PRD-derived **task** is AFK-ready for an **agent** or HITL-owned by a human.
@@ -225,6 +225,10 @@ _Avoid_: "chat" (too generic), "approval prompt" (too narrow), "one-shot proposa
 **Flow batch**:
 A group of **tasks** selected together by a **flow** and coordinated through the same implement/review/merge cycle.
 _Avoid_: "iteration" (already one agent invocation), "run" (too broad), "sprint"
+
+**Interrupted execution**:
+A **task** whose **hub status** is still an execution state (`implementing`, `reviewing`, `merging`) but whose owning **worktree lease** is no longer active — the run process died before the phase completed. archLoop routes recovery by consulting the run event log (`task_implementation_succeeded` / `task_review_succeeded`): a finished phase is preserved, an unfinished one retries from `ready_for_agent` reusing the preserved **worktree**.
+_Avoid_: "stuck task" (vague about cause), "orphaned task" (implies no owner metadata, which may still be present), "failed task" (a distinct **hub status** with its own recovery path)
 
 **Flow prompt**:
 A **prompt** owned by a **flow**, used when archLoop runs that **flow** through **archLoop Hub**.
@@ -411,6 +415,18 @@ _Avoid_: "log file" (too generic), "output file"
 **Terminal mode**:
 The display mode where archLoop renders an interactive UI in the terminal with spinners and styled status messages.
 _Avoid_: "stdout mode", "interactive mode", "CLI mode" (ambiguous with the CLI itself)
+
+**Hub task board view**:
+The terminal-mode rendering of the **Hub task board** — the visual layout with header line, status badges, per-status task groups, and a footer tip. Distinct from the underlying **Hub task board** (the data projection): the same board data can be rendered as the **Hub task board view** (terminal mode), the `--json` payload, or the `--plain` fallback. Grouping and default filtering (e.g. hiding **done** by default) are properties of the view, not the underlying board.
+_Avoid_: "task list screen" (ambiguous with `archloop tasks list` command), "board card", "board panel"
+
+**Hub run card**:
+The terminal-mode rendering of a Hub run in progress — an alt-screen dashboard with four regions: a fixed header (project · flow · run short id · outcome · elapsed), a **Hub run done ledger** listing completed **tasks** and **flow batches** (append-only within the run, scrolls internally when the terminal is short), a live-updating active card showing every active **flow batch** and every active **task** with its current phase and phase-elapsed, and a fixed footer with the run log path and hotkeys. On exit — user pressed `q`, SIGINT, or run completed — the CLI leaves the alt-screen and dumps a plain-text summary (header + full ledger + logs path) into real terminal scrollback so the user has a durable record of what shipped. It is the visual counterpart of the plain-text streaming events available in **log-to-file mode**; the same underlying run state can be rendered as the **Hub run card** (terminal mode), the run log (log-to-file mode), or the `--json` / `--stream` event stream. See ADR-0033.
+_Avoid_: "run panel", "batch card" (a run card contains multiple batches), "live view" (ambiguous with `--follow`), "run status card" (redundant), "append-only run card" (superseded — see ADR-0032/0033).
+
+**Hub run done ledger**:
+The append-only region of the **Hub run card** listing tasks and **flow batches** that completed during the current run. Each row is `<outcome-symbol> <id>  <title>  <duration>`, oldest at top, newest at bottom. When the terminal is shorter than the ledger plus the other **Hub run card** regions, the ledger drops rows from its top and shows a dim `… N earlier shipped, see run log` sentinel; the run log file holds the unbounded history. The ledger is what makes "completed tasks stay visible to the user after they finish" true; without it the alt-screen card would erase completed work from view.
+_Avoid_: "done list" (too generic), "history panel" (evokes a separate window), "run log" (that's the file, not the ledger).
 
 **Agent stream event**:
 A single item in the **agent**'s output stream -- either a `text` chunk or a `toolCall` -- surfaced to the caller of `run()` so the stream can be forwarded to an external observability system. Available only in **log-to-file mode** via the `onAgentStreamEvent` callback on the `logging` option. Each event carries its `iteration` number and a `timestamp`.

@@ -350,7 +350,7 @@ if (closeResult.preservedWorktreePath) {
 | `promptArgs`         | PromptArgs         | —                             | Key-value map for `{{KEY}}` placeholder substitution                |
 | `maxIterations`      | number             | `1`                           | Maximum iterations to run                                           |
 | `completionSignal`   | string \| string[] | `<promise>COMPLETE</promise>` | String(s) the agent emits to stop the iteration loop early          |
-| `idleTimeoutSeconds` | number             | `600`                         | Idle timeout in seconds — resets on each agent output event         |
+| `idleTimeoutSeconds` | number             | `600`                         | Idle timeout in seconds — resets on each agent output event; does not fire while an agent-spawned child process is running |
 | `name`               | string             | —                             | Display name for the run                                            |
 | `logging`            | object             | file (auto-generated)         | `{ type: 'file', path }` or `{ type: 'stdout' }`                    |
 | `signal`             | AbortSignal        | —                             | Cancels the run when aborted; handle stays usable afterward         |
@@ -966,14 +966,47 @@ Runs `gh auth login --insecure-storage` with `GH_CONFIG_DIR` set to archLoop's H
 
 ### `archloop tasks list`
 
-Shows the Hub task board grouped by canonical Hub task status from Beads data in the current git repository. Use it to inspect inbox, ready, blocked, implementation, review, merge, done, failure, and sync-conflict buckets. Each displayed task includes a 1-based list number that can be used as a task selector in follow-up commands.
-Task commands target the selected Hub project by default and accept `--project <name>` for an explicit override.
+Shows the Hub task board view for Beads data in the selected Hub project: a header (`archLoop · <project>`), status badges (`todo` / `in_progress` / `done`), per-bucket task groups with full Beads ids (no 1-based ordinals), and a tip footer. Each row may show a trailing remote badge: dim cyan `github#N` when synced, dim `local-only` when push is pending, or yellow `sync-conflict` when local and remote disagree. Rows with no remote link omit the badge. Done tasks are truncated by default; pass `--all` to expand them. Use `--warning high|medium|low` to filter PRD-warning tasks. Pass `--json` for a structured array of rows (including `remoteBadge` when present). Task commands target the selected Hub project by default and accept `--project <name>` for an explicit override.
+
+Example (plain / `NO_COLOR`):
+
+```text
+  archLoop · autotuneagent                                                                   8 tasks
+  ● 2 todo   ◐ 1 in_progress   ✓ 5 done
+  ●  todo · 2
+     AutoTuneAgent-9k3  Slice 5 · Wire config validator into apply pipeline         github#211
+     AutoTuneAgent-a12  fix(run_task): stop double-registering error handlers         local-only
+  ◐  in_progress · 1
+     AutoTuneAgent-2mr  Slice 2 · Remove TaskOrchestrator and legacy Test Task
+  ✓  done · 5
+     AutoTuneAgent-fij  feat(scenario_register): apply candidate writes board
+     …
+  tip   archloop tasks show <id>   ·   archloop tasks pull
+```
+
+Pass `--plain` (or set `NO_COLOR=1`) to strip bold/dim/color while keeping symbols and indentation. `FORCE_COLOR=1` forces color even when stdout is not a TTY.
 
 ### `archloop tasks show <task-selector>`
 
-Shows a single Beads task with its Hub status, Beads lifecycle state, claim metadata/state, labels, metadata, comments, remote refs, and run refs when present.
+Shows a single Beads task as a typographic `section`: header (`archLoop · task · <id>` with status/owner), 12-char key/value identity rows, `description` / `comments · N` prose, and a `next` footer.
 
-Task selectors resolve in this order: exact Beads id, exact task title, then the 1-based number shown by `archloop tasks list`. Ambiguous title matches fail with candidate ids instead of guessing.
+Task selectors are an exact Beads id or exact task title. Ambiguous title matches fail with candidate ids instead of guessing. The old 1-based `tasks list` ordinal (`archloop tasks show 3`) is no longer accepted — pass the Beads id instead.
+
+Example:
+
+```text
+  archLoop · task · AutoTuneAgent-2mr                                                ready_for_agent
+  title       Slice 2 · Remove TaskOrchestrator
+  status      ready_for_agent  (beads: open)
+  labels      ready_for_agent, archLoop
+  origin      prd-decomposition
+  remote      github#210
+  description
+    Delete the old orchestrator path.
+  comments · 1
+    alice · 2026-06-11T15:00:00Z: Looks good
+  next  archloop tasks update AutoTuneAgent-2mr ... · gh issue view 210
+```
 
 ### `archloop tasks create <title>`
 
@@ -995,7 +1028,28 @@ Use explicit direction commands for GitHub issue exchange:
 - `archloop tasks push` sends linked local Hub collaboration state to GitHub. Local `ready_for_agent`, `ready_for_human`, `needs_info`, and `blocked` update GitHub labels; local `done` / `wontfix` closes the linked GitHub issue. It does not pull remote issues or create local tasks.
 - `archloop tasks sync --dry-run` previews the combined pull/push plan. `archloop tasks sync` asks for confirmation in a TTY, and non-interactive sync requires `--yes`.
 
+Successful pull/push/sync results render as a directional `section` (↓ pulled / ↑ pushed). Non-empty sides list each changed task as an indented `<id> <title> <github#N>` row; conflict rows add a dim reason continuation line. Empty sides (`nothing new` / `nothing to push`) stay count-only. A `fix` footer appears when conflicts need `archloop tasks resolve <id>`. Pass `--json` for a structured payload including `entries[]`. Global `--plain` (or `NO_COLOR`) keeps the same layout without color:
+
+```text
+  archLoop · sync · autotuneagent                                           Yibeibankaishui/archLoop
+  ↓ pulled  4 created  0 updated · 0 conflicts · 0 dup-candidates
+     arch-abc  Import open issues into Beads                                 github#101
+     arch-def  Refresh linked titles                                         github#102
+  ↑ pushed  nothing to push  0 synced · 0 closed · 0 pending
+    done in 1.4s
+  next  archloop tasks list
+```
+
 Beads remains the local task store. Execution statuses such as `implementing`, `reviewing`, `waiting_for_merge`, `merging`, and `failed` stay local. Tasks imported from GitHub remain linked through metadata such as `remote_refs` and `github_issue`. If an unlinked GitHub issue has the same normalized title as a local task, archLoop reports a duplicate link candidate instead of silently creating another local task.
+
+### `archloop tasks resolve <task-selector>`
+
+Resolves a Hub sync conflict recorded on a local Beads task. Shows the diverged local vs remote fields (title, Hub status, description), then keeps one side:
+
+- `--keep local` clears the conflict marker, sets `sync_state = push_pending`, and leaves local title/status/description unchanged so the next `archloop tasks push` writes the local side back to GitHub.
+- `--keep remote` overwrites the local Beads fields with the remote GitHub issue values, clears the conflict marker, and sets `sync_state = synced`.
+
+Resolution mutates local Beads only; it never edits or closes GitHub issues. In a TTY without `--keep`, archLoop prompts with `clack.select`. Non-interactive runs (and `--yes` without `--keep`) require `--keep local|remote`. Pass `--json` for `{ id, kept, mutations }`.
 
 ### `archloop tasks from-prd <prd-ref>`
 
@@ -1035,23 +1089,33 @@ Previews and confirms cleanup of Hub-managed task branches. By default, archLoop
 
 Permanently deletes one or more local Beads tasks. This is destructive removal, not lifecycle close: Hub merge/triage/recovery use close to mark work done locally while keeping the Beads record. Delete removes the task from Beads and does not delete remote GitHub issues.
 
-Task selectors match `tasks show` and `tasks comment` (Beads id, exact title, or `tasks list` number). Pass multiple selectors in one command to batch-delete. In a TTY, archLoop previews with Beads dry-run output and asks for confirmation. In non-interactive mode, pass `--yes` to confirm or `--dry-run` to preview only. `--cascade` passes through to Beads to recursively delete dependent tasks when a blocker would otherwise fail deletion.
+Task selectors match `tasks show` and `tasks comment` (Beads id or exact title — not a `tasks list` ordinal). Pass multiple selectors in one command to batch-delete. In a TTY, archLoop previews with Beads dry-run output and asks for confirmation. In non-interactive mode, pass `--yes` to confirm or `--dry-run` to preview only. `--cascade` passes through to Beads to recursively delete dependent tasks when a blocker would otherwise fail deletion.
 
 ### `archloop run [<project> | --project <name>] --flow <id>`
 
-Runs a Hub-owned flow against the selected Hub project by default. In a TTY, archLoop opens the Hub project picker when no project is selected and opens a flow picker when `--flow` is omitted. Hub flows use bundled prompts from archLoop itself, not repo-local `.archloop/` prompt files. Legacy path calls like `archloop run . --flow with-review` still work temporarily and print migration guidance toward `archloop project add` / `archloop project select`.
+Runs a Hub-owned flow against the selected Hub project by default. In a TTY, archLoop opens the Hub project picker when no project is selected and opens a flow picker when `--flow` is omitted. After flow selection, interactive runs render a compact run plan `section` (flow / project / ready tasks) and wait about 3 seconds before starting: `Ctrl+C` cancels (exit `130`), `e` returns to flow selection, and the timeout starts the flow. Non-TTY sessions, `--yes`, and `--dry-run` skip the countdown; `--dry-run` prints the plan and exits without starting. Hub flows use bundled prompts from archLoop itself, not repo-local `.archloop/` prompt files. Legacy path calls like `archloop run . --flow with-review` still work temporarily and print migration guidance toward `archloop project add` / `archloop project select`.
+
+Example run plan (before the countdown):
+
+```text
+  archLoop · run
+  flow      with-review
+  project   autotuneagent  ← /home/bai/code/AutoTuneAgent
+  ready     1 task
+  tip   starting in 3s · Ctrl+C to cancel · e to edit flow
+```
 
 The first available task-board flows are `no-review` and `with-review`. Proposal flows `prd-decomposition` and `triage` run through the shared proposal session runtime: `archloop run --flow prd-decomposition --input <prd-ref>` and `archloop run --flow triage --input <task-id|statuses>` execute end-to-end. Task-board flow implementers now read the Hub project development contract before prompting the agent; if no contract exists, `run --flow` creates a generic fallback contract, reports how to specialize it with `archloop project configure [--project <name>] --project-profile <profile>`, and then continues. The matching `archloop tasks` shortcuts remain the recommended entry points.
 
 When `--flow` targets `prd-decomposition` or `triage`, archLoop runs the same agent-driven proposal path as the task shortcut: no-sandbox execution, Hub-wide role config, structured output validation, proposal artifacts in the Hub run directory, mutation detection before apply, and local-only Beads writes. Remote issue updates remain outside proposal flows and happen through explicit `archloop tasks pull`, `tasks push`, or confirmed `tasks sync`.
 
-The `no-review` flow reads the Beads ready queue, selects a batch of eligible `ready_for_agent` tasks, claims the selected tasks, starts their implementers concurrently with task id/title/branch supplied by TypeScript orchestration, and advances successful work to `waiting_for_merge`. After a successful batch completes, Hub reloads the ready queue and continues with the next batch until the queue is empty or `--max-batches` is reached. Agent or sandbox failures move tasks to `failed` with a failure reason.
+The `no-review` flow reads the Beads ready queue, selects a batch of eligible `ready_for_agent` tasks, claims the selected tasks, starts their implementers concurrently with task id/title/branch supplied by TypeScript orchestration, and advances successful work to `waiting_for_merge`. Implementer success is derived from observed branch commits (or existing unmerged work) plus a `<promise>COMPLETE</promise>` signal — a trailing non-zero provider exit does not override that, and failure events report the true branch `commitCount`. Mid-run provider transients (`API Error: 400 Invalid request parameters`, Cursor `RetriableError: Connection stalled` / `PING timed out`) are retried with exponential backoff (defaults: 3 attempts, 5s / 20s / 60s; override with `ARCHLOOP_PROVIDER_RETRY_ATTEMPTS` and `ARCHLOOP_PROVIDER_RETRY_BASE_MS`) and recorded as `task_provider_retry` events; if `<promise>COMPLETE</promise>` was already emitted, observation wins and no retry runs. After a successful batch completes, Hub reloads the ready queue and continues with the next batch until the queue is empty or `--max-batches` is reached. Agent or sandbox failures move tasks to `failed` with a failure reason.
 
 The `with-review` flow adds a reviewer stage after implementation: successful work moves to `reviewing`, the reviewer receives the task branch and diff/commit context from orchestration, and completed review advances the task to `waiting_for_merge`. Selected task pipelines run in parallel within each batch; each task's reviewer starts after that task's implementation succeeds. After each successful batch, Hub reloads the ready queue and continues with the next batch until the queue is empty or `--max-batches` is reached. Review failures move tasks to `failed` with a failure reason.
 
 Hub flow runs also write a run-level completion event. User-facing task-board outcomes are `completed`, `completed_with_failures`, `failed`, or `cancelled`, with completed, failed, blocked, skipped, and ready-to-merge task counts where applicable. `no_ready_tasks` with no completed batch is shown as `Nothing to run`; reaching `--max-batches` is a successful bounded completion. Those successful outcomes exit `0`, blocking or completed-with-failures outcomes exit nonzero, and user cancellation exits `130`.
 
-Hub runs default to `--output auto`. A capable interactive TTY gets a bounded live view with a shared compact run header, elapsed time, durable logs, and final outcome. Task-board flows render stable current-batch task rows and completed-batch scrollback; `prd-decomposition` and `triage` render proposal phases for input preparation, draft, optional refinement, finalization, mutation detection, approval, validation, and apply. The renderer never enters the alternate screen and does not show raw agent prose, tool arguments, percentages, or ETA claims. It suspends around proposal prompts, switches between wide and stacked layouts as the terminal resizes, restores the cursor on success, failure, cancellation, and abnormal cleanup, and falls back to plain output for redirected stdout, CI, `TERM=dumb`, unsupported cursor control, or unsafe terminal width or height. In the live view, `NO_COLOR` or `--no-color` removes color without removing textual labels or status symbols.
+Hub runs default to `--output auto`. A capable interactive TTY gets an append-only Hub run card: each state transition prints a `section` snapshot (project · flow · short run id · elapsed, collapsed completed batches, current task), and a single-line spinner heartbeat ticks phase-elapsed once per second. Task-board flows render stable current-batch detail and completed-batch collapse; `prd-decomposition` and `triage` still use their proposal live renderer for input preparation, draft, optional refinement, finalization, mutation detection, approval, validation, and apply. The run card never enters the alternate screen, never uses cursor-up outside the spinner line, and does not show raw agent prose, tool arguments, percentages, or ETA claims. It restores the cursor on success, failure, cancellation, and abnormal cleanup, and falls back to plain output for redirected stdout, CI, `TERM=dumb`, unsupported cursor control, or unsafe terminal width or height. In the live view, `NO_COLOR` or `--no-color` removes color without removing textual labels or status symbols.
 
 For deterministic CI or redirected logs, Hub flows use plain output automatically and also accept explicit `--output plain`. Plain mode writes append-only physical lines with stable field ordering, escaped values, and no ANSI cursor rewriting. Task-board records retain task stages, five outcome counts, diagnostics, logs, and recovery actions. Proposal records expose only canonical phase/status transitions and applied, skipped, and dependency counts; final outcomes distinguish `applied`, `no_change`, `cancelled`, `validation_failed`, `mutation_failed`, and `failed`. Mutation and validation failures include concise diagnostics, logs, and a same-flow recovery command. Explicit plain/JSON modes are non-interactive, so proposal writes require `--yes`; auto TTY mode keeps refinement, status, approval, and guarded apply prompts. Agent prose, tool arguments, and direct agent-startup decoration stay out of projected output and remain available in the Hub run directory.
 
@@ -1083,6 +1147,7 @@ Hub moves selected tasks to `merging`, merges each branch with per-task events, 
 | `--batch-strategy` | No       | Task-board batch selection strategy (`planned`, `limited`, `conservative`; default `planned`)                                   |
 | `--max-tasks`      | No       | Maximum tasks to select for a task-board batch (1–10; default `3`)                                                              |
 | `--max-batches`    | No       | Maximum task-board batches to complete in one run (positive integer; unlimited by default)                                      |
+| `--idle-timeout`   | No       | Agent idle timeout in seconds (default `600`). Resets on agent output; does not fire while an agent-spawned child process is running |
 | `--output <mode>`  | No       | `auto` (default) for live TTY output with plain fallback, `plain` for deterministic text, or `json` for stdout-pure JSONL       |
 | `--no-color`       | No       | Disable live-view color while retaining labels and symbols                                                                      |
 
@@ -1164,7 +1229,7 @@ Removes the Podman image.
 | `copyToWorktree`     | string[]           | —                             | Host-relative file paths to copy into the sandbox before start (not supported with `branchStrategy: { type: 'head' }`)                                                       |
 | `logging`            | object             | file (auto-generated)         | `{ type: 'file', path }` or `{ type: 'stdout' }`                                                                                                                             |
 | `completionSignal`   | string \| string[] | `<promise>COMPLETE</promise>` | String or array of strings the agent emits to stop the iteration loop early                                                                                                  |
-| `idleTimeoutSeconds` | number             | `600`                         | Idle timeout in seconds — resets on each agent output event                                                                                                                  |
+| `idleTimeoutSeconds` | number             | `600`                         | Idle timeout in seconds — resets on each agent output event; does not fire while an agent-spawned child process is running                                                 |
 | `resumeSession`      | string             | —                             | Resume a prior Claude Code session by ID. Incompatible with `maxIterations > 1`. Session file must exist on host.                                                            |
 | `signal`             | AbortSignal        | —                             | Cancel the run when aborted. Kills the in-flight agent subprocess and cancels lifecycle hooks; the worktree is preserved on disk. Rejects with `signal.reason`.              |
 | `timeouts`           | Timeouts           | —                             | Override default timeouts for built-in lifecycle steps. Currently supports `{ copyToWorktreeMs?: number }` (default: 60 000).                                                |

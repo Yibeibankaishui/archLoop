@@ -5,20 +5,28 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
+import { createPalette } from "./ansi.js";
 import {
   claimHubTask,
   deleteHubTasks,
-  formatHubTaskBoardLines,
-  formatHubTaskCommentLines,
-  formatHubTaskDetailsRows,
+  buildHubTaskBoardModel,
+  buildHubTaskDetailModel,
+  deriveTaskBoardRemoteBadge,
+  formatTaskBoardJson,
   isCanonicalHubTaskStatus,
   loadHubTaskBoard,
+  mapHubStatusToTaskBoardBucket,
   projectHubTask,
   projectHubTaskBoard,
   projectHubReadyQueueBoard,
+  renderHubTaskBoardText,
   resolveHubTaskSelectors,
   selectHubBatchMergeTasks,
+  type TaskBoardRemoteBadge,
 } from "./taskBoard.js";
+
+const stripAnsi = (s: string): string =>
+  s.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "");
 
 const execAsync = promisify(exec);
 
@@ -29,6 +37,8 @@ const seedHubTaskStore = (repoDir: string): void => {
   if (!existsSync(metadataPath)) {
     writeFileSync(metadataPath, JSON.stringify({ backend: "dolt" }));
   }
+  // Mirror bd init: a fully-initialized store also has the embeddeddolt dir.
+  mkdirSync(join(beadsDir, "embeddeddolt"), { recursive: true });
 };
 
 const initRepo = async (dir: string) => {
@@ -248,13 +258,19 @@ describe("task status projection", () => {
     }
   });
 
-  it("preserves Beads details, labels, metadata, comments, and refs for show output", () => {
+  it("builds a Hub task detail model with kv identity, prose, comments timeline, and next footer", () => {
     const task = projectHubTask({
       id: "bd-42",
       title: "Projected task",
       status: "open",
+      owner: "alice",
       labels: ["ready-for-agent", "backend"],
-      metadata: { execution_mode: "agent", blocked_reason: undefined },
+      metadata: {
+        execution_mode: "agent",
+        origin: "manual",
+        kind: "slice",
+        blocked_reason: undefined,
+      },
       description: "Task description",
       notes: "Task notes",
       comments: [
@@ -269,20 +285,51 @@ describe("task status projection", () => {
     });
 
     expect(task.hubStatus).toBe("ready_for_agent");
-    expect(formatHubTaskDetailsRows(task)).toMatchObject({
-      "Beads id": "bd-42",
-      Title: "Projected task",
-      "Hub status": "ready_for_agent",
-      Labels: "ready-for-agent, backend",
-      Metadata: '{"execution_mode":"agent"}',
-      "Remote refs": "github#64",
-      "Run refs": "run-123",
-      Comments: "1",
+    const model = buildHubTaskDetailModel(task);
+
+    expect(model.header).toEqual({
+      kind: "header",
+      title: "archLoop",
+      subtitle: "task · bd-42",
+      right: "ready_for_agent · alice",
     });
-    expect(formatHubTaskCommentLines(task)).toEqual([
-      "Comments",
-      "  - alice · 2026-06-11T15:00:00Z: Looks good",
-    ]);
+    expect(model.identity).toEqual({
+      kind: "kv",
+      gutter: 12,
+      rows: [
+        { key: "title", value: "Projected task" },
+        {
+          key: "status",
+          value: "ready_for_agent",
+          secondary: "(beads: open)",
+        },
+        { key: "labels", value: "ready-for-agent, backend" },
+        { key: "origin", value: "manual" },
+        { key: "kind", value: "slice" },
+        { key: "remote", value: "github#64" },
+        { key: "runs", value: "run-123" },
+        { key: "metadata", value: '{"execution_mode":"agent"}' },
+      ],
+    });
+    expect(model.description).toEqual({
+      kind: "prose",
+      title: "description",
+      body: "Task description\n\nTask notes",
+    });
+    expect(model.comments).toEqual({
+      kind: "prose",
+      title: "comments · 1",
+      body: "alice · 2026-06-11T15:00:00Z: Looks good",
+    });
+    expect(model.footer).toEqual({
+      kind: "footer",
+      label: "tip",
+      commands: [
+        "archloop tasks comment bd-42",
+        "archloop tasks recover bd-42",
+        "gh issue view 64",
+      ],
+    });
   });
 
   it("loads all Beads tasks including closed tasks beyond the default list page", async () => {
@@ -384,7 +431,7 @@ fs.writeSync(1, JSON.stringify(tasks));
     expect(task.hubStatus).toBe("done");
   });
 
-  it("represents task claims in metadata without inventing a claimed status", () => {
+  it("represents task claims in the detail model without inventing a claimed status", () => {
     const task = projectHubTask({
       id: "bd-69",
       title: "Claimed task",
@@ -401,16 +448,24 @@ fs.writeSync(1, JSON.stringify(tasks));
 
     expect(task.hubStatus).toBe("inbox");
     expect(task.claimState).toBe("stale");
-    expect(formatHubTaskDetailsRows(task)).toMatchObject({
-      Claim:
-        '{"runId":"run-1","batchId":"batch-1","branch":"feature/issue-69","claimedAt":"2026-06-11T16:00:00Z"}',
-      "Claim state": "stale",
-    });
+    const model = buildHubTaskDetailModel(task);
+    expect(model.identity.rows).toEqual(
+      expect.arrayContaining([
+        {
+          key: "claim",
+          value:
+            '{"runId":"run-1","batchId":"batch-1","branch":"feature/issue-69","claimedAt":"2026-06-11T16:00:00Z"}',
+        },
+        { key: "claim state", value: "stale" },
+      ]),
+    );
   });
 
-  it("formats grouped task board lines", () => {
-    const lines = formatHubTaskBoardLines(
-      projectHubTaskBoard([
+  it("builds a Hub task board model with display buckets and no ordinals", () => {
+    const model = buildHubTaskBoardModel({
+      projectName: "demo",
+      showAll: true,
+      board: projectHubTaskBoard([
         { id: "bd-1", title: "Inbox task", status: "open" },
         {
           id: "bd-2",
@@ -419,17 +474,366 @@ fs.writeSync(1, JSON.stringify(tasks));
           labels: ["ready-for-agent"],
         },
       ]),
-    );
+    });
 
-    expect(lines).toContain("Hub task board");
-    expect(lines).toContain("Total tasks: 2");
-    expect(lines).toContain("inbox (1)");
-    expect(lines).toContain("ready_for_agent (1)");
-    expect(lines).toContain("  1. bd-1: Inbox task");
-    expect(lines).toContain("  2. bd-2: Ready task");
+    expect(model.header).toEqual({
+      kind: "header",
+      title: "archLoop",
+      subtitle: "demo",
+      right: "2 tasks",
+    });
+    expect(
+      model.badges.badges.map((badge) => [badge.label, badge.count]),
+    ).toEqual([
+      ["todo", 2],
+      ["in_progress", 0],
+      ["done", 0],
+    ]);
+    expect(model.groups.map((group) => [group.name, group.count])).toEqual([
+      ["todo", 2],
+    ]);
+    expect(model.groups[0]?.items).toEqual([
+      { id: "bd-1", title: "Inbox task" },
+      { id: "bd-2", title: "Ready task" },
+    ]);
+    expect(model.rows).toEqual([
+      { id: "bd-1", title: "Inbox task" },
+      { id: "bd-2", title: "Ready task" },
+    ]);
+    expect(mapHubStatusToTaskBoardBucket("inbox")).toBe("todo");
+    expect(mapHubStatusToTaskBoardBucket("ready_for_agent")).toBe("todo");
   });
 
-  it("shows PRD warning details when task metadata includes warning fields", () => {
+  it.each([
+    {
+      name: "sync-conflict from metadata flag",
+      task: {
+        id: "bd-c",
+        title: "Conflicted",
+        status: "blocked",
+        metadata: {
+          sync_conflict: true,
+          remote_refs: ["github#10"],
+          sync_state: "synced",
+        },
+      },
+      expected: { kind: "sync-conflict" } satisfies TaskBoardRemoteBadge,
+    },
+    {
+      name: "sync-conflict from hubStatus",
+      task: {
+        id: "bd-c2",
+        title: "Conflicted hub",
+        status: "blocked",
+        labels: ["sync-conflict"],
+        metadata: { remote_refs: ["github#11"] },
+      },
+      expected: { kind: "sync-conflict" } satisfies TaskBoardRemoteBadge,
+    },
+    {
+      name: "synced with remote_ref",
+      task: {
+        id: "bd-s",
+        title: "Synced",
+        status: "open",
+        metadata: { sync_state: "synced", remote_ref: "github#211" },
+      },
+      expected: {
+        kind: "synced",
+        value: "github#211",
+      } satisfies TaskBoardRemoteBadge,
+    },
+    {
+      name: "synced with remote_refs projection",
+      task: {
+        id: "bd-s2",
+        title: "Synced refs",
+        status: "open",
+        metadata: { sync_state: "synced", remote_refs: ["github#212"] },
+      },
+      expected: {
+        kind: "synced",
+        value: "github#212",
+      } satisfies TaskBoardRemoteBadge,
+    },
+    {
+      name: "push_pending is local-only",
+      task: {
+        id: "bd-p",
+        title: "Pending push",
+        status: "open",
+        metadata: { sync_state: "push_pending" },
+      },
+      expected: { kind: "local-only" } satisfies TaskBoardRemoteBadge,
+    },
+    {
+      name: "local_only sync_state",
+      task: {
+        id: "bd-l",
+        title: "Local only",
+        status: "open",
+        metadata: { sync_state: "local_only" },
+      },
+      expected: { kind: "local-only" } satisfies TaskBoardRemoteBadge,
+    },
+    {
+      name: "no remote link → no badge",
+      task: {
+        id: "bd-n",
+        title: "Plain",
+        status: "open",
+        metadata: {},
+      },
+      expected: undefined,
+    },
+    {
+      name: "synced without remote_ref → no badge",
+      task: {
+        id: "bd-empty",
+        title: "Synced empty",
+        status: "open",
+        metadata: { sync_state: "synced" },
+      },
+      expected: undefined,
+    },
+  ])("derives remoteBadge: $name", ({ task, expected }) => {
+    const projected = projectHubTask(task);
+    expect(deriveTaskBoardRemoteBadge(projected)).toEqual(expected);
+
+    const model = buildHubTaskBoardModel({
+      projectName: "demo",
+      showAll: true,
+      board: projectHubTaskBoard([task]),
+    });
+    const row = model.rows.find((item) => item.id === projected.id);
+    expect(row?.remoteBadge).toEqual(expected);
+    const groupItem = model.groups
+      .flatMap((group) => group.items)
+      .find((item) => item.id === projected.id);
+    expect(groupItem?.remoteBadge).toEqual(expected);
+  });
+
+  it("routes blocked, failed, sync_conflict, and needs_info tasks to the attention bucket", () => {
+    expect(mapHubStatusToTaskBoardBucket("blocked")).toBe("attention");
+    expect(mapHubStatusToTaskBoardBucket("failed")).toBe("attention");
+    expect(mapHubStatusToTaskBoardBucket("sync_conflict")).toBe("attention");
+    expect(mapHubStatusToTaskBoardBucket("needs_info")).toBe("attention");
+    expect(mapHubStatusToTaskBoardBucket("implementing")).toBe("in_progress");
+    expect(mapHubStatusToTaskBoardBucket("done")).toBe("done");
+    expect(mapHubStatusToTaskBoardBucket("wontfix")).toBe("done");
+  });
+
+  it("shows the attention badge and group only when at least one task needs attention", () => {
+    const board = projectHubTaskBoard([
+      {
+        id: "bd-1",
+        title: "Inbox task",
+        status: "open",
+        labels: [],
+        metadata: {},
+      },
+      {
+        id: "bd-2",
+        title: "Blocked task",
+        status: "blocked",
+        labels: [],
+        metadata: { blocked_reason: "waiting on design" },
+      },
+      {
+        id: "bd-3",
+        title: "Failed task",
+        status: "failed",
+        labels: [],
+        metadata: { failed: "provider exited non-zero" },
+      },
+    ]);
+    const model = buildHubTaskBoardModel({
+      projectName: "sample",
+      board,
+      showAll: false,
+    });
+    const badgeLabels = model.badges.badges.map((b) => b.label);
+    expect(badgeLabels).toEqual(["todo", "in_progress", "attention", "done"]);
+    const attentionBadge = model.badges.badges.find(
+      (b) => b.label === "attention",
+    );
+    expect(attentionBadge?.count).toBe(2);
+    expect(attentionBadge?.severity).toBe("error");
+    const attentionGroup = model.groups.find((g) => g.name === "attention");
+    expect(attentionGroup?.count).toBe(2);
+    expect(attentionGroup?.items.map((i) => i.id)).toEqual(["bd-2", "bd-3"]);
+  });
+
+  it("hides the attention badge and group when there are no attention tasks", () => {
+    const board = projectHubTaskBoard([
+      {
+        id: "bd-1",
+        title: "Inbox task",
+        status: "open",
+        labels: [],
+        metadata: {},
+      },
+    ]);
+    const model = buildHubTaskBoardModel({
+      projectName: "sample",
+      board,
+      showAll: false,
+    });
+    const badgeLabels = model.badges.badges.map((b) => b.label);
+    expect(badgeLabels).toEqual(["todo", "in_progress", "done"]);
+    expect(model.groups.find((g) => g.name === "attention")).toBeUndefined();
+  });
+
+  it("renders the specific hub status when attention holds only one kind of trouble", () => {
+    const board = projectHubTaskBoard([
+      {
+        id: "bd-1",
+        title: "Inbox task",
+        status: "open",
+        labels: [],
+        metadata: {},
+      },
+      {
+        id: "bd-2",
+        title: "Blocked one",
+        status: "blocked",
+        labels: [],
+        metadata: { blocked_reason: "waiting on design" },
+      },
+      {
+        id: "bd-3",
+        title: "Blocked two",
+        status: "blocked",
+        labels: [],
+        metadata: { blocked_reason: "waiting on remote" },
+      },
+    ]);
+    const model = buildHubTaskBoardModel({
+      projectName: "sample",
+      board,
+      showAll: false,
+    });
+    // Only blocked lives in attention → badge and group both read "blocked".
+    const attentionBadge = model.badges.badges.find(
+      (b) => b.severity === "error",
+    );
+    expect(attentionBadge?.label).toBe("blocked");
+    expect(attentionBadge?.count).toBe(2);
+    expect(attentionBadge?.symbol).toBe("!");
+    const attentionGroup = model.groups.find((g) => g.severity === "error");
+    expect(attentionGroup?.name).toBe("blocked");
+    expect(attentionGroup?.symbol).toBe("!");
+  });
+
+  it("uses the ✗ glyph and 'failed' label when attention holds only failed tasks", () => {
+    const board = projectHubTaskBoard([
+      {
+        id: "bd-1",
+        title: "Failed one",
+        status: "failed",
+        labels: [],
+        metadata: { failed: "typecheck" },
+      },
+    ]);
+    const model = buildHubTaskBoardModel({
+      projectName: "sample",
+      board,
+      showAll: false,
+    });
+    const attentionBadge = model.badges.badges.find(
+      (b) => b.severity === "error",
+    );
+    expect(attentionBadge?.label).toBe("failed");
+    expect(attentionBadge?.symbol).toBe("✗");
+    const attentionGroup = model.groups.find((g) => g.severity === "error");
+    expect(attentionGroup?.name).toBe("failed");
+    expect(attentionGroup?.symbol).toBe("✗");
+  });
+
+  it("renders sync_conflict and needs_info as kebab-case labels in the attention bucket", () => {
+    const conflictBoard = projectHubTaskBoard([
+      {
+        id: "bd-1",
+        title: "Conflicted task",
+        status: "blocked",
+        labels: [],
+        metadata: { sync_conflict: true, sync_conflict_reason: "diverged" },
+      },
+    ]);
+    const conflictModel = buildHubTaskBoardModel({
+      projectName: "sample",
+      board: conflictBoard,
+      showAll: false,
+    });
+    const conflictBadge = conflictModel.badges.badges.find(
+      (b) => b.severity === "error",
+    );
+    expect(conflictBadge?.label).toBe("sync-conflict");
+    const conflictGroup = conflictModel.groups.find(
+      (g) => g.severity === "error",
+    );
+    expect(conflictGroup?.name).toBe("sync-conflict");
+
+    const needsInfoBoard = projectHubTaskBoard([
+      {
+        id: "bd-2",
+        title: "Awaiting details",
+        status: "open",
+        labels: ["needs-info"],
+        metadata: {},
+      },
+    ]);
+    const needsInfoModel = buildHubTaskBoardModel({
+      projectName: "sample",
+      board: needsInfoBoard,
+      showAll: false,
+    });
+    const needsInfoBadge = needsInfoModel.badges.badges.find(
+      (b) => b.severity === "error",
+    );
+    expect(needsInfoBadge?.label).toBe("needs-info");
+    const needsInfoGroup = needsInfoModel.groups.find(
+      (g) => g.severity === "error",
+    );
+    expect(needsInfoGroup?.name).toBe("needs-info");
+  });
+
+  it("falls back to the generic attention label when multiple trouble kinds coexist", () => {
+    // This is the branch the existing "shows the attention badge and group"
+    // test already covers (blocked + failed together → fallback to attention).
+    // Documenting it explicitly here so the intent is not accidentally lost.
+    const board = projectHubTaskBoard([
+      {
+        id: "bd-1",
+        title: "Blocked",
+        status: "blocked",
+        labels: [],
+        metadata: { blocked_reason: "waiting on design" },
+      },
+      {
+        id: "bd-2",
+        title: "Failed",
+        status: "failed",
+        labels: [],
+        metadata: { failed: "typecheck" },
+      },
+    ]);
+    const model = buildHubTaskBoardModel({
+      projectName: "sample",
+      board,
+      showAll: false,
+    });
+    const attentionBadge = model.badges.badges.find(
+      (b) => b.severity === "error",
+    );
+    expect(attentionBadge?.label).toBe("attention");
+    expect(attentionBadge?.symbol).toBe("!");
+    const attentionGroup = model.groups.find((g) => g.severity === "error");
+    expect(attentionGroup?.name).toBe("attention");
+    expect(attentionGroup?.symbol).toBe("!");
+  });
+
+  it("shows PRD warning details on the task detail model", () => {
     const task = projectHubTask({
       id: "bd-99",
       title: "Warned task",
@@ -443,15 +847,55 @@ fs.writeSync(1, JSON.stringify(tasks));
       },
     });
 
-    expect(formatHubTaskDetailsRows(task)).toMatchObject({
-      "PRD warning":
-        "[high] · Missing acceptance criteria · Slice: slice-1 · Proposal run: run-abc",
+    const model = buildHubTaskDetailModel(task);
+    expect(model.identity.rows).toEqual(
+      expect.arrayContaining([
+        {
+          key: "prd warning",
+          value:
+            "[high] · Missing acceptance criteria · Slice: slice-1 · Proposal run: run-abc",
+        },
+      ]),
+    );
+  });
+
+  it("formats a multi-comment timeline on the task detail model", () => {
+    const task = projectHubTask({
+      id: "bd-7",
+      title: "Discussed task",
+      status: "open",
+      comments: [
+        {
+          author: "alice",
+          body: "First note",
+          createdAt: "2026-06-11T15:00:00Z",
+        },
+        {
+          author: "bob",
+          body: "Second note",
+          createdAt: "2026-06-12T09:00:00Z",
+        },
+      ],
+    });
+
+    const model = buildHubTaskDetailModel(task);
+    expect(model.comments).toEqual({
+      kind: "prose",
+      title: "comments · 2",
+      body: "alice · 2026-06-11T15:00:00Z: First note\nbob · 2026-06-12T09:00:00Z: Second note",
+    });
+    expect(model.footer).toEqual({
+      kind: "footer",
+      label: "tip",
+      commands: ["archloop tasks comment bd-7", "archloop tasks recover bd-7"],
     });
   });
 
-  it("shows PRD warning summary and severity suffix on task board lines", () => {
-    const lines = formatHubTaskBoardLines(
-      projectHubTaskBoard([
+  it("attaches PRD warning badges on the task board model", () => {
+    const model = buildHubTaskBoardModel({
+      projectName: "demo",
+      showAll: true,
+      board: projectHubTaskBoard([
         { id: "bd-1", title: "Clean task", status: "open" },
         {
           id: "bd-2",
@@ -465,14 +909,22 @@ fs.writeSync(1, JSON.stringify(tasks));
           },
         },
       ]),
-    );
+    });
 
-    expect(lines).toContain("PRD warnings: 1 high · 0 medium · 0 low");
-    expect(lines).toContain("  1. bd-1: Clean task");
-    expect(lines).toContain("  2. bd-2: Warned task [high]");
+    expect(model.warningSummary?.body).toBe(
+      "PRD warnings: 1 high · 0 medium · 0 low",
+    );
+    expect(model.groups[0]?.items).toEqual([
+      { id: "bd-1", title: "Clean task" },
+      {
+        id: "bd-2",
+        title: "Warned task",
+        trailingDim: "⚠ prd-warn",
+      },
+    ]);
   });
 
-  it("filters task board lines by PRD warning severity", () => {
+  it("filters the task board model by PRD warning severity", () => {
     const board = projectHubTaskBoard([
       {
         id: "bd-1",
@@ -497,12 +949,204 @@ fs.writeSync(1, JSON.stringify(tasks));
       },
     ]);
 
-    const lines = formatHubTaskBoardLines(board, { warningFilter: "high" });
+    const model = buildHubTaskBoardModel({
+      projectName: "demo",
+      board,
+      warningFilter: "high",
+      showAll: true,
+    });
 
-    expect(lines).toContain("Total tasks: 1");
-    expect(lines).toContain("PRD warnings: 1 high · 0 medium · 0 low");
-    expect(lines).toContain("  1. bd-1: High warning [high]");
-    expect(lines.some((line) => line.includes("bd-2"))).toBe(false);
+    expect(model.header.right).toBe("1 task");
+    expect(model.warningSummary?.body).toBe(
+      "PRD warnings: 1 high · 0 medium · 0 low",
+    );
+    expect(model.groups[0]?.items).toEqual([
+      {
+        id: "bd-1",
+        title: "High warning",
+        trailingDim: "⚠ prd-warn",
+      },
+    ]);
+    expect(
+      model.groups.some((group) =>
+        group.items.some((item) => item.id === "bd-2"),
+      ),
+    ).toBe(false);
+  });
+
+  it("hides surplus done tasks until --all expands them", () => {
+    const board = projectHubTaskBoard(
+      Array.from({ length: 7 }, (_, index) => ({
+        id: `bd-${index}`,
+        title: `Done task ${index}`,
+        status: "closed",
+        labels: ["done"],
+      })),
+    );
+
+    const collapsed = buildHubTaskBoardModel({
+      projectName: "demo",
+      board,
+      showAll: false,
+      perGroupLimit: 5,
+    });
+    expect(collapsed.groups).toHaveLength(1);
+    expect(collapsed.groups[0]?.name).toBe("done");
+    expect(collapsed.groups[0]?.count).toBe(7);
+    expect(collapsed.groups[0]?.items).toHaveLength(5);
+    expect(collapsed.groups[0]?.rightHint).toBe(
+      "showing 5 · archloop tasks list --all",
+    );
+    expect(collapsed.groups[0]?.footerDim).toBe("… 2 more");
+
+    const expanded = buildHubTaskBoardModel({
+      projectName: "demo",
+      board,
+      showAll: true,
+    });
+    expect(expanded.groups[0]?.items).toHaveLength(7);
+    expect(expanded.groups[0]?.rightHint).toBeUndefined();
+  });
+
+  it("shows owner dim on claimed tasks in the board model", () => {
+    const model = buildHubTaskBoardModel({
+      projectName: "demo",
+      showAll: true,
+      board: projectHubTaskBoard([
+        {
+          id: "bd-1",
+          title: "Claimed task",
+          status: "in_progress",
+          owner: "yc.bai",
+          metadata: {
+            claim: {
+              runId: "run-1",
+              batchId: "batch-1",
+              branch: "archloop/bd-1",
+              claimedAt: "2026-07-20T00:00:00Z",
+            },
+          },
+        },
+      ]),
+    });
+
+    expect(model.groups.map((group) => group.name)).toEqual(["in_progress"]);
+    expect(model.groups[0]?.items).toEqual([
+      {
+        id: "bd-1",
+        title: "Claimed task",
+        trailingDim: "yc.bai",
+      },
+    ]);
+  });
+
+  it("renders remote badges right-aligned with severity colors and owner stacking", () => {
+    const model = buildHubTaskBoardModel({
+      projectName: "demo",
+      showAll: true,
+      board: projectHubTaskBoard([
+        {
+          id: "bd-synced",
+          title: "Synced task",
+          status: "open",
+          metadata: { sync_state: "synced", remote_ref: "github#211" },
+        },
+        {
+          id: "bd-local",
+          title: "Local only task",
+          status: "open",
+          metadata: { sync_state: "push_pending" },
+        },
+        {
+          id: "bd-conflict",
+          title: "Conflict task",
+          status: "blocked",
+          metadata: { sync_conflict: true, remote_refs: ["github#99"] },
+        },
+        {
+          id: "bd-owner",
+          title: "Claimed synced",
+          status: "in_progress",
+          owner: "yc.bai",
+          metadata: {
+            sync_state: "synced",
+            remote_ref: "github#300",
+            claim: {
+              runId: "run-1",
+              batchId: "batch-1",
+              branch: "archloop/bd-owner",
+              claimedAt: "2026-07-20T00:00:00Z",
+            },
+          },
+        },
+      ]),
+    });
+
+    const plain = renderHubTaskBoardText(model, {
+      width: 100,
+      colorEnabled: false,
+    }).map(stripAnsi);
+    expect(plain.some((line) => /bd-synced\s+Synced task/.test(line))).toBe(
+      true,
+    );
+    expect(plain.some((line) => line.includes("github#211"))).toBe(true);
+    expect(plain.some((line) => line.includes("local-only"))).toBe(true);
+    expect(plain.some((line) => line.includes("sync-conflict"))).toBe(true);
+    expect(
+      plain.some(
+        (line) =>
+          line.includes("bd-owner") && line.includes("yc.bai · github#300"),
+      ),
+    ).toBe(true);
+
+    const colored = renderHubTaskBoardText(model, {
+      width: 100,
+      colorEnabled: true,
+    }).join("\n");
+    const palette = createPalette(true);
+    expect(colored).toContain(palette.dim(palette.cyan("github#211")));
+    expect(colored).toContain(palette.dim("local-only"));
+    expect(colored).toContain(palette.yellow("sync-conflict"));
+  });
+
+  it("formatTaskBoardJson includes remoteBadge on rows", () => {
+    const model = buildHubTaskBoardModel({
+      projectName: "demo",
+      showAll: true,
+      board: projectHubTaskBoard([
+        {
+          id: "bd-1",
+          title: "Synced",
+          status: "open",
+          metadata: { sync_state: "synced", remote_ref: "github#211" },
+        },
+        {
+          id: "bd-2",
+          title: "Local",
+          status: "open",
+          metadata: { sync_state: "local_only" },
+        },
+        {
+          id: "bd-3",
+          title: "Plain",
+          status: "open",
+          metadata: {},
+        },
+      ]),
+    });
+
+    const payload = JSON.parse(formatTaskBoardJson(model)) as Array<{
+      id: string;
+      title: string;
+      remoteBadge?: TaskBoardRemoteBadge;
+    }>;
+    expect(payload.map((row) => row.id)).toEqual(["bd-1", "bd-2", "bd-3"]);
+    expect(payload[0]?.remoteBadge).toEqual({
+      kind: "synced",
+      value: "github#211",
+    });
+    expect(payload[1]?.remoteBadge).toEqual({ kind: "local-only" });
+    expect(payload[2]?.remoteBadge).toBeUndefined();
   });
 
   it("preserves bd ready queue order in projectHubReadyQueueBoard", () => {
@@ -805,7 +1449,7 @@ describe("resolveHubTaskSelectors", () => {
 
     const tasks = resolveHubTaskSelectors(
       repoDir,
-      ["bd-1", "Second task", "3"],
+      ["bd-1", "Second task", "bd-3"],
       env,
     );
     expect(tasks.map((task) => task.id)).toEqual(["bd-1", "bd-2", "bd-3"]);
@@ -818,12 +1462,20 @@ describe("resolveHubTaskSelectors", () => {
       { id: "bd-1", title: "Only task", status: "open" },
     ]);
 
-    const tasks = resolveHubTaskSelectors(
-      repoDir,
-      ["bd-1", "Only task", "1"],
-      env,
-    );
+    const tasks = resolveHubTaskSelectors(repoDir, ["bd-1", "Only task"], env);
     expect(tasks.map((task) => task.id)).toEqual(["bd-1"]);
+  });
+
+  it("rejects 1-based ordinal selectors", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "taskboard-ordinal-"));
+    await initRepo(repoDir);
+    const { env } = await writeMockBdDelete(repoDir, [
+      { id: "bd-1", title: "Only task", status: "open" },
+    ]);
+
+    expect(() => resolveHubTaskSelectors(repoDir, ["1"], env)).toThrow(
+      /did not match a Beads id or an exact task title/,
+    );
   });
 });
 

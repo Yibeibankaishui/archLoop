@@ -40,6 +40,8 @@ export interface BindMountSandboxHandle {
     command: string,
     options?: {
       onLine?: (line: string) => void;
+      /** Called with the host PID of the spawned process once it starts. */
+      onSpawn?: (pid: number) => void;
       cwd?: string;
       sudo?: boolean;
       stdin?: string;
@@ -118,6 +120,8 @@ export interface IsolatedSandboxHandle {
     command: string,
     options?: {
       onLine?: (line: string) => void;
+      /** Called with the host PID of the spawned process once it starts. */
+      onSpawn?: (pid: number) => void;
       cwd?: string;
       sudo?: boolean;
       stdin?: string;
@@ -211,6 +215,8 @@ export interface NoSandboxHandle {
     command: string,
     options?: {
       onLine?: (line: string) => void;
+      /** Called with the host PID of the spawned process once it starts. */
+      onSpawn?: (pid: number) => void;
       cwd?: string;
       sudo?: boolean;
       stdin?: string;

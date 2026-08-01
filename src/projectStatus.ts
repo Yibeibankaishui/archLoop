@@ -13,7 +13,10 @@ import {
   collectHubWorktreeLeaseDiagnosticsForTasks,
   type HubWorktreeLeaseDiagnostic,
 } from "./hubWorktreeLeaseDiagnostics.js";
-import { resolveHubProjectDevelopmentContractState } from "./hubProjectDevelopmentContract.js";
+import {
+  resolveHubProjectDevelopmentContractPath,
+  resolveHubProjectDevelopmentContractState,
+} from "./hubProjectDevelopmentContract.js";
 import {
   loadHubTaskBoard,
   type HubFailureReason,
@@ -22,6 +25,14 @@ import {
   type HubTaskStatus,
 } from "./taskBoard.js";
 import { listWorktreeLeases } from "./worktreeLeaseStore.js";
+import { DEFAULT_PROJECT_PROFILE_NAME } from "./InitService.js";
+import type {
+  SectionBlock,
+  SectionFooterBlock,
+  SectionHeaderBlock,
+  SectionKvBlock,
+  SectionProseBlock,
+} from "./section.js";
 
 export interface HubProjectTaskCounts {
   readonly ready: number;
@@ -865,4 +876,103 @@ export const resolveHubProjectStatus = (
     recentEvents,
     worktreeLeaseDiagnostics,
   };
+};
+
+// ---------------------------------------------------------------------------
+// project status summary model (Variant C section primitive)
+// ---------------------------------------------------------------------------
+
+const PROJECT_STATUS_KV_GUTTER = 32;
+
+export interface HubProjectStatusSummaryModel {
+  readonly header: SectionHeaderBlock;
+  readonly identity: SectionKvBlock;
+  readonly detail?: SectionProseBlock;
+  readonly footer: SectionFooterBlock;
+}
+
+export interface BuildHubProjectStatusSummaryModelInput {
+  readonly status: HubProjectStatus;
+  readonly cleanupDiagnosticsLines?: readonly string[];
+}
+
+const projectStatusIdentityRows = (
+  status: HubProjectStatus,
+): readonly SectionKvBlock["rows"][number][] => [
+  { key: "Repository root", value: status.repoRoot },
+  { key: "archLoop user data dir", value: status.archloopUserDataDir },
+  { key: "Hub project dir", value: status.hubProjectDir },
+  {
+    key: "Hub project profile",
+    value: status.projectProfile ?? DEFAULT_PROJECT_PROFILE_NAME,
+  },
+  {
+    key: "Hub project development contract",
+    value:
+      status.projectDevelopmentContractPath ??
+      resolveHubProjectDevelopmentContractPath(status.hubProjectDir),
+  },
+  {
+    key: "Hub project registration",
+    value: status.projectRegistered ? "existing" : "created",
+  },
+  { key: "Beads available", value: status.beadsAvailable ? "yes" : "no" },
+  {
+    key: "Task store initialized",
+    value: status.taskStoreInitialized ? "yes" : "no",
+  },
+  { key: "Task board ready", value: String(status.taskCounts.ready) },
+  { key: "Task board total", value: String(status.taskCounts.total) },
+];
+
+export const buildHubProjectStatusSummaryModel = (
+  input: BuildHubProjectStatusSummaryModelInput,
+): HubProjectStatusSummaryModel => {
+  const detailLines = formatHubProjectStatusLines(
+    input.status,
+    input.cleanupDiagnosticsLines,
+  );
+  const detailBody = detailLines
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return {
+    header: {
+      kind: "header",
+      title: "archLoop",
+      subtitle: "project · status",
+      right: `ready ${input.status.taskCounts.ready} / total ${input.status.taskCounts.total}`,
+    },
+    identity: {
+      kind: "kv",
+      gutter: PROJECT_STATUS_KV_GUTTER,
+      rows: projectStatusIdentityRows(input.status),
+    },
+    ...(detailBody.length > 0
+      ? {
+          detail: {
+            kind: "prose" as const,
+            title: "detail",
+            body: detailBody,
+          },
+        }
+      : {}),
+    footer: {
+      kind: "footer",
+      label: "tip",
+      commands: ["archloop tasks list", "archloop check"],
+    },
+  };
+};
+
+export const hubProjectStatusSummaryModelToBlocks = (
+  model: HubProjectStatusSummaryModel,
+): readonly SectionBlock[] => {
+  const blocks: SectionBlock[] = [model.header, model.identity];
+  if (model.detail) {
+    blocks.push(model.detail);
+  }
+  blocks.push(model.footer);
+  return blocks;
 };

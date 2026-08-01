@@ -40,6 +40,7 @@ export const testBindMount = (): BindMountSandboxProvider =>
           command: string,
           options?: {
             onLine?: (line: string) => void;
+            onSpawn?: (pid: number) => void;
             cwd?: string;
             sudo?: boolean;
           },
@@ -51,6 +52,10 @@ export const testBindMount = (): BindMountSandboxProvider =>
                 cwd: options?.cwd ?? worktreePath,
                 stdio: ["ignore", "pipe", "pipe"],
               });
+
+              if (proc.pid !== undefined) {
+                options?.onSpawn?.(proc.pid);
+              }
 
               const stdoutChunks: string[] = [];
               const stderrChunks: string[] = [];

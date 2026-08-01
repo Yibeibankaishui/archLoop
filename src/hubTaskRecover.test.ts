@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import { describe, expect, it, vi } from "vitest";
 import type { HubFlowMerger, HubFlowVerifier } from "./hubBatchMerge.js";
 import { claimHubTaskForImplementation } from "./hubTaskLifecycle.js";
+import type { HubTaskEvent } from "./hubExecution.js";
 import {
   buildWorktreeLeaseMetadata,
   leaseLockPath,
@@ -29,6 +30,8 @@ const seedHubTaskStore = (repoDir: string): void => {
   if (!existsSync(metadataPath)) {
     writeFileSync(metadataPath, JSON.stringify({ backend: "dolt" }));
   }
+  // Mirror bd init: a fully-initialized store also has the embeddeddolt dir.
+  mkdirSync(join(beadsDir, "embeddeddolt"), { recursive: true });
 };
 
 const initRepo = async (dir: string) => {
@@ -528,5 +531,395 @@ describe("recoverHubTask", () => {
     expect(verifier).toHaveBeenCalledTimes(1);
     expect(await readFile(commentArgsFile, "utf-8")).toContain("close_failed");
     expect(await readFile(commentArgsFile, "utf-8")).toContain("merged");
+  });
+});
+
+const phaseCompletionEvent = (
+  overrides: Partial<HubTaskEvent>,
+): HubTaskEvent => ({
+  type: "task_review_succeeded",
+  runId: "run-stale",
+  batchId: "batch-stale",
+  taskId: "bd-stale-exec",
+  branch: "archloop/bd-stale-exec-stale-execution-task",
+  createdAt: "2026-07-23T00:00:00.000Z",
+  status: "waiting_for_merge",
+  ...overrides,
+});
+
+describe("recoverHubTask event-aware stale execution", () => {
+  it("routes a reviewing task whose review succeeded back to waiting_for_merge and preserves the claim", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-recover-review-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const taskId = "bd-stale-review";
+    const title = "Stale execution task";
+    const branch = `archloop/${taskId}-stale-execution-task`;
+    const { env, commentArgsFile } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: taskId,
+        title,
+        status: "open",
+        labels: ["reviewing"],
+        metadata: {
+          hubStatus: "reviewing",
+          claim: {
+            runId: "run-stale",
+            batchId: "batch-stale",
+            branch,
+            claimedAt: "2026-07-23T00:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const result = await recoverHubTask({
+      cwd: repoDir,
+      taskId,
+      env,
+      resolveLatestPhaseCompletionEvent: async () =>
+        phaseCompletionEvent({
+          type: "task_review_succeeded",
+          status: "waiting_for_merge",
+          taskId,
+          branch,
+        }),
+      branchHasUnmergedWork: async () => true,
+    });
+
+    const task = loadHubTask(repoDir, taskId, env);
+    expect(result.outcome).toBe("recovered_failed");
+    expect(result.priorStatus).toBe("reviewing");
+    expect(task.hubStatus).toBe("waiting_for_merge");
+    expect(task.claim).toBeDefined();
+    expect(task.claim?.runId).toBe("run-stale");
+    expect(await readFile(commentArgsFile, "utf-8")).toContain(
+      "task_review_succeeded",
+    );
+    expect(await readFile(commentArgsFile, "utf-8")).toContain(
+      "waiting_for_merge",
+    );
+  });
+
+  it("routes an implementing task whose implementation succeeded (reviewer flow) to reviewing and preserves the claim", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-recover-impl-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const taskId = "bd-stale-impl";
+    const title = "Stale execution task";
+    const branch = `archloop/${taskId}-stale-execution-task`;
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env, commentArgsFile } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: taskId,
+        title,
+        status: "open",
+        labels: ["implementing"],
+        metadata: {
+          hubStatus: "implementing",
+          claim: {
+            runId: "run-stale",
+            batchId: "batch-stale",
+            branch,
+            claimedAt: "2026-07-23T00:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const result = await recoverHubTask({
+      cwd: repoDir,
+      taskId,
+      env,
+      resolveLatestPhaseCompletionEvent: async () =>
+        phaseCompletionEvent({
+          type: "task_implementation_succeeded",
+          status: "reviewing",
+          taskId,
+          branch,
+        }),
+      branchHasUnmergedWork: async () => true,
+    });
+
+    const task = loadHubTask(repoDir, taskId, env);
+    expect(result.outcome).toBe("recovered_failed");
+    expect(task.hubStatus).toBe("reviewing");
+    expect(task.claim).toBeDefined();
+    expect(task.claim?.runId).toBe("run-stale");
+    expect(await readFile(commentArgsFile, "utf-8")).toContain(
+      "task_implementation_succeeded",
+    );
+  });
+
+  it("routes an interrupted implementing task with no success event and branch commits to ready_for_agent and drops the claim (reuses preserved worktree)", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-recover-retry-work-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const taskId = "bd-stale-retry-work";
+    const title = "Stale execution task";
+    const branch = `archloop/${taskId}-stale-execution-task`;
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env, commentArgsFile } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: taskId,
+        title,
+        status: "open",
+        labels: ["implementing"],
+        metadata: {
+          hubStatus: "implementing",
+          claim: {
+            runId: "run-stale",
+            batchId: "batch-stale",
+            branch,
+            claimedAt: "2026-07-23T00:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const result = await recoverHubTask({
+      cwd: repoDir,
+      taskId,
+      env,
+      resolveLatestPhaseCompletionEvent: async () => undefined,
+      branchHasUnmergedWork: async () => true,
+    });
+
+    const task = loadHubTask(repoDir, taskId, env);
+    expect(result.outcome).toBe("recovered_failed");
+    expect(task.hubStatus).toBe("ready_for_agent");
+    expect(task.claim).toBeUndefined();
+    expect(await readFile(commentArgsFile, "utf-8")).toContain(
+      "reuses the preserved worktree",
+    );
+  });
+
+  it("routes an interrupted implementing task with no success event and no branch commits to ready_for_agent for a fresh implement", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-recover-fresh-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const taskId = "bd-stale-fresh";
+    const title = "Stale execution task";
+    const branch = `archloop/${taskId}-stale-execution-task`;
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env, commentArgsFile } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: taskId,
+        title,
+        status: "open",
+        labels: ["implementing"],
+        metadata: {
+          hubStatus: "implementing",
+          claim: {
+            runId: "run-stale",
+            batchId: "batch-stale",
+            branch,
+            claimedAt: "2026-07-23T00:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const result = await recoverHubTask({
+      cwd: repoDir,
+      taskId,
+      env,
+      resolveLatestPhaseCompletionEvent: async () => undefined,
+      branchHasUnmergedWork: async () => false,
+    });
+
+    const task = loadHubTask(repoDir, taskId, env);
+    expect(result.outcome).toBe("recovered_failed");
+    expect(task.hubStatus).toBe("ready_for_agent");
+    expect(task.claim).toBeUndefined();
+    expect(await readFile(commentArgsFile, "utf-8")).toContain(
+      "fresh implement",
+    );
+  });
+
+  it("routes a reviewing task flagged with a human failure reason to ready_for_human (story 17 — override not bypassed for stale execution)", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-recover-human-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const taskId = "bd-stale-human";
+    const title = "Stale execution task";
+    const branch = `archloop/${taskId}-stale-execution-task`;
+    const stateFile = join(repoDir, "bd-state.json");
+    // A reviewing task flagged with a human-failure reason projects as
+    // `failed` (truthy failureReason metadata drives the projection), so
+    // recovery runs the failed path. With no unmerged branch work, the
+    // human-failure override must route it to ready_for_human rather than
+    // ready_for_agent — the existing failure-reason routing is not bypassed
+    // for tasks originating from a stale execution. (The same override is
+    // wired into recoverStaleExecutionStatus's ready_for_agent branch too, so
+    // a future stale-execution task that carries a human reason would also
+    // route to ready_for_human.)
+    const { env, commentArgsFile } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: taskId,
+        title,
+        status: "open",
+        labels: ["reviewing"],
+        metadata: {
+          hubStatus: "reviewing",
+          failed: true,
+          failureReason: "merge_conflict",
+          claim: {
+            runId: "run-stale",
+            batchId: "batch-stale",
+            branch,
+            claimedAt: "2026-07-23T00:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const result = await recoverHubTask({
+      cwd: repoDir,
+      taskId,
+      env,
+      resolveLatestPhaseCompletionEvent: async () => undefined,
+      branchHasUnmergedWork: async () => false,
+    });
+
+    const task = loadHubTask(repoDir, taskId, env);
+    expect(result.outcome).toBe("recovered_failed");
+    expect(task.hubStatus).toBe("ready_for_human");
+    expect(task.claim).toBeUndefined();
+    expect(await readFile(commentArgsFile, "utf-8")).toContain(
+      "ready_for_human",
+    );
+  });
+
+  it("routes a reviewing HITL-slice task with no success event to ready_for_human and does not claim a human-failure reason", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-recover-hitl-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const taskId = "bd-stale-hitl";
+    const title = "Stale execution task";
+    const branch = `archloop/${taskId}-stale-execution-task`;
+    const stateFile = join(repoDir, "bd-state.json");
+    // A reviewing task with no failure metadata projects as `reviewing` (it
+    // takes the stale-execution path, not the failed path). Its HITL slice
+    // type makes resolveFailedRecoveryTarget diverge from the router's base
+    // ready_for_agent destination to ready_for_human. The override summary
+    // must not claim the divergence came from a human-failure reason.
+    const { env, commentArgsFile } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: taskId,
+        title,
+        status: "open",
+        labels: ["reviewing"],
+        metadata: {
+          hubStatus: "reviewing",
+          slice_type: "HITL",
+          claim: {
+            runId: "run-stale",
+            batchId: "batch-stale",
+            branch,
+            claimedAt: "2026-07-23T00:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const result = await recoverHubTask({
+      cwd: repoDir,
+      taskId,
+      env,
+      resolveLatestPhaseCompletionEvent: async () => undefined,
+      branchHasUnmergedWork: async () => false,
+    });
+
+    const task = loadHubTask(repoDir, taskId, env);
+    expect(result.outcome).toBe("recovered_failed");
+    expect(task.hubStatus).toBe("ready_for_human");
+    expect(task.claim).toBeUndefined();
+    const comment = await readFile(commentArgsFile, "utf-8");
+    expect(comment).toContain("ready_for_human");
+    expect(comment).toContain("overrides the default ready_for_agent");
+    expect(comment).not.toContain("human-failure reason");
+  });
+
+  it("reads the phase-completion event from the run event log by default (no injected resolver)", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-recover-rundir-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const taskId = "bd-stale-rundir";
+    const title = "Stale execution task";
+    const branch = `archloop/${taskId}-stale-execution-task`;
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env, commentArgsFile } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: taskId,
+        title,
+        status: "open",
+        labels: ["merging"],
+        metadata: {
+          hubStatus: "merging",
+          claim: {
+            runId: "run-stale",
+            batchId: "batch-stale",
+            branch,
+            claimedAt: "2026-07-23T00:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    // Lay out a real Hub run dir under a controlled XDG_DATA_HOME so the
+    // default event reader scans it. The project id is sha256(repoRoot)[:12],
+    // matching resolveHubProjectDir.
+    const { createHash } = await import("node:crypto");
+    const projectId = createHash("sha256")
+      .update(repoDir)
+      .digest("hex")
+      .slice(0, 12);
+    const runDir = join(
+      repoDir,
+      ".test-xdg-data",
+      "archloop",
+      "hub",
+      "projects",
+      projectId,
+      "runs",
+      "run-stale",
+    );
+    mkdirSync(join(runDir, "events"), { recursive: true });
+    writeFileSync(
+      join(runDir, "events", "task.jsonl"),
+      `${JSON.stringify(
+        phaseCompletionEvent({
+          type: "task_review_succeeded",
+          status: "waiting_for_merge",
+          taskId,
+          branch,
+        }),
+      )}\n`,
+    );
+
+    const result = await recoverHubTask({
+      cwd: repoDir,
+      taskId,
+      env: { ...env, XDG_DATA_HOME: join(repoDir, ".test-xdg-data") },
+      branchHasUnmergedWork: async () => true,
+    });
+
+    const task = loadHubTask(repoDir, taskId, env);
+    expect(result.outcome).toBe("recovered_failed");
+    expect(task.hubStatus).toBe("waiting_for_merge");
+    expect(task.claim).toBeDefined();
+    expect(task.claim?.runId).toBe("run-stale");
+    expect(await readFile(commentArgsFile, "utf-8")).toContain(
+      "task_review_succeeded",
+    );
   });
 });
