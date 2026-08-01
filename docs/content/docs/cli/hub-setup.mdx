@@ -1,0 +1,29 @@
+---
+title: Hub setup and readiness
+description: Reference for initialize and check commands.
+---
+
+## `archloop initialize [--skip-check]`
+
+Configures shared agent roles, environment values, and authentication guidance.
+It runs a quick Hub check unless `--skip-check` is provided. It does not create
+project-local `.archloop/` files.
+
+## `archloop check`
+
+By default, checks Hub-wide configuration and the selected project when one is
+available.
+
+```bash
+npx archloop check --hub
+npx archloop check --project <name>
+npx archloop check --all-projects
+```
+
+- `--hub` checks only shared roles, credentials, provider references, CLIs, and
+  grouped provider/model smoke calls.
+- `--project` checks one project explicitly.
+- `--all-projects` checks every registered project.
+
+Blocking readiness failures return a non-zero exit code for the requested
+target.

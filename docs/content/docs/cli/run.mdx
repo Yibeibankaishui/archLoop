@@ -1,0 +1,25 @@
+---
+title: Run flows
+description: Reference for project-centric Hub flow execution and output modes.
+---
+
+```bash
+npx archloop run [<project> | --project <name>] --flow <id>
+```
+
+Common flow IDs are `no-review`, `with-review`, `triage`, and
+`prd-decomposition`. Proposal flows also accept `--input <value>`.
+
+| Option             | Purpose                                                                     |
+| ------------------ | --------------------------------------------------------------------------- |
+| `--dry-run`        | Print the run plan without starting agents                                  |
+| `--yes`            | Skip the interactive start delay and approve allowed non-interactive writes |
+| `--batch-strategy` | Choose planned, limited, or conservative task selection                     |
+| `--max-tasks`      | Limit tasks in one batch                                                    |
+| `--max-batches`    | Limit batches in one run                                                    |
+| `--idle-timeout`   | Override the agent idle timeout in seconds                                  |
+| `--output`         | Select `auto`, `plain`, or schema-versioned JSONL output                    |
+| `--no-color`       | Disable color styling for flow output                                       |
+
+Task-board flows recover an unfinished same-flow merge-ready batch before
+claiming new work. Proposal flows reject task-batch options that do not apply.

@@ -1,0 +1,25 @@
+---
+title: Hub and projects
+description: Learn how shared Hub configuration relates to registered Git repositories.
+---
+
+The Hub stores reusable agent role configuration, environment values,
+provider-owned login sessions, registered projects, and run artifacts under the
+archLoop user data directory.
+
+A Hub project points to one existing Git repository. It has a stable internal
+identity, a user-facing name, a selected project profile, a development
+contract, and local task/run data. Renaming or relinking a project preserves its
+identity and history.
+
+## Project selection
+
+The CLI remembers one selected project. Commands such as `project status`,
+`tasks list`, and `run --flow` use it by default. Pass `--project <name>` when a
+script or one-off command should target another project explicitly.
+
+## Hub versus repo-local configuration
+
+Hub onboarding does not create `.archloop/` in the target repository. The
+repo-local directory belongs to the legacy custom-scaffold path and is not a
+prerequisite for Hub flows.

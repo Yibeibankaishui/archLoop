@@ -1,0 +1,40 @@
+---
+title: Synchronize GitHub Issues
+description: Exchange task state with GitHub Issues and resolve conflicts explicitly.
+---
+
+GitHub synchronization is directional and explicit.
+
+| Command      | Behavior                                              |
+| ------------ | ----------------------------------------------------- |
+| `tasks pull` | Import eligible GitHub Issues into local Beads data   |
+| `tasks push` | Send linked local labels and terminal state to GitHub |
+| `tasks sync` | Plan and execute both directions                      |
+
+## Preview and synchronize
+
+```bash
+npx archloop tasks pull
+npx archloop tasks sync --dry-run
+npx archloop tasks sync
+```
+
+By default, pull imports open issues. Use `--include-closed` only when closed
+history is intentionally needed.
+
+## Resolve a conflict
+
+```bash
+npx archloop tasks resolve <task-id> --keep local
+# or
+npx archloop tasks resolve <task-id> --keep remote
+```
+
+Keeping local resolves the recorded conflict in Beads. Run `tasks push`
+afterward to propagate that choice to GitHub. Keeping remote updates the local
+side from the recorded remote state.
+
+## Automation
+
+Use `--json` on task list and sync commands when a program needs structured
+results. Non-interactive combined sync requires `--yes` to apply its plan.

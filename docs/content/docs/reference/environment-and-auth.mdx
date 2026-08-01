@@ -1,0 +1,36 @@
+---
+title: Environment and authentication
+description: Understand credential precedence and provider-owned login sessions.
+---
+
+## Hub environment
+
+Use `archloop env init` or `env set` to store shared credential values. Runtime
+`process.env` values override the Hub env file. Empty and placeholder-like
+values do not satisfy readiness checks.
+
+Common keys include:
+
+| Key                 | Provider or feature                                |
+| ------------------- | -------------------------------------------------- |
+| `ANTHROPIC_API_KEY` | Claude Code and Pi API authentication              |
+| `OPENAI_KEY`        | Codex API billing path                             |
+| `CURSOR_API_KEY`    | Headless Cursor execution                          |
+| `OPENCODE_API_KEY`  | OpenCode authentication when required              |
+| `GH_TOKEN`          | GitHub Issues synchronization                      |
+| `ARCHLOOP_BD_PATH`  | Optional override for the bundled Beads executable |
+
+The installed version may expose additional provider-specific variables. Use
+`archloop env show` and `archloop check --hub` for authoritative readiness.
+
+## CLI login sessions
+
+`archloop auth login codex` creates a Hub-owned Codex/ChatGPT CLI session. It is
+not equivalent to `OPENAI_KEY`.
+
+`archloop auth login github` creates a Hub-owned GitHub CLI session used by task
+synchronization. A successful login in another host configuration does not
+automatically authenticate the Hub-owned configuration.
+
+Never place credentials in agent role options, committed docs, or checked-in
+repo-local environment files.

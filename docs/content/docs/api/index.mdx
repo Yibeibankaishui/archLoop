@@ -1,0 +1,32 @@
+---
+title: TypeScript API
+description: Choose the right archLoop lifecycle primitive for custom orchestration.
+---
+
+Install the package and import public APIs from `@yibeibankaishui/archloop`.
+Sandbox factories use their documented subpath exports.
+
+| API                | Lifecycle                                             |
+| ------------------ | ----------------------------------------------------- |
+| `run()`            | One agent invocation with automatic setup and cleanup |
+| `interactive()`    | One interactive agent session                         |
+| `createSandbox()`  | Reusable sandbox for several runs or sessions         |
+| `createWorktree()` | Independent worktree reused across execution modes    |
+
+## Minimal one-shot invocation
+
+```typescript
+import { claudeCode, run } from "@yibeibankaishui/archloop";
+import { docker } from "@yibeibankaishui/archloop/sandboxes/docker";
+
+const result = await run({
+  agent: claudeCode("claude-opus-4-6"),
+  sandbox: docker(),
+  prompt: "Implement the change and verify it.",
+});
+
+console.log(result.commits);
+```
+
+Read [run()](/docs/api/run) for one-shot options or
+[createSandbox()](/docs/api/create-sandbox) when setup should be reused.

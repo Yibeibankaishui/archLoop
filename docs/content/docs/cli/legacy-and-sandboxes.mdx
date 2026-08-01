@@ -1,0 +1,31 @@
+---
+title: Legacy init and sandbox images
+description: Reference for repo-local scaffold and container image commands.
+---
+
+## `archloop init`
+
+Creates a legacy `.archloop/` custom-workflow scaffold. Important options include
+agent, runtimes, model, template, project profile, sandbox, backlog, preset
+agents, capability pack, and whether to build the image. Use `--help` for the
+installed version's complete option list.
+
+`init` refuses to overwrite an existing scaffold.
+
+## Docker
+
+```bash
+npx archloop docker build-image
+npx archloop docker remove-image
+```
+
+## Podman
+
+```bash
+npx archloop podman build-image
+npx archloop podman remove-image
+```
+
+These image commands belong to the repo-local scaffold path. Hub flows may use
+provider configuration without requiring a target repository to contain
+`.archloop/`.

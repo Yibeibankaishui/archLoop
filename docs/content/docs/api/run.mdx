@@ -1,0 +1,44 @@
+---
+title: run() and interactive()
+description: Invoke an agent once with an automatically managed lifecycle.
+---
+
+## `run()`
+
+`run()` accepts an agent provider, a sandbox provider, and exactly one prompt
+source. It returns iteration results, combined output, created commits, target
+branch information, and an optional log path.
+
+```typescript
+const result = await run({
+  agent: codex("<model>", { effort: "medium" }),
+  sandbox: docker(),
+  cwd: "<target-repo>",
+  promptFile: "prompts/implement.md",
+  promptArgs: { TASK_ID: "task-42" },
+  maxIterations: 3,
+  idleTimeoutSeconds: 600,
+  branchStrategy: { type: "branch", branch: "archloop/task-42" },
+});
+```
+
+`cwd` selects the host repository. `promptFile` resolves against the process
+working directory, not against `cwd`.
+
+## Completion and structured output
+
+The default completion substring is `<promise>COMPLETE</promise>`. Pass a string
+or array through `completionSignal` to customize early termination.
+
+`Output.object()` and `Output.string()` extract tagged structured output from a
+single iteration. Structured output requires `maxIterations === 1` and a prompt
+that instructs the agent to emit the configured tag.
+
+## `interactive()`
+
+Use `interactive()` when a human should participate in the provider's terminal
+session. A sandbox provider is still explicit; pass `noSandbox()` when direct
+host execution is intentional.
+
+Both APIs accept an `AbortSignal`. Cancellation rejects with the signal reason
+and preserves dirty work that cannot be cleaned safely.

@@ -1,0 +1,19 @@
+---
+title: Contributing
+description: Find architecture, extension, and documentation maintenance resources.
+---
+
+The repository separates user documentation from project decision records:
+
+- User-facing pages live under `docs/content/docs/`.
+- Product decisions live under `docs/adr/`.
+- Feature requirements live under `docs/prd/`.
+- Research and implementation notes live under their existing contributor-only
+  directories.
+
+Public TypeScript extension points include agent providers and bind-mount or
+isolated sandbox providers. Consult the exported interfaces and relevant ADRs
+before adding a new implementation.
+
+Read [Documentation maintenance](/docs/contributing/documentation) before
+changing a public command, setup flow, environment variable, or API.

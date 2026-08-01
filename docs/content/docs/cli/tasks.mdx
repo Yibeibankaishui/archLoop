@@ -1,0 +1,24 @@
+---
+title: Task commands
+description: Reference for local task-board and GitHub synchronization commands.
+---
+
+| Command                         | Purpose                                   |
+| ------------------------------- | ----------------------------------------- |
+| `tasks init`                    | Initialize the local Beads task store     |
+| `tasks list`                    | Show the Hub task board                   |
+| `tasks show <selector>`         | Show one task by ID or exact title        |
+| `tasks create <title>`          | Create an inbox task                      |
+| `tasks triage [task-id]`        | Propose and apply Triage decisions        |
+| `tasks from-prd <ref>`          | Propose dependency-aware tasks from a PRD |
+| `tasks comment <selector>`      | Add a local task comment                  |
+| `tasks pull`, `push`, `sync`    | Exchange state with GitHub Issues         |
+| `tasks resolve <selector>`      | Resolve a recorded sync conflict          |
+| `tasks doctor`                  | Audit task state without mutation         |
+| `tasks repair-state <selector>` | Repair the local state projection         |
+| `tasks recover <selector>`      | Recover interrupted or failed execution   |
+| `tasks cleanup`                 | Preview or perform managed branch cleanup |
+| `tasks delete <selector...>`    | Delete local tasks with safeguards        |
+
+Use `--json` where offered for machine-readable output. Preview synchronization,
+cleanup, and deletion with `--dry-run` before applying them in automation.

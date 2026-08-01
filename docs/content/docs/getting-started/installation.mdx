@@ -1,0 +1,47 @@
+---
+title: Installation and Hub setup
+description: Install archLoop and configure shared Hub roles, credentials, and authentication.
+---
+
+## Install
+
+Install archLoop as a development dependency in the project used to invoke it:
+
+```bash
+npm install --save-dev @yibeibankaishui/archloop
+```
+
+Use `npx archloop` in the examples below so the project-local version is used.
+
+## Initialize the Hub
+
+```bash
+npx archloop initialize
+```
+
+The interactive setup:
+
+- configures provider and model choices for agent roles;
+- collects shared environment values when needed;
+- explains provider-specific login options;
+- performs a quick Hub readiness check;
+- points to `archloop project add` as the next step.
+
+Use `--skip-check` only when you intentionally want to skip the provider/model
+smoke check.
+
+## Verify
+
+```bash
+npx archloop agent-config show
+npx archloop env show
+npx archloop auth show
+npx archloop check --hub
+```
+
+Values shown by `env show` are masked. A missing optional credential is not a
+problem unless a configured role or selected workflow needs it.
+
+## Next step
+
+[Register your first project](/docs/getting-started/first-project).

@@ -1,0 +1,48 @@
+---
+title: Recover interrupted work
+description: Diagnose failed tasks, stale state, merge blockers, and preserved branches without losing work.
+---
+
+Start with read-only information:
+
+```bash
+npx archloop project status
+npx archloop check
+npx archloop tasks doctor
+```
+
+Then follow the CLI's recommended action.
+
+## Failed or interrupted task
+
+```bash
+npx archloop tasks recover <task-id>
+```
+
+Recovery keeps branch work that can be retried and removes only safe managed
+resources. Rerun the same flow after recovery when instructed.
+
+## State projection drift
+
+When `tasks doctor` reports that events and Beads metadata disagree:
+
+```bash
+npx archloop tasks repair-state <task-id>
+```
+
+Review the preview before confirming. This does not directly mutate GitHub.
+
+## Dirty source checkout
+
+Non-overlapping uncommitted files do not necessarily block a merge. If a task
+branch overlaps dirty source files, archLoop lists the exact paths and keeps the
+task merge-ready. Commit, stash, or discard those paths, then rerun the same
+flow.
+
+## Active worktree lease
+
+Wait for the active process or use the task recovery path. Do not remove lock
+files, worktrees, or branches manually while a lease is active.
+
+For symptom-specific entries, see
+[Troubleshooting](/docs/reference/troubleshooting).

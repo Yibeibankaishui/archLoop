@@ -1,0 +1,22 @@
+---
+title: Configuration and paths
+description: Understand which archLoop settings are shared, project-specific, or repo-local.
+---
+
+| Scope               | Contains                                                            | Inspect with                                 |
+| ------------------- | ------------------------------------------------------------------- | -------------------------------------------- |
+| Shared Hub          | Agent roles, env file, provider login directories, project registry | `agent-config path`, `env path`, `auth path` |
+| Hub project         | Repository link, development contract, task/run artifacts           | `project status`                             |
+| Target repository   | Application source and Git history                                  | Git commands                                 |
+| Legacy `.archloop/` | Custom entry point, prompts, env example, sandbox definition        | Repo-local files                             |
+
+The shared user data directory follows `XDG_DATA_HOME` when set and otherwise
+uses the platform's archLoop data location. Use CLI `path` commands instead of
+hard-coding it.
+
+Hub flows do not require `.archloop/` in the target repository. The repo-local
+directory is created only by the legacy `archloop init` path.
+
+Project profiles such as `generic`, `node`, `python`, and `cpp` shape the Hub
+development contract and legacy scaffold guidance. Reconfigure a registered
+project with `project configure` when its technology profile changes.
