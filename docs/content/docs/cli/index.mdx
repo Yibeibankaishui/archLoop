@@ -1,0 +1,22 @@
+---
+title: CLI reference
+description: Find archLoop commands by the job they perform.
+---
+
+Use the project-local CLI through `npx archloop`. Append `--help` to any command
+or command group for the complete options supported by the installed version.
+
+| Command group         | Purpose                                                  |
+| --------------------- | -------------------------------------------------------- |
+| `initialize`, `check` | Configure and validate the shared Hub                    |
+| `project`             | Register, select, configure, rename, and relink projects |
+| `tasks`               | Manage, synchronize, diagnose, and recover task state    |
+| `run --flow`          | Preview or execute a Hub flow                            |
+| `agent-config`        | Map workflow roles to providers and models               |
+| `env`, `auth`         | Manage credentials and provider-owned login sessions     |
+| `init`                | Create a legacy repo-local scaffold                      |
+| `docker`, `podman`    | Build or remove repo-local sandbox images                |
+
+Global plain styling is available through `archloop --plain …` and
+`NO_COLOR=1`. Flow lifecycle output has a separate `--output auto|plain|json`
+option.

@@ -1,0 +1,18 @@
+---
+title: Project commands
+description: Reference for the Hub project command group.
+---
+
+| Command                                  | Purpose                                           |
+| ---------------------------------------- | ------------------------------------------------- |
+| `project add`                            | Register an existing Git repository and select it |
+| `project list`                           | List registered projects and readiness summaries  |
+| `project select [name]`                  | Choose the default CLI project                    |
+| `project status`                         | Show project, task, run, and cleanup diagnostics  |
+| `project configure`                      | Create or refresh the development contract        |
+| `project rename <project> <new-name>`    | Change the display name                           |
+| `project relink <project> --path <path>` | Point an existing identity at a moved repository  |
+
+Most project-aware commands accept `--project <name>` as an explicit override.
+Interactive pickers are available when required values are omitted in a TTY;
+scripts should provide explicit names and paths.

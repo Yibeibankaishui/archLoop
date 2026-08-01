@@ -1,0 +1,35 @@
+---
+title: createWorktree()
+description: Keep a worktree alive while moving between interactive and sandboxed agent execution.
+---
+
+`createWorktree()` makes the worktree the first-class owner. It accepts named
+branch and merge-to-head strategies; the no-worktree `head` strategy does not
+apply.
+
+```typescript
+import { claudeCode, createWorktree } from "@yibeibankaishui/archloop";
+import { docker } from "@yibeibankaishui/archloop/sandboxes/docker";
+
+await using worktree = await createWorktree({
+  branchStrategy: { type: "branch", branch: "archloop/task-42" },
+});
+
+await worktree.interactive({
+  agent: claudeCode("claude-opus-4-6"),
+  prompt: "Inspect the task and repository.",
+});
+
+const result = await worktree.run({
+  agent: claudeCode("claude-opus-4-6"),
+  sandbox: docker(),
+  prompt: "Implement the task.",
+});
+```
+
+`worktree.interactive()` defaults to `noSandbox()` when no provider is given.
+AFK `worktree.run()` requires an explicit sandbox provider.
+
+When `worktree.createSandbox()` creates a child sandbox, closing that sandbox
+does not remove the worktree. Close the worktree handle to perform final
+worktree cleanup.

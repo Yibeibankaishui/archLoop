@@ -1,0 +1,11 @@
+{
+  "title": "Guides",
+  "pages": [
+    "index",
+    "manage-projects",
+    "manage-tasks",
+    "github-sync",
+    "recovery",
+    "legacy-repo-local-setup"
+  ]
+}

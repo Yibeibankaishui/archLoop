@@ -1,0 +1,45 @@
+---
+title: Manage projects
+description: Register, select, inspect, rename, configure, and relink Hub projects.
+---
+
+## Register
+
+```bash
+npx archloop project add
+```
+
+For scripts, pass `--name`, `--path`, and optionally `--project-profile`.
+
+## Select and inspect
+
+```bash
+npx archloop project list
+npx archloop project select <name>
+npx archloop project status
+npx archloop check --project <name>
+```
+
+`project list` shows path validity, profile, task readiness, task counts, and
+active runs. `project status` adds the development contract, run artifacts,
+failed-task actions, and managed branch cleanup diagnostics.
+
+## Configure the development contract
+
+```bash
+npx archloop project configure --project-profile node
+```
+
+Running the command again with the same profile refreshes detected project facts
+while preserving user-edited setup, verification, and context sections.
+
+## Rename or move
+
+```bash
+npx archloop project rename <project> <new-name>
+npx archloop project relink <project> --path <new-repo-path>
+```
+
+Both operations preserve the stable project identity, task data, and run
+history. Relinking validates that the new path is an existing Git repository
+with at least one commit.

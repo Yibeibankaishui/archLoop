@@ -25,7 +25,15 @@ For user-facing changes, add a changeset to `.changeset`. Check all changesets t
 
 ## Docs
 
-- When changing public-facing behavior, public APIs, CLI behavior, setup flow, or user-facing defaults, update `README.md` if the documentation is affected.
+- `docs/content/docs/` is the source of truth for complete user documentation. Organize it by user task under Getting Started, Concepts, Guides, CLI, API, and Reference.
+- Keep `README.md` and `readme_cn.md` as short product entry pages. They should explain the recommended Hub path, provide the canonical quick start, and link to deeper documentation instead of duplicating the full CLI or API reference.
+- The canonical Hub quick start is `npm install --save-dev @yibeibankaishui/archloop` -> `npx archloop initialize` -> `npx archloop project add` -> `npx archloop check` -> `npx archloop run --flow with-review`.
+- Treat `archloop init` and `.archloop/` as the legacy repo-local custom-scaffold path. Do not imply that Hub projects require repo-local initialization.
+- When changing public-facing behavior, public APIs, CLI behavior, setup flow, or user-facing defaults, update the task-oriented page and the relevant CLI/API/reference page. Update README only when the product entry path or headline capabilities change.
+- Reconcile `readme_cn.md` and `user_guide.md` when a workflow they cover changes. Keep the user guide's document change record current.
+- Never add developer usernames, personal absolute paths, obsolete global install commands, or current-product references using the old identity to user documentation.
+- Run `npm run docs:lint` while editing documentation and `npm run docs:check` before completion. `docs:check` includes the Fumadocs production build.
+- When adding or moving documentation pages, update the nearest `meta.json` navigation file and verify local links.
 - When PRDs, issues, public APIs, CLI behavior, major features, releases, or phase status change, update `docs/roadmap.md` if the roadmap is affected.
 
 ## Bundled skill (`skills/archloop-usage/SKILL.md`)
@@ -33,7 +41,7 @@ For user-facing changes, add a changeset to `.changeset`. Check all changesets t
 The repo ships a portable agent skill at `skills/archloop-usage/SKILL.md` that teaches other agents how to set up and run archLoop in a target project. It must not go stale across releases.
 
 - Treat the skill as user-facing docs: whenever you change CLI commands/flags, `archloop init` prompts or defaults, template names, project profiles, env var names, public API surface (`run`/`interactive`/`createSandbox`/`createWorktree`, provider factories), the `.archloop/` layout, or known failure modes/diagnostics, update `skills/archloop-usage/SKILL.md` in the same change.
-- Keep it consistent with `README.md`, `readme_cn.md`, and `user_guide.md`; if those move, reconcile the skill.
+- Keep it consistent with the canonical docs under `docs/content/docs/`, plus the covered entry paths in `README.md`, `readme_cn.md`, and `user_guide.md`; if those move, reconcile the skill.
 - Preserve the YAML frontmatter (`name`, `description`) and keep the description's WHAT/WHEN trigger terms accurate. Keep the body concise (< 500 lines) and use placeholders like `<ARCHLOOP_REPO>` / `<TARGET_REPO>` rather than absolute paths.
 - This skill is distributed by copying into a user skills directory (see README "Agent skill" section); it is not auto-installed.
 

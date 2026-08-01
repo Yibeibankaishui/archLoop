@@ -1,0 +1,12 @@
+{
+  "title": "CLI reference",
+  "pages": [
+    "index",
+    "hub-setup",
+    "projects",
+    "tasks",
+    "run",
+    "env-and-auth",
+    "legacy-and-sandboxes"
+  ]
+}

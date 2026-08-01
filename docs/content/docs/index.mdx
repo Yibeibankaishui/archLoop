@@ -1,41 +1,64 @@
 ---
-title: Getting Started
-description: Learn how to use archLoop to orchestrate AI coding agents in isolated sandbox environments.
+title: archLoop documentation
+description: Orchestrate AI coding agents across projects, tasks, sandboxes, reviews, and merges.
 ---
 
-## What is archLoop?
+archLoop combines a project Hub, a local task board, agent roles, sandboxed
+execution, and Git branch workflows. Start with the CLI for a complete workflow
+or use the TypeScript API to build a custom one.
 
-archLoop is a TypeScript CLI tool that orchestrates AI coding agents inside isolated sandbox environments. It manages the full lifecycle of running an agent against your codebase: syncing code into a sandbox, invoking the agent, and syncing changes back.
+## Start here
 
-## Key Concepts
+| Your goal                                  | Recommended page                                                |
+| ------------------------------------------ | --------------------------------------------------------------- |
+| Configure archLoop for the first time      | [Getting started](/docs/getting-started)                        |
+| Understand Hub, tasks, and flows           | [Core concepts](/docs/concepts)                                 |
+| Look up a command                          | [CLI reference](/docs/cli)                                      |
+| Integrate the library in TypeScript        | [API reference](/docs/api)                                      |
+| Diagnose a failed run                      | [Troubleshooting](/docs/reference/troubleshooting)              |
+| Maintain an existing `.archloop/` scaffold | [Legacy repo-local setup](/docs/guides/legacy-repo-local-setup) |
 
-- **Sandbox** -- An isolated environment (Docker container or local directory) where an agent executes code
-- **Host** -- Your machine where archLoop runs and the real git repo lives
-- **Agent** -- The AI coding tool invoked inside the sandbox (e.g. Claude Code)
-- **Iteration** -- A single invocation of the agent, producing at most one commit
-
-## Quick Start
-
-### 1. Install
-
-```bash
-npm install -g archloop
-```
-
-### 2. Initialize
-
-Run `archloop init` in your repository to scaffold the config directory:
+## Recommended workflow
 
 ```bash
-archloop init
+npm install --save-dev @yibeibankaishui/archloop
+npx archloop initialize
+npx archloop project add
+npx archloop check
+npx archloop run --flow with-review
 ```
 
-This creates a `.archloop/` directory with a Dockerfile, prompt file, and configuration.
+`archloop initialize` configures the shared Hub. `project add` registers an
+existing Git repository. `check` verifies Hub and project readiness. The final
+command implements ready tasks, reviews their branches, verifies them, and
+merges eligible changes.
 
-### 3. Run
+## Two supported paths
 
-```bash
-archloop run
-```
+### Hub workflow
 
-archLoop will build the Docker image, sync your code into the sandbox, and start the agent.
+Use Hub for new projects. It lets you select and operate on registered projects
+from any directory, shares agent and authentication configuration, and supports
+task-board flows and recovery.
+
+### Legacy repo-local workflow
+
+`archloop init` creates a `.archloop/` scaffold inside one repository. It remains
+supported for existing custom orchestration scripts, but it is not the default
+onboarding path.
+
+## Documentation map
+
+- **Getting started** — install, initialize, register a project, and run a flow.
+- **Concepts** — the vocabulary that connects Hub, projects, tasks, flows,
+  sandboxes, branches, and worktrees.
+- **Guides** — task-focused recipes for projects, task sync, recovery, and legacy
+  setup.
+- **CLI reference** — commands grouped by purpose.
+- **API reference** — lifecycle and integration guidance for public TypeScript
+  exports.
+- **Reference** — configuration locations, environment/auth behavior, and
+  symptom-based troubleshooting.
+
+Product decisions, implementation plans, and research notes are contributor
+material and are intentionally kept outside the user navigation.

@@ -1,0 +1,59 @@
+---
+title: Manage tasks
+description: Work with the local Hub task board safely.
+---
+
+## List and inspect
+
+```bash
+npx archloop tasks list
+npx archloop tasks list --all
+npx archloop tasks show <task-id>
+```
+
+Selectors are full Beads IDs or exact titles. Numeric list positions are not
+stable selectors.
+
+## Create and triage
+
+```bash
+npx archloop tasks create "Improve the login error"
+npx archloop tasks triage <task-id>
+```
+
+New manual tasks enter the inbox. Triage proposes a status, description,
+dependencies, and other collaboration changes before applying them.
+
+## Create tasks from a PRD
+
+```bash
+npx archloop tasks from-prd <prd-ref>
+```
+
+The PRD flow validates a dependency-aware proposal and asks for approval before
+writing local tasks.
+
+## Diagnose and repair
+
+```bash
+npx archloop tasks doctor
+npx archloop tasks repair-state <task-id>
+npx archloop tasks recover <task-id>
+```
+
+Use `doctor` first because it is read-only. `repair-state` fixes the local state
+projection when run events and task metadata disagree. `recover` handles failed
+or interrupted execution while preserving recoverable branch work.
+
+## Delete or clean branches
+
+Preview destructive operations first:
+
+```bash
+npx archloop tasks delete <task-id> --dry-run
+npx archloop tasks cleanup --dry-run
+```
+
+Task deletion affects local Beads data, not the linked GitHub Issue. Historical
+unowned branches remain preserved unless cleanup is explicitly asked to include
+them.

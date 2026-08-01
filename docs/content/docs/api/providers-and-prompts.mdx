@@ -1,0 +1,59 @@
+---
+title: Providers, prompts, hooks, and branches
+description: Configure the extension points shared by archLoop execution APIs.
+---
+
+## Agent providers
+
+Public factories include:
+
+- `claudeCode(model, options?)`
+- `codex(model, options?)`
+- `cursor(model, options?)`
+- `opencode(model, options?)`
+- `pi(model, options?)`
+
+Provider options control provider-specific modes such as effort. Credentials
+belong in environment configuration, not in the provider options object.
+
+## Sandbox providers
+
+Import built-in providers from package subpaths:
+
+```typescript
+import { docker } from "@yibeibankaishui/archloop/sandboxes/docker";
+import { podman } from "@yibeibankaishui/archloop/sandboxes/podman";
+import { vercel } from "@yibeibankaishui/archloop/sandboxes/vercel";
+import { daytona } from "@yibeibankaishui/archloop/sandboxes/daytona";
+import { noSandbox } from "@yibeibankaishui/archloop/sandboxes/no-sandbox";
+```
+
+Custom integrations implement the public bind-mount or isolated sandbox
+provider contracts.
+
+## Prompts
+
+Provide either `prompt` or `promptFile`. File prompts support `{{KEY}}`
+substitution through `promptArgs`. Processed prompt files can also embed dynamic
+command context with the documented command marker; inline prompts are used
+literally.
+
+## Hooks
+
+Hooks are grouped by execution location:
+
+- host `onWorktreeReady`
+- host `onSandboxReady`
+- sandbox `onSandboxReady`
+
+Use host hooks for host-visible preparation and sandbox hooks for dependencies
+or setup that must execute inside the sandbox.
+
+## Branch strategies
+
+- `head` runs against the current checkout without creating a worktree.
+- `branch` uses an explicit named branch.
+- `merge-to-head` creates isolated work and merges it back to the starting HEAD.
+
+Provider type and API determine which strategies are valid. Prefer explicit
+branches for reusable handles.
