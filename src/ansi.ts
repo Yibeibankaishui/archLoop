@@ -114,9 +114,12 @@ export const alignLeftRight = (
   return left + " ".repeat(pad) + right;
 };
 
+/** Shared severity vocabulary for colored section accents (`severityColor`). */
+export type SectionSeverity = "info" | "success" | "warn" | "error" | "muted";
+
 export const severityColor = (
   palette: Palette,
-  severity: "info" | "success" | "warn" | "error" | "muted",
+  severity: SectionSeverity,
 ): ((text: string) => string) => {
   switch (severity) {
     case "success":

@@ -23,3 +23,14 @@ Common flow IDs are `no-review`, `with-review`, `triage`, and
 
 Task-board flows recover an unfinished same-flow merge-ready batch before
 claiming new work. Proposal flows reject task-batch options that do not apply.
+
+At startup, task-board runs also detect tasks left in implementation, review,
+or merge without a live worktree lease. The event-aware recovery route resumes
+after a completed phase instead of repeating it and reuses preserved branch or
+worktree changes. Plain output summarizes each route; schema-versioned JSONL
+includes the result in the final `autoRecover` projection.
+
+The final `fix` guidance distinguishes semantic failure from interruption. A
+real failed task points to `archloop tasks recover --stale`; a run interrupted
+without failed tasks points back to `archloop run`, which performs automatic
+startup recovery.

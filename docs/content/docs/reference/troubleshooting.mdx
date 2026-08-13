@@ -76,6 +76,25 @@ npx archloop tasks recover <task-id>
 
 Recovery preserves retryable work. Do not delete the branch or worktree first.
 
+## Run ended while tasks still look active
+
+Re-run the same `archloop run --flow ...` command. Startup detects tasks left in
+implementation, review, or merge without a live lease and resumes from the next
+safe event-backed phase. `tasks list` marks these rows `⚠ interrupted`; JSON
+sets `interrupted: true`.
+
+Use `archloop tasks recover --stale` to preview all interrupted routes without
+starting a flow, then add `--yes` or confirm interactively to apply them. A run
+summary points to this command for real task failures, but points back to
+`archloop run` for interruption without failed tasks.
+
+## Implementer exited non-zero after finishing
+
+Hub derives success from observed branch work plus the completion signal. A
+recognized trailing provider disconnect does not erase completed work. A
+zero-new-commit rerun is also accepted when prior run evidence proves the task
+was already merged and closed; a completion signal alone is not sufficient.
+
 ## Worktree is already in use
 
 An active lease owns the worktree. Wait for the owning process or use the task

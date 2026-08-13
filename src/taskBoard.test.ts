@@ -6,13 +6,18 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { createPalette } from "./ansi.js";
+import type { HubManagedBranchCleanupEvaluation } from "./hubManagedBranchCleanup.js";
+import { flattenSectionForLog, renderSection } from "./section.js";
 import {
+  buildHubManagedBranchCleanupModel,
   claimHubTask,
   deleteHubTasks,
   buildHubTaskBoardModel,
   buildHubTaskDetailModel,
   deriveTaskBoardRemoteBadge,
+  formatHubManagedBranchCleanupLines,
   formatTaskBoardJson,
+  hubManagedBranchCleanupModelToBlocks,
   isCanonicalHubTaskStatus,
   loadHubTaskBoard,
   mapHubStatusToTaskBoardBucket,
@@ -20,6 +25,7 @@ import {
   projectHubTaskBoard,
   projectHubReadyQueueBoard,
   renderHubTaskBoardText,
+  renderHubTaskDetailText,
   resolveHubTaskSelectors,
   selectHubBatchMergeTasks,
   type TaskBoardRemoteBadge,
@@ -302,13 +308,14 @@ describe("task status projection", () => {
           key: "status",
           value: "ready_for_agent",
           secondary: "(beads: open)",
+          valueSeverity: "info",
         },
         { key: "labels", value: "ready-for-agent, backend" },
         { key: "origin", value: "manual" },
         { key: "kind", value: "slice" },
         { key: "remote", value: "github#64" },
         { key: "runs", value: "run-123" },
-        { key: "metadata", value: '{"execution_mode":"agent"}' },
+        { key: "execution_mode", value: "agent" },
       ],
     });
     expect(model.description).toEqual({
@@ -320,6 +327,13 @@ describe("task status projection", () => {
       kind: "prose",
       title: "comments · 1",
       body: "alice · 2026-06-11T15:00:00Z: Looks good",
+      entries: [
+        {
+          lead: "alice",
+          meta: "2026-06-11T15:00:00Z",
+          body: "Looks good",
+        },
+      ],
     });
     expect(model.footer).toEqual({
       kind: "footer",
@@ -330,6 +344,102 @@ describe("task status projection", () => {
         "gh issue view 64",
       ],
     });
+  });
+
+  it("colors the task detail status row by board-bucket severity", () => {
+    const cases = [
+      {
+        labels: ["ready-for-agent"] as string[],
+        metadata: {},
+        status: "info" as const,
+        hubStatus: "ready_for_agent",
+      },
+      {
+        labels: ["implementing"] as string[],
+        metadata: {},
+        status: "warn" as const,
+        hubStatus: "implementing",
+      },
+      {
+        labels: ["needs-info"] as string[],
+        metadata: {},
+        status: "error" as const,
+        hubStatus: "needs_info",
+      },
+      {
+        labels: ["failed"] as string[],
+        metadata: {},
+        status: "error" as const,
+        hubStatus: "failed",
+      },
+      {
+        labels: ["done"] as string[],
+        metadata: { done: true },
+        status: "success" as const,
+        hubStatus: "done",
+      },
+      {
+        labels: ["wontfix"] as string[],
+        metadata: {},
+        status: "success" as const,
+        hubStatus: "wontfix",
+      },
+    ];
+
+    for (const testCase of cases) {
+      const task = projectHubTask({
+        id: `bd-sev-${testCase.hubStatus}`,
+        title: testCase.hubStatus,
+        status: testCase.hubStatus === "done" ? "closed" : "open",
+        labels: testCase.labels,
+        metadata: testCase.metadata,
+      });
+      expect(task.hubStatus).toBe(testCase.hubStatus);
+      const statusRow = buildHubTaskDetailModel(task).identity.rows.find(
+        (row) => row.key === "status",
+      );
+      expect(statusRow).toMatchObject({
+        value: testCase.hubStatus,
+        valueSeverity: testCase.status,
+      });
+    }
+  });
+
+  it("renders colored status and emphasized comments while plain mode stays ANSI-free", () => {
+    const task = projectHubTask({
+      id: "bd-render",
+      title: "Render me",
+      status: "open",
+      labels: ["needs-info"],
+      metadata: { execution_mode: "agent" },
+      comments: [
+        {
+          author: "alice",
+          body: "Needs a repro",
+          createdAt: "2026-06-11T15:00:00Z",
+        },
+      ],
+    });
+    const model = buildHubTaskDetailModel(task);
+    const colored = renderHubTaskDetailText(model, {
+      width: 80,
+      colorEnabled: true,
+    }).join("\n");
+    const plain = renderHubTaskDetailText(model, {
+      width: 80,
+      colorEnabled: false,
+    }).join("\n");
+
+    expect(colored).toMatch(/\x1b\[/);
+    expect(plain).not.toMatch(/\x1b\[/);
+    expect(stripAnsi(colored)).toContain("needs_info");
+    expect(stripAnsi(colored)).toContain("alice");
+    expect(stripAnsi(colored)).toContain("Needs a repro");
+    expect(stripAnsi(colored)).toContain("execution_mode");
+    expect(stripAnsi(colored)).not.toContain('{"execution_mode":"agent"}');
+    expect(plain).toContain("needs_info");
+    expect(plain).toContain("alice · 2026-06-11T15:00:00Z: Needs a repro");
+    expect(plain).toContain("execution_mode");
   });
 
   it("loads all Beads tasks including closed tasks beyond the default list page", async () => {
@@ -883,12 +993,48 @@ fs.writeSync(1, JSON.stringify(tasks));
       kind: "prose",
       title: "comments · 2",
       body: "alice · 2026-06-11T15:00:00Z: First note\nbob · 2026-06-12T09:00:00Z: Second note",
+      entries: [
+        {
+          lead: "alice",
+          meta: "2026-06-11T15:00:00Z",
+          body: "First note",
+        },
+        {
+          lead: "bob",
+          meta: "2026-06-12T09:00:00Z",
+          body: "Second note",
+        },
+      ],
     });
     expect(model.footer).toEqual({
       kind: "footer",
       label: "tip",
       commands: ["archloop tasks comment bd-7", "archloop tasks recover bd-7"],
     });
+  });
+
+  it("does not dump leftover detail metadata as a raw JSON blob", () => {
+    const task = projectHubTask({
+      id: "bd-meta",
+      title: "Metadata task",
+      status: "open",
+      metadata: {
+        execution_mode: "agent",
+        attempt: 2,
+        nested: { ok: true },
+      },
+    });
+
+    const rows = buildHubTaskDetailModel(task).identity.rows;
+    expect(rows.find((row) => row.key === "metadata")).toBeUndefined();
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        { key: "execution_mode", value: "agent" },
+        { key: "attempt", value: "2" },
+        { key: "nested", value: '{"ok":true}' },
+      ]),
+    );
+    expect(JSON.stringify(rows)).not.toContain('"key":"metadata"');
   });
 
   it("attaches PRD warning badges on the task board model", () => {
@@ -1156,6 +1302,110 @@ fs.writeSync(1, JSON.stringify(tasks));
     ]);
 
     expect(board.tasks.map((task) => task.id)).toEqual(["bd-z", "bd-a"]);
+  });
+
+  it("badges interrupted-execution tasks passed via interruptedTaskIds", () => {
+    const board = projectHubTaskBoard([
+      {
+        id: "bd-stuck",
+        title: "Stuck implementing task",
+        status: "in_progress",
+        labels: ["implementing"],
+        owner: "yucheng.bai",
+        metadata: {
+          claim: { branch: "archloop/bd-stuck-stuck-implementing-task" },
+        },
+      },
+      {
+        id: "bd-live",
+        title: "Live implementing task",
+        status: "in_progress",
+        labels: ["implementing"],
+        owner: "yucheng.bai",
+        metadata: {
+          claim: { branch: "archloop/bd-live-live-implementing-task" },
+        },
+      },
+    ]);
+
+    const model = buildHubTaskBoardModel({
+      projectName: "demo",
+      showAll: true,
+      board,
+      interruptedTaskIds: new Set(["bd-stuck"]),
+    });
+
+    // The interrupted task carries an additive `interrupted: true` flag on its
+    // row; the non-interrupted task omits the field entirely so existing JSON
+    // consumers see no shape change for healthy tasks.
+    const stuckRow = model.rows.find((row) => row.id === "bd-stuck");
+    const liveRow = model.rows.find((row) => row.id === "bd-live");
+    expect(stuckRow?.interrupted).toBe(true);
+    expect(stuckRow?.trailingDim).toBe("⚠ interrupted");
+    expect(liveRow?.interrupted).toBeUndefined();
+    expect(liveRow?.trailingDim).toBe("yucheng.bai");
+
+    // The group item (human renderer) shares the same row shape, so the badge
+    // is visible at a glance in the board view, not just the JSON dump.
+    const inProgressGroup = model.groups.find(
+      (group) => group.name === "in_progress",
+    );
+    const stuckItem = inProgressGroup?.items.find(
+      (item) => item.id === "bd-stuck",
+    );
+    expect(stuckItem?.trailingDim).toBe("⚠ interrupted");
+  });
+
+  it("omits the interrupted flag when no interruptedTaskIds are supplied", () => {
+    const board = projectHubTaskBoard([
+      {
+        id: "bd-stuck",
+        title: "Stuck implementing task",
+        status: "in_progress",
+        labels: ["implementing"],
+      },
+    ]);
+
+    const model = buildHubTaskBoardModel({
+      projectName: "demo",
+      showAll: true,
+      board,
+    });
+
+    expect(model.rows[0]?.interrupted).toBeUndefined();
+  });
+
+  it("formatTaskBoardJson includes interrupted on flagged rows only", () => {
+    const board = projectHubTaskBoard([
+      {
+        id: "bd-stuck",
+        title: "Stuck reviewing task",
+        status: "in_progress",
+        labels: ["reviewing"],
+      },
+      {
+        id: "bd-plain",
+        title: "Plain task",
+        status: "open",
+      },
+    ]);
+
+    const model = buildHubTaskBoardModel({
+      projectName: "demo",
+      showAll: true,
+      board,
+      interruptedTaskIds: new Set(["bd-stuck"]),
+    });
+
+    const payload = JSON.parse(formatTaskBoardJson(model)) as Array<{
+      id: string;
+      title: string;
+      interrupted?: boolean;
+    }>;
+    const stuck = payload.find((row) => row.id === "bd-stuck");
+    const plain = payload.find((row) => row.id === "bd-plain");
+    expect(stuck?.interrupted).toBe(true);
+    expect(plain?.interrupted).toBeUndefined();
   });
 });
 
@@ -1540,5 +1790,233 @@ process.exit(1);
         env,
       }),
     ).toThrow(/dependents not in deletion set/);
+  });
+});
+
+const sampleCleanupEvaluation = {
+  repoRoot: "/tmp/repo",
+  hubProjectDir: "/tmp/data/archloop/hub/projects/demo",
+  targetBranch: "main",
+  targetHead: "abc123def456",
+  managedSafeCandidates: [
+    {
+      branch: "archloop/bd-safe-cleanup",
+      ownership: {
+        taskId: "bd-safe",
+        runId: "run-safe",
+        batchId: "batch-safe",
+        branch: "archloop/bd-safe-cleanup",
+        claimedAt: "2026-07-05T10:00:00.000Z",
+        baseHead: "abc123",
+        branchExistedBeforeClaim: false,
+      },
+      exists: true,
+      mergedIntoTarget: true,
+      worktreePaths: [],
+      activeLeases: [],
+      skipReasons: [],
+    },
+  ],
+  managedBlockedBranches: [
+    {
+      branch: "archloop/bd-blocked-cleanup",
+      ownership: {
+        taskId: "bd-blocked",
+        runId: "run-blocked",
+        batchId: "batch-blocked",
+        branch: "archloop/bd-blocked-cleanup",
+        claimedAt: "2026-07-05T10:05:00.000Z",
+        baseHead: "abc123",
+        branchExistedBeforeClaim: true,
+      },
+      exists: true,
+      mergedIntoTarget: false,
+      worktreePaths: [],
+      activeLeases: [],
+      skipReasons: [
+        {
+          reason: "branch_existed_before_claim",
+          message:
+            "Branch archloop/bd-blocked-cleanup existed before Hub claimed task bd-blocked; keep it out of automatic cleanup.",
+        },
+      ],
+    },
+  ],
+  unownedCandidates: [
+    {
+      branch: "archloop/unowned-history",
+      exists: true,
+      mergedIntoTarget: true,
+      worktreePaths: [],
+      activeLeases: [],
+      skipReasons: [
+        {
+          reason: "missing_ownership",
+          message:
+            "Branch archloop/unowned-history has no Hub-managed ownership record.",
+        },
+      ],
+    },
+  ],
+} satisfies HubManagedBranchCleanupEvaluation;
+
+describe("buildHubManagedBranchCleanupModel", () => {
+  it("groups safe/blocked/unowned branches with severity assignment", () => {
+    const model = buildHubManagedBranchCleanupModel(sampleCleanupEvaluation);
+
+    expect(model.header).toMatchObject({
+      kind: "header",
+      title: "Hub managed branch cleanup",
+    });
+    expect(model.identity.rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ key: "target", value: "main" }),
+        expect.objectContaining({ key: "head", value: "abc123def456" }),
+      ]),
+    );
+    expect(model.groups.map((group) => group.name)).toEqual([
+      "safe managed",
+      "blocked managed",
+      "unowned historical",
+    ]);
+    expect(model.groups.map((group) => group.severity)).toEqual([
+      "success",
+      "warn",
+      "info",
+    ]);
+    expect(model.groups.map((group) => group.symbol)).toEqual(["✓", "!", "●"]);
+    expect(model.groups.map((group) => group.count)).toEqual([1, 1, 1]);
+
+    expect(model.groups[0]?.items).toEqual([
+      {
+        id: "bd-safe",
+        title: "archloop/bd-safe-cleanup",
+      },
+    ]);
+    expect(model.groups[1]?.items).toEqual([
+      {
+        id: "bd-blocked",
+        title: "archloop/bd-blocked-cleanup",
+        detailDim:
+          "Branch archloop/bd-blocked-cleanup existed before Hub claimed task bd-blocked; keep it out of automatic cleanup.",
+      },
+    ]);
+    expect(model.groups[2]?.items[0]).toMatchObject({
+      id: "historical",
+      title: "archloop/unowned-history",
+      trailingDim: "Use --include-unowned to delete safe historical branches",
+    });
+  });
+
+  it("surfaces dry-run preview and deleted-branch summaries", () => {
+    const model = buildHubManagedBranchCleanupModel(sampleCleanupEvaluation, {
+      dryRun: true,
+      deletedManagedBranches: ["archloop/bd-safe-cleanup"],
+      deletedHistoricalBranches: ["archloop/unowned-history"],
+      includeUnowned: true,
+    });
+
+    expect(model.preview?.body).toBe("Preview: no git refs will be deleted.");
+    expect(model.deletedManaged?.body).toBe(
+      "Deleted managed branches: archloop/bd-safe-cleanup",
+    );
+    expect(model.deletedHistorical?.body).toBe(
+      "Deleted historical branches: archloop/unowned-history",
+    );
+    expect(model.groups[2]?.items[0]?.trailingDim).toBe(
+      "safe historical branch included by --include-unowned",
+    );
+  });
+
+  it("keeps unowned skip reasons in detailDim without duplicating the trailing hint", () => {
+    const evaluation: HubManagedBranchCleanupEvaluation = {
+      ...sampleCleanupEvaluation,
+      unownedCandidates: [
+        {
+          branch: "archloop/unowned-dirty",
+          exists: true,
+          mergedIntoTarget: false,
+          worktreePaths: [],
+          activeLeases: [],
+          skipReasons: [
+            {
+              reason: "missing_ownership",
+              message:
+                "Branch archloop/unowned-dirty has no Hub-managed ownership record.",
+            },
+            {
+              reason: "unmerged_work",
+              message: "Branch archloop/unowned-dirty has unmerged commits.",
+            },
+          ],
+        },
+      ],
+    };
+
+    const withoutFlag = buildHubManagedBranchCleanupModel(evaluation);
+    expect(withoutFlag.groups[2]?.items[0]).toEqual({
+      id: "historical",
+      title: "archloop/unowned-dirty",
+      trailingDim: "Use --include-unowned to delete safe historical branches",
+      detailDim: "Branch archloop/unowned-dirty has unmerged commits.",
+    });
+
+    const withFlag = buildHubManagedBranchCleanupModel(evaluation, {
+      includeUnowned: true,
+    });
+    expect(withFlag.groups[2]?.items[0]).toEqual({
+      id: "historical",
+      title: "archloop/unowned-dirty",
+      detailDim: "Branch archloop/unowned-dirty has unmerged commits.",
+    });
+  });
+});
+
+describe("hubManagedBranchCleanupModelToBlocks / formatHubManagedBranchCleanupLines (presentation)", () => {
+  it("plain (flattenSectionForLog) preserves every branch, task id, and skip reason with no ANSI", () => {
+    const lines = formatHubManagedBranchCleanupLines(sampleCleanupEvaluation, {
+      dryRun: true,
+    });
+    const text = lines.join("\n");
+
+    expect(text).not.toMatch(/\x1b\[/);
+    expect(text).toContain("Hub managed branch cleanup");
+    expect(text).toContain("Preview: no git refs will be deleted.");
+    expect(text).toContain("main");
+    expect(text).toContain("abc123def456");
+    expect(text).toContain("archloop/bd-safe-cleanup");
+    expect(text).toContain("bd-safe");
+    expect(text).toContain("archloop/bd-blocked-cleanup");
+    expect(text).toContain("bd-blocked");
+    expect(text).toContain(
+      "existed before Hub claimed task bd-blocked; keep it out of automatic cleanup",
+    );
+    expect(text).toContain("archloop/unowned-history");
+    expect(text).toContain("--include-unowned");
+
+    expect(lines).toEqual(
+      flattenSectionForLog(
+        hubManagedBranchCleanupModelToBlocks(
+          buildHubManagedBranchCleanupModel(sampleCleanupEvaluation, {
+            dryRun: true,
+          }),
+        ),
+      ),
+    );
+  });
+
+  it("color render distinguishes safe/blocked/unowned severity symbols", () => {
+    const palette = createPalette(true);
+    const rendered = renderSection(
+      "",
+      hubManagedBranchCleanupModelToBlocks(
+        buildHubManagedBranchCleanupModel(sampleCleanupEvaluation),
+      ),
+      { width: 100, colorEnabled: true },
+    ).join("\n");
+
+    expect(rendered).toContain(palette.green("✓"));
+    expect(rendered).toContain(palette.yellow("!"));
+    expect(rendered).toContain(palette.cyan("●"));
   });
 });

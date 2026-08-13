@@ -31,6 +31,8 @@ import {
 import { TaskBoardError } from "./errors.js";
 import { runBdTextForHubTaskStore } from "./hubTaskStore.js";
 import {
+  flattenSectionForLog,
+  formatSectionProseEntry,
   renderSection,
   type RenderSectionOptions,
   type SectionBadgesBlock,
@@ -41,6 +43,8 @@ import {
   type SectionHeaderBlock,
   type SectionKvBlock,
   type SectionProseBlock,
+  type SectionProseEntry,
+  type SectionSeverity,
 } from "./section.js";
 
 export const HUB_TASK_STATUSES = [
@@ -1332,14 +1336,6 @@ export const deleteHubTasks = (input: DeleteHubTasksInput): string => {
   return output;
 };
 
-const formatCleanupCandidateLine = (
-  branch: HubManagedBranchCleanupCandidate,
-  suffix: string,
-): string =>
-  suffix.length > 0
-    ? `  - ${branch.branch} (${suffix})`
-    : `  - ${branch.branch}`;
-
 const formatCleanupReasonSuffix = (
   reasons: readonly HubManagedBranchCleanupSkipDetail[],
 ): string =>
@@ -1363,28 +1359,33 @@ const selectSafeHistoricalCleanupCandidates = (
 ): readonly HubManagedBranchCleanupCandidate[] =>
   evaluation.unownedCandidates.filter(canDeleteHistoricalCandidate);
 
-const formatHistoricalCleanupCandidateNote = (
+/** Opt-in hint for the unowned group; skip reasons live in `detailDim`. */
+const formatUnownedCleanupTrailingHint = (
   candidate: HubManagedBranchCleanupCandidate,
   includeUnowned: boolean,
 ): string => {
-  const historicalSafe = canDeleteHistoricalCandidate(candidate);
-  const reasonSuffix = formatCleanupReasonSuffix(candidate.skipReasons);
-
-  if (includeUnowned && historicalSafe) {
-    return "safe historical branch included by --include-unowned";
+  if (canDeleteHistoricalCandidate(candidate)) {
+    return includeUnowned
+      ? "safe historical branch included by --include-unowned"
+      : "Use --include-unowned to delete safe historical branches";
   }
 
-  if (historicalSafe) {
-    return "Use --include-unowned to delete safe historical branches";
-  }
-
-  if (includeUnowned) {
-    return reasonSuffix;
-  }
-
-  const prefix = "Use --include-unowned to delete safe historical branches";
-  return reasonSuffix.length > 0 ? `${prefix}; ${reasonSuffix}` : prefix;
+  // Unsafe historical branches cannot be deleted via --include-unowned.
+  // Keep the opt-in hint only when the flag is off; when it is on, reasons alone
+  // explain why the branch stays (see `detailDim`).
+  return includeUnowned
+    ? ""
+    : "Use --include-unowned to delete safe historical branches";
 };
+
+const formatNonOwnershipCleanupReasons = (
+  candidate: HubManagedBranchCleanupCandidate,
+): string =>
+  formatCleanupReasonSuffix(
+    candidate.skipReasons.filter(
+      (detail) => detail.reason !== "missing_ownership",
+    ),
+  );
 
 const formatHistoricalCleanupNextAction = (
   options?: FormatHubManagedBranchCleanupDiagnosticsLinesOptions,
@@ -1478,6 +1479,166 @@ const appendCleanupDiagnosticsSection = (
   }
 };
 
+const CLEANUP_KV_GUTTER = 8;
+
+type CleanupGroupItem = SectionGroupBlock["items"][number];
+
+const cleanupOwnershipLabel = (
+  candidate: HubManagedBranchCleanupCandidate,
+): string => (candidate.ownership ? candidate.ownership.taskId : "managed");
+
+const toCleanupManagedGroupItem = (
+  candidate: HubManagedBranchCleanupCandidate,
+  detailDim?: string,
+): CleanupGroupItem => ({
+  id: cleanupOwnershipLabel(candidate),
+  title: candidate.branch,
+  ...(detailDim && detailDim.length > 0 ? { detailDim } : {}),
+});
+
+const toCleanupSafeGroupItem = (
+  candidate: HubManagedBranchCleanupCandidate,
+): CleanupGroupItem => toCleanupManagedGroupItem(candidate);
+
+const toCleanupBlockedGroupItem = (
+  candidate: HubManagedBranchCleanupCandidate,
+): CleanupGroupItem =>
+  toCleanupManagedGroupItem(
+    candidate,
+    formatCleanupReasonSuffix(candidate.skipReasons),
+  );
+
+const toCleanupUnownedGroupItem = (
+  candidate: HubManagedBranchCleanupCandidate,
+  includeUnowned: boolean,
+): CleanupGroupItem => {
+  const trailingDim = formatUnownedCleanupTrailingHint(
+    candidate,
+    includeUnowned,
+  );
+  const detailDim = formatNonOwnershipCleanupReasons(candidate);
+  return {
+    id: "historical",
+    title: candidate.branch,
+    ...(trailingDim.length > 0 ? { trailingDim } : {}),
+    ...(detailDim.length > 0 ? { detailDim } : {}),
+  };
+};
+
+const optionalCleanupProse = (
+  body: string | undefined,
+): SectionProseBlock | undefined =>
+  body === undefined || body.length === 0
+    ? undefined
+    : { kind: "prose", body };
+
+const deletedBranchesProse = (
+  label: string,
+  branches: readonly string[] | undefined,
+): SectionProseBlock | undefined =>
+  branches && branches.length > 0
+    ? { kind: "prose", body: `${label}: ${branches.join(", ")}` }
+    : undefined;
+
+const buildCleanupGroup = (
+  symbol: SectionGroupBlock["symbol"],
+  severity: SectionSeverity,
+  name: string,
+  items: readonly CleanupGroupItem[],
+): SectionGroupBlock => ({
+  kind: "group",
+  symbol,
+  severity,
+  name,
+  count: items.length,
+  items,
+});
+
+export interface HubManagedBranchCleanupModel {
+  readonly header: SectionHeaderBlock;
+  readonly identity: SectionKvBlock;
+  readonly preview?: SectionProseBlock;
+  readonly deletedManaged?: SectionProseBlock;
+  readonly deletedHistorical?: SectionProseBlock;
+  readonly groups: readonly SectionGroupBlock[];
+}
+
+/**
+ * Build the cleanup section model. Three fixed groups map the evaluator's
+ * safe / blocked / unowned buckets onto severity-colored section blocks.
+ */
+export const buildHubManagedBranchCleanupModel = (
+  evaluation: HubManagedBranchCleanupEvaluation,
+  options?: FormatHubManagedBranchCleanupLinesOptions,
+): HubManagedBranchCleanupModel => {
+  const includeUnowned = options?.includeUnowned === true;
+  const safeItems = evaluation.managedSafeCandidates.map(
+    toCleanupSafeGroupItem,
+  );
+  const blockedItems = evaluation.managedBlockedBranches.map(
+    toCleanupBlockedGroupItem,
+  );
+  const unownedItems = evaluation.unownedCandidates.map((candidate) =>
+    toCleanupUnownedGroupItem(candidate, includeUnowned),
+  );
+
+  return {
+    header: {
+      kind: "header",
+      title: "Hub managed branch cleanup",
+    },
+    identity: {
+      kind: "kv",
+      gutter: CLEANUP_KV_GUTTER,
+      rows: [
+        { key: "target", value: evaluation.targetBranch },
+        { key: "head", value: evaluation.targetHead },
+      ],
+    },
+    preview: optionalCleanupProse(
+      options?.dryRun === true
+        ? "Preview: no git refs will be deleted."
+        : undefined,
+    ),
+    deletedManaged: deletedBranchesProse(
+      "Deleted managed branches",
+      options?.deletedManagedBranches,
+    ),
+    deletedHistorical: deletedBranchesProse(
+      "Deleted historical branches",
+      options?.deletedHistoricalBranches,
+    ),
+    groups: [
+      buildCleanupGroup("✓", "success", "safe managed", safeItems),
+      buildCleanupGroup("!", "warn", "blocked managed", blockedItems),
+      buildCleanupGroup("●", "info", "unowned historical", unownedItems),
+    ],
+  };
+};
+
+/** Map the cleanup model to blocks for `d.section` / `renderSection`. */
+export const hubManagedBranchCleanupModelToBlocks = (
+  model: HubManagedBranchCleanupModel,
+): readonly SectionBlock[] => [
+  model.header,
+  model.identity,
+  ...(model.preview ? [model.preview] : []),
+  ...(model.deletedManaged ? [model.deletedManaged] : []),
+  ...(model.deletedHistorical ? [model.deletedHistorical] : []),
+  ...model.groups,
+];
+
+/** Plain cleanup text via the same blocks the live CLI renders with `d.section`. */
+export const formatHubManagedBranchCleanupLines = (
+  evaluation: HubManagedBranchCleanupEvaluation,
+  options?: FormatHubManagedBranchCleanupLinesOptions,
+): readonly string[] =>
+  flattenSectionForLog(
+    hubManagedBranchCleanupModelToBlocks(
+      buildHubManagedBranchCleanupModel(evaluation, options),
+    ),
+  );
+
 export const planHubManagedBranchCleanup = (
   evaluation: HubManagedBranchCleanupEvaluation,
   options?: Pick<FormatHubManagedBranchCleanupLinesOptions, "includeUnowned">,
@@ -1497,90 +1658,6 @@ export const planHubManagedBranchCleanup = (
     historicalBranches,
     totalBranches: managedBranches.length + historicalBranches.length,
   };
-};
-
-export const formatHubManagedBranchCleanupLines = (
-  evaluation: HubManagedBranchCleanupEvaluation,
-  options?: FormatHubManagedBranchCleanupLinesOptions,
-): readonly string[] => {
-  const lines: string[] = ["Hub managed branch cleanup"];
-  lines.push(`Target branch: ${evaluation.targetBranch}`);
-  lines.push(`Target head: ${evaluation.targetHead}`);
-
-  if (options?.dryRun) {
-    lines.push("Preview: no git refs will be deleted.");
-  }
-
-  if (
-    options?.deletedManagedBranches &&
-    options.deletedManagedBranches.length
-  ) {
-    lines.push(
-      `Deleted managed branches: ${options.deletedManagedBranches.join(", ")}`,
-    );
-  }
-  if (
-    options?.deletedHistoricalBranches &&
-    options.deletedHistoricalBranches.length
-  ) {
-    lines.push(
-      `Deleted historical branches: ${options.deletedHistoricalBranches.join(", ")}`,
-    );
-  }
-
-  lines.push("");
-  lines.push(
-    `Safe managed branches (${evaluation.managedSafeCandidates.length})`,
-  );
-  if (evaluation.managedSafeCandidates.length === 0) {
-    lines.push("  - none");
-  } else {
-    for (const candidate of evaluation.managedSafeCandidates) {
-      const taskSuffix = candidate.ownership
-        ? `task ${candidate.ownership.taskId}`
-        : "managed";
-      lines.push(formatCleanupCandidateLine(candidate, taskSuffix));
-    }
-  }
-
-  lines.push("");
-  lines.push(
-    `Blocked managed branches (${evaluation.managedBlockedBranches.length})`,
-  );
-  if (evaluation.managedBlockedBranches.length === 0) {
-    lines.push("  - none");
-  } else {
-    for (const candidate of evaluation.managedBlockedBranches) {
-      const taskSuffix = candidate.ownership
-        ? `task ${candidate.ownership.taskId}`
-        : "managed";
-      const reasonSuffix = formatCleanupReasonSuffix(candidate.skipReasons);
-      lines.push(
-        formatCleanupCandidateLine(
-          candidate,
-          `${taskSuffix}${reasonSuffix.length > 0 ? ` - ${reasonSuffix}` : ""}`,
-        ),
-      );
-    }
-  }
-
-  lines.push("");
-  lines.push(
-    `Unowned historical candidates (${evaluation.unownedCandidates.length})`,
-  );
-  if (evaluation.unownedCandidates.length === 0) {
-    lines.push("  - none");
-  } else {
-    for (const candidate of evaluation.unownedCandidates) {
-      const note = formatHistoricalCleanupCandidateNote(
-        candidate,
-        options?.includeUnowned === true,
-      );
-      lines.push(formatCleanupCandidateLine(candidate, note));
-    }
-  }
-
-  return lines;
 };
 
 export const formatHubManagedBranchCleanupDiagnosticsLines = (
@@ -1856,27 +1933,24 @@ export const addHubTaskDependency = (
 const cleanJoinedValues = (values: readonly string[]): string =>
   values.filter((value) => value.trim().length > 0).join(", ");
 
-const formatInlineObject = (
-  value: Readonly<Record<string, unknown>>,
-): string => {
-  const entries = Object.entries(value);
-  if (entries.length === 0) {
-    return "{}";
+/** Format leftover detail metadata / claim blobs for kv rows (scalars plain, else JSON). */
+const formatDetailMetadataValue = (value: unknown): string => {
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value === null
+  ) {
+    return String(value);
   }
   return JSON.stringify(value);
 };
 
-const formatComment = (comment: BeadsTaskComment): string => {
-  const parts: string[] = [];
-  if (comment.author) {
-    parts.push(comment.author);
-  }
-  if (comment.createdAt) {
-    parts.push(comment.createdAt);
-  }
-  const prefix = parts.length > 0 ? `${parts.join(" · ")}: ` : "";
-  return `${prefix}${comment.body ?? ""}`.trim();
-};
+const toCommentProseEntry = (comment: BeadsTaskComment): SectionProseEntry => ({
+  ...(comment.author ? { lead: comment.author } : {}),
+  ...(comment.createdAt ? { meta: comment.createdAt } : {}),
+  body: comment.body ?? "",
+});
 
 export const filterHubTasksByPrdWarning = (
   tasks: readonly HubTaskProjection[],
@@ -1905,6 +1979,12 @@ export interface TaskBoardRow {
   readonly title: string;
   readonly trailingDim?: string;
   readonly remoteBadge?: TaskBoardRemoteBadge;
+  /**
+   * Whether the task is an interrupted execution (per the shared detector), so
+   * `tasks list` flags it at a glance. Additive to the JSON shape: omitted
+   * (not `false`) for healthy tasks so existing JSON consumers see no change.
+   */
+  readonly interrupted?: boolean;
 }
 
 export interface TaskBoardModel {
@@ -1925,21 +2005,34 @@ export interface BuildTaskBoardModelInput {
   readonly warningFilter?: PrdWarningSeverity;
   readonly showAll: boolean;
   readonly perGroupLimit?: number;
+  /**
+   * Tasks the shared interrupted-execution detector flags as interrupted, so
+   * the board can badge them at a glance. The caller resolves this set (loading
+   * worktree leases and running `detectInterruptedHubTaskExecutions`) so the
+   * model stays pure over its inputs and testable without a filesystem. When
+   * omitted (or empty) no task is badged — the common healthy-board path.
+   */
+  readonly interruptedTaskIds?: ReadonlySet<string>;
 }
 
-const TASK_BOARD_BUCKETS = [
+/** Stable board-bucket axis order (todo → in_progress → attention → done). */
+export const TASK_BOARD_BUCKETS = [
   "todo",
   "in_progress",
   "attention",
   "done",
 ] as const satisfies readonly TaskBoardDisplayBucket[];
 
+// Reused empty set so the common healthy-board path (no interrupted tasks)
+// never allocates a fresh `new Set()` and `interruptedTaskIds.has` is a no-op.
+const EMPTY_SET: ReadonlySet<string> = new Set();
+
 const TASK_BOARD_BUCKET_META: Readonly<
   Record<
     TaskBoardDisplayBucket,
     {
       readonly symbol: SectionGroupBlock["symbol"];
-      readonly severity: SectionGroupBlock["severity"];
+      readonly severity: SectionSeverity;
     }
   >
 > = {
@@ -1971,12 +2064,39 @@ export const mapHubStatusToTaskBoardBucket = (
   }
 };
 
+/** Symbol + severity for a Hub status on the board-bucket axis. */
+export const hubTaskStatusBoardPresentation = (
+  status: HubTaskStatus,
+): {
+  readonly bucket: TaskBoardDisplayBucket;
+  readonly symbol: SectionGroupBlock["symbol"];
+  readonly severity: SectionSeverity;
+} => {
+  const bucket = mapHubStatusToTaskBoardBucket(status);
+  const meta = TASK_BOARD_BUCKET_META[bucket];
+  return { bucket, symbol: meta.symbol, severity: meta.severity };
+};
+
+/** Presentation severity for a Hub status value on `tasks show` (board-bucket axis). */
+export const hubTaskStatusValueSeverity = (
+  status: HubTaskStatus,
+): SectionSeverity => hubTaskStatusBoardPresentation(status).severity;
+
 const formatTaskCountLabel = (count: number): string =>
   count === 1 ? "1 task" : `${count} tasks`;
 
+const INTERRUPTED_TRAILING_DIM = "⚠ interrupted";
+
 const taskBoardItemTrailingDim = (
   task: HubTaskProjection,
+  interrupted: boolean,
 ): string | undefined => {
+  // An interrupted execution is the most actionable trailing signal — the task
+  // is stuck mid-run and needs `archloop tasks recover` — so it wins over the
+  // PRD-warning and owner markers that would otherwise occupy this slot.
+  if (interrupted) {
+    return INTERRUPTED_TRAILING_DIM;
+  }
   if (readPrdWarningFromTask(task)) {
     return "⚠ prd-warn";
   }
@@ -2035,14 +2155,18 @@ export const deriveTaskBoardRemoteBadge = (
 // `TaskBoardRow` is structurally compatible with `SectionGroupBlock`'s item
 // type (`detailDim` is optional there), so the same object doubles as the
 // group-item shape — no re-projection needed.
-const toTaskBoardRow = (task: HubTaskProjection): TaskBoardRow => {
-  const trailingDim = taskBoardItemTrailingDim(task);
+const toTaskBoardRow = (
+  task: HubTaskProjection,
+  interrupted: boolean,
+): TaskBoardRow => {
+  const trailingDim = taskBoardItemTrailingDim(task, interrupted);
   const remoteBadge = deriveTaskBoardRemoteBadge(task);
   return {
     id: task.id,
     title: task.title,
     ...(trailingDim ? { trailingDim } : {}),
     ...(remoteBadge ? { remoteBadge } : {}),
+    ...(interrupted ? { interrupted: true } : {}),
   };
 };
 
@@ -2051,6 +2175,7 @@ const buildTaskBoardGroup = (
   tasks: readonly HubTaskProjection[],
   showAll: boolean,
   perGroupLimit: number,
+  interruptedTaskIds: ReadonlySet<string>,
   displayName?: string,
 ): SectionGroupBlock | undefined => {
   if (tasks.length === 0) {
@@ -2075,7 +2200,9 @@ const buildTaskBoardGroup = (
           footerDim: `… ${tasks.length - visibleTasks.length} more`,
         }
       : {}),
-    items: visibleTasks.map(toTaskBoardRow),
+    items: visibleTasks.map((task) =>
+      toTaskBoardRow(task, interruptedTaskIds.has(task.id)),
+    ),
   };
 };
 
@@ -2133,6 +2260,7 @@ export const buildHubTaskBoardModel = (
   input: BuildTaskBoardModelInput,
 ): TaskBoardModel => {
   const perGroupLimit = input.perGroupLimit ?? 5;
+  const interruptedTaskIds = input.interruptedTaskIds ?? EMPTY_SET;
   const visibleTasks = input.warningFilter
     ? filterHubTasksByPrdWarning(input.board.tasks, input.warningFilter)
     : input.board.tasks;
@@ -2178,6 +2306,7 @@ export const buildHubTaskBoardModel = (
       bucketTasks[bucket],
       input.showAll,
       perGroupLimit,
+      interruptedTaskIds,
       bucket === "attention" ? attentionDisplay.label : undefined,
     );
     if (!group) {
@@ -2227,7 +2356,9 @@ export const buildHubTaskBoardModel = (
     ...(emptyMessage ? { emptyMessage } : {}),
     groups,
     rows: TASK_BOARD_BUCKETS.flatMap((bucket) =>
-      bucketTasks[bucket].map(toTaskBoardRow),
+      bucketTasks[bucket].map((task) =>
+        toTaskBoardRow(task, interruptedTaskIds.has(task.id)),
+      ),
     ),
     footer: {
       kind: "footer",
@@ -2336,6 +2467,7 @@ const buildTaskDetailIdentity = (task: HubTaskProjection): SectionKvBlock => {
   const statusRow: SectionKvBlock["rows"][number] = {
     key: "status",
     value: task.hubStatus,
+    valueSeverity: hubTaskStatusValueSeverity(task.hubStatus),
   };
   if (task.beadsStatus) {
     rows.push({
@@ -2365,7 +2497,10 @@ const buildTaskDetailIdentity = (task: HubTaskProjection): SectionKvBlock => {
     rows.push({ key: "runs", value: cleanJoinedValues(task.runRefs) });
   }
   if (task.claim) {
-    rows.push({ key: "claim", value: formatInlineObject(task.claim.raw) });
+    rows.push({
+      key: "claim",
+      value: formatDetailMetadataValue(task.claim.raw),
+    });
     rows.push({ key: "claim state", value: task.claimState ?? "stale" });
   }
 
@@ -2382,8 +2517,8 @@ const buildTaskDetailIdentity = (task: HubTaskProjection): SectionKvBlock => {
   }
 
   const leftover = leftoverDetailMetadata(task.metadata);
-  if (Object.keys(leftover).length > 0) {
-    rows.push({ key: "metadata", value: formatInlineObject(leftover) });
+  for (const [key, value] of Object.entries(leftover)) {
+    rows.push({ key, value: formatDetailMetadataValue(value) });
   }
 
   return {
@@ -2399,10 +2534,13 @@ const buildTaskDetailComments = (
   if (task.comments.length === 0) {
     return undefined;
   }
+  const entries = task.comments.map(toCommentProseEntry);
   return {
     kind: "prose",
     title: `comments · ${task.comments.length}`,
-    body: task.comments.map((comment) => formatComment(comment)).join("\n"),
+    // Keep body in lockstep with flattenSectionForLog / plain rendering.
+    body: entries.map((entry) => formatSectionProseEntry(entry)).join("\n"),
+    entries,
   };
 };
 

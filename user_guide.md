@@ -136,11 +136,14 @@ npx archloop tasks from-prd <prd-ref>
 npx archloop tasks comment <task-id>
 npx archloop tasks doctor
 npx archloop tasks repair-state <task-id>
+npx archloop tasks recover --stale
 npx archloop tasks delete <task-id> --dry-run
 ```
 
 `doctor` 是只读诊断。`repair-state` 只修复本地 archLoop 管理的状态字段；删除
-本地任务不会自动删除 GitHub Issue。
+本地任务不会自动删除 GitHub Issue。`tasks list` 会把没有存活 worktree lease 的
+执行中任务标记为 `⚠ interrupted`；`recover --stale` 默认只预览所有中断任务的
+恢复路径，使用 `--yes` 或交互确认后才批量应用。
 
 ## 7 GitHub Issues 同步
 
@@ -189,6 +192,11 @@ npx archloop run --flow with-review
 任务型 Flow 默认按批次选择任务。若同一个 Flow 存在未完成的待合并批次，
 archLoop 会先恢复该批次，再领取新任务。
 
+进程中断后再次执行同一个 `archloop run`，启动阶段会根据已经完成的实现或评审
+事件把任务恢复到下一个安全阶段，并保留已有分支和 worktree 内容。失败任务的
+`fix` 指引使用 `tasks recover --stale`；只有运行中断但没有失败任务时，指引会让
+用户直接重新执行 `archloop run`。
+
 ### 8.3 自动化输出
 
 ```bash
@@ -215,16 +223,17 @@ npx archloop tasks recover <task-id>
 
 常见情况：
 
-| 现象                     | 处理方式                                           |
-| ------------------------ | -------------------------------------------------- | ------- |
-| 没有默认项目             | `project list` 后执行 `project select`             |
-| 仓库路径失效             | 使用 `project relink` 指向新的 Git 仓库路径        |
-| role 或凭据缺失          | 使用 `agent-config show`、`env show`、`auth show`  |
-| 没有初始提交             | 先在目标仓库创建一次 Git 提交                      |
-| 任务状态和运行事件不一致 | 先运行 `tasks doctor`，再按建议 repair 或 recover  |
-| 合并被脏文件阻塞         | 提交、暂存或放弃 CLI 列出的重叠文件后重试同一 Flow |
-| GitHub 同步冲突          | 使用 `tasks resolve --keep local                   | remote` |
-| 工作分支仍有可恢复内容   | 使用 `tasks recover`，不要手动强删 worktree 或分支 |
+| 现象                     | 处理方式                                               |
+| ------------------------ | ------------------------------------------------------ |
+| 没有默认项目             | `project list` 后执行 `project select`                 |
+| 仓库路径失效             | 使用 `project relink` 指向新的 Git 仓库路径            |
+| role 或凭据缺失          | 使用 `agent-config show`、`env show`、`auth show`      |
+| 没有初始提交             | 先在目标仓库创建一次 Git 提交                          |
+| 运行被中断               | 重新执行同一 Flow，或先用 `tasks recover --stale` 预览 |
+| 任务状态和运行事件不一致 | 先运行 `tasks doctor`，再按建议 repair 或 recover      |
+| 合并被脏文件阻塞         | 提交、暂存或放弃 CLI 列出的重叠文件后重试同一 Flow     |
+| GitHub 同步冲突          | 使用 `tasks resolve --keep local` 或 `--keep remote`   |
+| 工作分支仍有可恢复内容   | 使用 `tasks recover`，不要手动强删 worktree 或分支     |
 
 完整诊断索引见
 [Troubleshooting](./docs/content/docs/reference/troubleshooting.mdx)。
@@ -272,3 +281,4 @@ API 参数、返回值和生命周期说明见
 | ---------- | ------------------------------------------------------- |
 | 2026-06-12 | 创建 Unified Interface 用户指南                         |
 | 2026-08-01 | 按用户任务重组指南，统一 Hub 优先路径并拆出详细参考链接 |
+| 2026-08-13 | 补充中断自动恢复、批量恢复与任务诊断输出说明            |

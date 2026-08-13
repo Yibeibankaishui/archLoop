@@ -192,10 +192,12 @@ import type {
   PrdWarningSeverity,
 } from "./hubPrdDecomposition.js";
 import {
+  buildHubManagedBranchCleanupModel,
   buildHubTaskBoardModel,
   buildHubTaskCreateSummaryModel,
   buildHubTaskDetailModel,
   formatTaskBoardJson,
+  hubManagedBranchCleanupModelToBlocks,
   hubTaskCreateSummaryModelToBlocks,
   taskBoardModelToBlocks,
   taskDetailModelToBlocks,
@@ -204,14 +206,20 @@ import {
   createHubTask,
   deleteHubTasks,
   formatHubManagedBranchCleanupDiagnosticsLines,
-  formatHubManagedBranchCleanupLines,
   loadHubTask,
   loadHubTaskBoard,
   planHubManagedBranchCleanup,
   resolveHubTaskSelector,
   resolveHubTaskSelectors,
   selectHubFlowTasks,
+  type HubTaskBoard,
 } from "./taskBoard.js";
+import { detectInterruptedHubTaskExecutions } from "./hubTaskInterruptedExecutionDetector.js";
+import {
+  listWorktreeLeases,
+  resolveWorktreeLeasesDir,
+} from "./worktreeLeaseStore.js";
+import { existsSync } from "node:fs";
 import { waitForKeypress } from "./keypress.js";
 import {
   RUN_START_DEBOUNCE_MS,
@@ -233,8 +241,10 @@ import {
 import {
   buildHubTaskRecoverSummaryModel,
   formatHubRecoveryComment,
+  formatStaleHubTaskRecoveryLines,
   hubTaskRecoverSummaryModelToBlocks,
   recoverHubTask,
+  recoverStaleHubTasks,
 } from "./hubTaskRecover.js";
 import {
   buildConflictFieldValues,
@@ -248,9 +258,11 @@ import {
   type HubConflictKeep,
 } from "./hubTaskResolve.js";
 import {
+  buildHubTaskStateDoctorModel,
+  buildHubTaskStateRepairModel,
   doctorHubTaskState,
-  formatHubTaskStateDoctorLines,
-  formatHubTaskStateRepairLines,
+  hubTaskStateDoctorModelToBlocks,
+  hubTaskStateRepairModelToBlocks,
   repairHubTaskState,
 } from "./hubTaskStateDoctor.js";
 import {
@@ -1804,6 +1816,9 @@ const resolveProjectTargetStatus = (
   });
 
 const taskIdArg = Args.text({ name: "id" });
+// `tasks recover` accepts an optional id: required for single-task recovery,
+// omitted with --stale for batch recovery across the whole board.
+const taskRecoverIdArg = Args.text({ name: "id" }).pipe(Args.optional);
 const taskTitleArg = Args.text({ name: "title" });
 const taskOriginOption = Options.text("origin").pipe(
   Options.withDescription(
@@ -1848,6 +1863,18 @@ const taskDeleteYesOption = Options.boolean("yes").pipe(
 const taskRepairStateYesOption = Options.boolean("yes").pipe(
   Options.withDescription(
     "Apply local Beads task-state repair after previewing planned changes.",
+  ),
+  Options.withDefault(false),
+);
+const taskRecoverStaleOption = Options.boolean("stale").pipe(
+  Options.withDescription(
+    "Recover every interrupted-execution task on the board in one batch (dry-run preview by default; apply with --yes).",
+  ),
+  Options.withDefault(false),
+);
+const taskRecoverYesOption = Options.boolean("yes").pipe(
+  Options.withDescription(
+    "Apply a batch --stale recovery after previewing the planned routing. Required for non-interactive batch recovery.",
   ),
   Options.withDefault(false),
 );
@@ -1979,6 +2006,34 @@ const resolveTaskCommandRepoRoot = (
     (target) => target.repoRoot,
   );
 
+// Reused empty set so the common healthy-board path (no locks directory) never
+// allocates a fresh `new Set()` for the interrupted badge.
+const EMPTY_INTERRUPTED_TASK_IDS: ReadonlySet<string> = new Set();
+
+/**
+ * Resolve the set of interrupted-execution task ids on a board, for the
+ * `tasks list` interrupted badge. The lease load the detector needs is gated
+ * behind a cheap check: if the locks directory does not exist (the common
+ * healthy-board path — no run has ever acquired a worktree lease here), the
+ * badge is skipped entirely so `tasks list` incurs no extra cost. When the
+ * directory exists, leases are loaded and the shared detector is run against
+ * the supplied board, returning exactly the interrupted task ids.
+ */
+const resolveInterruptedTaskIds = (
+  repoRoot: string,
+  board: HubTaskBoard,
+): ReadonlySet<string> => {
+  if (!existsSync(resolveWorktreeLeasesDir(repoRoot))) {
+    return EMPTY_INTERRUPTED_TASK_IDS;
+  }
+  const leases = listWorktreeLeases(repoRoot);
+  return new Set(
+    detectInterruptedHubTaskExecutions(board.tasks, leases).map(
+      (entry) => entry.taskId,
+    ),
+  );
+};
+
 const normalizeTaskOrigin = (
   value: string,
 ): "manual" | "user-feedback" | undefined => {
@@ -2073,11 +2128,16 @@ const tasksListCommand = Command.make(
         try: () => loadHubTaskBoard(target.repoRoot),
         catch: toTaskBoardError,
       });
+      const interruptedTaskIds = yield* Effect.try({
+        try: () => resolveInterruptedTaskIds(target.repoRoot, board),
+        catch: toTaskBoardError,
+      });
       const model = buildHubTaskBoardModel({
         projectName: target.projectName,
         board,
         warningFilter,
         showAll: all,
+        ...(interruptedTaskIds.size > 0 ? { interruptedTaskIds } : {}),
       });
       if (json) {
         yield* d.plain(formatTaskBoardJson(model));
@@ -2546,13 +2606,98 @@ const tasksCommentCommand = Command.make(
 
 const tasksRecoverCommand = Command.make(
   "recover",
-  { id: taskIdArg, project: projectTargetOption },
-  ({ id, project }) =>
+  {
+    id: taskRecoverIdArg,
+    stale: taskRecoverStaleOption,
+    yes: taskRecoverYesOption,
+    project: projectTargetOption,
+  },
+  ({ id, stale, yes, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
       const cwd = yield* resolveTaskCommandRepoRoot(project);
+
+      if (stale) {
+        const idValue = optionalTextValue(id);
+        if (idValue !== undefined) {
+          return yield* Effect.fail(
+            new TaskBoardError({
+              message:
+                "archloop tasks recover --stale recovers every interrupted task on the board; pass a task id without --stale for single-task recovery.",
+            }),
+          );
+        }
+
+        const preview = yield* Effect.tryPromise({
+          try: () => recoverStaleHubTasks({ cwd }),
+          catch: toTaskBoardError,
+        });
+
+        for (const line of formatStaleHubTaskRecoveryLines(preview)) {
+          yield* d.text(line);
+        }
+
+        if (preview.entries.length === 0) {
+          return;
+        }
+
+        const isTTY = process.stdin.isTTY === true;
+        if (!yes && !isTTY) {
+          return yield* Effect.fail(
+            new TaskBoardError({
+              message:
+                "archloop tasks recover --stale mutates local Beads state. Re-run with --yes in non-interactive mode after reviewing the preview.",
+            }),
+          );
+        }
+
+        if (!yes && isTTY) {
+          const approved = yield* Effect.tryPromise({
+            try: async () => {
+              const result = await clack.confirm({
+                message: `Apply batch recovery to ${preview.entries.length} interrupted task${preview.entries.length === 1 ? "" : "s"}?`,
+                initialValue: false,
+              });
+              if (clack.isCancel(result)) {
+                throw new TaskBoardError({
+                  message: "Batch stale recovery cancelled.",
+                });
+              }
+              return result === true;
+            },
+            catch: toTaskBoardError,
+          });
+
+          if (!approved) {
+            return yield* Effect.fail(
+              new TaskBoardError({
+                message: "Batch stale recovery cancelled.",
+              }),
+            );
+          }
+        }
+
+        const applied = yield* Effect.tryPromise({
+          try: () => recoverStaleHubTasks({ cwd, yes: true }),
+          catch: toTaskBoardError,
+        });
+        for (const line of formatStaleHubTaskRecoveryLines(applied)) {
+          yield* d.text(line);
+        }
+        return;
+      }
+
+      const idValue = optionalTextValue(id);
+      if (idValue === undefined) {
+        return yield* Effect.fail(
+          new TaskBoardError({
+            message:
+              "archloop tasks recover requires a task id, or --stale to recover every interrupted task on the board.",
+          }),
+        );
+      }
       const task = yield* Effect.try({
-        try: () => resolveHubTaskSelector(cwd, id),
+        try: () => resolveHubTaskSelector(cwd, idValue),
         catch: toTaskBoardError,
       });
       const result = yield* Effect.tryPromise({
@@ -2706,7 +2851,9 @@ const tasksDoctorCommand = Command.make(
         catch: toTaskBoardError,
       });
 
-      for (const line of formatHubTaskStateDoctorLines(result)) {
+      const model = buildHubTaskStateDoctorModel(result);
+      yield* d.section("", hubTaskStateDoctorModelToBlocks(model));
+      for (const line of result.managedBranchCleanupDiagnostics) {
         yield* d.text(line);
       }
     }),
@@ -2735,12 +2882,15 @@ const tasksCleanupCommand = Command.make(
       const managedDeletionCount = cleanupPlan.managedBranches.length;
       const historicalDeletionCount = cleanupPlan.historicalBranches.length;
 
-      for (const line of formatHubManagedBranchCleanupLines(evaluation, {
-        dryRun,
-        includeUnowned,
-      })) {
-        yield* d.text(line);
-      }
+      yield* d.section(
+        "",
+        hubManagedBranchCleanupModelToBlocks(
+          buildHubManagedBranchCleanupModel(evaluation, {
+            dryRun,
+            includeUnowned,
+          }),
+        ),
+      );
 
       if (dryRun) {
         yield* d.status("Dry run for managed branch cleanup.", "info");
@@ -2803,13 +2953,16 @@ const tasksCleanupCommand = Command.make(
         catch: toTaskBoardError,
       });
 
-      for (const line of formatHubManagedBranchCleanupLines(result.evaluation, {
-        includeUnowned,
-        deletedManagedBranches: result.deletedManagedBranches,
-        deletedHistoricalBranches: result.deletedHistoricalBranches,
-      })) {
-        yield* d.text(line);
-      }
+      yield* d.section(
+        "",
+        hubManagedBranchCleanupModelToBlocks(
+          buildHubManagedBranchCleanupModel(result.evaluation, {
+            includeUnowned,
+            deletedManagedBranches: result.deletedManagedBranches,
+            deletedHistoricalBranches: result.deletedHistoricalBranches,
+          }),
+        ),
+      );
 
       yield* d.status("Completed managed branch cleanup.", "success");
     }),
@@ -2831,9 +2984,10 @@ const tasksRepairStateCommand = Command.make(
         catch: toTaskBoardError,
       });
 
-      for (const line of formatHubTaskStateRepairLines(preview)) {
-        yield* d.text(line);
-      }
+      yield* d.section(
+        "",
+        hubTaskStateRepairModelToBlocks(buildHubTaskStateRepairModel(preview)),
+      );
 
       if (preview.plannedRepairs.length === 0) {
         return;
@@ -2879,9 +3033,10 @@ const tasksRepairStateCommand = Command.make(
         try: () => repairHubTaskState({ cwd, taskSelector: id, yes: true }),
         catch: toTaskBoardError,
       });
-      for (const line of formatHubTaskStateRepairLines(applied)) {
-        yield* d.text(line);
-      }
+      yield* d.section(
+        "",
+        hubTaskStateRepairModelToBlocks(buildHubTaskStateRepairModel(applied)),
+      );
     }),
 );
 

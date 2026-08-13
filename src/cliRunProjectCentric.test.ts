@@ -530,12 +530,12 @@ describe("archloop run project targeting", () => {
     const originalColumns = process.stdout.columns;
     const originalTerm = process.env.TERM;
     const chunks: string[] = [];
-    const write = vi
-      .spyOn(process.stdout, "write")
-      .mockImplementation(((chunk: string | Uint8Array) => {
-        chunks.push(String(chunk));
-        return true;
-      }) as typeof process.stdout.write);
+    const write = vi.spyOn(process.stdout, "write").mockImplementation(((
+      chunk: string | Uint8Array,
+    ) => {
+      chunks.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write);
     setTerminalTtyState(true);
     setStdoutColumns(120);
     process.env.TERM = "xterm-256color";
@@ -1356,12 +1356,7 @@ describe("archloop run project targeting", () => {
     setTerminalTtyState(true);
     mockWaitForKeypress.mockResolvedValue("start");
 
-    const entries = await runCli([
-      "run",
-      "--flow",
-      "no-review",
-      "--dry-run",
-    ]);
+    const entries = await runCli(["run", "--flow", "no-review", "--dry-run"]);
 
     expect(mockWaitForKeypress).not.toHaveBeenCalled();
     expect(mockRunHubFlow).not.toHaveBeenCalled();
@@ -1938,7 +1933,8 @@ describe("archloop run project targeting", () => {
     const output = chunks.join("");
     expect(output).toContain("task-live-failed");
     expect(output).toContain("implementation failed before host error");
-    expect(output).toContain("archloop run --resume");
+    expect(output).toContain("archloop tasks recover --stale");
+    expect(output).not.toContain("--only-failed");
     expect(output).toContain("\x1b[?25h");
     expect(output).not.toContain("\x1b[1A");
   });
@@ -1970,7 +1966,16 @@ describe("archloop run project targeting", () => {
       .spyOn(process.stdout, "write")
       .mockImplementation((chunk: string | Uint8Array) => {
         const text = String(chunk);
-        if (!failedFinalWrite && text.includes("archloop run --resume")) {
+        // The final scrollback summary is the one write that carries the
+        // failed-run fix footer (`fix   archloop run` for an interrupted run
+        // with no failed task). Match that summary — its `✗ Run failed`
+        // outcome line and the `archloop run` fix footer land in the same
+        // chunk — to simulate a terminal write failure mid-finalization.
+        if (
+          !failedFinalWrite &&
+          text.includes("archloop run") &&
+          text.includes("Run failed")
+        ) {
           failedFinalWrite = true;
           throw new Error("simulated failure terminal write failure");
         }

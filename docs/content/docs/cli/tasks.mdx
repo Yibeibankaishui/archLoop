@@ -16,9 +16,26 @@ description: Reference for local task-board and GitHub synchronization commands.
 | `tasks resolve <selector>`      | Resolve a recorded sync conflict          |
 | `tasks doctor`                  | Audit task state without mutation         |
 | `tasks repair-state <selector>` | Repair the local state projection         |
-| `tasks recover <selector>`      | Recover interrupted or failed execution   |
+| `tasks recover <selector>`      | Recover one interrupted or failed task    |
+| `tasks recover --stale`         | Preview or recover all interrupted tasks  |
 | `tasks cleanup`                 | Preview or perform managed branch cleanup |
 | `tasks delete <selector...>`    | Delete local tasks with safeguards        |
 
 Use `--json` where offered for machine-readable output. Preview synchronization,
 cleanup, and deletion with `--dry-run` before applying them in automation.
+
+`tasks list` groups the board by Hub status and marks tasks stuck in
+`implementing`, `reviewing`, or `merging` without a live worktree lease as
+`⚠ interrupted`. JSON rows expose the same signal as `interrupted: true`.
+`tasks show` uses severity-aware status styling, labeled metadata, and a comment
+timeline. Selectors are full Beads IDs or exact titles, never list ordinals.
+
+`tasks doctor` is read-only and groups state, branch, event, and lease findings
+by severity. `tasks repair-state` previews local Beads projection changes and
+rewrites only archLoop-managed fields after confirmation. It never updates a
+remote GitHub Issue.
+
+`tasks recover --stale` previews the event-aware route for every interrupted
+task. Apply the batch with `--yes` or interactive confirmation. `tasks cleanup`
+groups safe managed, blocked managed, and unowned historical branches; deleting
+safe unowned history additionally requires `--include-unowned`.

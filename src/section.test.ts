@@ -119,11 +119,10 @@ describe("renderSection", () => {
   });
 
   it("applies a two-space left margin on content lines", () => {
-    const lines = renderSection(
-      "",
-      [{ kind: "header", title: "archLoop" }],
-      { width: 80, colorEnabled: false },
-    );
+    const lines = renderSection("", [{ kind: "header", title: "archLoop" }], {
+      width: 80,
+      colorEnabled: false,
+    });
     expect(lines[0]!.startsWith("  ")).toBe(true);
   });
 
@@ -259,13 +258,17 @@ describe("renderSection", () => {
     const fix: SectionBlock = {
       kind: "footer",
       label: "fix",
-      command: "archloop run --resume x --only-failed",
+      command: "archloop tasks recover --stale",
     };
     expect(tip.kind).toBe("footer");
     expect(next.kind).toBe("footer");
     expect(fix.kind).toBe("footer");
-    // @ts-expect-error — fourth label is not in the closed set
-    const bad: SectionBlock = { kind: "footer", label: "summary", command: "x" };
+    const bad: SectionBlock = {
+      kind: "footer",
+      // @ts-expect-error — fourth label is not in the closed set
+      label: "summary",
+      command: "x",
+    };
     void bad;
   });
 });
@@ -284,7 +287,9 @@ describe("flattenSectionForLog", () => {
     expect(text).toContain("title: Slice 2");
     expect(text).toContain("description");
     expect(text).toContain("↳ AutoTuneAgent-2mr");
-    expect(text).toContain("tip   archloop tasks show <id>   ·   archloop tasks pull");
+    expect(text).toContain(
+      "tip   archloop tasks show <id>   ·   archloop tasks pull",
+    );
   });
 });
 
@@ -306,5 +311,104 @@ describe("prose newlines", () => {
       "    alice · 2026-06-11: first",
       "    bob · 2026-06-12: second",
     ]);
+  });
+
+  it("renders structured comment entries with bold author and dim timestamp", () => {
+    const colored = renderSection(
+      "",
+      [
+        {
+          kind: "prose",
+          title: "comments · 1",
+          body: "alice · 2026-06-11T15:00:00Z: Looks good",
+          entries: [
+            {
+              lead: "alice",
+              meta: "2026-06-11T15:00:00Z",
+              body: "Looks good",
+            },
+          ],
+        },
+      ],
+      { width: 80, colorEnabled: true },
+    );
+    const joined = colored.join("\n");
+    expect(joined).toMatch(/\x1b\[/);
+    expect(stripAnsi(joined)).toContain("alice");
+    expect(stripAnsi(joined)).toContain("2026-06-11T15:00:00Z");
+    expect(stripAnsi(joined)).toContain("Looks good");
+
+    const plain = renderSection(
+      "",
+      [
+        {
+          kind: "prose",
+          title: "comments · 1",
+          body: "alice · 2026-06-11T15:00:00Z: Looks good",
+          entries: [
+            {
+              lead: "alice",
+              meta: "2026-06-11T15:00:00Z",
+              body: "Looks good",
+            },
+          ],
+        },
+      ],
+      { width: 80, colorEnabled: false },
+    );
+    expect(plain.join("\n")).not.toMatch(/\x1b\[/);
+    expect(plain).toEqual([
+      "  comments · 1",
+      "    alice · 2026-06-11T15:00:00Z: Looks good",
+    ]);
+  });
+});
+
+describe("kv valueSeverity", () => {
+  it("colors the value by severity and keeps secondary dim", () => {
+    const colored = renderSection(
+      "",
+      [
+        {
+          kind: "kv",
+          gutter: 12,
+          rows: [
+            {
+              key: "status",
+              value: "needs_info",
+              secondary: "(beads: open)",
+              valueSeverity: "error",
+            },
+          ],
+        },
+      ],
+      { width: 80, colorEnabled: true },
+    );
+    const joined = colored.join("\n");
+    expect(joined).toMatch(/\x1b\[/);
+    expect(stripAnsi(joined)).toContain("status");
+    expect(stripAnsi(joined)).toContain("needs_info");
+    expect(stripAnsi(joined)).toContain("(beads: open)");
+
+    const plain = renderSection(
+      "",
+      [
+        {
+          kind: "kv",
+          gutter: 12,
+          rows: [
+            {
+              key: "status",
+              value: "needs_info",
+              secondary: "(beads: open)",
+              valueSeverity: "error",
+            },
+          ],
+        },
+      ],
+      { width: 80, colorEnabled: false },
+    );
+    expect(plain.join("\n")).not.toMatch(/\x1b\[/);
+    expect(stripAnsi(plain.join("\n"))).toContain("needs_info");
   });
 });

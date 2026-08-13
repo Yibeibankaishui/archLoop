@@ -192,7 +192,8 @@ describe("createHubRunLiveDisplay (fallback / append-only path)", () => {
       },
     );
 
-    expect(output).toContain("archloop run --resume 74cc88e3 --only-failed");
+    expect(output).toContain("archloop tasks recover --stale");
+    expect(output).not.toContain("--only-failed");
     expect(output).toContain("\x1b[?25h");
     expect(isTerminalCursorHidden()).toBe(false);
     expect(display.emittedModels().at(-1)?.kind).toBe("run.failed");

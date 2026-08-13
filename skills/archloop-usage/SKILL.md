@@ -101,6 +101,11 @@ Task selectors are full Beads IDs or exact titles, never list ordinals. New
 manual tasks enter the inbox. Triage and PRD decomposition validate structured
 proposals before approved local Beads mutations.
 
+`tasks list` groups tasks by Hub status and marks an in-flight task as
+`⚠ interrupted` when it has no live worktree lease (`interrupted: true` in
+JSON). `tasks show` renders the status by severity, labels remaining metadata,
+and presents comments as a timeline rather than a raw metadata blob.
+
 Task commands use the selected project unless `--project <name>` is supplied.
 
 ## GitHub synchronization
@@ -146,6 +151,12 @@ merge eligible branches serially. `with-review` adds a reviewer stage. An
 unfinished same-flow merge-ready batch is recovered before new tasks are
 claimed.
 
+Re-running `archloop run` also detects tasks left in implementation, review, or
+merge by an interrupted process. It uses completed-phase events to resume at
+the next safe stage and preserves existing branch/worktree changes. The final
+`fix` hint distinguishes a real failed task (`tasks recover --stale`) from an
+interrupted run that can be resumed with `archloop run`.
+
 Use `--output plain` for stable line output and `--output json` for schema
 version 1 JSONL. Proposal flows in explicit machine modes need `--yes` before
 they may apply approved changes.
@@ -165,13 +176,21 @@ Then use the recommended guarded action:
 ```bash
 npx archloop tasks repair-state <task-id>
 npx archloop tasks recover <task-id>
+npx archloop tasks recover --stale
 npx archloop tasks cleanup --dry-run
 ```
 
 - Dirty source files block a merge only when they overlap files changed by the
   merge. Resolve the exact listed paths and rerun the same flow.
+- `tasks doctor` is read-only. It groups diagnostics by severity and reports
+  interrupted execution when no lease diagnostic already explains it.
+- `tasks repair-state` previews changes before confirmation and rewrites only
+  archLoop-managed status fields; it does not mutate GitHub Issues.
+- `tasks recover --stale` previews all interrupted-task routes by default; use
+  `--yes` or interactive confirmation to apply them in one batch.
 - Recovery preserves retryable branch work and cleans only safe managed
-  resources.
+  resources. `tasks cleanup` groups safe, blocked, and unowned historical
+  branches; unowned deletion requires `--include-unowned` explicitly.
 - Do not manually delete worktrees, branches, or lock files while an active
   worktree lease exists.
 - Keep `.beads/issues.jsonl` and `.beads/interactions.jsonl` out of code changes;

@@ -6,7 +6,10 @@ import {
   truncateTail,
   visibleLength,
   type Palette,
+  type SectionSeverity,
 } from "./ansi.js";
+
+export type { SectionSeverity };
 
 // ---------------------------------------------------------------------------
 // SectionBlock discriminated union (ADR-0030 / implementation plan §2)
@@ -32,7 +35,7 @@ export interface SectionBadgesBlock {
     readonly symbol: "●" | "◐" | "✓" | "✗" | "!" | "↓" | "↑";
     readonly count: number;
     readonly label: string;
-    readonly severity: "info" | "success" | "warn" | "error" | "muted";
+    readonly severity: SectionSeverity;
   }[];
 }
 
@@ -44,7 +47,7 @@ export interface SectionBadgesBlock {
 export interface SectionGroupBlock {
   readonly kind: "group";
   readonly symbol: "●" | "◐" | "✓" | "✗" | "!";
-  readonly severity: "info" | "success" | "warn" | "error" | "muted";
+  readonly severity: SectionSeverity;
   readonly name: string;
   readonly count: number;
   readonly rightHint?: string;
@@ -72,7 +75,19 @@ export interface SectionKvBlock {
     readonly key: string;
     readonly value: string;
     readonly secondary?: string;
+    /** Optional severity coloring for the value (keys stay bold; secondary stays dim). */
+    readonly valueSeverity?: SectionSeverity;
   }[];
+}
+
+/**
+ * Structured timeline line for prose blocks (e.g. comments): bold lead, dim meta,
+ * plain body. When `entries` is set, the renderer prefers them over `body`.
+ */
+export interface SectionProseEntry {
+  readonly lead?: string;
+  readonly meta?: string;
+  readonly body: string;
 }
 
 /** Free-flowing paragraph. Renderer only soft-wraps. */
@@ -80,6 +95,7 @@ export interface SectionProseBlock {
   readonly kind: "prose";
   readonly title?: string;
   readonly body: string;
+  readonly entries?: readonly SectionProseEntry[];
 }
 
 /**
@@ -89,7 +105,7 @@ export interface SectionProseBlock {
 export interface SectionIndentedBlock {
   readonly kind: "indented-block";
   readonly leading: "↳" | "✓" | "✗" | "◐";
-  readonly leadingSeverity: "info" | "success" | "warn" | "error" | "muted";
+  readonly leadingSeverity: SectionSeverity;
   readonly id?: string;
   readonly title: string;
   readonly subLines: readonly string[];
@@ -195,8 +211,7 @@ const renderHeader = (
   const usable = cols - MARGIN.length;
   let left = palette.bold(block.title);
   if (block.subtitle) {
-    left +=
-      " " + palette.dim("·") + " " + palette.cyan(block.subtitle);
+    left += " " + palette.dim("·") + " " + palette.cyan(block.subtitle);
   }
   const right = block.right ? palette.dim(block.right) : "";
   if (!right) {
@@ -300,13 +315,9 @@ const composeGroupItemTrailing = (
   palette: Palette,
 ): { readonly plain: string; readonly rendered: string } => {
   const dimPart = item.trailingDim ?? "";
-  const badgePart = item.remoteBadge
-    ? remoteBadgeLabel(item.remoteBadge)
-    : "";
+  const badgePart = item.remoteBadge ? remoteBadgeLabel(item.remoteBadge) : "";
   const plain =
-    dimPart && badgePart
-      ? `${dimPart} · ${badgePart}`
-      : dimPart || badgePart;
+    dimPart && badgePart ? `${dimPart} · ${badgePart}` : dimPart || badgePart;
   if (!plain) {
     return { plain: "", rendered: "" };
   }
@@ -375,10 +386,7 @@ const renderGroup = (
     if (titleBudget < 4) {
       // Extreme narrow: collapse to id-only + hard-truncated title
       titleBudget = Math.max(4, cols - visibleLength(indent) - 1);
-      const title = truncateTail(
-        `${item.id}  ${item.title}`,
-        titleBudget,
-      );
+      const title = truncateTail(`${item.id}  ${item.title}`, titleBudget);
       lines.push(indent + title);
     } else {
       const title = truncateTail(item.title, titleBudget);
@@ -411,6 +419,39 @@ const renderGroup = (
   return lines;
 };
 
+/**
+ * Format a prose timeline entry as plain text (lead · meta: body).
+ * Pass `palette` to bold the lead and dim the meta / separator.
+ */
+export const formatSectionProseEntry = (
+  entry: SectionProseEntry,
+  palette?: Palette,
+): string => {
+  const prefixParts: string[] = [];
+  if (entry.lead) {
+    prefixParts.push(palette ? palette.bold(entry.lead) : entry.lead);
+  }
+  if (entry.meta) {
+    prefixParts.push(palette ? palette.dim(entry.meta) : entry.meta);
+  }
+  const sep = palette ? palette.dim(" · ") : " · ";
+  const prefix =
+    prefixParts.length > 0 ? `${prefixParts.join(sep)}: ` : "";
+  return `${prefix}${entry.body}`.trim();
+};
+
+const proseBlockParagraphs = (
+  block: SectionProseBlock,
+  palette: Palette,
+): readonly string[] => {
+  if (block.entries && block.entries.length > 0) {
+    return block.entries.map((entry) =>
+      formatSectionProseEntry(entry, palette),
+    );
+  }
+  return block.body.trimEnd().split(/\r?\n/);
+};
+
 const renderKv = (
   block: SectionKvBlock,
   cols: number,
@@ -423,9 +464,11 @@ const renderKv = (
     const keyPad = Math.max(1, gutter - visibleLength(row.key));
     const keyPadded = key + " ".repeat(keyPad);
     const valueBudget = Math.max(10, cols - MARGIN.length - gutter);
-    let value = row.value;
+    let value = row.valueSeverity
+      ? severityColor(palette, row.valueSeverity)(row.value)
+      : row.value;
     if (row.secondary) {
-      value = `${row.value}  ${palette.dim(row.secondary)}`;
+      value = `${value}  ${palette.dim(row.secondary)}`;
     }
     const wrapped = wrapText(value, valueBudget);
     lines.push(MARGIN + keyPadded + wrapped[0]!);
@@ -448,9 +491,7 @@ const renderProse = (
   }
   const indent = MARGIN + "  ";
   const usable = Math.max(10, cols - indent.length);
-  // Preserve explicit newlines (comments timeline); soft-wrap within each paragraph line.
-  const paragraphs = block.body.trimEnd().split(/\r?\n/);
-  for (const paragraph of paragraphs) {
+  for (const paragraph of proseBlockParagraphs(block, palette)) {
     if (paragraph.length === 0) {
       lines.push(indent);
       continue;
@@ -478,10 +519,7 @@ const renderIndentedBlock = (
   let first = headerPrefix;
   if (block.id) {
     // Never pad the id past the remaining column budget.
-    const idBudget = Math.max(
-      8,
-      cols - visibleLength(headerPrefix) - 4,
-    );
+    const idBudget = Math.max(8, cols - visibleLength(headerPrefix) - 4);
     const idText =
       visibleLength(block.id) > idBudget
         ? truncateTail(block.id, idBudget)
@@ -523,10 +561,9 @@ const renderFooter = (
   const commands =
     block.label === "tip" ? [...block.commands] : [block.command];
   const labelStr =
-    block.label === "fix"
-      ? palette.red(block.label)
-      : palette.dim(block.label);
-  const labelPadded = labelStr + " ".repeat(Math.max(1, 6 - block.label.length));
+    block.label === "fix" ? palette.red(block.label) : palette.dim(block.label);
+  const labelPadded =
+    labelStr + " ".repeat(Math.max(1, 6 - block.label.length));
   const sep = "   " + palette.dim("·") + "   ";
   const joined = commands.join(sep);
   const first = MARGIN + labelPadded + joined;
@@ -666,7 +703,15 @@ export const flattenSectionForLog = (
         if (block.title) {
           lines.push(block.title);
         }
-        lines.push(block.body);
+        if (block.entries && block.entries.length > 0) {
+          lines.push(
+            block.entries
+              .map((entry) => formatSectionProseEntry(entry))
+              .join("\n"),
+          );
+        } else {
+          lines.push(block.body);
+        }
         break;
       case "indented-block": {
         const id = block.id ? `${block.id}  ` : "";
