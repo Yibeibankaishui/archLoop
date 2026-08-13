@@ -1,9 +1,13 @@
 import { execFileSync } from "node:child_process";
 import {
   appendFileSync,
+  closeSync,
   existsSync,
+  fsyncSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  renameSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
@@ -12,6 +16,14 @@ export const HUB_TASK_STORE_INIT_COMMAND = "archloop tasks init";
 
 export const HUB_TASK_STORE_REDIRECT_FILE_NAME = "redirect";
 export const HUB_TASK_STORE_GIT_EXCLUDE_PATTERN = ".beads/redirect";
+export const HUB_TASK_STORE_QUARANTINE_DIR_NAME = ".hub-quarantine";
+export const HUB_TASK_STORE_QUARANTINE_GIT_EXCLUDE_PATTERN =
+  ".beads/.hub-quarantine";
+export const HUB_TASK_STORE_RUNTIME_GIT_EXCLUDE_PATTERNS = [
+  ".beads/issues.jsonl",
+  ".beads/interactions.jsonl",
+  ".beads/events.jsonl",
+] as const;
 
 export type HubTaskStoreKind =
   | "uninitialized"
@@ -163,7 +175,22 @@ const resolveGitExcludePath = (repoRoot: string): string => {
   }
 };
 
-const ensureGitExcludePattern = (repoRoot: string, pattern: string): void => {
+export const resolveHubTaskStoreQuarantineDir = (repoRoot: string): string =>
+  join(resolveRepoBeadsDir(repoRoot), HUB_TASK_STORE_QUARANTINE_DIR_NAME);
+
+const fsyncPath = (path: string): void => {
+  const fd = openSync(path, "r+");
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+};
+
+export const ensureHubTaskStoreGitExcludePattern = (
+  repoRoot: string,
+  pattern: string,
+): void => {
   const excludePath = resolveGitExcludePath(repoRoot);
   mkdirSync(dirname(excludePath), { recursive: true });
   let existing = "";
@@ -186,10 +213,20 @@ export const installHubTaskStoreRedirect = (
 ): void => {
   const repoBeadsDir = resolveRepoBeadsDir(repoRoot);
   mkdirSync(repoBeadsDir, { recursive: true });
-  writeFileSync(
-    resolveHubTaskStoreRedirectPath(repoRoot),
-    `${managedBeadsDir}\n`,
-    "utf8",
+  const redirectPath = resolveHubTaskStoreRedirectPath(repoRoot);
+  const tempPath = `${redirectPath}.${process.pid}.tmp`;
+  writeFileSync(tempPath, `${managedBeadsDir}\n`, "utf8");
+  fsyncPath(tempPath);
+  renameSync(tempPath, redirectPath);
+  ensureHubTaskStoreGitExcludePattern(
+    repoRoot,
+    HUB_TASK_STORE_GIT_EXCLUDE_PATTERN,
   );
-  ensureGitExcludePattern(repoRoot, HUB_TASK_STORE_GIT_EXCLUDE_PATTERN);
+  ensureHubTaskStoreGitExcludePattern(
+    repoRoot,
+    HUB_TASK_STORE_QUARANTINE_GIT_EXCLUDE_PATTERN,
+  );
+  for (const pattern of HUB_TASK_STORE_RUNTIME_GIT_EXCLUDE_PATTERNS) {
+    ensureHubTaskStoreGitExcludePattern(repoRoot, pattern);
+  }
 };

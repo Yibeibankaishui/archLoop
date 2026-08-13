@@ -245,6 +245,22 @@ export const createHubRunJsonRenderer = (input: {
                 },
               }
             : {}),
+          ...(result.taskStoreMigration
+            ? {
+                taskStoreMigration: {
+                  kind: result.taskStoreMigration.kind,
+                  beadsDir: result.taskStoreMigration.beadsDir,
+                  ...(result.taskStoreMigration.kind === "migrated"
+                    ? {
+                        phase: result.taskStoreMigration.phase,
+                        backupDir: result.taskStoreMigration.backupDir,
+                      }
+                    : {
+                        reason: result.taskStoreMigration.reason,
+                      }),
+                },
+              }
+            : {}),
         }),
       ];
     },

@@ -204,7 +204,9 @@ const buildTaskStoreSection = (
   if (status.taskStoreInitialized) {
     const message = isHubOwnedTaskStoreKind(status.taskStoreKind)
       ? `Hub-owned task store is initialized at ${status.taskStoreDir}.`
-      : "Local task store is initialized.";
+      : status.taskStoreKind === "legacy"
+        ? "Repository-local Beads store is initialized and will migrate automatically on the next mutating Hub command."
+        : "Local task store is initialized.";
     return createSection("Checking local task store", [
       createFinding("success", "Local task store is initialized", message),
     ]);

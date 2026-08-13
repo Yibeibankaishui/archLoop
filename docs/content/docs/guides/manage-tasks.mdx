@@ -12,8 +12,10 @@ npx archloop tasks init
 For a registered Hub project without a repository-local Beads database, this
 creates the live store under the Hub project directory and installs a
 Git-ignored `.beads/redirect`. Direct host `bd ready` and `bd show` then use
-the same tasks as `archloop tasks`. Existing repository-local stores stay in
-place until migration is implemented.
+the same tasks as `archloop tasks`. An existing writer-free repository-local
+store migrates automatically on `tasks init` and on the first mutating
+`archloop run` or task command. The original database is quarantined, copied,
+verified, and retained as a recoverable backup.
 
 ## List and inspect
 

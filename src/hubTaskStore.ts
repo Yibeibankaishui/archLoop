@@ -9,11 +9,15 @@ import {
   installHubTaskStoreRedirect,
   isBeadsStoreFullyInitialized,
   isBeadsStoreMarkerPresent,
-  isHubOwnedTaskStoreKind,
   resolveHubTaskStore,
+  resolveHubTaskStoreQuarantineDir,
   resolveManagedHubTaskStoreDir,
   type HubTaskStoreResolution,
 } from "./hubTaskStoreResolver.js";
+import {
+  ensureHubTaskStoreMigrated,
+  formatHubTaskStoreMigrationMessage,
+} from "./hubTaskStoreMigration.js";
 
 export { HUB_TASK_STORE_INIT_COMMAND };
 
@@ -150,15 +154,10 @@ export const formatHubTaskStoreCommandFailure = (
 const beadsEnvForResolution = (
   env: NodeJS.ProcessEnv,
   resolution: HubTaskStoreResolution,
-): NodeJS.ProcessEnv => {
-  if (isHubOwnedTaskStoreKind(resolution.kind)) {
-    return {
-      ...env,
-      BEADS_DIR: resolution.beadsDir,
-    };
-  }
-  return env;
-};
+): NodeJS.ProcessEnv => ({
+  ...env,
+  BEADS_DIR: resolution.beadsDir,
+});
 
 const execBdText = (
   cwd: string,
@@ -227,6 +226,7 @@ export const runBdTextForHubTaskStore = (
 export interface InitHubTaskStoreResult {
   readonly alreadyInitialized: boolean;
   readonly output: string;
+  readonly migrated?: boolean;
 }
 
 export interface InitHubTaskStoreOptions extends HubTaskStoreLocationOptions {
@@ -258,7 +258,10 @@ const initLegacyHubTaskStore = (
     return { alreadyInitialized: true, output: "" };
   }
 
-  const output = execBdText(cwd, ["init", "--non-interactive"], env);
+  const output = execBdText(cwd, ["init", "--non-interactive"], {
+    ...env,
+    BEADS_DIR: resolveHubTaskStoreDir(cwd),
+  });
 
   if (!isHubTaskStoreFullyInitialized(cwd)) {
     throw new TaskBoardError({
@@ -322,7 +325,24 @@ export const initHubTaskStore = (
     const hasLegacyStore = isBeadsStoreFullyInitialized(
       resolveHubTaskStoreDir(cwd),
     );
-    if (options.hubProjectDir && !hasLegacyStore) {
+    if (options.hubProjectDir) {
+      const quarantinePresent = existsSync(
+        join(resolveHubTaskStoreQuarantineDir(cwd), "embeddeddolt"),
+      );
+      const needsLegacyMigration = hasLegacyStore || quarantinePresent;
+      if (needsLegacyMigration) {
+        const migrated = ensureHubTaskStoreMigrated({
+          repoRoot: cwd,
+          hubProjectDir: options.hubProjectDir,
+          env,
+        });
+        return {
+          alreadyInitialized: migrated.kind === "not_needed",
+          output: formatHubTaskStoreMigrationMessage(migrated),
+          migrated: migrated.kind === "migrated",
+        };
+      }
+
       return initManagedHubTaskStore(
         cwd,
         env,

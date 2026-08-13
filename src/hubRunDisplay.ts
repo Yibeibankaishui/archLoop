@@ -791,6 +791,14 @@ export const formatPlainHubRunEvent = (
         textField("run_id", event.runId),
         textField("logs", join(event.hubProjectDir, "runs", event.runId)),
       ].join(" ");
+    case "task_store_migration":
+      return [
+        "event=task_store_migration",
+        textField("run_id", event.runId),
+        textField("kind", event.kind),
+        textField("beads_dir", event.beadsDir),
+        textField("message", event.message),
+      ].join(" ");
     case "batch_started":
       return [
         "event=batch_started",
