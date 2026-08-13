@@ -169,6 +169,18 @@ export type HubLandingTaskCloser = (input: {
   readonly candidateOid: string;
 }) => Promise<void> | void;
 
+export const isMatchingHubLandingBeadsClose = (
+  evidence: HubLandingBeadsCloseEvidence | undefined,
+  identity: {
+    readonly transactionId: string;
+    readonly candidateOid: string | undefined;
+  },
+): boolean =>
+  evidence?.closed === true &&
+  evidence.transactionId === identity.transactionId &&
+  identity.candidateOid !== undefined &&
+  evidence.candidateOid === identity.candidateOid;
+
 export const HUB_LANDING_INTEGRITY_INCIDENT = "landing_integrity_incident";
 
 const gitText = async (
@@ -218,6 +230,43 @@ const writeAtomicJson = (path: string, value: unknown): void => {
 
 const hashBuffer = (value: string): string =>
   createHash("sha256").update(value).digest("hex");
+
+const parseJsonRecord = (raw: string): Record<string, unknown> | undefined => {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+};
+
+const readJsonFile = (path: string): Record<string, unknown> | undefined => {
+  if (!existsSync(path)) {
+    return undefined;
+  }
+  return parseJsonRecord(readFileSync(path, "utf8"));
+};
+
+const stringField = (value: unknown): string | undefined =>
+  typeof value === "string" ? value : undefined;
+
+const requiredStrings = <K extends string>(
+  value: Record<string, unknown>,
+  keys: readonly K[],
+): Record<K, string> | undefined => {
+  const result = {} as Record<K, string>;
+  for (const key of keys) {
+    const field = stringField(value[key]);
+    if (field === undefined) {
+      return undefined;
+    }
+    result[key] = field;
+  }
+  return result;
+};
 
 export const resolveHubLandingCandidateRef = (transactionId: string): string =>
   `refs/archloop/candidates/${transactionId}`;
@@ -371,85 +420,49 @@ export const readHubLandingVerificationArtifact = (
   hubProjectDir: string,
   transactionId: string,
 ): HubLandingVerificationArtifact | undefined => {
-  const path = resolveVerificationArtifactPath(hubProjectDir, transactionId);
-  if (!existsSync(path)) {
+  const value = readJsonFile(
+    resolveVerificationArtifactPath(hubProjectDir, transactionId),
+  );
+  if (!value || typeof value.exitCode !== "number") {
     return undefined;
   }
-  try {
-    const value = JSON.parse(readFileSync(path, "utf8")) as Record<
-      string,
-      unknown
-    >;
-    if (
-      typeof value.candidateOid !== "string" ||
-      typeof value.verifierFingerprint !== "string" ||
-      typeof value.exitCode !== "number" ||
-      typeof value.outputHash !== "string" ||
-      typeof value.createdAt !== "string"
-    ) {
-      return undefined;
-    }
-    return {
-      candidateOid: value.candidateOid,
-      verifierFingerprint: value.verifierFingerprint,
-      verifierConfigHash:
-        typeof value.verifierConfigHash === "string"
-          ? value.verifierConfigHash
-          : undefined,
-      runtimeFingerprint:
-        typeof value.runtimeFingerprint === "string"
-          ? value.runtimeFingerprint
-          : undefined,
-      exitCode: value.exitCode,
-      outputHash: value.outputHash,
-      artifactHash:
-        typeof value.artifactHash === "string" ? value.artifactHash : undefined,
-      createdAt: value.createdAt,
-    };
-  } catch {
+  const required = requiredStrings(value, [
+    "candidateOid",
+    "verifierFingerprint",
+    "outputHash",
+    "createdAt",
+  ]);
+  if (!required) {
     return undefined;
   }
+  return {
+    ...required,
+    verifierConfigHash: stringField(value.verifierConfigHash),
+    runtimeFingerprint: stringField(value.runtimeFingerprint),
+    exitCode: value.exitCode,
+    artifactHash: stringField(value.artifactHash),
+  };
 };
 
 export const readHubLandingCandidateManifest = (
   hubProjectDir: string,
   transactionId: string,
 ): HubLandingCandidateManifest | undefined => {
-  const path = resolveHubLandingCandidateManifestPath(
-    hubProjectDir,
-    transactionId,
+  const value = readJsonFile(
+    resolveHubLandingCandidateManifestPath(hubProjectDir, transactionId),
   );
-  if (!existsSync(path)) {
+  if (!value) {
     return undefined;
   }
-  try {
-    const value = JSON.parse(readFileSync(path, "utf8")) as Record<
-      string,
-      unknown
-    >;
-    if (
-      typeof value.transactionId !== "string" ||
-      typeof value.taskId !== "string" ||
-      typeof value.sourceOid !== "string" ||
-      typeof value.baseOid !== "string" ||
-      typeof value.candidateOid !== "string" ||
-      typeof value.candidateRef !== "string" ||
-      typeof value.createdAt !== "string"
-    ) {
-      return undefined;
-    }
-    return {
-      transactionId: value.transactionId,
-      taskId: value.taskId,
-      sourceOid: value.sourceOid,
-      baseOid: value.baseOid,
-      candidateOid: value.candidateOid,
-      candidateRef: value.candidateRef,
-      createdAt: value.createdAt,
-    };
-  } catch {
-    return undefined;
-  }
+  return requiredStrings(value, [
+    "transactionId",
+    "taskId",
+    "sourceOid",
+    "baseOid",
+    "candidateOid",
+    "candidateRef",
+    "createdAt",
+  ]);
 };
 
 export const readHubLandingReceipt = (
@@ -465,38 +478,22 @@ export const readHubLandingReceipt = (
   if (!payload) {
     return undefined;
   }
-  try {
-    const value = JSON.parse(payload) as Record<string, unknown>;
-    if (
-      typeof value.transactionId !== "string" ||
-      typeof value.taskId !== "string" ||
-      typeof value.candidateOid !== "string" ||
-      typeof value.sourceOid !== "string" ||
-      typeof value.baseOid !== "string" ||
-      typeof value.publishTargetRef !== "string" ||
-      typeof value.fenceRef !== "string" ||
-      typeof value.verifierFingerprint !== "string" ||
-      typeof value.landedAt !== "string"
-    ) {
-      return undefined;
-    }
-    return {
-      oid,
-      receipt: {
-        transactionId: value.transactionId,
-        taskId: value.taskId,
-        candidateOid: value.candidateOid,
-        sourceOid: value.sourceOid,
-        baseOid: value.baseOid,
-        publishTargetRef: value.publishTargetRef,
-        fenceRef: value.fenceRef,
-        verifierFingerprint: value.verifierFingerprint,
-        landedAt: value.landedAt,
-      },
-    };
-  } catch {
+  const value = parseJsonRecord(payload);
+  if (!value) {
     return undefined;
   }
+  const receipt = requiredStrings(value, [
+    "transactionId",
+    "taskId",
+    "candidateOid",
+    "sourceOid",
+    "baseOid",
+    "publishTargetRef",
+    "fenceRef",
+    "verifierFingerprint",
+    "landedAt",
+  ]);
+  return receipt ? { oid, receipt } : undefined;
 };
 
 const ensureCandidateWorktree = async (input: {
@@ -776,6 +773,26 @@ export const createHubLandingCandidate = async (input: {
   };
 };
 
+const recordCandidateVerifiedCheckpoint = (input: {
+  readonly hubProjectDir: string;
+  readonly transactionId: string;
+  readonly taskId: string;
+  readonly candidateOid: string;
+  readonly verifierFingerprint: string;
+  readonly createdAt: string;
+  readonly artifactPath: string;
+}): HubLandingTransactionState =>
+  appendHubLandingCheckpoint(input.hubProjectDir, {
+    type: "checkpoint",
+    checkpoint: "candidate_verified",
+    transactionId: input.transactionId,
+    taskId: input.taskId,
+    createdAt: input.createdAt,
+    candidateOid: input.candidateOid,
+    verifierFingerprint: input.verifierFingerprint,
+    verificationArtifactPath: input.artifactPath,
+  });
+
 export const bindHubLandingVerification = (input: {
   readonly hubProjectDir: string;
   readonly transactionId: string;
@@ -801,6 +818,10 @@ export const bindHubLandingVerification = (input: {
     input.hubProjectDir,
     input.transactionId,
   );
+  const artifactPath = resolveVerificationArtifactPath(
+    input.hubProjectDir,
+    input.transactionId,
+  );
   if (
     existing &&
     verifierConfigHash &&
@@ -813,19 +834,14 @@ export const bindHubLandingVerification = (input: {
       runtimeFingerprint,
     })
   ) {
-    const path = resolveVerificationArtifactPath(
-      input.hubProjectDir,
-      input.transactionId,
-    );
-    appendHubLandingCheckpoint(input.hubProjectDir, {
-      type: "checkpoint",
-      checkpoint: "candidate_verified",
+    recordCandidateVerifiedCheckpoint({
+      hubProjectDir: input.hubProjectDir,
       transactionId: input.transactionId,
       taskId: input.taskId,
-      createdAt: existing.createdAt,
       candidateOid: input.candidateOid,
       verifierFingerprint: input.verifierFingerprint,
-      verificationArtifactPath: path,
+      createdAt: existing.createdAt,
+      artifactPath,
     });
     return existing;
   }
@@ -844,22 +860,17 @@ export const bindHubLandingVerification = (input: {
     ...artifactBase,
     artifactHash: hashVerificationArtifact(artifactBase),
   };
-  const path = resolveVerificationArtifactPath(
-    input.hubProjectDir,
-    input.transactionId,
-  );
   maybeCrash(input.faultInjection, "verification_artifact", "before");
-  writeAtomicJson(path, artifact);
+  writeAtomicJson(artifactPath, artifact);
   maybeCrash(input.faultInjection, "verification_artifact", "after");
-  appendHubLandingCheckpoint(input.hubProjectDir, {
-    type: "checkpoint",
-    checkpoint: "candidate_verified",
+  recordCandidateVerifiedCheckpoint({
+    hubProjectDir: input.hubProjectDir,
     transactionId: input.transactionId,
     taskId: input.taskId,
-    createdAt: now,
     candidateOid: input.candidateOid,
     verifierFingerprint: input.verifierFingerprint,
-    verificationArtifactPath: path,
+    createdAt: now,
+    artifactPath,
   });
   return artifact;
 };
@@ -1115,11 +1126,12 @@ export const closeHubLandingTask = async (input: {
   readonly faultInjection?: HubLandingFaultInjection;
 }): Promise<HubLandingTransactionState> => {
   const existing = input.readTaskClose?.(input.taskId);
-  const matchingClose =
-    existing?.closed === true &&
-    existing.transactionId === input.transactionId &&
-    existing.candidateOid === input.candidateOid;
-  if (!matchingClose) {
+  if (
+    !isMatchingHubLandingBeadsClose(existing, {
+      transactionId: input.transactionId,
+      candidateOid: input.candidateOid,
+    })
+  ) {
     maybeCrash(input.faultInjection, "task_close", "before");
     await input.closeTask?.({
       taskId: input.taskId,

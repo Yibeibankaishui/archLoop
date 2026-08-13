@@ -6,6 +6,7 @@ import {
   cleanupHubLandingCandidate,
   closeHubLandingTask,
   computeHubVerifierParts,
+  isMatchingHubLandingBeadsClose,
   isReusableHubLandingVerificationArtifact,
   readHubLandingCandidateManifest,
   readHubLandingReceipt,
@@ -32,6 +33,10 @@ import {
   type HubLandingCheckpoint,
   type HubLandingTransactionState,
 } from "./hubLandingTransaction.js";
+import {
+  isCompletedHubStatus,
+  type HubTaskProjection,
+} from "./taskBoard.js";
 
 const CHECKPOINT_RANK = new Map(
   HUB_LANDING_CHECKPOINTS.map((checkpoint, index) => [checkpoint, index]),
@@ -163,7 +168,6 @@ const transactionMessage = (
 
 const summarize = (
   transactions: readonly HubLandingTransactionEvidence[],
-  kind: HubLandingReconciliationKind,
   reconstructedCount = 0,
 ): {
   readonly kind: HubLandingReconciliationKind;
@@ -185,10 +189,10 @@ const summarize = (
       nextAction: integrityAction,
     };
   }
-  if (pendingCount > 0 || kind === "pending") {
+  if (pendingCount > 0) {
     const pending = transactions.find((entry) => entry.pending);
     return {
-      kind: kind === "reconciled" ? "reconciled" : "pending",
+      kind: "pending",
       pendingCount,
       reconstructedCount,
       message: pending
@@ -197,7 +201,7 @@ const summarize = (
       nextAction: pendingAction,
     };
   }
-  if (kind === "reconciled" && reconstructedCount > 0) {
+  if (reconstructedCount > 0) {
     return {
       kind: "reconciled",
       pendingCount: 0,
@@ -215,6 +219,41 @@ const summarize = (
   };
 };
 
+const inspectionKind = (
+  kind: HubLandingReconciliationKind,
+): HubLandingReconciliationInspection["kind"] => {
+  if (kind === "integrity_incident") {
+    return "integrity_incident";
+  }
+  if (kind === "pending") {
+    return "pending";
+  }
+  return "clean";
+};
+
+export const beadsCloseEvidenceFromHubTask = (
+  task: Pick<HubTaskProjection, "hubStatus" | "metadata"> | undefined,
+): HubLandingBeadsCloseEvidence | undefined => {
+  if (!task) {
+    return undefined;
+  }
+  const transactionId = task.metadata.landingTransactionId;
+  const candidateOid = task.metadata.landingCandidateOid;
+  return {
+    closed: isCompletedHubStatus(task.hubStatus) || task.metadata.done === true,
+    transactionId: typeof transactionId === "string" ? transactionId : undefined,
+    candidateOid: typeof candidateOid === "string" ? candidateOid : undefined,
+  };
+};
+
+export const hubLandingTaskCloseReaderFromTasks = (
+  tasks: readonly Pick<HubTaskProjection, "id" | "hubStatus" | "metadata">[],
+): HubLandingTaskCloseReader =>
+  (taskId) =>
+    beadsCloseEvidenceFromHubTask(
+      tasks.find((task) => task.id === taskId),
+    );
+
 const listTransactionIdsFromDisk = (hubProjectDir: string): string[] => {
   const dir = resolveHubLandingTransactionsDir(hubProjectDir);
   if (!existsSync(dir)) {
@@ -224,6 +263,9 @@ const listTransactionIdsFromDisk = (hubProjectDir: string): string[] => {
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name);
 };
+
+const TRANSACTION_REF_PATTERN =
+  /^refs\/archloop\/(?:candidates|receipts)\/(.+)$/;
 
 const listTransactionIdsFromRefs = (repoRoot: string): string[] => {
   const output = tryGitText(repoRoot, [
@@ -237,15 +279,8 @@ const listTransactionIdsFromRefs = (repoRoot: string): string[] => {
   }
   return output
     .split("\n")
-    .map((ref) => {
-      const candidate = ref.match(/^refs\/archloop\/candidates\/(.+)$/);
-      if (candidate?.[1]) {
-        return candidate[1];
-      }
-      const receipt = ref.match(/^refs\/archloop\/receipts\/(.+)$/);
-      return receipt?.[1];
-    })
-    .filter((value): value is string => typeof value === "string");
+    .map((ref) => ref.match(TRANSACTION_REF_PATTERN)?.[1])
+    .filter((value): value is string => value !== undefined);
 };
 
 export const listHubLandingTransactionIds = (input: {
@@ -259,15 +294,35 @@ export const listHubLandingTransactionIds = (input: {
   return [...ids].sort();
 };
 
-const matchingBeadsClose = (
-  evidence: HubLandingBeadsCloseEvidence | undefined,
-  transactionId: string,
-  candidateOid: string | undefined,
-): boolean =>
-  evidence?.closed === true &&
-  evidence.transactionId === transactionId &&
-  candidateOid !== undefined &&
-  evidence.candidateOid === candidateOid;
+const candidateOidMismatchIncident = (
+  source: "journal" | "manifest",
+  recordedOid: string | undefined,
+  refOid: string | undefined,
+): string | undefined => {
+  if (!recordedOid || !refOid || recordedOid === refOid) {
+    return undefined;
+  }
+  return `${HUB_LANDING_INTEGRITY_INCIDENT}: ${source} candidate ${recordedOid} does not match ref ${refOid}`;
+};
+
+const isPendingReconciliation = (input: {
+  readonly integrityIncident?: string;
+  readonly evidenceCheckpoint?: HubLandingCheckpoint;
+  readonly landed: boolean;
+  readonly closed: boolean;
+  readonly worktreePresent: boolean;
+}): boolean => {
+  if (input.integrityIncident) {
+    return false;
+  }
+  if (rankOf(input.evidenceCheckpoint) < rankOf("cleaned")) {
+    return true;
+  }
+  if (input.landed && !input.closed) {
+    return true;
+  }
+  return input.worktreePresent && (input.landed || input.closed);
+};
 
 const collectEvidence = (input: {
   readonly repoRoot: string;
@@ -290,15 +345,17 @@ const collectEvidence = (input: {
     resolveHubLandingCandidateRef(input.transactionId);
   const refOid = tryGitText(input.repoRoot, ["rev-parse", candidateRef]);
   const candidateOid = refOid ?? manifest?.candidateOid ?? journal?.candidateOid;
-  let integrityIncident: string | undefined;
-  if (journal?.candidateOid && refOid && journal.candidateOid !== refOid) {
-    integrityIncident = `${HUB_LANDING_INTEGRITY_INCIDENT}: journal candidate ${journal.candidateOid} does not match ref ${refOid}`;
-  } else if (
-    manifest?.candidateOid &&
-    refOid &&
-    manifest.candidateOid !== refOid
-  ) {
-    integrityIncident = `${HUB_LANDING_INTEGRITY_INCIDENT}: manifest candidate ${manifest.candidateOid} does not match ref ${refOid}`;
+  let integrityIncident = candidateOidMismatchIncident(
+    "journal",
+    journal?.candidateOid,
+    refOid,
+  );
+  if (!integrityIncident) {
+    integrityIncident = candidateOidMismatchIncident(
+      "manifest",
+      manifest?.candidateOid,
+      refOid,
+    );
   }
 
   const verifierParts = computeHubVerifierParts(input.repoRoot);
@@ -352,11 +409,10 @@ const collectEvidence = (input: {
 
   const taskId = journal?.taskId ?? manifest?.taskId ?? storedReceipt?.receipt.taskId;
   const beadsClose = taskId ? input.readTaskClose?.(taskId) : undefined;
-  const closedFromBeads = matchingBeadsClose(
-    beadsClose,
-    input.transactionId,
-    candidateOid ?? storedReceipt?.receipt.candidateOid,
-  );
+  const closedFromBeads = isMatchingHubLandingBeadsClose(beadsClose, {
+    transactionId: input.transactionId,
+    candidateOid: candidateOid ?? storedReceipt?.receipt.candidateOid,
+  });
   const closedFromJournal =
     input.readTaskClose === undefined &&
     rankOf(journal?.checkpoint) >= rankOf("task_closed");
@@ -377,11 +433,13 @@ const collectEvidence = (input: {
     cleaned ? "cleaned" : undefined,
   );
 
-  const pending =
-    integrityIncident === undefined &&
-    (rankOf(evidenceCheckpoint) < rankOf("cleaned") ||
-      (landed && !closed) ||
-      (worktreePresent && (landed || closed)));
+  const pending = isPendingReconciliation({
+    integrityIncident,
+    evidenceCheckpoint,
+    landed,
+    closed,
+    worktreePresent,
+  });
 
   return {
     transactionId: input.transactionId,
@@ -416,39 +474,36 @@ const reconstructCheckpoints = (
   if (evidence.integrityIncident || !evidence.taskId) {
     return 0;
   }
-  const now = (input.now ?? new Date()).toISOString();
-  const writes: HubLandingCheckpoint[] = [];
   const proven = evidence.evidenceCheckpoint;
   if (!proven) {
     return 0;
   }
-  const ensure = (checkpoint: HubLandingCheckpoint): void => {
-    if (rankOf(journal?.checkpoint) >= rankOf(checkpoint)) {
-      return;
-    }
-    if (rankOf(proven) < rankOf(checkpoint)) {
-      return;
-    }
-    writes.push(checkpoint);
-  };
-  ensure("opened");
-  ensure("base_pinned");
+  const journalRank = rankOf(journal?.checkpoint);
+  const provenRank = rankOf(proven);
+  const provenCheckpoints: HubLandingCheckpoint[] = ["opened", "base_pinned"];
   if (evidence.candidateOid) {
-    ensure("candidate_created");
+    provenCheckpoints.push("candidate_created");
   }
   if (evidence.verificationReusable) {
-    ensure("candidate_verified");
+    provenCheckpoints.push("candidate_verified");
   }
   if (evidence.landed) {
-    ensure("target_landed");
+    provenCheckpoints.push("target_landed");
   }
   if (evidence.closed) {
-    ensure("task_closed");
+    provenCheckpoints.push("task_closed");
   }
   if (evidence.cleaned) {
-    ensure("cleaned");
+    provenCheckpoints.push("cleaned");
   }
-
+  const writes = provenCheckpoints.filter(
+    (checkpoint) =>
+      journalRank < rankOf(checkpoint) && provenRank >= rankOf(checkpoint),
+  );
+  const now = (input.now ?? new Date()).toISOString();
+  const publishTargetOid = evidence.landed
+    ? evidence.candidateOid
+    : evidence.publishTargetOid;
   for (const checkpoint of writes) {
     appendHubLandingCheckpoint(input.hubProjectDir, {
       type: "checkpoint",
@@ -461,9 +516,7 @@ const reconstructCheckpoints = (
       candidateOid: evidence.candidateOid,
       candidateRef: evidence.candidateRef,
       verifierFingerprint: evidence.verifierFingerprint,
-      publishTargetOid: evidence.landed
-        ? evidence.candidateOid
-        : evidence.publishTargetOid,
+      publishTargetOid,
       receiptRef: evidence.receiptOid
         ? resolveHubLandingReceiptRef(evidence.transactionId)
         : undefined,
@@ -523,15 +576,9 @@ export const inspectHubLandingTransactions = (
       readTaskClose: input.readTaskClose,
     }),
   );
-  const summary = summarize(transactions, "clean");
-  const kind =
-    summary.kind === "integrity_incident"
-      ? "integrity_incident"
-      : summary.pendingCount > 0
-        ? "pending"
-        : "clean";
+  const summary = summarize(transactions);
   return {
-    kind,
+    kind: inspectionKind(summary.kind),
     transactions,
     pendingCount: summary.pendingCount,
     integrityIncident: summary.integrityIncident,
@@ -559,9 +606,8 @@ export const reconcileHubLandingTransactions = async (
       readTaskClose: input.readTaskClose,
     });
     if (before.integrityIncident) {
-      const summary = summarize([before], "integrity_incident");
       return {
-        ...summary,
+        ...summarize([before]),
         transactions: [before],
       };
     }
@@ -607,16 +653,8 @@ export const reconcileHubLandingTransactions = async (
   }
 
   const after = inspectHubLandingTransactions(input);
-  const kind: HubLandingReconciliationKind = after.integrityIncident
-    ? "integrity_incident"
-    : reconstructedCount > 0 || after.pendingCount > 0
-      ? after.pendingCount > 0
-        ? "pending"
-        : "reconciled"
-      : "clean";
-  const summary = summarize(after.transactions, kind, reconstructedCount);
   return {
-    ...summary,
+    ...summarize(after.transactions, reconstructedCount),
     transactions: after.transactions,
   };
 };

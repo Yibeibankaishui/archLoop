@@ -25,6 +25,7 @@ import { latestPhaseCompletionEventByTask } from "./hubTaskRecoveryRouter.js";
 import { readHubProjectRegistry } from "./hubProjectRegistry.js";
 import {
   formatHubLandingReconciliationMessage,
+  hubLandingTaskCloseReaderFromTasks,
   inspectHubLandingTransactions,
 } from "./hubLandingReconciliation.js";
 import {
@@ -681,22 +682,7 @@ export const doctorHubTaskState = async (
   const landingReconciliation = inspectHubLandingTransactions({
     repoRoot,
     hubProjectDir,
-    readTaskClose: (taskId) => {
-      const task = board.tasks.find((entry) => entry.id === taskId);
-      if (!task) {
-        return undefined;
-      }
-      const transactionId = task.metadata.landingTransactionId;
-      const candidateOid = task.metadata.landingCandidateOid;
-      return {
-        closed:
-          isCompletedHubStatus(task.hubStatus) || task.metadata.done === true,
-        transactionId:
-          typeof transactionId === "string" ? transactionId : undefined,
-        candidateOid:
-          typeof candidateOid === "string" ? candidateOid : undefined,
-      };
-    },
+    readTaskClose: hubLandingTaskCloseReaderFromTasks(board.tasks),
   });
   const landingDiagnostics: string[] = [];
   if (landingReconciliation.kind !== "clean") {

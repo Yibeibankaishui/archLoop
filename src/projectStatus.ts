@@ -17,6 +17,7 @@ import {
 } from "./hubTaskStoreResolver.js";
 import {
   formatHubLandingReconciliationMessage,
+  hubLandingTaskCloseReaderFromTasks,
   inspectHubLandingTransactions,
 } from "./hubLandingReconciliation.js";
 import {
@@ -37,7 +38,6 @@ import {
   type HubLandingPolicy,
 } from "./hubLandingPolicy.js";
 import {
-  isCompletedHubStatus,
   loadHubTaskBoard,
   type HubFailureReason,
   type HubTaskBoard,
@@ -957,22 +957,7 @@ export const resolveHubProjectStatus = (
   const landingReconciliation = inspectHubLandingTransactions({
     repoRoot,
     hubProjectDir,
-    readTaskClose: (taskId) => {
-      const task = board?.tasks.find((entry) => entry.id === taskId);
-      if (!task) {
-        return undefined;
-      }
-      const transactionId = task.metadata.landingTransactionId;
-      const candidateOid = task.metadata.landingCandidateOid;
-      return {
-        closed:
-          isCompletedHubStatus(task.hubStatus) || task.metadata.done === true,
-        transactionId:
-          typeof transactionId === "string" ? transactionId : undefined,
-        candidateOid:
-          typeof candidateOid === "string" ? candidateOid : undefined,
-      };
-    },
+    readTaskClose: hubLandingTaskCloseReaderFromTasks(board?.tasks ?? []),
   });
 
   return {
