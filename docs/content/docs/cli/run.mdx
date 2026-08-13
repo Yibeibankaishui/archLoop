@@ -34,3 +34,8 @@ The final `fix` guidance distinguishes semantic failure from interruption. A
 real failed task points to `archloop tasks recover --stale`; a run interrupted
 without failed tasks points back to `archloop run`, which performs automatic
 startup recovery.
+
+A Hub implementer iteration that aborts during provider startup with no agent
+output does not fail the whole run while iterations remain. The next iteration
+continues with a progress summary. The run still fails after the iteration
+limit if there is no completion signal and no branch work.

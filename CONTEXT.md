@@ -522,6 +522,7 @@ _Avoid_: "log event" (the log file contains more than just agent output), "displ
 - **Host hooks** run on the **host**; **sandbox hooks** run inside the **sandbox**. Hooks are grouped under `host` and `sandbox` in the `hooks` option
 - Lifecycle ordering: `copyToWorktree` -> `host.onWorktreeReady` (sequential) -> sandbox created -> `host.onSandboxReady` + `sandbox.onSandboxReady` (parallel)
 - Each **iteration** may produce one or more commits; iterations repeat until the **completion signal** fires or the max count is reached
+- A provider non-zero exit with no **agent** output (a transient startup abort) does not fail a multi-**iteration** run while iterations remain; the next **iteration** continues with a progress summary, and a zero-commit exploration turn is nudged toward implementation. Exhausting the iteration limit with no **completion signal** and no commits is still a failure.
 - **Init** creates the **config directory** on the **host**, prompting the user to select an **agent**, **backlog manager**, and **project profile**
 - **Init** may also prompt the user to select a **capability pack**. archLoop does not silently infer a **capability pack** from repository files in the first version.
 - A **template** defines the scaffolded workflow shape; a **project profile** defines the repo environment and bootstrap assumptions. They compose independently.

@@ -30,6 +30,13 @@ working directory, not against `cwd`.
 The default completion substring is `<promise>COMPLETE</promise>`. Pass a string
 or array through `completionSignal` to customize early termination.
 
+When `maxIterations` is greater than 1, a provider exit with no agent output
+(a transient startup abort) continues to the next iteration instead of failing
+the run. Later iterations also receive a short progress summary from earlier
+turns, and a "make implementation progress" nudge when a turn produced no
+commits. Exhausting the iteration limit without a completion signal still
+leaves `completionSignal` unset.
+
 `Output.object()` and `Output.string()` extract tagged structured output from a
 single iteration. Structured output requires `maxIterations === 1` and a prompt
 that instructs the agent to emit the configured tag.

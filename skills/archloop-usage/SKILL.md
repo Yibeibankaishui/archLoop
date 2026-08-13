@@ -195,6 +195,12 @@ npx archloop tasks cleanup --dry-run
   worktree lease exists.
 - Keep `.beads/issues.jsonl` and `.beads/interactions.jsonl` out of code changes;
   use task sync commands for remote exchange.
+- A later iteration that aborts during provider startup with no agent output
+  (for example a SessionStart hook error and `stop_reason: abort`) does not
+  fail the whole Hub run while iterations remain. The next iteration continues
+  with a progress summary; an exploration-only turn is nudged to implement.
+  Exhausting iterations with no completion signal and no commits is still
+  `agent_failed`. Do not treat this as an already-merged zero-commit success.
 
 ## Legacy repo-local scaffold
 

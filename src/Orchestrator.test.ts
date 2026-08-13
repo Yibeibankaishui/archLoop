@@ -1549,7 +1549,8 @@ describe("Orchestrator error handling", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    // Should have failed on iteration 2
+    // Iteration 2's empty startup abort is skipped while iterations remain;
+    // the run still fails when the last iteration also aborts.
     expect(exit._tag).toBe("Failure");
 
     // But iteration 1's commit should be preserved on host
@@ -1998,6 +1999,368 @@ describe("Orchestrator error handling", () => {
         expect(err.message).not.toContain("some stdout output");
       }
     }
+  });
+});
+
+describe("Orchestrator iteration resilience", () => {
+  it("continues after a transient startup abort on iteration 2 following zero-progress exploration", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-transient-abort-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    let callCount = 0;
+    const abortStdout = JSON.stringify({
+      stop_reason: "abort",
+      is_error: true,
+      errors: ["stop_reason=abort"],
+      output_tokens: 0,
+    });
+
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const fsLayer = makeLocalSandboxLayer(dir);
+      return Layer.succeed(Sandbox, {
+        exec: (command, options) => {
+          if (command.startsWith("claude ") && options?.onLine) {
+            const onLine = options.onLine;
+            callCount++;
+            if (callCount === 1) {
+              const output =
+                "Now let me look at Orchestrator.ts and related tests.";
+              const streamOutput = toStreamJson(output);
+              for (const line of streamOutput.split("\n")) {
+                onLine(line);
+              }
+              return Effect.succeed({
+                stdout: streamOutput,
+                stderr: "",
+                exitCode: 0,
+              });
+            }
+            if (callCount === 2) {
+              onLine(abortStdout);
+              return Effect.succeed({
+                stdout: abortStdout,
+                stderr: "/bin/sh: 1: bd: not found\n",
+                exitCode: 1,
+              });
+            }
+            const output = "Implemented the fix. <promise>COMPLETE</promise>";
+            const streamOutput = toStreamJson(output);
+            for (const line of streamOutput.split("\n")) {
+              onLine(line);
+            }
+            return Effect.succeed({
+              stdout: streamOutput,
+              stderr: "",
+              exitCode: 0,
+            });
+          }
+          return Effect.flatMap(Sandbox, (real) =>
+            real.exec(command, options),
+          ).pipe(Effect.provide(fsLayer));
+        },
+        copyIn: (hostPath, sandboxPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyIn(hostPath, sandboxPath),
+          ).pipe(Effect.provide(fsLayer)),
+        copyFileOut: (sandboxPath, hostPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyFileOut(sandboxPath, hostPath),
+          ).pipe(Effect.provide(fsLayer)),
+      });
+    });
+
+    const result = await Effect.runPromise(
+      orchestrate({
+        provider: testProvider,
+        hostRepoDir: hostDir,
+        iterations: 3,
+        prompt: "do some work",
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
+    expect(result.iterations.length).toBe(3);
+    expect(callCount).toBe(3);
+  });
+
+  it("nudges the next iteration to implement after a zero-progress exploration turn", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-zero-progress-nudge-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const capturedStdins: string[] = [];
+    let callCount = 0;
+
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const fsLayer = makeLocalSandboxLayer(dir);
+      return Layer.succeed(Sandbox, {
+        exec: (command, options) => {
+          if (command.startsWith("claude ") && options?.onLine) {
+            const onLine = options.onLine;
+            callCount++;
+            capturedStdins.push(options.stdin ?? "");
+            const output =
+              callCount === 1
+                ? "Now let me look at hubFlowExecution.ts before writing anything."
+                : "Implemented the fix. <promise>COMPLETE</promise>";
+            const streamOutput = toStreamJson(output);
+            for (const line of streamOutput.split("\n")) {
+              onLine(line);
+            }
+            return Effect.succeed({
+              stdout: streamOutput,
+              stderr: "",
+              exitCode: 0,
+            });
+          }
+          return Effect.flatMap(Sandbox, (real) =>
+            real.exec(command, options),
+          ).pipe(Effect.provide(fsLayer));
+        },
+        copyIn: (hostPath, sandboxPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyIn(hostPath, sandboxPath),
+          ).pipe(Effect.provide(fsLayer)),
+        copyFileOut: (sandboxPath, hostPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyFileOut(sandboxPath, hostPath),
+          ).pipe(Effect.provide(fsLayer)),
+      });
+    });
+
+    const result = await Effect.runPromise(
+      orchestrate({
+        provider: testProvider,
+        hostRepoDir: hostDir,
+        iterations: 3,
+        prompt: "do some work",
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
+    expect(capturedStdins).toHaveLength(2);
+    expect(capturedStdins[0]).toBe("do some work");
+    expect(capturedStdins[1]).toContain("do some work");
+    expect(capturedStdins[1]).toContain("Make implementation progress");
+    expect(capturedStdins[1]).toContain(
+      "Now let me look at hubFlowExecution.ts before writing anything.",
+    );
+    expect(capturedStdins[1]).toContain("Do not repeat that exploration");
+  });
+
+  it("still fails when the last remaining iteration aborts during provider startup", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-last-iter-abort-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const abortStdout = JSON.stringify({
+      stop_reason: "abort",
+      is_error: true,
+      errors: ["stop_reason=abort"],
+      output_tokens: 0,
+    });
+
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const fsLayer = makeLocalSandboxLayer(dir);
+      return Layer.succeed(Sandbox, {
+        exec: (command, options) => {
+          if (command.startsWith("claude ") && options?.onLine) {
+            options.onLine(abortStdout);
+            return Effect.succeed({
+              stdout: abortStdout,
+              stderr: "/bin/sh: 1: bd: not found\n",
+              exitCode: 1,
+            });
+          }
+          return Effect.flatMap(Sandbox, (real) =>
+            real.exec(command, options),
+          ).pipe(Effect.provide(fsLayer));
+        },
+        copyIn: (hostPath, sandboxPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyIn(hostPath, sandboxPath),
+          ).pipe(Effect.provide(fsLayer)),
+        copyFileOut: (sandboxPath, hostPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyFileOut(sandboxPath, hostPath),
+          ).pipe(Effect.provide(fsLayer)),
+      });
+    });
+
+    const exit = await Effect.runPromiseExit(
+      orchestrate({
+        provider: testProvider,
+        hostRepoDir: hostDir,
+        iterations: 1,
+        prompt: "do some work",
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      const err = Cause.squash(exit.cause);
+      expect(err).toBeInstanceOf(AgentError);
+      if (err instanceof AgentError) {
+        expect(err.transientStartupAbort).toBe(true);
+        expect(err.message).toContain("claude-code exited with code 1:");
+      }
+    }
+  });
+
+  it("still fails a non-zero exit that produced agent output while iterations remain", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-midrun-crash-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    let callCount = 0;
+
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const fsLayer = makeLocalSandboxLayer(dir);
+      return Layer.succeed(Sandbox, {
+        exec: (command, options) => {
+          if (command.startsWith("claude ") && options?.onLine) {
+            const onLine = options.onLine;
+            callCount++;
+            const output =
+              "I started editing files, then the provider crashed.";
+            const streamOutput = toStreamJson(output);
+            for (const line of streamOutput.split("\n")) {
+              onLine(line);
+            }
+            return Effect.succeed({
+              stdout: streamOutput,
+              stderr: "fatal: provider crashed mid-turn",
+              exitCode: 1,
+            });
+          }
+          return Effect.flatMap(Sandbox, (real) =>
+            real.exec(command, options),
+          ).pipe(Effect.provide(fsLayer));
+        },
+        copyIn: (hostPath, sandboxPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyIn(hostPath, sandboxPath),
+          ).pipe(Effect.provide(fsLayer)),
+        copyFileOut: (sandboxPath, hostPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyFileOut(sandboxPath, hostPath),
+          ).pipe(Effect.provide(fsLayer)),
+      });
+    });
+
+    const exit = await Effect.runPromiseExit(
+      orchestrate({
+        provider: testProvider,
+        hostRepoDir: hostDir,
+        iterations: 3,
+        prompt: "do some work",
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    expect(callCount).toBe(1);
+    if (exit._tag === "Failure") {
+      const err = Cause.squash(exit.cause);
+      expect(err).toBeInstanceOf(AgentError);
+      if (err instanceof AgentError) {
+        expect(err.transientStartupAbort).toBeFalsy();
+      }
+    }
+  });
+
+  it("carries prior exploration output into the iteration after a startup abort", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-abort-carry-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    const capturedStdins: string[] = [];
+    let callCount = 0;
+    const abortStdout = JSON.stringify({
+      stop_reason: "abort",
+      is_error: true,
+      errors: ["stop_reason=abort"],
+      output_tokens: 0,
+    });
+
+    const { factoryLayer } = makeTestSandboxFactory(hostDir, (dir) => {
+      const fsLayer = makeLocalSandboxLayer(dir);
+      return Layer.succeed(Sandbox, {
+        exec: (command, options) => {
+          if (command.startsWith("claude ") && options?.onLine) {
+            const onLine = options.onLine;
+            callCount++;
+            capturedStdins.push(options.stdin ?? "");
+            if (callCount === 1) {
+              const output =
+                "Now let me look at Orchestrator.ts and related tests.";
+              const streamOutput = toStreamJson(output);
+              for (const line of streamOutput.split("\n")) {
+                onLine(line);
+              }
+              return Effect.succeed({
+                stdout: streamOutput,
+                stderr: "",
+                exitCode: 0,
+              });
+            }
+            if (callCount === 2) {
+              onLine(abortStdout);
+              return Effect.succeed({
+                stdout: abortStdout,
+                stderr: "/bin/sh: 1: bd: not found\n",
+                exitCode: 1,
+              });
+            }
+            const output = "Implemented the fix. <promise>COMPLETE</promise>";
+            const streamOutput = toStreamJson(output);
+            for (const line of streamOutput.split("\n")) {
+              onLine(line);
+            }
+            return Effect.succeed({
+              stdout: streamOutput,
+              stderr: "",
+              exitCode: 0,
+            });
+          }
+          return Effect.flatMap(Sandbox, (real) =>
+            real.exec(command, options),
+          ).pipe(Effect.provide(fsLayer));
+        },
+        copyIn: (hostPath, sandboxPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyIn(hostPath, sandboxPath),
+          ).pipe(Effect.provide(fsLayer)),
+        copyFileOut: (sandboxPath, hostPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyFileOut(sandboxPath, hostPath),
+          ).pipe(Effect.provide(fsLayer)),
+      });
+    });
+
+    const result = await Effect.runPromise(
+      orchestrate({
+        provider: testProvider,
+        hostRepoDir: hostDir,
+        iterations: 3,
+        prompt: "do some work",
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+    );
+
+    expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
+    expect(capturedStdins).toHaveLength(3);
+    expect(capturedStdins[2]).toContain("aborted during provider startup");
+    expect(capturedStdins[2]).toContain(
+      "Now let me look at Orchestrator.ts and related tests.",
+    );
+    expect(capturedStdins[2]).toContain(
+      "Do not restart exploration from scratch",
+    );
   });
 });
 

@@ -21,6 +21,12 @@ metadata, and run events.
 Tasks within a batch can implement and review concurrently. Eligible branches
 merge serially so verification failures have a clear boundary.
 
+Implementer iterations continue past a provider startup abort that produced no
+agent output, as long as iterations remain. A turn that only explored (no
+commits, no completion signal) nudges the next iteration to start writing
+instead of repeating the same reads. Exhausting the iteration limit with no
+completion signal and no branch work is still `agent_failed`.
+
 If the same flow already has an unfinished merge-ready batch, a later run
 recovers it before claiming new tasks.
 

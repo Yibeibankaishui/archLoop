@@ -73,6 +73,12 @@ export class AgentError extends Data.TaggedError("AgentError")<{
   readonly message: string;
   /** Host path to the preserved worktree, set when the worktree was kept after failure. */
   readonly preservedWorktreePath?: string;
+  /**
+   * True when the provider exited before producing agent output (text, tool
+   * calls, or a captured result). Used by the orchestrator to continue a
+   * multi-iteration run instead of failing the whole loop.
+   */
+  readonly transientStartupAbort?: boolean;
 }> {}
 
 /** .archloop/ config directory missing */
