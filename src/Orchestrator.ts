@@ -70,6 +70,11 @@ const invokeAgent = (
   Effect.gen(function* () {
     let resultText = "";
     let producedAgentOutput = false;
+    const noteAgentOutput = (text: string) => {
+      if (text.trim()) {
+        producedAgentOutput = true;
+      }
+    };
     let sessionId: string | undefined;
     let agentRootPid: number | undefined;
     const execAbortController = new AbortController();
@@ -162,12 +167,11 @@ const invokeAgent = (
           resetIdleTimer();
           for (const parsed of provider.parseStreamLine(line)) {
             if (parsed.type === "text") {
-              if (parsed.text.trim()) {
-                producedAgentOutput = true;
-              }
+              noteAgentOutput(parsed.text);
               onText(parsed.text);
             } else if (parsed.type === "result") {
               resultText = parsed.result;
+              noteAgentOutput(parsed.result);
             } else if (parsed.type === "tool_call") {
               producedAgentOutput = true;
               onToolCall(parsed.name, parsed.args);
@@ -222,8 +226,7 @@ const invokeAgent = (
         return yield* Effect.fail(
           new AgentError({
             message: `${provider.name} exited with code ${execResult.exitCode}:\n${errorDetail}`,
-            transientStartupAbort:
-              !producedAgentOutput && failure.resultText.trim() === "",
+            transientStartupAbort: !producedAgentOutput,
           }),
         );
       }
@@ -265,6 +268,11 @@ const DEFAULT_COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
 const DEFAULT_IDLE_TIMEOUT_SECONDS = 10 * 60; // 600 seconds
 const ITERATION_CONTINUATION_OUTPUT_LIMIT = 4000;
 
+type IterationContinuationKind =
+  | "zero_progress"
+  | "progress"
+  | "transient_startup_abort";
+
 const truncateTail = (text: string, limit: number): string => {
   const trimmed = text.trim();
   if (trimmed.length <= limit) {
@@ -273,25 +281,31 @@ const truncateTail = (text: string, limit: number): string => {
   return `…${trimmed.slice(-limit)}`;
 };
 
+const continuationMessage = (
+  kind: IterationContinuationKind,
+  previousIteration: number,
+): string => {
+  switch (kind) {
+    case "transient_startup_abort":
+      return `Iteration ${previousIteration} aborted during provider startup before the agent produced output. Continue the task. Do not restart exploration from scratch.`;
+    case "zero_progress":
+      return `Iteration ${previousIteration} produced no commits and no completion signal (exploration only). Do not repeat that exploration. Make implementation progress now: write the change, verify it, and commit.`;
+    case "progress":
+      return `Iteration ${previousIteration} did not emit a completion signal. Continue from the progress below instead of repeating the same exploration.`;
+  }
+};
+
 const buildIterationContinuationPrompt = (input: {
   readonly previousIteration: number;
-  readonly kind: "zero_progress" | "progress" | "transient_startup_abort";
+  readonly kind: IterationContinuationKind;
   readonly previousOutput?: string;
 }): string => {
-  const lines = ["", "# ITERATION CONTINUATION", ""];
-  if (input.kind === "transient_startup_abort") {
-    lines.push(
-      `Iteration ${input.previousIteration} aborted during provider startup before the agent produced output. Continue the task. Do not restart exploration from scratch.`,
-    );
-  } else if (input.kind === "zero_progress") {
-    lines.push(
-      `Iteration ${input.previousIteration} produced no commits and no completion signal (exploration only). Do not repeat that exploration. Make implementation progress now: write the change, verify it, and commit.`,
-    );
-  } else {
-    lines.push(
-      `Iteration ${input.previousIteration} did not emit a completion signal. Continue from the progress below instead of repeating the same exploration.`,
-    );
-  }
+  const lines = [
+    "",
+    "# ITERATION CONTINUATION",
+    "",
+    continuationMessage(input.kind, input.previousIteration),
+  ];
   const previousOutput = input.previousOutput
     ? truncateTail(input.previousOutput, ITERATION_CONTINUATION_OUTPUT_LIMIT)
     : "";
@@ -301,6 +315,9 @@ const buildIterationContinuationPrompt = (input: {
   lines.push("");
   return lines.join("\n");
 };
+
+const isTransientStartupAbortError = (error: unknown): error is AgentError =>
+  error instanceof AgentError && error.transientStartupAbort === true;
 
 export interface OrchestrateOptions {
   readonly hostRepoDir: string;
@@ -572,9 +589,7 @@ export const orchestrate = (
         .pipe(
           Effect.catchIf(
             (error): error is AgentError =>
-              error instanceof AgentError &&
-              error.transientStartupAbort === true &&
-              i < iterations,
+              isTransientStartupAbortError(error) && i < iterations,
             () =>
               Effect.gen(function* () {
                 const remaining = iterations - i;
@@ -628,10 +643,11 @@ export const orchestrate = (
       }
 
       lastUsefulOutput = lifecycleResult.result.stdout;
+      const continuationKind: IterationContinuationKind =
+        lifecycleResult.commits.length === 0 ? "zero_progress" : "progress";
       continuationSuffix = buildIterationContinuationPrompt({
         previousIteration: i,
-        kind:
-          lifecycleResult.commits.length === 0 ? "zero_progress" : "progress",
+        kind: continuationKind,
         previousOutput: lastUsefulOutput,
       });
     }
