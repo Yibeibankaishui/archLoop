@@ -24,8 +24,9 @@ description: Reference for local task-board and GitHub synchronization commands.
 `tasks init` creates the live Beads database under the stable Hub project
 directory, not in the Git repository. It also installs a Git-ignored
 `.beads/redirect` so host `bd where`, `bd ready`, and `bd show` resolve the
-same store. Existing repository-local stores are left in place until automatic
-migration lands.
+same store. Hub flow agents consume an immutable task snapshot rather than
+that live store. Existing repository-local stores are left in place until
+automatic migration lands.
 
 Use `--json` where offered for machine-readable output. Preview synchronization,
 cleanup, and deletion with `--dry-run` before applying them in automation.

@@ -35,6 +35,12 @@ real failed task points to `archloop tasks recover --stale`; a run interrupted
 without failed tasks points back to `archloop run`, which performs automatic
 startup recovery.
 
+Task-board implementation and review agents receive an immutable snapshot of
+the selected task, its parent PRD, required dependencies, comments, and remote
+refs. They do not need live `bd show` access. Structured `<task-notes>` output
+is schema-validated and applied by Hub after the attempt; invalid notes are
+rejected without changing the live task store.
+
 A Hub implementer iteration that aborts during provider startup with no agent
 output does not fail the whole run while iterations remain. The next iteration
 continues with a progress summary. The run still fails after the iteration

@@ -11,7 +11,9 @@ A Hub project points to one existing Git repository. It has a stable internal
 identity, a user-facing name, a selected project profile, a development
 contract, and local task/run data. New projects store the live Beads database
 in the Hub project directory. A Git-ignored `.beads/redirect` keeps host `bd`
-commands pointed at that store. Renaming or relinking a project preserves its
+commands pointed at that store. Hub implementation and review agents receive an
+immutable task snapshot instead of live `bd` access; structured notes are
+applied by Hub after the attempt. Renaming or relinking a project preserves its
 identity, history, and task store.
 
 ## Project selection
