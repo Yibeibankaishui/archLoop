@@ -65,6 +65,12 @@ local landing onto the Hub publish target. Landed code lives on the Hub
 publish ref until a later checkout-projection slice can fast-forward the host
 branch safely.
 
+Interrupted landing transactions resume automatically on the next mutating
+`archloop run`. Hub reconstructs progress from the journal, candidate
+ref/manifest, verification artifact, atomic receipt, Beads close metadata, and
+missing worktrees. `tasks doctor` and `project status` can show that pending
+state without changing it. Do not run `archloop tasks recover` for this.
+
 ## Active worktree lease
 
 Wait for the active process or use the task recovery path. Do not remove lock

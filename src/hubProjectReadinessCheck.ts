@@ -244,6 +244,36 @@ const buildTaskStoreSection = (
   ]);
 };
 
+const buildLandingSection = (status: HubProjectStatus): HubReadinessSection => {
+  if (status.landingIntegrityIncident) {
+    return createSection("Checking Hub landing", [
+      createFinding(
+        "error",
+        "Landing integrity incident",
+        status.landingReconciliationMessage ??
+          status.landingIntegrityIncident,
+      ),
+    ]);
+  }
+  if (status.landingReconciliationKind === "pending") {
+    return createSection("Checking Hub landing", [
+      createFinding(
+        "warn",
+        "Landing reconciliation pending",
+        status.landingReconciliationMessage ??
+          "An incomplete Hub landing transaction will resume automatically from durable evidence. This is not a task failure.",
+      ),
+    ]);
+  }
+  return createSection("Checking Hub landing", [
+    createFinding(
+      "success",
+      "Landing transactions are idle",
+      "No incomplete Hub landing transactions need reconciliation.",
+    ),
+  ]);
+};
+
 const buildTaskSummarySection = (
   status: HubProjectStatus,
 ): HubReadinessSection => {
@@ -405,6 +435,7 @@ export const collectHubProjectReadinessCheck = async (
     resolveDefaultProjectStatus(project, options);
   sections.push(buildDevelopmentContractSection(project, status));
   sections.push(buildTaskStoreSection(status));
+  sections.push(buildLandingSection(status));
   sections.push(buildTaskSummarySection(status));
   sections.push(buildFailedTaskSection(status));
   sections.push(buildActiveRunsSection(status));

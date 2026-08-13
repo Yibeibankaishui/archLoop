@@ -13,6 +13,7 @@ import {
   createHubRunContext,
   createHubRunIdentifiers,
   observeHubRunEvents,
+  type HubLandingReconciliationEvent,
   type HubRunCompletedBatchResult,
   type HubRunEventObserver,
   type HubRunStopReason,
@@ -38,6 +39,11 @@ import {
   type HubRunAutoRecoverSummary,
 } from "./hubRunAutoRecover.js";
 import { ensureHubLandingPolicy } from "./hubLandingPolicy.js";
+import {
+  formatHubLandingReconciliationMessage,
+  reconcileHubLandingTransactions,
+  type HubLandingReconciliationOutcome,
+} from "./hubLandingReconciliation.js";
 import {
   ensureHubTaskStoreMigrated,
   formatHubTaskStoreMigrationMessage,
@@ -98,6 +104,8 @@ import {
 } from "./hubTaskSnapshot.js";
 import type { SandboxProvider } from "./SandboxProvider.js";
 import {
+  closeHubTask,
+  isCompletedHubStatus,
   loadHubTaskBoard,
   resolveHubTaskBranch,
   loadHubReadyQueue,
@@ -265,6 +273,7 @@ export interface RunHubFlowResult {
    */
   readonly autoRecoverSummary?: HubRunAutoRecoverSummary;
   readonly taskStoreMigration?: HubTaskStoreMigrationOutcome;
+  readonly landingReconciliation?: HubLandingReconciliationOutcome;
 }
 
 type HubFlowLifecycleMutation = <T>(
@@ -1387,6 +1396,52 @@ const implementSelectedTask = async (
   };
 };
 
+const createHubLandingTaskCloseReader = (
+  repoRoot: string,
+  env: NodeJS.ProcessEnv | undefined,
+) => {
+  return (taskId: string) => {
+    try {
+      const task = loadHubTaskBoard(repoRoot, env).tasks.find(
+        (entry) => entry.id === taskId,
+      );
+      if (!task) {
+        return undefined;
+      }
+      const transactionId = task.metadata.landingTransactionId;
+      const candidateOid = task.metadata.landingCandidateOid;
+      return {
+        closed:
+          isCompletedHubStatus(task.hubStatus) || task.metadata.done === true,
+        transactionId:
+          typeof transactionId === "string" ? transactionId : undefined,
+        candidateOid: typeof candidateOid === "string" ? candidateOid : undefined,
+      };
+    } catch {
+      return undefined;
+    }
+  };
+};
+
+const hubLandingReconciliationEventFields = (
+  outcome: HubLandingReconciliationOutcome,
+): Pick<
+  HubLandingReconciliationEvent,
+  | "kind"
+  | "pendingCount"
+  | "reconstructedCount"
+  | "message"
+  | "integrityIncident"
+> => ({
+  kind: outcome.kind,
+  pendingCount: outcome.pendingCount,
+  reconstructedCount: outcome.reconstructedCount,
+  message: formatHubLandingReconciliationMessage(outcome),
+  ...(outcome.integrityIncident
+    ? { integrityIncident: outcome.integrityIncident }
+    : {}),
+});
+
 const hubTaskStoreMigrationEventFields = (
   outcome: Exclude<HubTaskStoreMigrationOutcome, { kind: "not_needed" }>,
 ): Pick<
@@ -1453,6 +1508,22 @@ const runObservedHubFlow = async (
     env: input.env,
   });
   throwIfHubTaskStoreSplitBrain(taskStoreMigration);
+  const landingReconciliation = await reconcileHubLandingTransactions({
+    repoRoot,
+    hubProjectDir,
+    readTaskClose: createHubLandingTaskCloseReader(repoRoot, input.env),
+    closeTask: async ({ taskId, transactionId, candidateOid }) => {
+      closeHubTask({
+        cwd: repoRoot,
+        taskId,
+        metadata: {
+          landingTransactionId: transactionId,
+          landingCandidateOid: candidateOid,
+        },
+        env: input.env,
+      });
+    },
+  });
   // Run-startup auto-recover: detect tasks left stuck in an execution status by
   // a previously-interrupted run and route each one through the event-aware
   // recovery wiring before the run loads the board for the resumed-batch scan.
@@ -1514,6 +1585,14 @@ const runObservedHubFlow = async (
       runId: context.runId,
       createdAt: new Date().toISOString(),
       ...hubTaskStoreMigrationEventFields(taskStoreMigration),
+    });
+  }
+  if (landingReconciliation.kind !== "clean") {
+    appendHubRunEvent(context.runDir, {
+      type: "landing_reconciliation",
+      runId: context.runId,
+      createdAt: new Date().toISOString(),
+      ...hubLandingReconciliationEventFields(landingReconciliation),
     });
   }
   const batchResults: HubFlowBatchResult[] = [];
@@ -1757,6 +1836,31 @@ const runObservedHubFlow = async (
   });
   const effectiveBatchId = resumedBatchId ?? context.batchId;
 
+  const completedLandingReconciliation = await reconcileHubLandingTransactions({
+    repoRoot,
+    hubProjectDir,
+    readTaskClose: createHubLandingTaskCloseReader(repoRoot, input.env),
+    closeTask: async ({ taskId, transactionId, candidateOid }) => {
+      closeHubTask({
+        cwd: repoRoot,
+        taskId,
+        metadata: {
+          landingTransactionId: transactionId,
+          landingCandidateOid: candidateOid,
+        },
+        env: input.env,
+      });
+    },
+  });
+  if (completedLandingReconciliation.kind !== "clean") {
+    appendHubRunEvent(context.runDir, {
+      type: "landing_reconciliation",
+      runId: context.runId,
+      createdAt: new Date().toISOString(),
+      ...hubLandingReconciliationEventFields(completedLandingReconciliation),
+    });
+  }
+
   appendHubRunEvent(context.runDir, {
     type: "run_completed",
     runId: context.runId,
@@ -1791,6 +1895,7 @@ const runObservedHubFlow = async (
       projectDevelopmentContract.createdGenericFallback,
     autoRecoverSummary,
     taskStoreMigration,
+    landingReconciliation: completedLandingReconciliation,
   };
 };
 
@@ -1819,6 +1924,14 @@ export const formatHubFlowResultLines = (
     result.taskStoreMigration.kind !== "not_needed"
   ) {
     lines.push(formatHubTaskStoreMigrationMessage(result.taskStoreMigration));
+  }
+  if (
+    result.landingReconciliation &&
+    result.landingReconciliation.kind !== "clean"
+  ) {
+    lines.push(
+      formatHubLandingReconciliationMessage(result.landingReconciliation),
+    );
   }
   if (result.worktreeWarning) {
     lines.push(

@@ -230,6 +230,10 @@ _Avoid_: "batch merge", "git merge command", "run transaction"
 A transaction-specific Git ref advanced atomically with the **Hub publish target** and its fence, proving which exact verified candidate completed local landing.
 _Avoid_: "merge event", "reflog entry", "task status"
 
+**Landing transaction reconciliation**:
+Reconstructing missing **landing transaction** checkpoints from durable physical evidence (candidate refs/manifests, verification artifacts, atomic **landing receipts**, Beads close metadata, and resource absence) at mutating entry points. Read-only commands may display the evidence but must not write checkpoints or advance the transaction.
+_Avoid_: "tasks recover", "event replay", "merge recovery"
+
 **Target quiet wait**:
 A durable, automatically retried landing condition entered after repeated target drift. The oldest transaction retains its FIFO position while Hub waits for a stable target window.
 _Avoid_: "merge failed", "retry exhausted", "requeue"

@@ -17,6 +17,7 @@ import { ensureHubLandingPolicy } from "./hubLandingPolicy.js";
 import {
   deriveHubLandingShipped,
   loadHubLandingTransaction,
+  resolveHubLandingJournalPath,
 } from "./hubLandingTransaction.js";
 
 const execFileAsync = promisify(execFile);
@@ -298,5 +299,57 @@ describe("Hub fenced local landing", () => {
     );
     const second = computeHubVerifierFingerprint(repoDir);
     expect(first).not.toBe(second);
+  });
+
+  it("reuses the exact candidate ref after a crash before the checkpoint", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hub-landing-reuse-cand-"));
+    const repoDir = join(root, "repo");
+    const hubProjectDir = join(root, "hub-project");
+    await mkdir(repoDir, { recursive: true });
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello\n", "init");
+    const branch = "archloop/bd-reuse";
+    await execFileAsync("git", ["checkout", "-b", branch], { cwd: repoDir });
+    await commitFile(repoDir, "feature.txt", "feature\n", "feature");
+    await execFileAsync("git", ["checkout", "main"], { cwd: repoDir });
+
+    const first = await createHubLandingCandidate({
+      repoRoot: repoDir,
+      hubProjectDir,
+      taskId: "bd-reuse",
+      branch,
+    });
+    const journalPath = resolveHubLandingJournalPath(
+      hubProjectDir,
+      first.transactionId,
+    );
+    const journal = await readFile(journalPath, "utf8");
+    await writeFile(
+      journalPath,
+      journal
+        .split("\n")
+        .filter((line) => !line.includes('"candidate_created"'))
+        .join("\n"),
+    );
+    expect(
+      loadHubLandingTransaction(hubProjectDir, first.transactionId)?.candidateOid,
+    ).toBeUndefined();
+
+    let mergeCalls = 0;
+    const second = await createHubLandingCandidate({
+      repoRoot: repoDir,
+      hubProjectDir,
+      taskId: "bd-reuse",
+      branch,
+      merge: async () => {
+        mergeCalls += 1;
+      },
+    });
+    expect(mergeCalls).toBe(0);
+    expect(second.candidateOid).toBe(first.candidateOid);
+    expect(second.candidateRef).toBe(first.candidateRef);
+    expect(await gitText(repoDir, ["rev-parse", first.candidateRef])).toBe(
+      first.candidateOid,
+    );
   });
 });

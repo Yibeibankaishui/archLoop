@@ -61,6 +61,24 @@ If an external `bd` writer or migration owner is active, Hub defers the switch
 and keeps using the verified legacy store until the next automatic retry.
 Do not run `archloop tasks recover` for this.
 
+## Interrupted Hub landing transaction
+
+**Cause:** A previous run stopped between candidate creation, verification,
+atomic landing, task close, or cleanup.
+
+```bash
+npx archloop run --flow with-review
+npx archloop tasks doctor
+npx archloop project status
+```
+
+The next mutating `archloop run` resumes from durable Git refs, artifacts, and
+receipts. It reuses the exact candidate and a matching verification artifact,
+recognizes an atomic landing receipt, retries Beads close idempotently, and
+retries cleanup without undoing `shipped`. `tasks doctor` is read-only.
+Pending reconciliation is not a task failure; do not run
+`archloop tasks recover` for this.
+
 ## Task-store split brain after redirect
 
 **Cause:** After `.beads/redirect` was installed, both the leftover

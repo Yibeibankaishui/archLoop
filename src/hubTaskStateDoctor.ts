@@ -24,6 +24,10 @@ import {
 import { latestPhaseCompletionEventByTask } from "./hubTaskRecoveryRouter.js";
 import { readHubProjectRegistry } from "./hubProjectRegistry.js";
 import {
+  formatHubLandingReconciliationMessage,
+  inspectHubLandingTransactions,
+} from "./hubLandingReconciliation.js";
+import {
   formatHubTaskStoreMigrationMessage,
   inspectHubTaskStoreMigration,
 } from "./hubTaskStoreMigration.js";
@@ -108,6 +112,7 @@ export interface DoctorHubTaskStateResult {
   readonly diagnostics: readonly HubTaskStateDiagnostic[];
   readonly managedBranchCleanupDiagnostics: readonly string[];
   readonly taskStoreDiagnostics?: readonly string[];
+  readonly landingDiagnostics?: readonly string[];
 }
 
 export interface HubTaskStatePlannedRepair {
@@ -673,6 +678,34 @@ export const doctorHubTaskState = async (
     }
   }
 
+  const landingReconciliation = inspectHubLandingTransactions({
+    repoRoot,
+    hubProjectDir,
+    readTaskClose: (taskId) => {
+      const task = board.tasks.find((entry) => entry.id === taskId);
+      if (!task) {
+        return undefined;
+      }
+      const transactionId = task.metadata.landingTransactionId;
+      const candidateOid = task.metadata.landingCandidateOid;
+      return {
+        closed:
+          isCompletedHubStatus(task.hubStatus) || task.metadata.done === true,
+        transactionId:
+          typeof transactionId === "string" ? transactionId : undefined,
+        candidateOid:
+          typeof candidateOid === "string" ? candidateOid : undefined,
+      };
+    },
+  });
+  const landingDiagnostics: string[] = [];
+  if (landingReconciliation.kind !== "clean") {
+    landingDiagnostics.push(
+      formatHubLandingReconciliationMessage(landingReconciliation),
+    );
+    landingDiagnostics.push(`Next action: ${landingReconciliation.nextAction}`);
+  }
+
   return {
     diagnostics,
     managedBranchCleanupDiagnostics:
@@ -680,6 +713,7 @@ export const doctorHubTaskState = async (
         managedBranchCleanupEvaluation,
       ),
     taskStoreDiagnostics,
+    landingDiagnostics,
   };
 };
 
@@ -892,6 +926,7 @@ export const formatHubTaskStateDoctorLines = (
   return [
     ...flattenSectionForLog(blocks),
     ...(result.taskStoreDiagnostics ?? []),
+    ...(result.landingDiagnostics ?? []),
     ...result.managedBranchCleanupDiagnostics,
   ];
 };

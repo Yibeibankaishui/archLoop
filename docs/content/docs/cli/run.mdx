@@ -42,7 +42,11 @@ the publish target, fence, and landing receipt in one Git ref transaction
 before closing the task. The user's checkout, index, HEAD, and WIP are not
 modified. A remote repository is not required. `shipped` means the verified
 candidate is on the publish target and the Beads task closed with matching
-transaction metadata.
+transaction metadata. If a run is interrupted, the next `archloop run`
+reconstructs missing checkpoints from those durable refs, artifacts, and
+receipts, then finishes close and cleanup without landing or closing twice.
+Pending reconciliation is not a task failure and does not require
+`archloop tasks recover`.
 
 Task-board implementation and review agents receive an immutable snapshot of
 the selected task, its parent PRD, required dependencies, comments, and remote

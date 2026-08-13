@@ -866,4 +866,28 @@ describe("plain Hub run lifecycle output", () => {
     expect(line.split("\n")).toHaveLength(1);
     expect(line).not.toMatch(/\u001b\[[0-?]*[ -/]*[@-~]/);
   });
+
+  it("formats landing reconciliation as pending work, not semantic failure", () => {
+    const event: HubRunEvent = {
+      type: "landing_reconciliation",
+      eventId: "run-1:9",
+      sequence: 9,
+      runId: "run-1",
+      createdAt: "2026-08-14T12:00:00.000Z",
+      kind: "pending",
+      pendingCount: 1,
+      message:
+        "Hub landing transaction ltx-1 is pending reconciliation at candidate_created. Automatic retry will resume from durable evidence. This is not a task failure and does not require a recovery command.",
+    };
+    const line = formatPlainHubRunEvent(
+      event,
+      createHubRunDisplayState({
+        hubProjectName: "alpha",
+        flowId: "no-review",
+      }),
+    );
+    expect(line).toContain("event=landing_reconciliation");
+    expect(line).toContain('kind="pending"');
+    expect(line).not.toMatch(/tasks recover/);
+  });
 });

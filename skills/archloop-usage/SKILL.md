@@ -203,8 +203,13 @@ npx archloop tasks cleanup --dry-run
 - Landing does not mutate the user's checkout, index, HEAD, or WIP. Dirty
   source files and staged Beads runtime/export files do not block a local
   landing. Checkout projection of the landed commit is a later, separate step.
-- `tasks doctor` is read-only. It groups diagnostics by severity and reports
-  interrupted execution when no lease diagnostic already explains it.
+- Interrupted landing transactions resume automatically on the next
+  `archloop run` from candidate refs, verification artifacts, atomic receipts,
+  Beads close metadata, and resource absence. Do not run `tasks recover` for
+  this pending reconciliation.
+- `tasks doctor` is read-only. It groups diagnostics by severity, reports
+  interrupted execution when no lease diagnostic already explains it, and can
+  display landing reconciliation state without advancing the transaction.
 - `tasks repair-state` previews changes before confirmation and rewrites only
   archLoop-managed status fields; it does not mutate GitHub Issues.
 - `tasks recover --stale` previews all interrupted-task routes by default; use
