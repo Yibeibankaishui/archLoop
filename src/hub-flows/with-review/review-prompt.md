@@ -2,7 +2,12 @@
 
 Review the code changes on branch `{{BRANCH}}` for task {{TASK_ID}}: {{TASK_TITLE}}.
 
-Pull in the task using `{{VIEW_TASK_COMMAND}}` when you need implementation context.
+The selected task context is provided below as an immutable Hub task snapshot.
+Do not query the live Beads store (`bd show`, `bd list`, `bd ready`) and do not
+write Beads state (`bd update`, `bd comments`, `bd close`, `bd dolt`). Hub
+applies structured notes after this attempt.
+
+{{TASK_SNAPSHOT}}
 
 Improve code clarity, consistency, and maintainability while preserving exact functionality.
 
@@ -57,5 +62,13 @@ If you find improvements to make:
 3. Commit describing the refinements
 
 If the code is already clean and well-structured, do nothing.
+
+To record a comment on this task, emit:
+
+<task-notes>
+{"schemaVersion":1,"taskId":"{{TASK_ID}}","comments":["review note"]}
+</task-notes>
+
+Invalid or oversized notes are rejected and are not applied. Do not comment via `bd`.
 
 Once complete, output <promise>COMPLETE</promise>.

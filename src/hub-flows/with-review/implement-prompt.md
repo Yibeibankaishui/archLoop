@@ -2,7 +2,12 @@
 
 Fix task {{TASK_ID}}: {{TASK_TITLE}}
 
-Pull in the task using `{{VIEW_TASK_COMMAND}}`. If it has a parent PRD, pull that in too.
+The selected task context is provided below as an immutable Hub task snapshot.
+Do not query the live Beads store (`bd show`, `bd list`, `bd ready`) and do not
+write Beads state (`bd update`, `bd comments`, `bd close`, `bd dolt`). Hub
+applies structured notes after this attempt.
+
+{{TASK_SNAPSHOT}}
 
 Only work on the task specified.
 
@@ -75,13 +80,21 @@ This Hub flow runs **implement → review → merge → close** for each task.
 - **You are the implementer.** Your job ends at **committing to the task branch** and running tests. **Do not close the task.**
 - Do **not** `git push` to any remote. Do **not** run `bd dolt push` or `bd dolt commit`. Do **not** sync Beads. Hub handles merge and remote sync later.
 - The task stays **open** until the merge phase closes it after branches are merged into the base branch.
-- If you cannot finish, leave a comment on the task describing what was done and what remains. Say it is **awaiting the merge phase** instead of waiting for human review.
+- If you cannot finish, emit structured task notes describing what was done and what remains. Say it is **awaiting the merge phase** instead of waiting for human review.
 
 # THE TASK
 
-If the task is not complete, leave a comment on the task with what was done.
+If the task is not complete, emit structured task notes with what was done.
 
 Do not close the task — only the merge phase closes tasks after branches are merged.
+
+To record a comment on this task, emit:
+
+<task-notes>
+{"schemaVersion":1,"taskId":"{{TASK_ID}}","comments":["what was done"]}
+</task-notes>
+
+Invalid or oversized notes are rejected and are not applied. Do not comment via `bd`.
 
 Once complete, output <promise>COMPLETE</promise>.
 

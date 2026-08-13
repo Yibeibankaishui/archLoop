@@ -153,7 +153,9 @@ npx archloop run --flow with-review
 Task-board flows select a batch, run task implementations concurrently, and
 merge eligible branches serially. `with-review` adds a reviewer stage. An
 unfinished same-flow merge-ready batch is recovered before new tasks are
-claimed.
+claimed. Implementation and review agents receive an immutable task snapshot
+instead of live `bd` access; Hub applies schema-validated `<task-notes>` after
+the attempt.
 
 Re-running `archloop run` also detects tasks left in implementation, review, or
 merge by an interrupted process. It uses completed-phase events to resume at
