@@ -37,6 +37,11 @@ import {
   type HubRunAutoRecoverSummary,
 } from "./hubRunAutoRecover.js";
 import {
+  ensureHubTaskStoreMigrated,
+  formatHubTaskStoreMigrationMessage,
+  type HubTaskStoreMigrationOutcome,
+} from "./hubTaskStoreMigration.js";
+import {
   createHubProjectDirPhaseCompletionEventResolver,
   type RecoverHubTaskInput,
 } from "./hubTaskRecover.js";
@@ -256,6 +261,7 @@ export interface RunHubFlowResult {
    * render the count unconditionally.
    */
   readonly autoRecoverSummary?: HubRunAutoRecoverSummary;
+  readonly taskStoreMigration?: HubTaskStoreMigrationOutcome;
 }
 
 type HubFlowLifecycleMutation = <T>(
@@ -1409,6 +1415,11 @@ const runObservedHubFlow = async (
   const hubProjectDir =
     input.hubProjectDir ??
     resolveHubProjectDir(resolveArchloopUserDataDir(input.env), repoRoot);
+  const taskStoreMigration = ensureHubTaskStoreMigrated({
+    repoRoot,
+    hubProjectDir,
+    env: input.env,
+  });
   // Run-startup auto-recover: detect tasks left stuck in an execution status by
   // a previously-interrupted run and route each one through the event-aware
   // recovery wiring before the run loads the board for the resumed-batch scan.
@@ -1464,6 +1475,17 @@ const runObservedHubFlow = async (
     env: input.env,
   });
   mkdirSync(join(context.runDir, "logs"), { recursive: true });
+  if (taskStoreMigration.kind === "migrated") {
+    appendHubRunEvent(context.runDir, {
+      type: "task_store_migration",
+      runId: context.runId,
+      createdAt: new Date().toISOString(),
+      kind: taskStoreMigration.kind,
+      phase: taskStoreMigration.phase,
+      beadsDir: taskStoreMigration.beadsDir,
+      message: formatHubTaskStoreMigrationMessage(taskStoreMigration),
+    });
+  }
   const batchResults: HubFlowBatchResult[] = [];
   const results: HubFlowTaskResult[] = [];
   const selectedTaskIds: string[] = [];
@@ -1732,6 +1754,7 @@ const runObservedHubFlow = async (
     projectDevelopmentContractCreatedGenericFallback:
       projectDevelopmentContract.createdGenericFallback,
     autoRecoverSummary,
+    taskStoreMigration,
   };
 };
 
@@ -1754,6 +1777,9 @@ export const formatHubFlowResultLines = (
   ];
   for (const line of formatHubRunAutoRecoverLines(result.autoRecoverSummary)) {
     lines.push(line);
+  }
+  if (result.taskStoreMigration?.kind === "migrated") {
+    lines.push(formatHubTaskStoreMigrationMessage(result.taskStoreMigration));
   }
   if (result.worktreeWarning) {
     lines.push(

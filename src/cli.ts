@@ -229,6 +229,7 @@ import {
 import { evaluateHubManagedBranchCleanup } from "./hubManagedBranchCleanup.js";
 import { HUB_TRIAGE_DEFAULT_TASK_QUERY } from "./hubTriage.js";
 import { initHubTaskStore } from "./hubTaskStore.js";
+import { ensureHubTaskStoreMigrated } from "./hubTaskStoreMigration.js";
 import { isTriageTaskIdInput } from "./hubTriageProposal.js";
 import {
   buildSyncResultModel,
@@ -1978,6 +1979,7 @@ const taskSelectorsArg = Args.atLeast(
 
 const resolveTaskCommandProjectTarget = (
   project: OptionalTextFlag,
+  options: { readonly migrateLegacyStore?: boolean } = {},
 ): Effect.Effect<
   {
     readonly repoRoot: string;
@@ -1994,22 +1996,47 @@ const resolveTaskCommandProjectTarget = (
         isTTY: process.stdin.isTTY === true,
         selectProject: resolveInteractiveProjectSelection,
       });
-      return {
+      const target = {
         repoRoot: resolved.project.repoRoot,
         projectName: resolved.project.name,
         hubProjectDir: resolved.project.hubProjectDir,
       };
+      if (options.migrateLegacyStore) {
+        ensureHubTaskStoreMigrated({
+          repoRoot: target.repoRoot,
+          hubProjectDir: target.hubProjectDir,
+        });
+      }
+      return target;
     },
     catch: toTaskBoardError,
   });
 
+const resolveMutatingTaskCommandProjectTarget = (
+  project: OptionalTextFlag,
+): Effect.Effect<
+  {
+    readonly repoRoot: string;
+    readonly projectName: string;
+    readonly hubProjectDir: string;
+  },
+  TaskBoardError,
+  never
+> => resolveTaskCommandProjectTarget(project, { migrateLegacyStore: true });
+
 const resolveTaskCommandRepoRoot = (
   project: OptionalTextFlag,
+  options: { readonly migrateLegacyStore?: boolean } = {},
 ): Effect.Effect<string, TaskBoardError, never> =>
   Effect.map(
-    resolveTaskCommandProjectTarget(project),
+    resolveTaskCommandProjectTarget(project, options),
     (target) => target.repoRoot,
   );
+
+const resolveMutatingTaskCommandRepoRoot = (
+  project: OptionalTextFlag,
+): Effect.Effect<string, TaskBoardError, never> =>
+  resolveTaskCommandRepoRoot(project, { migrateLegacyStore: true });
 
 // Reused empty set so the common healthy-board path (no locks directory) never
 // allocates a fresh `new Set()` for the interrupted badge.
@@ -2108,6 +2135,17 @@ const tasksInitCommand = Command.make(
         catch: toTaskBoardError,
       });
 
+      if (result.migrated) {
+        if (result.output.trim().length > 0) {
+          yield* d.text(result.output.trim());
+        }
+        yield* d.status(
+          "Migrated the repository-local Beads store into Hub-owned storage.",
+          "success",
+        );
+        return;
+      }
+
       if (result.alreadyInitialized) {
         yield* d.status("Hub task store is already initialized.", "success");
         return;
@@ -2168,7 +2206,7 @@ const tasksCreateCommand = Command.make(
   ({ title, origin, description, kind, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const cwd = yield* resolveMutatingTaskCommandRepoRoot(project);
       const resolvedOrigin = yield* resolveTaskOrigin(origin);
       const kindValue = optionalTextValue(kind);
       const created = yield* Effect.try({
@@ -2238,7 +2276,7 @@ const tasksTriageCommand = Command.make(
   },
   ({ taskId, query, approve, project }) =>
     Effect.gen(function* () {
-      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const cwd = yield* resolveMutatingTaskCommandRepoRoot(project);
       const explicitTaskId = optionalTextValue(taskId)?.trim();
       const explicitQuery = optionalTextValue(query)?.trim();
       const yes = approve;
@@ -2368,7 +2406,7 @@ const tasksFromPrdCommand = Command.make(
   },
   ({ prdRef, approve, status, deps, project }) =>
     Effect.gen(function* () {
-      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const cwd = yield* resolveMutatingTaskCommandRepoRoot(project);
       const explicitHubStatusMode =
         !approve && status._tag === "Some"
           ? yield* resolvePrdHubStatusMode(status)
@@ -2510,7 +2548,7 @@ const tasksSyncCommand = Command.make(
   },
   ({ yes, dryRun, includeClosed, json, project }) =>
     Effect.gen(function* () {
-      const target = yield* resolveTaskCommandProjectTarget(project);
+      const target = yield* resolveMutatingTaskCommandProjectTarget(project);
       return yield* runHubTaskSyncCommand({
         mode: "sync",
         cwd: target.repoRoot,
@@ -2533,7 +2571,7 @@ const tasksPullCommand = Command.make(
   },
   ({ includeClosed, dryRun, json, project }) =>
     Effect.gen(function* () {
-      const target = yield* resolveTaskCommandProjectTarget(project);
+      const target = yield* resolveMutatingTaskCommandProjectTarget(project);
       return yield* runHubTaskSyncCommand({
         mode: "pull",
         cwd: target.repoRoot,
@@ -2554,7 +2592,7 @@ const tasksPushCommand = Command.make(
   },
   ({ dryRun, json, project }) =>
     Effect.gen(function* () {
-      const target = yield* resolveTaskCommandProjectTarget(project);
+      const target = yield* resolveMutatingTaskCommandProjectTarget(project);
       return yield* runHubTaskSyncCommand({
         mode: "push",
         cwd: target.repoRoot,
@@ -2578,7 +2616,7 @@ const tasksCommentCommand = Command.make(
   ({ id, body, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const cwd = yield* resolveMutatingTaskCommandRepoRoot(project);
       const task = yield* Effect.try({
         try: () => resolveHubTaskSelector(cwd, id),
         catch: toTaskBoardError,
@@ -2624,7 +2662,7 @@ const tasksRecoverCommand = Command.make(
   ({ id, stale, yes, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const cwd = yield* resolveMutatingTaskCommandRepoRoot(project);
 
       if (stale) {
         const idValue = optionalTextValue(id);
@@ -2741,7 +2779,7 @@ const tasksResolveCommand = Command.make(
   ({ id, keep, yes, json, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const target = yield* resolveTaskCommandProjectTarget(project);
+      const target = yield* resolveMutatingTaskCommandProjectTarget(project);
       const cwd = target.repoRoot;
       const task = yield* Effect.try({
         try: () => resolveHubTaskSelector(cwd, id),
@@ -2987,7 +3025,7 @@ const tasksRepairStateCommand = Command.make(
   ({ id, yes, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const cwd = yield* resolveMutatingTaskCommandRepoRoot(project);
       const preview = yield* Effect.tryPromise({
         try: () => repairHubTaskState({ cwd, taskSelector: id }),
         catch: toTaskBoardError,
@@ -3061,7 +3099,7 @@ const tasksDeleteCommand = Command.make(
   ({ selectors, yes, dryRun, cascade, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const cwd = yield* resolveMutatingTaskCommandRepoRoot(project);
       const tasks = yield* Effect.try({
         try: () => resolveHubTaskSelectors(cwd, selectors),
         catch: toTaskBoardError,

@@ -25,8 +25,10 @@ description: Reference for local task-board and GitHub synchronization commands.
 directory, not in the Git repository. It also installs a Git-ignored
 `.beads/redirect` so host `bd where`, `bd ready`, and `bd show` resolve the
 same store. Hub flow agents consume an immutable task snapshot rather than
-that live store. Existing repository-local stores are left in place until
-automatic migration lands.
+that live store. An existing writer-free repository-local store migrates
+automatically on `tasks init` and on the first mutating `archloop run` or task
+command. Migration is journaled and resumes after a crash; it is not a task
+failure and does not require `tasks recover`.
 
 Use `--json` where offered for machine-readable output. Preview synchronization,
 cleanup, and deletion with `--dry-run` before applying them in automation.

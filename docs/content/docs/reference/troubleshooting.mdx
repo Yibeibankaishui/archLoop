@@ -49,6 +49,16 @@ Fix the redirect path, or rerun `tasks init` for the registered project to
 recreate the Hub-owned store and redirect. Do not initialize a second database
 in the Git repository.
 
+## Legacy Beads store still lives in the repository
+
+**Cause:** The project still has a repository-local Beads database. Hub
+migrates a writer-free legacy store automatically on the first mutating
+`archloop run` or task command.
+
+No extra migration command is required. If a previous attempt crashed, retry
+the same mutating command; Hub resumes from the durable journal and backup.
+Do not run `archloop tasks recover` for this.
+
 ## Agent role or credential is missing
 
 ```bash

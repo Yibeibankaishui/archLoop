@@ -73,6 +73,16 @@ export interface HubRunCompletedEvent {
   readonly batchResults: readonly HubRunCompletedBatchResult[];
 }
 
+export interface HubTaskStoreMigrationEvent {
+  readonly type: "task_store_migration";
+  readonly runId: string;
+  readonly createdAt: string;
+  readonly kind: "migrated" | "not_needed";
+  readonly phase?: string;
+  readonly beadsDir: string;
+  readonly message: string;
+}
+
 export interface HubBatchStartedEvent {
   readonly type: "batch_started";
   readonly runId: string;
@@ -189,6 +199,7 @@ export interface HubTaskEvent {
 type HubRunEventData =
   | HubRunStartedEvent
   | HubRunCompletedEvent
+  | HubTaskStoreMigrationEvent
   | HubBatchStartedEvent
   | HubBatchPlannedEvent
   | HubBatchMergeSelectionEvent
@@ -454,7 +465,7 @@ export const createHubRunContext = (
 
 export const appendHubRunEvent = (
   runDir: string,
-  event: HubRunStartedEvent | HubRunCompletedEvent,
+  event: HubRunStartedEvent | HubRunCompletedEvent | HubTaskStoreMigrationEvent,
 ): string => {
   const { runEventsPath } = resolveHubRunEventsPaths(runDir);
   return appendHubEvent(

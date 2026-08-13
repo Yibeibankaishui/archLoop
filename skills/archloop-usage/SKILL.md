@@ -49,7 +49,10 @@ repositories.
 `--project-profile`. Registration selects the project. Selection persists across
 directories. Optional task-store initialization creates a Hub-owned Beads
 database under the Hub project directory and a Git-ignored `.beads/redirect`
-so host `bd` commands resolve the same store.
+so host `bd` commands resolve the same store. An existing writer-free
+repository-local Beads store migrates automatically on the first mutating
+`archloop run` or task command; crashes resume from the journal without
+`tasks recover`.
 
 ## Project operations
 
@@ -109,8 +112,9 @@ JSON). `tasks show` renders the status by severity, labels remaining metadata,
 and presents comments as a timeline rather than a raw metadata blob.
 
 Task commands use the selected project unless `--project <name>` is supplied.
-`tasks init` initializes the Hub-owned store for a registered project that does
-not already have a repository-local Beads database.
+`tasks init` initializes the Hub-owned store for a registered project. If a
+repository-local Beads database already exists, it migrates that store into
+Hub-owned storage and installs `.beads/redirect`.
 
 ## GitHub synchronization
 

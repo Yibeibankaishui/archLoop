@@ -23,9 +23,10 @@ TypeScript API to build your own orchestration.
 
 - A shared Hub registry for multiple Git projects
 - Agent roles for planning, implementation, review, merge, triage, and recovery
-- Local Beads-backed tasks stored in the Hub project directory, with optional
-  GitHub Issues synchronization. Hub flow agents receive an immutable task
-  snapshot; Hub applies structured notes after each attempt.
+- Local Beads-backed tasks stored in the Hub project directory, with automatic
+  migration from a repository-local Beads store and optional GitHub Issues
+  synchronization. Hub flow agents receive an immutable task snapshot; Hub
+  applies structured notes after each attempt.
 - Docker, Podman, Vercel, Daytona, and explicit no-sandbox execution
 - Git branches and worktrees for isolated changes
 - Review and merge flows with recovery after interrupted runs

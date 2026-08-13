@@ -16,6 +16,11 @@ import {
   type HubTaskStoreKind,
 } from "./hubTaskStoreResolver.js";
 import {
+  formatHubTaskStoreMigrationMessage,
+  inspectHubTaskStoreMigration,
+  type HubTaskStoreMigrationPhase,
+} from "./hubTaskStoreMigration.js";
+import {
   collectHubWorktreeLeaseDiagnosticsForTasks,
   type HubWorktreeLeaseDiagnostic,
 } from "./hubWorktreeLeaseDiagnostics.js";
@@ -95,6 +100,8 @@ export interface HubProjectStatus {
   readonly taskStoreKind?: HubTaskStoreKind;
   readonly taskStoreDir?: string;
   readonly taskStoreRedirectError?: string;
+  readonly taskStoreMigrationPhase?: HubTaskStoreMigrationPhase;
+  readonly taskStoreMigrationMessage?: string;
   readonly taskCounts: HubProjectTaskCounts;
   readonly statusCounts: Partial<Record<HubTaskStatus, number>>;
   readonly failedTasks: readonly HubProjectFailedTask[];
@@ -485,6 +492,12 @@ const formatTaskStoreLocationValue = (status: HubProjectStatus): string => {
     return status.taskStoreDir ?? "hub-owned";
   }
   if (status.taskStoreInitialized || status.taskStoreKind === "legacy") {
+    if (
+      status.taskStoreMigrationPhase &&
+      status.taskStoreMigrationPhase !== "verified"
+    ) {
+      return `repository-local (${status.taskStoreMigrationPhase})`;
+    }
     return "repository-local";
   }
   return "missing";
@@ -653,6 +666,11 @@ export const formatHubProjectStatusLines = (
 ): readonly string[] => {
   const lines: string[] = [];
   appendTaskCountLines(lines, status);
+  if (status.taskStoreMigrationMessage) {
+    lines.push("Task store migration");
+    lines.push(`  ${status.taskStoreMigrationMessage}`);
+    lines.push("");
+  }
   lines.push("");
   appendActiveBatchLines(lines, status.activeBatches);
   lines.push("");
@@ -869,6 +887,10 @@ export const resolveHubProjectStatus = (
     repoRoot,
     hubProjectDir,
   });
+  const taskStoreMigration = inspectHubTaskStoreMigration({
+    repoRoot,
+    hubProjectDir,
+  });
   const taskCounts = resolveTaskCounts(
     repoRoot,
     beadsAvailable,
@@ -917,6 +939,9 @@ export const resolveHubProjectStatus = (
     taskStoreKind: taskStoreResolution.kind,
     taskStoreDir: taskStoreResolution.beadsDir,
     taskStoreRedirectError: taskStoreResolution.redirectError,
+    taskStoreMigrationPhase: taskStoreMigration.phase,
+    taskStoreMigrationMessage:
+      formatHubTaskStoreMigrationMessage(taskStoreMigration),
     taskCounts,
     statusCounts,
     failedTasks,
@@ -975,6 +1000,14 @@ const projectStatusIdentityRows = (
     key: "Task store",
     value: formatTaskStoreLocationValue(status),
   },
+  ...(status.taskStoreMigrationPhase
+    ? [
+        {
+          key: "Task store migration",
+          value: status.taskStoreMigrationPhase,
+        },
+      ]
+    : []),
   { key: "Task board ready", value: String(status.taskCounts.ready) },
   { key: "Task board total", value: String(status.taskCounts.total) },
 ];

@@ -49,7 +49,9 @@ npx archloop project add
 
 交互式流程会询问仓库路径、项目名、Project profile，以及是否初始化 Hub 拥有的
 任务表。新项目把 Beads 数据库放在 Hub 项目目录中，并安装 Git-ignored 的
-`.beads/redirect`，以便主机上的 `bd` 命令继续指向同一套任务。
+`.beads/redirect`，以便主机上的 `bd` 命令继续指向同一套任务。已有的仓库内
+Beads 库会在第一次变更型 `archloop run` 或 task 命令时自动迁移，崩溃后按
+journal 续跑，不需要 `tasks recover`。
 脚本中可以显式提供参数：
 
 ```bash
@@ -287,4 +289,5 @@ API 参数、返回值和生命周期说明见
 | 2026-08-13 | 补充中断自动恢复、批量恢复与任务诊断输出说明                |
 | 2026-08-13 | 说明后续 iteration 启动 abort 会继续运行，而不是整次失败    |
 | 2026-08-13 | 新 Hub 项目将 Beads 任务表放到 Hub 项目目录，并保留 bd 跳转 |
-| 2026-08-13 | Hub 执行 agent 使用不可变任务快照，notes 由 Hub 写回 |
+| 2026-08-13 | Hub 执行 agent 使用不可变任务快照，notes 由 Hub 写回        |
+| 2026-08-13 | 已有仓库内 Beads 库在首次变更型命令时自动迁移并可崩溃续跑   |
