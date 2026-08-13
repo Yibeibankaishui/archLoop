@@ -492,10 +492,13 @@ const formatTaskStoreLocationValue = (status: HubProjectStatus): string => {
     return status.taskStoreDir ?? "hub-owned";
   }
   if (status.taskStoreInitialized || status.taskStoreKind === "legacy") {
-    return status.taskStoreMigrationPhase &&
+    if (
+      status.taskStoreMigrationPhase &&
       status.taskStoreMigrationPhase !== "verified"
-      ? `repository-local (${status.taskStoreMigrationPhase})`
-      : "repository-local";
+    ) {
+      return `repository-local (${status.taskStoreMigrationPhase})`;
+    }
+    return "repository-local";
   }
   return "missing";
 };

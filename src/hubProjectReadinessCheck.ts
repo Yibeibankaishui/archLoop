@@ -202,11 +202,13 @@ const buildTaskStoreSection = (
   }
 
   if (status.taskStoreInitialized) {
-    const message = isHubOwnedTaskStoreKind(status.taskStoreKind)
-      ? `Hub-owned task store is initialized at ${status.taskStoreDir}.`
-      : status.taskStoreKind === "legacy"
-        ? "Repository-local Beads store is initialized and will migrate automatically on the next mutating Hub command."
-        : "Local task store is initialized.";
+    let message = "Local task store is initialized.";
+    if (isHubOwnedTaskStoreKind(status.taskStoreKind)) {
+      message = `Hub-owned task store is initialized at ${status.taskStoreDir}.`;
+    } else if (status.taskStoreKind === "legacy") {
+      message =
+        "Repository-local Beads store is initialized and will migrate automatically on the next mutating Hub command.";
+    }
     return createSection("Checking local task store", [
       createFinding("success", "Local task store is initialized", message),
     ]);

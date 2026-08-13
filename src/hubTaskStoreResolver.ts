@@ -62,9 +62,11 @@ const resolveBeadsDatabaseDir = (beadsDir: string): string =>
 export const isBeadsStoreMarkerPresent = (beadsDir: string): boolean =>
   existsSync(resolveBeadsMetadataPath(beadsDir));
 
-export const isBeadsStoreFullyInitialized = (beadsDir: string): boolean =>
-  isBeadsStoreMarkerPresent(beadsDir) &&
+export const isBeadsStoreDatabasePresent = (beadsDir: string): boolean =>
   existsSync(resolveBeadsDatabaseDir(beadsDir));
+
+export const isBeadsStoreFullyInitialized = (beadsDir: string): boolean =>
+  isBeadsStoreMarkerPresent(beadsDir) && isBeadsStoreDatabasePresent(beadsDir);
 
 export const resolveManagedHubTaskStoreDir = (hubProjectDir: string): string =>
   join(hubProjectDir, ".beads");
@@ -207,6 +209,18 @@ export const ensureHubTaskStoreGitExcludePattern = (
   appendFileSync(excludePath, `${prefix}${pattern}\n`);
 };
 
+export const ensureHubTaskStoreMigrationGitExcludes = (
+  repoRoot: string,
+): void => {
+  ensureHubTaskStoreGitExcludePattern(
+    repoRoot,
+    HUB_TASK_STORE_QUARANTINE_GIT_EXCLUDE_PATTERN,
+  );
+  for (const pattern of HUB_TASK_STORE_RUNTIME_GIT_EXCLUDE_PATTERNS) {
+    ensureHubTaskStoreGitExcludePattern(repoRoot, pattern);
+  }
+};
+
 export const installHubTaskStoreRedirect = (
   repoRoot: string,
   managedBeadsDir: string,
@@ -222,11 +236,5 @@ export const installHubTaskStoreRedirect = (
     repoRoot,
     HUB_TASK_STORE_GIT_EXCLUDE_PATTERN,
   );
-  ensureHubTaskStoreGitExcludePattern(
-    repoRoot,
-    HUB_TASK_STORE_QUARANTINE_GIT_EXCLUDE_PATTERN,
-  );
-  for (const pattern of HUB_TASK_STORE_RUNTIME_GIT_EXCLUDE_PATTERNS) {
-    ensureHubTaskStoreGitExcludePattern(repoRoot, pattern);
-  }
+  ensureHubTaskStoreMigrationGitExcludes(repoRoot);
 };

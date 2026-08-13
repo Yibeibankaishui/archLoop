@@ -7,6 +7,7 @@ import { isBdAvailable, resolveBdExecutable } from "./resolveBdExecutable.js";
 import {
   HUB_TASK_STORE_INIT_COMMAND,
   installHubTaskStoreRedirect,
+  isBeadsStoreDatabasePresent,
   isBeadsStoreFullyInitialized,
   isBeadsStoreMarkerPresent,
   resolveHubTaskStore,
@@ -326,8 +327,8 @@ export const initHubTaskStore = (
       resolveHubTaskStoreDir(cwd),
     );
     if (options.hubProjectDir) {
-      const quarantinePresent = existsSync(
-        join(resolveHubTaskStoreQuarantineDir(cwd), "embeddeddolt"),
+      const quarantinePresent = isBeadsStoreDatabasePresent(
+        resolveHubTaskStoreQuarantineDir(cwd),
       );
       const needsLegacyMigration = hasLegacyStore || quarantinePresent;
       if (needsLegacyMigration) {

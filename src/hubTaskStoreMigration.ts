@@ -18,15 +18,14 @@ import { dirname, join } from "node:path";
 
 import { TaskBoardError } from "./errors.js";
 import {
-  ensureHubTaskStoreGitExcludePattern,
+  ensureHubTaskStoreMigrationGitExcludes,
   installHubTaskStoreRedirect,
+  isBeadsStoreDatabasePresent,
   isBeadsStoreFullyInitialized,
   isHubOwnedTaskStoreKind,
   resolveHubTaskStore,
   resolveHubTaskStoreQuarantineDir,
   resolveManagedHubTaskStoreDir,
-  HUB_TASK_STORE_QUARANTINE_GIT_EXCLUDE_PATTERN,
-  HUB_TASK_STORE_RUNTIME_GIT_EXCLUDE_PATTERNS,
   type HubTaskStoreKind,
   type HubTaskStoreResolution,
 } from "./hubTaskStoreResolver.js";
@@ -485,13 +484,7 @@ const quarantineLegacyStore = (
     }
     renameSync(from, to);
   }
-  ensureHubTaskStoreGitExcludePattern(
-    repoRoot,
-    HUB_TASK_STORE_QUARANTINE_GIT_EXCLUDE_PATTERN,
-  );
-  for (const pattern of HUB_TASK_STORE_RUNTIME_GIT_EXCLUDE_PATTERNS) {
-    ensureHubTaskStoreGitExcludePattern(repoRoot, pattern);
-  }
+  ensureHubTaskStoreMigrationGitExcludes(repoRoot);
 };
 
 const copyManagedStore = (
@@ -572,12 +565,16 @@ const releaseMigrationLease = (hubProjectDir: string): void => {
 const highestPhase = (
   phases: readonly HubTaskStoreMigrationPhase[],
 ): HubTaskStoreMigrationPhase | undefined => {
-  if (phases.length === 0) {
-    return undefined;
+  let highest: HubTaskStoreMigrationPhase | undefined;
+  let highestRank = -1;
+  for (const phase of phases) {
+    const rank = PHASE_RANK.get(phase) ?? -1;
+    if (rank > highestRank) {
+      highest = phase;
+      highestRank = rank;
+    }
   }
-  return [...phases].sort(
-    (left, right) => (PHASE_RANK.get(left) ?? -1) - (PHASE_RANK.get(right) ?? -1),
-  )[phases.length - 1];
+  return highest;
 };
 
 const derivePhase = (input: {
@@ -586,14 +583,15 @@ const derivePhase = (input: {
   readonly snapshot?: StoreIdentity;
   readonly journalPhases: readonly HubTaskStoreMigrationPhase[];
 }): HubTaskStoreMigrationPhase | undefined => {
+  const managedBeadsDir = input.resolution.managedBeadsDir;
   const managedReady =
-    Boolean(input.resolution.managedBeadsDir) &&
-    isBeadsStoreFullyInitialized(input.resolution.managedBeadsDir!);
+    managedBeadsDir !== undefined &&
+    isBeadsStoreFullyInitialized(managedBeadsDir);
   const redirectReady =
     input.resolution.kind === "redirect" &&
     !input.resolution.redirectError &&
     managedReady;
-  const quarantined = existsSync(join(input.quarantineDir, "embeddeddolt"));
+  const quarantined = isBeadsStoreDatabasePresent(input.quarantineDir);
   const legacyLive = input.resolution.kind === "legacy";
 
   if (redirectReady && input.journalPhases.includes("verified")) {
@@ -635,7 +633,7 @@ export const inspectHubTaskStoreMigration = (
     snapshot,
     journalPhases,
   });
-  const backupPresent = existsSync(join(quarantineDir, "embeddeddolt"));
+  const backupPresent = isBeadsStoreDatabasePresent(quarantineDir);
   return {
     kind: resolution.kind,
     beadsDir: resolution.beadsDir,
@@ -649,25 +647,31 @@ export const inspectHubTaskStoreMigration = (
   };
 };
 
+const isMigrationOutcome = (
+  value: HubTaskStoreMigrationOutcome | HubTaskStoreMigrationInspection,
+): value is HubTaskStoreMigrationOutcome =>
+  value.kind === "migrated" || value.kind === "not_needed";
+
 export const formatHubTaskStoreMigrationMessage = (
   outcome: HubTaskStoreMigrationOutcome | HubTaskStoreMigrationInspection,
 ): string => {
-  if ("integrityError" in outcome && outcome.integrityError) {
-    return outcome.integrityError;
-  }
-  if ("kind" in outcome && outcome.kind === "migrated") {
-    return `Migrated the repository-local Beads store into Hub-owned storage at ${outcome.beadsDir}. Direct \`bd\` commands continue through .beads/redirect. A recoverable backup remains at ${outcome.backupDir}.`;
-  }
-  if ("kind" in outcome && outcome.kind === "not_needed") {
+  if (isMigrationOutcome(outcome)) {
+    if (outcome.kind === "migrated") {
+      return `Migrated the repository-local Beads store into Hub-owned storage at ${outcome.beadsDir}. Direct \`bd\` commands continue through .beads/redirect. A recoverable backup remains at ${outcome.backupDir}.`;
+    }
     if (outcome.reason === "verified" || outcome.phase === "verified") {
       return `Hub-owned Beads store is already migrated at ${outcome.beadsDir}.`;
     }
     return `Hub Beads store does not need migration (${outcome.reason}).`;
   }
-  if ("phase" in outcome && outcome.phase === "verified") {
+
+  if (outcome.integrityError) {
+    return outcome.integrityError;
+  }
+  if (outcome.phase === "verified") {
     return `Hub-owned Beads store is migrated and verified at ${outcome.beadsDir}.`;
   }
-  if ("phase" in outcome && outcome.phase) {
+  if (outcome.phase) {
     return `Hub Beads store migration progress: ${outcome.phase}.`;
   }
   return "Hub Beads store migration has not started.";
@@ -712,6 +716,18 @@ const verifyManagedStore = (
   }
 };
 
+const notNeededReasonForKind = (
+  kind: HubTaskStoreKind,
+): "uninitialized" | "managed" | "redirect" => {
+  if (kind === "uninitialized") {
+    return "uninitialized";
+  }
+  if (kind === "managed") {
+    return "managed";
+  }
+  return "redirect";
+};
+
 export const ensureHubTaskStoreMigrated = (
   input: HubTaskStoreMigrationInput,
 ): HubTaskStoreMigrationOutcome => {
@@ -723,10 +739,11 @@ export const ensureHubTaskStoreMigrated = (
     });
   }
 
-  const resolution = resolveHubTaskStore({
+  const location = {
     repoRoot: input.repoRoot,
     hubProjectDir: input.hubProjectDir,
-  });
+  };
+  const resolution = resolveHubTaskStore(location);
   if (resolution.redirectError) {
     throw new TaskBoardError({ message: resolution.redirectError });
   }
@@ -739,6 +756,7 @@ export const ensureHubTaskStoreMigrated = (
   const journalPath = resolveJournalPath(input.hubProjectDir);
   const snapshotPath = resolveSnapshotPath(input.hubProjectDir);
   const inspection = inspectHubTaskStoreMigration(input);
+  const quarantinePresent = isBeadsStoreDatabasePresent(quarantineDir);
 
   if (
     inspection.phase === "verified" &&
@@ -755,24 +773,16 @@ export const ensureHubTaskStoreMigrated = (
   if (
     resolution.kind !== "legacy" &&
     inspection.phase === undefined &&
-    !existsSync(join(quarantineDir, "embeddeddolt"))
+    !quarantinePresent
   ) {
     return {
       kind: "not_needed",
-      reason:
-        resolution.kind === "uninitialized"
-          ? "uninitialized"
-          : resolution.kind === "managed"
-            ? "managed"
-            : "redirect",
+      reason: notNeededReasonForKind(resolution.kind),
       beadsDir: resolution.beadsDir,
     };
   }
 
-  if (
-    resolution.kind === "legacy" &&
-    !existsSync(join(quarantineDir, "embeddeddolt"))
-  ) {
+  if (resolution.kind === "legacy" && !quarantinePresent) {
     try {
       captureStoreIdentity(input.repoRoot, repoBeadsDir, env);
     } catch {
@@ -788,43 +798,41 @@ export const ensureHubTaskStoreMigrated = (
   try {
     let snapshot = readSnapshot(snapshotPath);
     const fault = input.faultInjection;
-
-    const journalPhases = () => readJournalPhases(journalPath);
     const syncJournal = (
       phase: HubTaskStoreMigrationPhase,
       extra?: Readonly<Record<string, unknown>>,
     ) => {
       appendJournalPhase(journalPath, phase, extra);
     };
-
-    const currentPhase = () =>
-      derivePhase({
-        resolution: resolveHubTaskStore({
-          repoRoot: input.repoRoot,
-          hubProjectDir: input.hubProjectDir,
+    const readProgress = () => {
+      const currentResolution = resolveHubTaskStore(location);
+      return {
+        resolution: currentResolution,
+        phase: derivePhase({
+          resolution: currentResolution,
+          quarantineDir,
+          snapshot,
+          journalPhases: readJournalPhases(journalPath),
         }),
-        quarantineDir,
-        snapshot,
-        journalPhases: journalPhases(),
-      });
+      };
+    };
 
-    if (currentPhase() === undefined || currentPhase() === "legacy_active") {
+    const startPhase = readProgress().phase;
+    if (startPhase === undefined || startPhase === "legacy_active") {
       if (resolution.kind === "legacy") {
         assertWriterFree(repoBeadsDir);
       }
-      withSideEffect(fault, "record_legacy_active", () => {
-        // Recording the source fingerprint happens with the snapshot; this
-        // side effect is the durable lease/journal start boundary.
-      });
+      // Durable lease/journal start boundary. The source fingerprint is
+      // recorded with the snapshot in the next step.
+      maybeCrash(fault, "record_legacy_active", "before");
+      maybeCrash(fault, "record_legacy_active", "after");
       syncJournal("legacy_active");
     }
 
+    const snapshotProgress = readProgress();
     if (
-      currentPhase() === "legacy_active" ||
-      (!snapshot && resolveHubTaskStore({
-        repoRoot: input.repoRoot,
-        hubProjectDir: input.hubProjectDir,
-      }).kind === "legacy")
+      snapshotProgress.phase === "legacy_active" ||
+      (!snapshot && snapshotProgress.resolution.kind === "legacy")
     ) {
       withSideEffect(fault, "prepare_snapshot", () => {
         snapshot = captureStoreIdentity(input.repoRoot, repoBeadsDir, env);
@@ -836,57 +844,61 @@ export const ensureHubTaskStoreMigrated = (
       });
     }
 
-    snapshot = snapshot ?? readSnapshot(snapshotPath);
-    if (!snapshot) {
+    const sourceSnapshot = snapshot ?? readSnapshot(snapshotPath);
+    if (!sourceSnapshot) {
       throw new TaskBoardError({
         message:
           "Hub Beads migration could not prepare a source snapshot. Retry the same mutating command. This is not a task failure and does not require `archloop tasks recover`.",
       });
     }
+    snapshot = sourceSnapshot;
 
+    const quarantineProgress = readProgress();
     if (
-      currentPhase() === "snapshot_prepared" ||
-      (currentPhase() === "legacy_active" &&
-        existsSync(join(repoBeadsDir, "embeddeddolt")))
+      quarantineProgress.phase === "snapshot_prepared" ||
+      (quarantineProgress.phase === "legacy_active" &&
+        isBeadsStoreDatabasePresent(repoBeadsDir))
     ) {
       withSideEffect(fault, "quarantine_legacy", () => {
         quarantineLegacyStore(input.repoRoot, repoBeadsDir, quarantineDir);
       });
       syncJournal("legacy_quarantined", {
-        fingerprint: snapshot.fingerprint,
+        fingerprint: sourceSnapshot.fingerprint,
       });
     }
 
+    const copyProgress = readProgress();
     if (
-      currentPhase() === "legacy_quarantined" ||
-      (existsSync(join(quarantineDir, "embeddeddolt")) &&
+      copyProgress.phase === "legacy_quarantined" ||
+      (isBeadsStoreDatabasePresent(quarantineDir) &&
         !isBeadsStoreFullyInitialized(managedBeadsDir))
     ) {
       withSideEffect(fault, "copy_managed", () => {
         copyManagedStore(repoBeadsDir, quarantineDir, managedBeadsDir);
       });
-      syncJournal("managed_copied", { fingerprint: snapshot.fingerprint });
+      syncJournal("managed_copied", {
+        fingerprint: sourceSnapshot.fingerprint,
+      });
     }
 
-    const afterCopy = resolveHubTaskStore({
-      repoRoot: input.repoRoot,
-      hubProjectDir: input.hubProjectDir,
-    });
+    const redirectProgress = readProgress();
     if (
-      afterCopy.kind !== "redirect" ||
-      afterCopy.redirectError ||
-      currentPhase() === "managed_copied"
+      redirectProgress.resolution.kind !== "redirect" ||
+      redirectProgress.resolution.redirectError ||
+      redirectProgress.phase === "managed_copied"
     ) {
       withSideEffect(fault, "install_redirect", () => {
         installHubTaskStoreRedirect(input.repoRoot, managedBeadsDir);
       });
-      syncJournal("redirect_installed", { fingerprint: snapshot.fingerprint });
+      syncJournal("redirect_installed", {
+        fingerprint: sourceSnapshot.fingerprint,
+      });
     }
 
     withSideEffect(fault, "verify_managed", () => {
-      verifyManagedStore(input.repoRoot, managedBeadsDir, snapshot!, env);
+      verifyManagedStore(input.repoRoot, managedBeadsDir, sourceSnapshot, env);
     });
-    syncJournal("verified", { fingerprint: snapshot.fingerprint });
+    syncJournal("verified", { fingerprint: sourceSnapshot.fingerprint });
 
     return {
       kind: "migrated",
