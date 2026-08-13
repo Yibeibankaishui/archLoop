@@ -20,6 +20,7 @@ import {
   ensureHubTaskStoreMigrated,
   formatHubTaskStoreMigrationMessage,
   formatHubTaskStoreSplitBrainMessage,
+  throwIfHubTaskStoreSplitBrain,
 } from "./hubTaskStoreMigration.js";
 
 export { HUB_TASK_STORE_INIT_COMMAND };
@@ -198,17 +199,18 @@ export const assertHubTaskStoreInitialized = (
 };
 
 const isReadOnlyBdInvocation = (args: readonly string[]): boolean => {
-  const command = args[0];
-  if (
-    command === "list" ||
-    command === "show" ||
-    command === "ready" ||
-    command === "where" ||
-    command === "stats"
-  ) {
-    return true;
+  switch (args[0]) {
+    case "list":
+    case "show":
+    case "ready":
+    case "where":
+    case "stats":
+      return true;
+    case "comments":
+      return args[1] !== "add";
+    default:
+      return false;
   }
-  return command === "comments" && args[1] !== "add";
 };
 
 export const runBdTextForHubTaskStore = (
@@ -365,9 +367,7 @@ export const initHubTaskStore = (
           hubProjectDir: options.hubProjectDir,
           env,
         });
-        if (migrated.kind === "split_brain") {
-          throw new TaskBoardError({ message: migrated.integrityError });
-        }
+        throwIfHubTaskStoreSplitBrain(migrated);
         return {
           alreadyInitialized:
             migrated.kind === "not_needed" || migrated.kind === "deferred",

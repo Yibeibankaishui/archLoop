@@ -177,7 +177,6 @@ interface StoreIdentity {
   readonly commentCount: number;
   readonly workingState: Readonly<Record<string, number>>;
   readonly fingerprint: string;
-  readonly sourceGeneration: string;
 }
 
 interface JournalRecord {
@@ -199,7 +198,21 @@ interface PendingRecord {
   readonly phase: HubTaskStoreMigrationPhase;
 }
 
-const MIGRATION_BACKOFF_MS = [2_000, 10_000, 30_000, 120_000] as const;
+const MIGRATION_BACKOFF_MAX_MS = 120_000;
+const MIGRATION_BACKOFF_MS = [
+  2_000,
+  10_000,
+  30_000,
+  MIGRATION_BACKOFF_MAX_MS,
+] as const;
+
+const PENDING_REASON_PROSE: Record<HubTaskStoreMigrationPendingReason, string> =
+  {
+    active_writer: "an active Beads writer",
+    source_fingerprint_changed: "a source fingerprint change",
+    unsafe_snapshot: "an unsafe snapshot",
+    migration_contention: "migration lease contention",
+  };
 
 const PHASE_RANK = new Map(
   HUB_TASK_STORE_MIGRATION_PHASES.map((phase, index) => [phase, index]),
@@ -339,6 +352,13 @@ const clearPending = (hubProjectDir: string): void => {
   }
 };
 
+const errorCode = (error: unknown): string | undefined => {
+  if (error && typeof error === "object" && "code" in error) {
+    return String((error as NodeJS.ErrnoException).code);
+  }
+  return undefined;
+};
+
 const recordPending = (input: {
   readonly hubProjectDir: string;
   readonly journalPath: string;
@@ -348,8 +368,7 @@ const recordPending = (input: {
   readonly previous?: PendingRecord;
 }): PendingRecord => {
   const attempt = (input.previous?.attempt ?? 0) + 1;
-  const delayIndex = Math.min(attempt - 1, MIGRATION_BACKOFF_MS.length - 1);
-  const delay = MIGRATION_BACKOFF_MS[delayIndex] ?? 120_000;
+  const delay = MIGRATION_BACKOFF_MS[attempt - 1] ?? MIGRATION_BACKOFF_MAX_MS;
   const pending: PendingRecord = {
     status: "task_store_migration_pending",
     reason: input.reason,
@@ -492,24 +511,6 @@ const execBdJson = (
   return extractJsonValue(stdout);
 };
 
-const hashPathGeneration = (root: string, hash: ReturnType<typeof createHash>): void => {
-  if (!existsSync(root)) {
-    return;
-  }
-  const stats = statSync(root);
-  hash.update(root);
-  hash.update("\0");
-  hash.update(String(stats.size));
-  hash.update("\0");
-  hash.update(String(Math.trunc(stats.mtimeMs)));
-  hash.update("\n");
-  if (stats.isDirectory()) {
-    for (const entry of readdirSync(root).sort()) {
-      hashPathGeneration(join(root, entry), hash);
-    }
-  }
-};
-
 const hashStoreTree = (root: string): string => {
   const hash = createHash("sha256");
   const walk = (path: string, rel: string): void => {
@@ -557,14 +558,6 @@ export const detectHubTaskStoreSplitBrain = (input: {
     legacyBeadsDir: resolution.repoBeadsDir,
     managedBeadsDir: managedDir,
   };
-};
-
-const hashBeadsRuntimeGeneration = (beadsDir: string): string => {
-  const hash = createHash("sha256");
-  for (const name of RUNTIME_ENTRY_NAMES) {
-    hashPathGeneration(join(beadsDir, name), hash);
-  }
-  return hash.digest("hex");
 };
 
 const captureStoreIdentity = (
@@ -642,7 +635,6 @@ const captureStoreIdentity = (
     commentCount,
     workingState,
     fingerprint,
-    sourceGeneration: hashBeadsRuntimeGeneration(beadsDir),
   };
 };
 
@@ -708,11 +700,7 @@ const quarantineLegacyStore = (
     try {
       renameSync(from, to);
     } catch (error) {
-      const code =
-        error && typeof error === "object" && "code" in error
-          ? String((error as NodeJS.ErrnoException).code)
-          : undefined;
-      if (code === "EXDEV") {
+      if (errorCode(error) === "EXDEV") {
         throw new TaskBoardError({
           message:
             "Hub Beads migration cannot move a live database across filesystems. Quarantine the store on its original filesystem first; only the cold quarantined copy is copied to Hub-owned storage.",
@@ -767,11 +755,7 @@ const isProcessAlive = (pid: number): boolean => {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    const code =
-      error && typeof error === "object" && "code" in error
-        ? String((error as NodeJS.ErrnoException).code)
-        : undefined;
-    return code === "EPERM";
+    return errorCode(error) === "EPERM";
   }
 };
 
@@ -877,19 +861,18 @@ export const inspectHubTaskStoreMigration = (
     repoRoot: input.repoRoot,
     hubProjectDir: input.hubProjectDir,
   });
-  const integrityIncident = resolution.redirectError
-    ? ("invalid_redirect" as const)
-    : splitBrain
-      ? HUB_TASK_STORE_SPLIT_BRAIN_INCIDENT
-      : undefined;
-  const integrityError = resolution.redirectError
-    ? resolution.redirectError
-    : splitBrain
-      ? formatHubTaskStoreSplitBrainMessage(
-          splitBrain.legacyBeadsDir,
-          splitBrain.managedBeadsDir,
-        )
-      : undefined;
+  let integrityIncident: HubTaskStoreIntegrityIncident | undefined;
+  let integrityError: string | undefined;
+  if (resolution.redirectError) {
+    integrityIncident = "invalid_redirect";
+    integrityError = resolution.redirectError;
+  } else if (splitBrain) {
+    integrityIncident = HUB_TASK_STORE_SPLIT_BRAIN_INCIDENT;
+    integrityError = formatHubTaskStoreSplitBrainMessage(
+      splitBrain.legacyBeadsDir,
+      splitBrain.managedBeadsDir,
+    );
+  }
   return {
     kind: resolution.kind,
     beadsDir: resolution.beadsDir,
@@ -919,32 +902,28 @@ const isMigrationOutcome = (
   value.kind === "deferred" ||
   value.kind === "split_brain";
 
-const formatPendingReason = (
-  reason: HubTaskStoreMigrationPendingReason,
-): string => {
-  if (reason === "active_writer") {
-    return "an active Beads writer";
-  }
-  if (reason === "source_fingerprint_changed") {
-    return "a source fingerprint change";
-  }
-  if (reason === "unsafe_snapshot") {
-    return "an unsafe snapshot";
-  }
-  return "migration lease contention";
-};
-
 const formatDeferredMigrationMessage = (
   reason: HubTaskStoreMigrationPendingReason,
   pendingUntil: string,
 ): string =>
-  `Hub Beads store migration is pending because ${formatPendingReason(reason)} was detected before quarantine. The verified repository-local store remains active. Automatic retry is scheduled by ${pendingUntil}. This is not a task failure and does not require a recovery command.`;
+  `Hub Beads store migration is pending because ${PENDING_REASON_PROSE[reason]} was detected before quarantine. The verified repository-local store remains active. Automatic retry is scheduled by ${pendingUntil}. This is not a task failure and does not require a recovery command.`;
 
 export const formatHubTaskStoreSplitBrainMessage = (
   legacyBeadsDir: string,
   managedBeadsDir: string,
 ): string =>
   `Hub Beads task-store split brain detected: both ${legacyBeadsDir} and ${managedBeadsDir} were modified independently after redirect. Automatic task-store writes are stopped. Inspect both databases and keep the intended history; do not merge or delete either store automatically. This is not a task failure and does not require a recovery command.`;
+
+export function throwIfHubTaskStoreSplitBrain(
+  outcome: HubTaskStoreMigrationOutcome,
+): asserts outcome is Exclude<
+  HubTaskStoreMigrationOutcome,
+  { kind: "split_brain" }
+> {
+  if (outcome.kind === "split_brain") {
+    throw new TaskBoardError({ message: outcome.integrityError });
+  }
+}
 
 export const formatHubTaskStoreMigrationMessage = (
   outcome: HubTaskStoreMigrationOutcome | HubTaskStoreMigrationInspection,
@@ -1009,6 +988,29 @@ const findActiveWriterPid = (repoBeadsDir: string): number | undefined => {
   return undefined;
 };
 
+type DeferredMigrationOutcome = Extract<
+  HubTaskStoreMigrationOutcome,
+  { kind: "deferred" }
+>;
+type SplitBrainMigrationOutcome = Extract<
+  HubTaskStoreMigrationOutcome,
+  { kind: "split_brain" }
+>;
+
+const deferredOutcomeFromPending = (input: {
+  readonly pending: PendingRecord;
+  readonly beadsDir: string;
+  readonly journalPath: string;
+  readonly reason?: HubTaskStoreMigrationPendingReason;
+}): DeferredMigrationOutcome => ({
+  kind: "deferred",
+  reason: input.reason ?? input.pending.reason,
+  phase: input.pending.phase,
+  beadsDir: input.beadsDir,
+  pendingUntil: input.pending.nextRetryAt,
+  journalPath: input.journalPath,
+});
+
 const deferMigration = (input: {
   readonly hubProjectDir: string;
   readonly journalPath: string;
@@ -1016,7 +1018,7 @@ const deferMigration = (input: {
   readonly reason: HubTaskStoreMigrationPendingReason;
   readonly phase: HubTaskStoreMigrationPhase;
   readonly now: Date;
-}): Extract<HubTaskStoreMigrationOutcome, { kind: "deferred" }> => {
+}): DeferredMigrationOutcome => {
   const pending = recordPending({
     hubProjectDir: input.hubProjectDir,
     journalPath: input.journalPath,
@@ -1032,6 +1034,34 @@ const deferMigration = (input: {
     beadsDir: input.beadsDir,
     pendingUntil: pending.nextRetryAt,
     journalPath: input.journalPath,
+  };
+};
+
+const recordSplitBrainOutcome = (input: {
+  readonly hubProjectDir: string;
+  readonly beadsDir: string;
+  readonly splitBrain: {
+    readonly legacyBeadsDir: string;
+    readonly managedBeadsDir: string;
+  };
+  readonly now: Date;
+}): SplitBrainMigrationOutcome => {
+  const journalPath = resolveJournalPath(input.hubProjectDir);
+  const integrityError = formatHubTaskStoreSplitBrainMessage(
+    input.splitBrain.legacyBeadsDir,
+    input.splitBrain.managedBeadsDir,
+  );
+  appendJournalRecord(journalPath, {
+    status: HUB_TASK_STORE_SPLIT_BRAIN_INCIDENT,
+    at: input.now.toISOString(),
+  });
+  return {
+    kind: "split_brain",
+    beadsDir: input.beadsDir,
+    legacyBeadsDir: input.splitBrain.legacyBeadsDir,
+    managedBeadsDir: input.splitBrain.managedBeadsDir,
+    integrityError,
+    journalPath,
   };
 };
 
@@ -1101,22 +1131,12 @@ export const ensureHubTaskStoreMigrated = (
     hubProjectDir: input.hubProjectDir,
   });
   if (splitBrain) {
-    const integrityError = formatHubTaskStoreSplitBrainMessage(
-      splitBrain.legacyBeadsDir,
-      splitBrain.managedBeadsDir,
-    );
-    appendJournalRecord(resolveJournalPath(input.hubProjectDir), {
-      status: HUB_TASK_STORE_SPLIT_BRAIN_INCIDENT,
-      at: now.toISOString(),
-    });
-    return {
-      kind: "split_brain",
+    return recordSplitBrainOutcome({
+      hubProjectDir: input.hubProjectDir,
       beadsDir: resolution.beadsDir,
-      legacyBeadsDir: splitBrain.legacyBeadsDir,
-      managedBeadsDir: splitBrain.managedBeadsDir,
-      integrityError,
-      journalPath: resolveJournalPath(input.hubProjectDir),
-    };
+      splitBrain,
+      now,
+    });
   }
 
   const managedBeadsDir =
@@ -1156,28 +1176,21 @@ export const ensureHubTaskStoreMigrated = (
   const existingPending = readPending(input.hubProjectDir);
   if (existingPending) {
     const pendingUntilMs = Date.parse(existingPending.nextRetryAt);
-    if (Number.isFinite(pendingUntilMs) && now.getTime() < pendingUntilMs) {
-      return {
-        kind: "deferred",
-        reason: existingPending.reason,
-        phase: existingPending.phase,
-        beadsDir: resolution.beadsDir,
-        pendingUntil: existingPending.nextRetryAt,
-        journalPath,
-      };
-    }
-    if (
+    const stillBackingOff =
+      Number.isFinite(pendingUntilMs) && now.getTime() < pendingUntilMs;
+    const ownedByLivePeer =
       existingPending.ownerPid !== process.pid &&
-      isProcessAlive(existingPending.ownerPid)
-    ) {
-      return {
-        kind: "deferred",
-        reason: "migration_contention",
-        phase: existingPending.phase,
+      isProcessAlive(existingPending.ownerPid);
+    if (stillBackingOff || ownedByLivePeer) {
+      return deferredOutcomeFromPending({
+        pending: existingPending,
         beadsDir: resolution.beadsDir,
-        pendingUntil: existingPending.nextRetryAt,
         journalPath,
-      };
+        reason:
+          ownedByLivePeer && !stillBackingOff
+            ? "migration_contention"
+            : existingPending.reason,
+      });
     }
   }
 

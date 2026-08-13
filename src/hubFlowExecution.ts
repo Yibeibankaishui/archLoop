@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import { promisify } from "node:util";
 
 import { assertAgentCredentialsConfigured } from "./agentAuthGuidance.js";
-import { HubFlowError, TaskBoardError } from "./errors.js";
+import { HubFlowError } from "./errors.js";
 import type { AgentProvider } from "./AgentProvider.js";
 import {
   appendHubRunEvent,
@@ -18,6 +18,7 @@ import {
   type HubRunStopReason,
   type HubTaskClaimMetadata,
   type HubTaskEvent,
+  type HubTaskStoreMigrationEvent,
 } from "./hubExecution.js";
 import {
   createHubFlowRunMerger,
@@ -39,6 +40,7 @@ import {
 import {
   ensureHubTaskStoreMigrated,
   formatHubTaskStoreMigrationMessage,
+  throwIfHubTaskStoreSplitBrain,
   type HubTaskStoreMigrationOutcome,
 } from "./hubTaskStoreMigration.js";
 import {
@@ -1384,6 +1386,31 @@ const implementSelectedTask = async (
   };
 };
 
+const hubTaskStoreMigrationEventFields = (
+  outcome: Exclude<HubTaskStoreMigrationOutcome, { kind: "not_needed" }>,
+): Pick<
+  HubTaskStoreMigrationEvent,
+  "kind" | "phase" | "beadsDir" | "message" | "reason" | "pendingUntil"
+> => {
+  const base = {
+    kind: outcome.kind,
+    beadsDir: outcome.beadsDir,
+    message: formatHubTaskStoreMigrationMessage(outcome),
+  };
+  if (outcome.kind === "migrated") {
+    return { ...base, phase: outcome.phase };
+  }
+  if (outcome.kind === "deferred") {
+    return {
+      ...base,
+      phase: outcome.phase,
+      reason: outcome.reason,
+      pendingUntil: outcome.pendingUntil,
+    };
+  }
+  return base;
+};
+
 const runObservedHubFlow = async (
   input: RunHubFlowInput,
 ): Promise<RunHubFlowResult> => {
@@ -1420,11 +1447,7 @@ const runObservedHubFlow = async (
     hubProjectDir,
     env: input.env,
   });
-  if (taskStoreMigration.kind === "split_brain") {
-    throw new TaskBoardError({
-      message: taskStoreMigration.integrityError,
-    });
-  }
+  throwIfHubTaskStoreSplitBrain(taskStoreMigration);
   // Run-startup auto-recover: detect tasks left stuck in an execution status by
   // a previously-interrupted run and route each one through the event-aware
   // recovery wiring before the run loads the board for the resumed-batch scan.
@@ -1485,20 +1508,7 @@ const runObservedHubFlow = async (
       type: "task_store_migration",
       runId: context.runId,
       createdAt: new Date().toISOString(),
-      kind: taskStoreMigration.kind,
-      phase:
-        taskStoreMigration.kind === "migrated" ||
-        taskStoreMigration.kind === "deferred"
-          ? taskStoreMigration.phase
-          : undefined,
-      beadsDir: taskStoreMigration.beadsDir,
-      message: formatHubTaskStoreMigrationMessage(taskStoreMigration),
-      ...(taskStoreMigration.kind === "deferred"
-        ? {
-            reason: taskStoreMigration.reason,
-            pendingUntil: taskStoreMigration.pendingUntil,
-          }
-        : {}),
+      ...hubTaskStoreMigrationEventFields(taskStoreMigration),
     });
   }
   const batchResults: HubFlowBatchResult[] = [];
@@ -1794,9 +1804,8 @@ export const formatHubFlowResultLines = (
     lines.push(line);
   }
   if (
-    result.taskStoreMigration?.kind === "migrated" ||
-    result.taskStoreMigration?.kind === "deferred" ||
-    result.taskStoreMigration?.kind === "split_brain"
+    result.taskStoreMigration &&
+    result.taskStoreMigration.kind !== "not_needed"
   ) {
     lines.push(formatHubTaskStoreMigrationMessage(result.taskStoreMigration));
   }

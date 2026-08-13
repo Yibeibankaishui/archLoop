@@ -229,7 +229,10 @@ import {
 import { evaluateHubManagedBranchCleanup } from "./hubManagedBranchCleanup.js";
 import { HUB_TRIAGE_DEFAULT_TASK_QUERY } from "./hubTriage.js";
 import { initHubTaskStore } from "./hubTaskStore.js";
-import { ensureHubTaskStoreMigrated } from "./hubTaskStoreMigration.js";
+import {
+  ensureHubTaskStoreMigrated,
+  throwIfHubTaskStoreSplitBrain,
+} from "./hubTaskStoreMigration.js";
 import { isTriageTaskIdInput } from "./hubTriageProposal.js";
 import {
   buildSyncResultModel,
@@ -2006,9 +2009,7 @@ const resolveTaskCommandProjectTarget = (
           repoRoot: target.repoRoot,
           hubProjectDir: target.hubProjectDir,
         });
-        if (migrated.kind === "split_brain") {
-          throw new TaskBoardError({ message: migrated.integrityError });
-        }
+        throwIfHubTaskStoreSplitBrain(migrated);
       }
       return target;
     },
