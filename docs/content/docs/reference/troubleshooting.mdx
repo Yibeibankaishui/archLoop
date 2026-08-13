@@ -57,7 +57,23 @@ migrates a writer-free legacy store automatically on the first mutating
 
 No extra migration command is required. If a previous attempt crashed, retry
 the same mutating command; Hub resumes from the durable journal and backup.
+If an external `bd` writer or migration owner is active, Hub defers the switch
+and keeps using the verified legacy store until the next automatic retry.
 Do not run `archloop tasks recover` for this.
+
+## Task-store split brain after redirect
+
+**Cause:** After `.beads/redirect` was installed, both the leftover
+repository-local database and the Hub-owned store were modified independently.
+
+```bash
+npx archloop project status
+npx archloop tasks doctor
+```
+
+Automatic task-store writes are stopped. Inspect both databases and keep the
+intended history. Hub does not merge or delete either store. This is not a
+task failure and does not require `tasks recover`.
 
 ## Agent role or credential is missing
 

@@ -15,8 +15,9 @@ description: Reference for the Hub project command group.
 
 `project add` can initialize the Hub-owned Beads task store. `project status`
 reports whether that store is Hub-owned, repository-local, missing, or blocked
-by an invalid `.beads/redirect`, and shows task-store migration progress when
-a legacy store is being moved.
+by an invalid `.beads/redirect`, shows task-store migration progress or a
+safe pending deferral, and surfaces a split-brain integrity incident when
+both stores were modified independently after redirect.
 
 Most project-aware commands accept `--project <name>` as an explicit override.
 Interactive pickers are available when required values are omitted in a TTY;

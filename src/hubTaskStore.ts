@@ -16,8 +16,11 @@ import {
   type HubTaskStoreResolution,
 } from "./hubTaskStoreResolver.js";
 import {
+  detectHubTaskStoreSplitBrain,
   ensureHubTaskStoreMigrated,
   formatHubTaskStoreMigrationMessage,
+  formatHubTaskStoreSplitBrainMessage,
+  throwIfHubTaskStoreSplitBrain,
 } from "./hubTaskStoreMigration.js";
 
 export { HUB_TASK_STORE_INIT_COMMAND };
@@ -195,6 +198,21 @@ export const assertHubTaskStoreInitialized = (
   });
 };
 
+const isReadOnlyBdInvocation = (args: readonly string[]): boolean => {
+  switch (args[0]) {
+    case "list":
+    case "show":
+    case "ready":
+    case "where":
+    case "stats":
+      return true;
+    case "comments":
+      return args[1] !== "add";
+    default:
+      return false;
+  }
+};
+
 export const runBdTextForHubTaskStore = (
   cwd: string,
   args: readonly string[],
@@ -209,6 +227,18 @@ export const runBdTextForHubTaskStore = (
   }
 
   const resolution = assertHubTaskStoreInitialized(cwd, failureLabel, options);
+  const splitBrain = detectHubTaskStoreSplitBrain({
+    repoRoot: cwd,
+    hubProjectDir: options.hubProjectDir,
+  });
+  if (splitBrain && !isReadOnlyBdInvocation(args)) {
+    throw new TaskBoardError({
+      message: formatHubTaskStoreSplitBrainMessage(
+        splitBrain.legacyBeadsDir,
+        splitBrain.managedBeadsDir,
+      ),
+    });
+  }
 
   try {
     return execBdText(cwd, args, beadsEnvForResolution(env, resolution));
@@ -337,8 +367,10 @@ export const initHubTaskStore = (
           hubProjectDir: options.hubProjectDir,
           env,
         });
+        throwIfHubTaskStoreSplitBrain(migrated);
         return {
-          alreadyInitialized: migrated.kind === "not_needed",
+          alreadyInitialized:
+            migrated.kind === "not_needed" || migrated.kind === "deferred",
           output: formatHubTaskStoreMigrationMessage(migrated),
           migrated: migrated.kind === "migrated",
         };

@@ -13,8 +13,10 @@ contract, and local task/run data. New projects store the live Beads database
 in the Hub project directory. A Git-ignored `.beads/redirect` keeps host `bd`
 commands pointed at that store. Hub implementation and review agents receive an
 immutable task snapshot instead of live `bd` access; structured notes are
-applied by Hub after the attempt. Renaming or relinking a project preserves its
-identity, history, and task store.
+applied by Hub after the attempt. Existing repository-local stores migrate
+automatically unless a writer or other unsafe condition defers the switch.
+Split brain after redirect stops automatic task-store writes. Renaming or
+relinking a project preserves its identity, history, and task store.
 
 ## Project selection
 

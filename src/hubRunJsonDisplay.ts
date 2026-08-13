@@ -25,6 +25,33 @@ export interface HubRunJsonRenderer {
 const eventTimestamp = (event: HubRunEvent): string =>
   "createdAt" in event ? event.createdAt : event.startedAt;
 
+const taskStoreMigrationJsonFields = (
+  migration: NonNullable<RunHubFlowResult["taskStoreMigration"]>,
+): Readonly<Record<string, unknown>> => {
+  switch (migration.kind) {
+    case "migrated":
+      return {
+        phase: migration.phase,
+        backupDir: migration.backupDir,
+      };
+    case "deferred":
+      return {
+        reason: migration.reason,
+        phase: migration.phase,
+        pendingUntil: migration.pendingUntil,
+      };
+    case "split_brain":
+      return {
+        reason: "task_store_split_brain",
+        integrityError: migration.integrityError,
+      };
+    case "not_needed":
+      return {
+        reason: migration.reason,
+      };
+  }
+};
+
 const eventData = (event: HubRunEvent): Readonly<Record<string, unknown>> => {
   const data = { ...event } as Record<string, unknown>;
   for (const key of [
@@ -250,14 +277,7 @@ export const createHubRunJsonRenderer = (input: {
                 taskStoreMigration: {
                   kind: result.taskStoreMigration.kind,
                   beadsDir: result.taskStoreMigration.beadsDir,
-                  ...(result.taskStoreMigration.kind === "migrated"
-                    ? {
-                        phase: result.taskStoreMigration.phase,
-                        backupDir: result.taskStoreMigration.backupDir,
-                      }
-                    : {
-                        reason: result.taskStoreMigration.reason,
-                      }),
+                  ...taskStoreMigrationJsonFields(result.taskStoreMigration),
                 },
               }
             : {}),

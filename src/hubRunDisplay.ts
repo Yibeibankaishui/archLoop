@@ -796,6 +796,7 @@ export const formatPlainHubRunEvent = (
         "event=task_store_migration",
         textField("run_id", event.runId),
         textField("kind", event.kind),
+        ...(event.reason ? [textField("reason", event.reason)] : []),
         textField("beads_dir", event.beadsDir),
         textField("message", event.message),
       ].join(" ");

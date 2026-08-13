@@ -52,7 +52,9 @@ database under the Hub project directory and a Git-ignored `.beads/redirect`
 so host `bd` commands resolve the same store. An existing writer-free
 repository-local Beads store migrates automatically on the first mutating
 `archloop run` or task command; crashes resume from the journal without
-`tasks recover`.
+`tasks recover`. An active writer, fingerprint change, unsafe snapshot, or
+live migration owner defers the switch and retries later against the verified
+legacy store. Split brain after redirect stops automatic task-store writes.
 
 ## Project operations
 
@@ -114,7 +116,9 @@ and presents comments as a timeline rather than a raw metadata blob.
 Task commands use the selected project unless `--project <name>` is supplied.
 `tasks init` initializes the Hub-owned store for a registered project. If a
 repository-local Beads database already exists, it migrates that store into
-Hub-owned storage and installs `.beads/redirect`.
+Hub-owned storage and installs `.beads/redirect`, or defers that migration
+when the switch would be unsafe. Split brain after redirect is an integrity
+incident: writes stop until a human inspects both stores.
 
 ## GitHub synchronization
 

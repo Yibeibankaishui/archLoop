@@ -8,6 +8,7 @@ import {
   resolveGitRepoRoot,
 } from "./projectStatus.js";
 import type { HubProjectRegistryEntry } from "./hubProjectRegistry.js";
+import { HUB_TASK_STORE_SPLIT_BRAIN_INCIDENT } from "./hubTaskStoreMigration.js";
 import { isHubOwnedTaskStoreKind } from "./hubTaskStoreResolver.js";
 import {
   formatReadinessCheckLines,
@@ -202,15 +203,35 @@ const buildTaskStoreSection = (
   }
 
   if (status.taskStoreInitialized) {
+    if (status.taskStoreIntegrityIncident === HUB_TASK_STORE_SPLIT_BRAIN_INCIDENT) {
+      return createSection("Checking local task store", [
+        createFinding(
+          "error",
+          "Task store split brain",
+          status.taskStoreMigrationMessage ??
+            "Hub Beads task-store split brain detected. Automatic task-store writes are stopped.",
+        ),
+      ]);
+    }
     let message = "Local task store is initialized.";
+    let severity: HubReadinessFinding["severity"] = "success";
+    let title = "Local task store is initialized";
     if (isHubOwnedTaskStoreKind(status.taskStoreKind)) {
       message = `Hub-owned task store is initialized at ${status.taskStoreDir}.`;
     } else if (status.taskStoreKind === "legacy") {
-      message =
-        "Repository-local Beads store is initialized and will migrate automatically on the next mutating Hub command.";
+      if (status.taskStoreMigrationPendingReason) {
+        severity = "warn";
+        title = "Task store migration pending";
+        message =
+          status.taskStoreMigrationMessage ??
+          "Repository-local Beads store remains active while migration is pending. Hub will retry automatically.";
+      } else {
+        message =
+          "Repository-local Beads store is initialized and will migrate automatically on the next mutating Hub command.";
+      }
     }
     return createSection("Checking local task store", [
-      createFinding("success", "Local task store is initialized", message),
+      createFinding(severity, title, message),
     ]);
   }
 
