@@ -24,6 +24,11 @@ import {
 import { latestPhaseCompletionEventByTask } from "./hubTaskRecoveryRouter.js";
 import { readHubProjectRegistry } from "./hubProjectRegistry.js";
 import {
+  formatHubLandingReconciliationMessage,
+  hubLandingTaskCloseReaderFromTasks,
+  inspectHubLandingTransactions,
+} from "./hubLandingReconciliation.js";
+import {
   formatHubTaskStoreMigrationMessage,
   inspectHubTaskStoreMigration,
 } from "./hubTaskStoreMigration.js";
@@ -108,6 +113,7 @@ export interface DoctorHubTaskStateResult {
   readonly diagnostics: readonly HubTaskStateDiagnostic[];
   readonly managedBranchCleanupDiagnostics: readonly string[];
   readonly taskStoreDiagnostics?: readonly string[];
+  readonly landingDiagnostics?: readonly string[];
 }
 
 export interface HubTaskStatePlannedRepair {
@@ -673,6 +679,19 @@ export const doctorHubTaskState = async (
     }
   }
 
+  const landingReconciliation = inspectHubLandingTransactions({
+    repoRoot,
+    hubProjectDir,
+    readTaskClose: hubLandingTaskCloseReaderFromTasks(board.tasks),
+  });
+  const landingDiagnostics: string[] = [];
+  if (landingReconciliation.kind !== "clean") {
+    landingDiagnostics.push(
+      formatHubLandingReconciliationMessage(landingReconciliation),
+    );
+    landingDiagnostics.push(`Next action: ${landingReconciliation.nextAction}`);
+  }
+
   return {
     diagnostics,
     managedBranchCleanupDiagnostics:
@@ -680,6 +699,7 @@ export const doctorHubTaskState = async (
         managedBranchCleanupEvaluation,
       ),
     taskStoreDiagnostics,
+    landingDiagnostics,
   };
 };
 
@@ -892,6 +912,7 @@ export const formatHubTaskStateDoctorLines = (
   return [
     ...flattenSectionForLog(blocks),
     ...(result.taskStoreDiagnostics ?? []),
+    ...(result.landingDiagnostics ?? []),
     ...result.managedBranchCleanupDiagnostics,
   ];
 };

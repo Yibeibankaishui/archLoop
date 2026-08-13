@@ -85,6 +85,17 @@ export interface HubTaskStoreMigrationEvent {
   readonly pendingUntil?: string;
 }
 
+export interface HubLandingReconciliationEvent {
+  readonly type: "landing_reconciliation";
+  readonly runId: string;
+  readonly createdAt: string;
+  readonly kind: "clean" | "pending" | "reconciled" | "integrity_incident";
+  readonly pendingCount: number;
+  readonly reconstructedCount?: number;
+  readonly message: string;
+  readonly integrityIncident?: string;
+}
+
 export interface HubBatchStartedEvent {
   readonly type: "batch_started";
   readonly runId: string;
@@ -212,6 +223,7 @@ type HubRunEventData =
   | HubRunStartedEvent
   | HubRunCompletedEvent
   | HubTaskStoreMigrationEvent
+  | HubLandingReconciliationEvent
   | HubBatchStartedEvent
   | HubBatchPlannedEvent
   | HubBatchMergeSelectionEvent
@@ -477,7 +489,11 @@ export const createHubRunContext = (
 
 export const appendHubRunEvent = (
   runDir: string,
-  event: HubRunStartedEvent | HubRunCompletedEvent | HubTaskStoreMigrationEvent,
+  event:
+    | HubRunStartedEvent
+    | HubRunCompletedEvent
+    | HubTaskStoreMigrationEvent
+    | HubLandingReconciliationEvent,
 ): string => {
   const { runEventsPath } = resolveHubRunEventsPaths(runDir);
   return appendHubEvent(

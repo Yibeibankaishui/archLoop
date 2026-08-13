@@ -24,7 +24,9 @@ metadata, and run events.
 
 Tasks within a batch can implement and review concurrently. Eligible branches
 land serially onto a Hub-managed local publish target so verification failures
-have a clear boundary. Landing does not merge into the user's checkout.
+have a clear boundary. Landing does not merge into the user's checkout. A
+crashed landing resumes from durable evidence on the next run without
+`tasks recover`.
 
 Implementer iterations continue past a provider startup abort that produced no
 agent output, as long as iterations remain. A turn that only explored (no

@@ -16,6 +16,11 @@ import {
   type HubTaskStoreKind,
 } from "./hubTaskStoreResolver.js";
 import {
+  formatHubLandingReconciliationMessage,
+  hubLandingTaskCloseReaderFromTasks,
+  inspectHubLandingTransactions,
+} from "./hubLandingReconciliation.js";
+import {
   formatHubTaskStoreMigrationMessage,
   inspectHubTaskStoreMigration,
   type HubTaskStoreMigrationPhase,
@@ -120,6 +125,10 @@ export interface HubProjectStatus {
   readonly landingPublishTargetRef?: string;
   readonly landingRemoteTarget?: string;
   readonly landingPublishPolicy?: HubLandingPolicy["publishPolicy"];
+  readonly landingReconciliationKind?: "clean" | "pending" | "integrity_incident";
+  readonly landingReconciliationMessage?: string;
+  readonly landingReconciliationPendingCount?: number;
+  readonly landingIntegrityIncident?: string;
 }
 
 export interface HubProjectStatusOptions {
@@ -681,6 +690,15 @@ export const formatHubProjectStatusLines = (
     lines.push(`  ${status.taskStoreMigrationMessage}`);
     lines.push("");
   }
+  if (
+    status.landingReconciliationMessage &&
+    status.landingReconciliationKind &&
+    status.landingReconciliationKind !== "clean"
+  ) {
+    lines.push("Landing reconciliation");
+    lines.push(`  ${status.landingReconciliationMessage}`);
+    lines.push("");
+  }
   lines.push("");
   appendActiveBatchLines(lines, status.activeBatches);
   lines.push("");
@@ -936,6 +954,11 @@ export const resolveHubProjectStatus = (
           (options.listWorktreeLeases ?? listWorktreeLeases)(repoRoot),
         );
   const landingPolicy = readHubLandingPolicy(hubProjectDir);
+  const landingReconciliation = inspectHubLandingTransactions({
+    repoRoot,
+    hubProjectDir,
+    readTaskClose: hubLandingTaskCloseReaderFromTasks(board?.tasks ?? []),
+  });
 
   return {
     repoRoot,
@@ -967,6 +990,11 @@ export const resolveHubProjectStatus = (
     landingPublishTargetRef: landingPolicy?.publishTargetRef,
     landingRemoteTarget: landingPolicy?.remoteTarget,
     landingPublishPolicy: landingPolicy?.publishPolicy,
+    landingReconciliationKind: landingReconciliation.kind,
+    landingReconciliationMessage:
+      formatHubLandingReconciliationMessage(landingReconciliation),
+    landingReconciliationPendingCount: landingReconciliation.pendingCount,
+    landingIntegrityIncident: landingReconciliation.integrityIncident,
   };
 };
 
@@ -1044,6 +1072,15 @@ const projectStatusIdentityRows = (
         {
           key: "Remote target",
           value: status.landingRemoteTarget ?? "(none)",
+        },
+      ]
+    : []),
+  ...(status.landingReconciliationKind &&
+  status.landingReconciliationKind !== "clean"
+    ? [
+        {
+          key: "Landing reconciliation",
+          value: status.landingReconciliationKind,
         },
       ]
     : []),

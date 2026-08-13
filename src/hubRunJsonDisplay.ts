@@ -281,6 +281,24 @@ export const createHubRunJsonRenderer = (input: {
                 },
               }
             : {}),
+          ...(result.landingReconciliation &&
+          result.landingReconciliation.kind !== "clean"
+            ? {
+                landingReconciliation: {
+                  kind: result.landingReconciliation.kind,
+                  pendingCount: result.landingReconciliation.pendingCount,
+                  reconstructedCount:
+                    result.landingReconciliation.reconstructedCount,
+                  message: result.landingReconciliation.message,
+                  ...(result.landingReconciliation.integrityIncident
+                    ? {
+                        integrityIncident:
+                          result.landingReconciliation.integrityIncident,
+                      }
+                    : {}),
+                },
+              }
+            : {}),
         }),
       ];
     },

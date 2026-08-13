@@ -637,4 +637,64 @@ describe("JSONL Hub run lifecycle output", () => {
       reason: "task_store_split_brain",
     });
   });
+
+  it("distinguishes pending landing reconciliation from an integrity incident", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+      now: () => new Date("2026-08-14T12:00:00.000Z"),
+    });
+
+    const pending = parseRecord(
+      renderer
+        .outcome(
+          makeRunResult({
+            landingReconciliation: {
+              kind: "pending",
+              transactions: [],
+              pendingCount: 1,
+              reconstructedCount: 0,
+              message:
+                "Hub landing transaction ltx-1 is pending reconciliation at candidate_created. Automatic retry will resume from durable evidence. This is not a task failure and does not require a recovery command.",
+              nextAction:
+                "Wait for the automatic retry; Hub will resume from durable landing evidence.",
+            },
+          }),
+          projectHubRunOutcome(makeRunResult({})),
+        )
+        .at(-1)!,
+    );
+    expect(pending.landingReconciliation).toMatchObject({
+      kind: "pending",
+      pendingCount: 1,
+    });
+    expect(JSON.stringify(pending)).not.toMatch(/tasks recover/);
+
+    const incident = parseRecord(
+      renderer
+        .outcome(
+          makeRunResult({
+            landingReconciliation: {
+              kind: "integrity_incident",
+              transactions: [],
+              pendingCount: 0,
+              reconstructedCount: 0,
+              integrityIncident:
+                "landing_integrity_incident: journal candidate does not match ref",
+              message:
+                "Hub landing integrity incident for ltx-1: landing_integrity_incident: journal candidate does not match ref This is not a task failure and does not require a recovery command.",
+              nextAction:
+                "Inspect the candidate ref, landing receipt, verification artifact, and journal. Do not land or close the task again automatically.",
+            },
+          }),
+          projectHubRunOutcome(makeRunResult({})),
+        )
+        .at(-1)!,
+    );
+    expect(incident.landingReconciliation).toMatchObject({
+      kind: "integrity_incident",
+      integrityIncident: expect.stringContaining("landing_integrity_incident"),
+    });
+    expect(JSON.stringify(incident)).not.toMatch(/tasks recover/);
+  });
 });

@@ -1722,6 +1722,7 @@ export const createHubFlowRunMerger = (options: {
               taskId: candidate.taskId,
               candidateOid: candidate.candidateOid,
               verifierFingerprint: fingerprint,
+              repoRoot: options.cwd,
             });
           },
           finalize: async () => {

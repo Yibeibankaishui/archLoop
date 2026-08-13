@@ -207,9 +207,11 @@ index 和未提交改动保持不变。远程发布默认 `off`，可用
 `archloop project configure --publish-policy` 显式打开。
 
 进程中断后再次执行同一个 `archloop run`，启动阶段会根据已经完成的实现或评审
-事件把任务恢复到下一个安全阶段，并保留已有分支和 worktree 内容。失败任务的
-`fix` 指引使用 `tasks recover --stale`；只有运行中断但没有失败任务时，指引会让
-用户直接重新执行 `archloop run`。
+事件把任务恢复到下一个安全阶段，并保留已有分支和 worktree 内容。未完成的落地
+事务会从 candidate ref、verification artifact、atomic receipt 和 Beads close
+元数据自动续跑，不需要 `tasks recover`。失败任务的 `fix` 指引使用
+`tasks recover --stale`；只有运行中断但没有失败任务时，指引会让用户直接重新
+执行 `archloop run`。
 
 ### 8.3 自动化输出
 
@@ -303,3 +305,4 @@ API 参数、返回值和生命周期说明见
 | 2026-08-13 | 已有仓库内 Beads 库在首次变更型命令时自动迁移并可崩溃续跑   |
 | 2026-08-13 | 不安全迁移会延期，split brain 会停止自动写入                |
 | 2026-08-13 | 单任务通过 fenced local landing 落到 Hub publish target     |
+| 2026-08-14 | 中断的落地事务从物理证据自动续跑，doctor 保持只读           |

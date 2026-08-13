@@ -806,6 +806,17 @@ export const formatPlainHubRunEvent = (
         textField("beads_dir", event.beadsDir),
         textField("message", event.message),
       ].join(" ");
+    case "landing_reconciliation":
+      return [
+        "event=landing_reconciliation",
+        textField("run_id", event.runId),
+        textField("kind", event.kind),
+        numberField("pending_count", event.pendingCount),
+        ...(event.integrityIncident
+          ? [textField("integrity_incident", event.integrityIncident)]
+          : []),
+        textField("message", event.message),
+      ].join(" ");
     case "batch_started":
       return [
         "event=batch_started",
