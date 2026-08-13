@@ -190,13 +190,23 @@ const buildTaskStoreSection = (
     ]);
   }
 
-  if (status.taskStoreInitialized) {
+  if (status.taskStoreRedirectError) {
     return createSection("Checking local task store", [
       createFinding(
-        "success",
-        "Local task store is initialized",
-        "Local task store is initialized.",
+        "error",
+        "Task store redirect is invalid",
+        status.taskStoreRedirectError,
       ),
+    ]);
+  }
+
+  if (status.taskStoreInitialized) {
+    const message =
+      status.taskStoreKind === "managed" || status.taskStoreKind === "redirect"
+        ? `Hub-owned task store is initialized at ${status.taskStoreDir}.`
+        : "Local task store is initialized.";
+    return createSection("Checking local task store", [
+      createFinding("success", "Local task store is initialized", message),
     ]);
   }
 

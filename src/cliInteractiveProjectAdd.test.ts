@@ -163,6 +163,11 @@ describe("archloop project add interactive onboarding", () => {
 
     expect(mockInitHubTaskStore).toHaveBeenCalledWith(
       resolveGitRepoRoot(repoDir),
+      process.env,
+      expect.objectContaining({
+        hubProjectDir: expect.any(String),
+        projectName: "alpha",
+      }),
     );
     expect(entries).toContainEqual(
       expect.objectContaining({

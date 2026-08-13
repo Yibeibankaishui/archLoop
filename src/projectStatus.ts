@@ -4,11 +4,16 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { isBdAvailable, resolveBdExecutable } from "./resolveBdExecutable.js";
+import { isBdAvailable } from "./resolveBdExecutable.js";
 import {
   HUB_TASK_STORE_INIT_COMMAND,
   isHubTaskStoreInitialized,
+  runBdTextForHubTaskStore,
 } from "./hubTaskStore.js";
+import {
+  resolveHubTaskStore,
+  type HubTaskStoreKind,
+} from "./hubTaskStoreResolver.js";
 import {
   collectHubWorktreeLeaseDiagnosticsForTasks,
   type HubWorktreeLeaseDiagnostic,
@@ -86,6 +91,9 @@ export interface HubProjectStatus {
   readonly projectRegistered: boolean;
   readonly beadsAvailable: boolean;
   readonly taskStoreInitialized: boolean;
+  readonly taskStoreKind?: HubTaskStoreKind;
+  readonly taskStoreDir?: string;
+  readonly taskStoreRedirectError?: string;
   readonly taskCounts: HubProjectTaskCounts;
   readonly statusCounts: Partial<Record<HubTaskStatus, number>>;
   readonly failedTasks: readonly HubProjectFailedTask[];
@@ -468,12 +476,33 @@ const collectRunDirectories = (
   return [...directories].sort();
 };
 
+const formatTaskStoreLocationValue = (status: HubProjectStatus): string => {
+  if (status.taskStoreRedirectError) {
+    return "invalid redirect";
+  }
+  if (
+    status.taskStoreKind === "managed" ||
+    status.taskStoreKind === "redirect"
+  ) {
+    return status.taskStoreDir ?? "hub-owned";
+  }
+  if (status.taskStoreInitialized || status.taskStoreKind === "legacy") {
+    return "repository-local";
+  }
+  return "missing";
+};
+
 const appendTaskCountLines = (lines: string[], status: HubProjectStatus) => {
   lines.push("Task counts by Hub status");
   if (!status.beadsAvailable) {
     lines.push(
       "  archLoop task runtime unavailable — install dependencies, set ARCHLOOP_BD_PATH, or ensure the bundled Beads runtime is available.",
     );
+    return;
+  }
+
+  if (status.taskStoreRedirectError) {
+    lines.push(`  ${status.taskStoreRedirectError}`);
     return;
   }
 
@@ -710,13 +739,19 @@ const parseJsonCount = (output: string): number => {
   return 0;
 };
 
-const countBdJsonResult = (args: readonly string[], cwd: string): number => {
+const countBdJsonResult = (
+  args: readonly string[],
+  cwd: string,
+  hubProjectDir?: string,
+): number => {
   try {
-    const stdout = execFileSync(resolveBdExecutable(), [...args], {
+    const stdout = runBdTextForHubTaskStore(
       cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+      args,
+      "project status",
+      process.env,
+      { hubProjectDir },
+    );
     return parseJsonCount(stdout);
   } catch {
     return 0;
@@ -737,9 +772,14 @@ const resolveTaskStoreInitialized = (
   repoRoot: string,
   beadsAvailable: boolean,
   detectTaskStoreInitialized: HubProjectStatusOptions["detectTaskStoreInitialized"],
+  hubProjectDir: string,
 ): boolean =>
   beadsAvailable
-    ? (detectTaskStoreInitialized ?? isHubTaskStoreInitialized)(repoRoot)
+    ? (
+        detectTaskStoreInitialized ??
+        ((repoRootPath) =>
+          isHubTaskStoreInitialized(repoRootPath, { hubProjectDir }))
+      )(repoRoot)
     : false;
 
 const resolveTaskCounts = (
@@ -748,18 +788,19 @@ const resolveTaskCounts = (
   taskStoreInitialized: boolean,
   countReadyTasks: HubProjectStatusOptions["countReadyTasks"],
   countTotalTasks: HubProjectStatusOptions["countTotalTasks"],
+  hubProjectDir: string,
 ): HubProjectTaskCounts =>
   beadsAvailable && taskStoreInitialized
     ? {
         ready: (
           countReadyTasks ??
           ((repoRootPath) =>
-            countBdJsonResult(["ready", "--json"], repoRootPath))
+            countBdJsonResult(["ready", "--json"], repoRootPath, hubProjectDir))
         )(repoRoot),
         total: (
           countTotalTasks ??
           ((repoRootPath) =>
-            countBdJsonResult(["list", "--json"], repoRootPath))
+            countBdJsonResult(["list", "--json"], repoRootPath, hubProjectDir))
         )(repoRoot),
       }
     : { ready: 0, total: 0 };
@@ -822,13 +863,19 @@ export const resolveHubProjectStatus = (
     repoRoot,
     beadsAvailable,
     options.detectTaskStoreInitialized,
+    hubProjectDir,
   );
+  const taskStoreResolution = resolveHubTaskStore({
+    repoRoot,
+    hubProjectDir,
+  });
   const taskCounts = resolveTaskCounts(
     repoRoot,
     beadsAvailable,
     taskStoreInitialized,
     options.countReadyTasks,
     options.countTotalTasks,
+    hubProjectDir,
   );
   const board = loadTaskBoardSafe(
     repoRoot,
@@ -867,6 +914,9 @@ export const resolveHubProjectStatus = (
     projectRegistered,
     beadsAvailable,
     taskStoreInitialized,
+    taskStoreKind: taskStoreResolution.kind,
+    taskStoreDir: taskStoreResolution.beadsDir,
+    taskStoreRedirectError: taskStoreResolution.redirectError,
     taskCounts,
     statusCounts,
     failedTasks,
@@ -920,6 +970,10 @@ const projectStatusIdentityRows = (
   {
     key: "Task store initialized",
     value: status.taskStoreInitialized ? "yes" : "no",
+  },
+  {
+    key: "Task store",
+    value: formatTaskStoreLocationValue(status),
   },
   { key: "Task board ready", value: String(status.taskCounts.ready) },
   { key: "Task board total", value: String(status.taskCounts.total) },

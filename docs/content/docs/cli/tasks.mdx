@@ -5,7 +5,7 @@ description: Reference for local task-board and GitHub synchronization commands.
 
 | Command                         | Purpose                                   |
 | ------------------------------- | ----------------------------------------- |
-| `tasks init`                    | Initialize the local Beads task store     |
+| `tasks init`                    | Initialize the Hub-owned Beads task store |
 | `tasks list`                    | Show the Hub task board                   |
 | `tasks show <selector>`         | Show one task by ID or exact title        |
 | `tasks create <title>`          | Create an inbox task                      |
@@ -20,6 +20,12 @@ description: Reference for local task-board and GitHub synchronization commands.
 | `tasks recover --stale`         | Preview or recover all interrupted tasks  |
 | `tasks cleanup`                 | Preview or perform managed branch cleanup |
 | `tasks delete <selector...>`    | Delete local tasks with safeguards        |
+
+`tasks init` creates the live Beads database under the stable Hub project
+directory, not in the Git repository. It also installs a Git-ignored
+`.beads/redirect` so host `bd where`, `bd ready`, and `bd show` resolve the
+same store. Existing repository-local stores are left in place until automatic
+migration lands.
 
 Use `--json` where offered for machine-readable output. Preview synchronization,
 cleanup, and deletion with `--dry-run` before applying them in automation.

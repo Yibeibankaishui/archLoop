@@ -1273,7 +1273,7 @@ process.exit(1);
     await initRepo(repoB);
     await commitFile(repoB, "hello.txt", "hello", "initial commit");
 
-    const dataDir = join(repoA, "xdg-data");
+    const dataDir = await mkdtemp(join(tmpdir(), "cli-xdg-data-"));
     const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
 
     await runCli(`project add --name alpha --path "${repoA}"`, otherDir, {
@@ -1884,9 +1884,10 @@ const { mkdirSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
 const [command] = process.argv.slice(2);
 if (command === "init") {
-  mkdirSync(".beads", { recursive: true });
-  mkdirSync(join(".beads", "embeddeddolt"), { recursive: true });
-  writeFileSync(join(".beads", "metadata.json"), JSON.stringify({ backend: "dolt" }));
+  const beadsDir = process.env.BEADS_DIR || ".beads";
+  mkdirSync(beadsDir, { recursive: true });
+  mkdirSync(join(beadsDir, "embeddeddolt"), { recursive: true });
+  writeFileSync(join(beadsDir, "metadata.json"), JSON.stringify({ backend: "dolt" }));
   process.exit(0);
 }
 if (command === "list") {

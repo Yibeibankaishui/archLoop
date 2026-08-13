@@ -47,7 +47,9 @@ repositories.
 
 `project add` accepts interactive input or explicit `--name`, `--path`, and
 `--project-profile`. Registration selects the project. Selection persists across
-directories.
+directories. Optional task-store initialization creates a Hub-owned Beads
+database under the Hub project directory and a Git-ignored `.beads/redirect`
+so host `bd` commands resolve the same store.
 
 ## Project operations
 
@@ -107,6 +109,8 @@ JSON). `tasks show` renders the status by severity, labels remaining metadata,
 and presents comments as a timeline rather than a raw metadata blob.
 
 Task commands use the selected project unless `--project <name>` is supplied.
+`tasks init` initializes the Hub-owned store for a registered project that does
+not already have a repository-local Beads database.
 
 ## GitHub synchronization
 

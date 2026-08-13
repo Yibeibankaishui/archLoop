@@ -26,7 +26,7 @@ archLoop 可以帮助使用者：
 | archLoop | 在用于调用 CLI 的项目中安装 `@yibeibankaishui/archloop` |
 | Agent    | 至少为流程需要的 agent role 配置 provider 和 model      |
 | 凭据     | 使用 Hub env 或 `archloop auth login` 提供认证          |
-| 任务表   | 任务型 Flow 需要项目的本地 Beads 任务表                 |
+| 任务表   | 任务型 Flow 需要 Hub 项目目录中的 Beads 任务表          |
 | 沙箱     | 使用容器型 Flow 时，需要可用的 Docker 或 Podman         |
 
 ## 3 首次配置
@@ -47,7 +47,9 @@ npx archloop initialize
 npx archloop project add
 ```
 
-交互式流程会询问仓库路径、项目名、Project profile，以及是否初始化本地任务表。
+交互式流程会询问仓库路径、项目名、Project profile，以及是否初始化 Hub 拥有的
+任务表。新项目把 Beads 数据库放在 Hub 项目目录中，并安装 Git-ignored 的
+`.beads/redirect`，以便主机上的 `bd` 命令继续指向同一套任务。
 脚本中可以显式提供参数：
 
 ```bash
@@ -282,3 +284,4 @@ API 参数、返回值和生命周期说明见
 | 2026-06-12 | 创建 Unified Interface 用户指南                         |
 | 2026-08-01 | 按用户任务重组指南，统一 Hub 优先路径并拆出详细参考链接 |
 | 2026-08-13 | 补充中断自动恢复、批量恢复与任务诊断输出说明            |
+| 2026-08-13 | 新 Hub 项目将 Beads 任务表放到 Hub 项目目录，并保留 bd 跳转 |

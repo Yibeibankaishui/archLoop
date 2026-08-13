@@ -1,9 +1,17 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { TaskBoardError } from "./errors.js";
 import { isBdAvailable, resolveBdExecutable } from "./resolveBdExecutable.js";
+import {
+  installHubTaskStoreRedirect,
+  isBeadsStoreFullyInitialized,
+  isBeadsStoreMarkerPresent,
+  resolveHubTaskStore,
+  resolveManagedHubTaskStoreDir,
+  type HubTaskStoreResolution,
+} from "./hubTaskStoreResolver.js";
 
 export const HUB_TASK_STORE_INIT_COMMAND = "archloop tasks init";
 
@@ -25,15 +33,42 @@ const resolveHubTaskStoreDatabaseDir = (cwd: string): string =>
 const isHubTaskStoreDatabasePresent = (cwd: string): boolean =>
   existsSync(resolveHubTaskStoreDatabaseDir(cwd));
 
+export interface HubTaskStoreLocationOptions {
+  readonly hubProjectDir?: string;
+}
+
+const resolveTaskStoreLocation = (
+  cwd: string,
+  options: HubTaskStoreLocationOptions = {},
+): HubTaskStoreResolution =>
+  resolveHubTaskStore({
+    repoRoot: cwd,
+    hubProjectDir: options.hubProjectDir,
+  });
+
 /**
  * Marker-file check only. True when `.beads/metadata.json` exists, regardless
  * of whether the underlying Dolt database is still present. Use
  * {@link isHubTaskStoreFullyInitialized} when you need to know the store is
  * actually usable (e.g. before skipping `bd init`), so an orphaned
  * `metadata.json` does not mask a missing database.
+ *
+ * Follows a repository `.beads/redirect` and, when provided, a Hub-owned
+ * managed store under `hubProjectDir`.
  */
-export const isHubTaskStoreInitialized = (cwd: string): boolean =>
-  existsSync(resolveHubTaskStoreMetadataPath(cwd));
+export const isHubTaskStoreInitialized = (
+  cwd: string,
+  options: HubTaskStoreLocationOptions = {},
+): boolean => {
+  const resolution = resolveTaskStoreLocation(cwd, options);
+  if (resolution.redirectError) {
+    return false;
+  }
+  if (resolution.kind !== "uninitialized") {
+    return isBeadsStoreMarkerPresent(resolution.beadsDir);
+  }
+  return existsSync(resolveHubTaskStoreMetadataPath(cwd));
+};
 
 /**
  * True only when both the metadata marker and the embedded Dolt database
@@ -41,8 +76,22 @@ export const isHubTaskStoreInitialized = (cwd: string): boolean =>
  * real `bd init` is still needed, so a stale `metadata.json` left behind by a
  * deleted database triggers a genuine re-init instead of a no-op.
  */
-export const isHubTaskStoreFullyInitialized = (cwd: string): boolean =>
-  isHubTaskStoreInitialized(cwd) && isHubTaskStoreDatabasePresent(cwd);
+export const isHubTaskStoreFullyInitialized = (
+  cwd: string,
+  options: HubTaskStoreLocationOptions = {},
+): boolean => {
+  const resolution = resolveTaskStoreLocation(cwd, options);
+  if (resolution.redirectError) {
+    return false;
+  }
+  if (resolution.kind !== "uninitialized") {
+    return isBeadsStoreFullyInitialized(resolution.beadsDir);
+  }
+  return (
+    existsSync(resolveHubTaskStoreMetadataPath(cwd)) &&
+    isHubTaskStoreDatabasePresent(cwd)
+  );
+};
 
 export const seedHubTaskStoreMetadata = (cwd: string): void => {
   const beadsDir = resolveHubTaskStoreDir(cwd);
@@ -77,13 +126,34 @@ export const formatHubTaskStoreCommandFailure = (
   failureLabel: string,
   error: unknown,
   cwd: string,
+  options: HubTaskStoreLocationOptions = {},
 ): string => {
+  const resolution = resolveTaskStoreLocation(cwd, options);
+  if (resolution.redirectError) {
+    return resolution.redirectError;
+  }
   const message = readErrorMessage(error);
-  if (!isHubTaskStoreFullyInitialized(cwd) || isTaskStoreInitError(message)) {
+  if (
+    !isHubTaskStoreFullyInitialized(cwd, options) ||
+    isTaskStoreInitError(message)
+  ) {
     return formatHubTaskStoreNotInitializedMessage(failureLabel);
   }
 
   return `archloop ${failureLabel} failed: ${message}`;
+};
+
+const beadsEnvForResolution = (
+  env: NodeJS.ProcessEnv,
+  resolution: HubTaskStoreResolution,
+): NodeJS.ProcessEnv => {
+  if (resolution.kind === "managed" || resolution.kind === "redirect") {
+    return {
+      ...env,
+      BEADS_DIR: resolution.beadsDir,
+    };
+  }
+  return env;
 };
 
 const execBdText = (
@@ -101,8 +171,16 @@ const execBdText = (
 export const assertHubTaskStoreInitialized = (
   cwd: string,
   failureLabel: string,
+  options: HubTaskStoreLocationOptions = {},
 ): void => {
-  if (isHubTaskStoreInitialized(cwd)) {
+  const resolution = resolveTaskStoreLocation(cwd, options);
+  if (resolution.redirectError) {
+    throw new TaskBoardError({
+      message: resolution.redirectError,
+    });
+  }
+
+  if (isHubTaskStoreInitialized(cwd, options)) {
     return;
   }
 
@@ -116,6 +194,7 @@ export const runBdTextForHubTaskStore = (
   args: readonly string[],
   failureLabel: string,
   env: NodeJS.ProcessEnv = process.env,
+  options: HubTaskStoreLocationOptions = {},
 ): string => {
   if (!isBdAvailable(env)) {
     throw new TaskBoardError({
@@ -123,13 +202,20 @@ export const runBdTextForHubTaskStore = (
     });
   }
 
-  assertHubTaskStoreInitialized(cwd, failureLabel);
+  assertHubTaskStoreInitialized(cwd, failureLabel, options);
+
+  const resolution = resolveTaskStoreLocation(cwd, options);
 
   try {
-    return execBdText(cwd, args, env);
+    return execBdText(cwd, args, beadsEnvForResolution(env, resolution));
   } catch (error) {
     throw new TaskBoardError({
-      message: formatHubTaskStoreCommandFailure(failureLabel, error, cwd),
+      message: formatHubTaskStoreCommandFailure(
+        failureLabel,
+        error,
+        cwd,
+        options,
+      ),
     });
   }
 };
@@ -139,9 +225,89 @@ export interface InitHubTaskStoreResult {
   readonly output: string;
 }
 
+export interface InitHubTaskStoreOptions extends HubTaskStoreLocationOptions {
+  readonly projectName?: string;
+}
+
+const sanitizeBeadsPrefix = (
+  projectName: string | undefined,
+  cwd: string,
+): string => {
+  const source = projectName?.trim() || basename(cwd);
+  const sanitized = source.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  if (sanitized.length === 0) {
+    return "hub";
+  }
+  return /^[0-9]/.test(sanitized)
+    ? `hub${sanitized}`.slice(0, 40)
+    : sanitized.slice(0, 40);
+};
+
+const INIT_STILL_MISSING_MESSAGE =
+  "archloop tasks init reported success, but the local task store is still missing. Retry after checking repository permissions.";
+
+const initLegacyHubTaskStore = (
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): InitHubTaskStoreResult => {
+  if (isHubTaskStoreFullyInitialized(cwd)) {
+    return { alreadyInitialized: true, output: "" };
+  }
+
+  const output = execBdText(cwd, ["init", "--non-interactive"], env);
+
+  if (!isHubTaskStoreFullyInitialized(cwd)) {
+    throw new TaskBoardError({
+      message: INIT_STILL_MISSING_MESSAGE,
+    });
+  }
+
+  return { alreadyInitialized: false, output };
+};
+
+const initManagedHubTaskStore = (
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  hubProjectDir: string,
+  projectName: string | undefined,
+): InitHubTaskStoreResult => {
+  const managedBeadsDir = resolveManagedHubTaskStoreDir(hubProjectDir);
+
+  if (isBeadsStoreFullyInitialized(managedBeadsDir)) {
+    installHubTaskStoreRedirect(cwd, managedBeadsDir);
+    return { alreadyInitialized: true, output: "" };
+  }
+
+  const output = execBdText(
+    cwd,
+    [
+      "init",
+      "--non-interactive",
+      "--skip-agents",
+      "--skip-hooks",
+      "--prefix",
+      sanitizeBeadsPrefix(projectName, cwd),
+    ],
+    {
+      ...env,
+      BEADS_DIR: managedBeadsDir,
+    },
+  );
+
+  if (!isBeadsStoreFullyInitialized(managedBeadsDir)) {
+    throw new TaskBoardError({
+      message: INIT_STILL_MISSING_MESSAGE,
+    });
+  }
+
+  installHubTaskStoreRedirect(cwd, managedBeadsDir);
+  return { alreadyInitialized: false, output };
+};
+
 export const initHubTaskStore = (
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
+  options: InitHubTaskStoreOptions = {},
 ): InitHubTaskStoreResult => {
   if (!isBdAvailable(env)) {
     throw new TaskBoardError({
@@ -149,28 +315,32 @@ export const initHubTaskStore = (
     });
   }
 
-  if (isHubTaskStoreFullyInitialized(cwd)) {
-    return { alreadyInitialized: true, output: "" };
-  }
-
   try {
-    const output = execBdText(cwd, ["init", "--non-interactive"], env);
-
-    if (!isHubTaskStoreFullyInitialized(cwd)) {
-      throw new TaskBoardError({
-        message:
-          "archloop tasks init reported success, but the local task store is still missing. Retry after checking repository permissions.",
-      });
+    const hasLegacyStore = isBeadsStoreFullyInitialized(
+      resolveHubTaskStoreDir(cwd),
+    );
+    if (options.hubProjectDir && !hasLegacyStore) {
+      return initManagedHubTaskStore(
+        cwd,
+        env,
+        options.hubProjectDir,
+        options.projectName,
+      );
     }
 
-    return { alreadyInitialized: false, output };
+    return initLegacyHubTaskStore(cwd, env);
   } catch (error) {
     if (error instanceof TaskBoardError) {
       throw error;
     }
 
     throw new TaskBoardError({
-      message: formatHubTaskStoreCommandFailure("tasks init", error, cwd),
+      message: formatHubTaskStoreCommandFailure(
+        "tasks init",
+        error,
+        cwd,
+        options,
+      ),
     });
   }
 };
