@@ -35,6 +35,15 @@ real failed task points to `archloop tasks recover --stale`; a run interrupted
 without failed tasks points back to `archloop run`, which performs automatic
 startup recovery.
 
+Eligible merge-ready tasks land through a durable per-task transaction onto a
+Hub-managed local Git ref. archLoop freezes source and base OIDs, builds and
+verifies the exact candidate in a Hub-owned detached worktree, then advances
+the publish target, fence, and landing receipt in one Git ref transaction
+before closing the task. The user's checkout, index, HEAD, and WIP are not
+modified. A remote repository is not required. `shipped` means the verified
+candidate is on the publish target and the Beads task closed with matching
+transaction metadata.
+
 Task-board implementation and review agents receive an immutable snapshot of
 the selected task, its parent PRD, required dependencies, comments, and remote
 refs. They do not need live `bd show` access. Structured `<task-notes>` output

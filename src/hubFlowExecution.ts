@@ -37,6 +37,7 @@ import {
   formatHubRunAutoRecoverLines,
   type HubRunAutoRecoverSummary,
 } from "./hubRunAutoRecover.js";
+import { ensureHubLandingPolicy } from "./hubLandingPolicy.js";
 import {
   ensureHubTaskStoreMigrated,
   formatHubTaskStoreMigrationMessage,
@@ -1442,6 +1443,10 @@ const runObservedHubFlow = async (
   const hubProjectDir =
     input.hubProjectDir ??
     resolveHubProjectDir(resolveArchloopUserDataDir(input.env), repoRoot);
+  ensureHubLandingPolicy({
+    repoRoot,
+    hubProjectDir,
+  });
   const taskStoreMigration = ensureHubTaskStoreMigrated({
     repoRoot,
     hubProjectDir,
@@ -1521,7 +1526,12 @@ const runObservedHubFlow = async (
   const mutateLifecycle = createHubFlowLifecycleMutationQueue();
   const runMergePhase = input.runMergePhase ?? true;
   const merger =
-    input.merger ?? createHubFlowRunMerger({ cwd: repoRoot, env: input.env });
+    input.merger ??
+    createHubFlowRunMerger({
+      cwd: repoRoot,
+      hubProjectDir,
+      env: input.env,
+    });
   const verifier =
     input.verifier ?? createHubFlowRunVerifier({ cwd: repoRoot });
   let currentBatchId = resumedBatchId ?? context.batchId;
@@ -1557,6 +1567,7 @@ const runObservedHubFlow = async (
       runId: context.runId,
       batchId,
       env: input.env,
+      hubProjectDir,
       merger,
       verifier,
     });
@@ -1895,11 +1906,11 @@ export const formatHubFlowResultLines = (
 
 /**
  * Pure selector over the Hub run event log: has this task previously reached
- * a merged/done milestone? A prior `merge_succeeded` (the implementation
- * commit reached the base branch) or `task_closed` (the task was closed as
- * done) proves the task's described work is already present on the branch
- * lineage. Used by the implementer to distinguish a faithful zero-new-commit
- * re-run on already-merged work from a genuine no-work failure (arch-d0c).
+ * a merged/done milestone? A prior `target_landing_succeeded`,
+ * `merge_succeeded`, `task_close_succeeded`, or `task_closed` proves the
+ * task's described work already landed. Used by the implementer to distinguish
+ * a faithful zero-new-commit re-run on already-landed work from a genuine
+ * no-work failure (arch-d0c).
  *
  * Events from the *current* run do not carry these types before the
  * implementer returns (implementation is the first phase), so only a prior,
@@ -1915,7 +1926,10 @@ const hasPriorMergedCompletion = (
   events.some(
     (event) =>
       event.taskId === taskId &&
-      (event.type === "merge_succeeded" || event.type === "task_closed"),
+      (event.type === "target_landing_succeeded" ||
+        event.type === "task_close_succeeded" ||
+        event.type === "merge_succeeded" ||
+        event.type === "task_closed"),
   );
 
 /**

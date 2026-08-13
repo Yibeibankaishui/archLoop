@@ -63,6 +63,7 @@ npx archloop project list
 npx archloop project select <name>
 npx archloop project status
 npx archloop project configure --project-profile <profile>
+npx archloop project configure --project-profile <profile> --publish-policy off
 npx archloop project rename <project> <new-name>
 npx archloop project relink <project> --path <repo-path>
 ```
@@ -72,7 +73,9 @@ safer than the selected project.
 
 Project profiles include `generic`, `node`, `python`, and `cpp`. Reconfiguring
 with the same profile refreshes detected facts while preserving user-edited
-development contract sections.
+development contract sections. `--publish-policy off|best_effort|required` and
+`--remote-target` write Hub-owned landing policy without dirtying the
+repository. Publication stays `off` until configured.
 
 ## Agent roles and credentials
 
@@ -159,11 +162,14 @@ npx archloop run --flow with-review
 ```
 
 Task-board flows select a batch, run task implementations concurrently, and
-merge eligible branches serially. `with-review` adds a reviewer stage. An
-unfinished same-flow merge-ready batch is recovered before new tasks are
-claimed. Implementation and review agents receive an immutable task snapshot
-instead of live `bd` access; Hub applies schema-validated `<task-notes>` after
-the attempt.
+land eligible branches serially onto a Hub-managed local publish target.
+`with-review` adds a reviewer stage. An unfinished same-flow merge-ready batch
+is recovered before new tasks are claimed. Implementation and review agents
+receive an immutable task snapshot instead of live `bd` access; Hub applies
+schema-validated `<task-notes>` after the attempt. Landing freezes source and
+base OIDs, verifies the exact candidate in a Hub-owned worktree, then advances
+the publish target with a fenced Git ref transaction. The user's checkout and
+WIP are not modified, and no remote is required.
 
 Re-running `archloop run` also detects tasks left in implementation, review, or
 merge by an interrupted process. It uses completed-phase events to resume at
@@ -194,8 +200,9 @@ npx archloop tasks recover --stale
 npx archloop tasks cleanup --dry-run
 ```
 
-- Dirty source files block a merge only when they overlap files changed by the
-  merge. Resolve the exact listed paths and rerun the same flow.
+- Landing does not mutate the user's checkout, index, HEAD, or WIP. Dirty
+  source files and staged Beads runtime/export files do not block a local
+  landing. Checkout projection of the landed commit is a later, separate step.
 - `tasks doctor` is read-only. It groups diagnostics by severity and reports
   interrupted execution when no lease diagnostic already explains it.
 - `tasks repair-state` previews changes before confirmation and rewrites only

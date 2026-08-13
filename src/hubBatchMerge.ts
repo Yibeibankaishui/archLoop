@@ -1,7 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -23,6 +22,15 @@ import {
 import { resolveHubAgentProvider } from "./hubProposalAgent.js";
 import { run } from "./run.js";
 import { noSandbox } from "./sandboxes/no-sandbox.js";
+import {
+  bindHubLandingVerification,
+  cleanupHubLandingCandidate,
+  commitHubLandingTarget,
+  computeHubVerifierFingerprint,
+  createHubLandingCandidate,
+  HubLandingWorktreeError,
+  recordHubLandingTaskClosed,
+} from "./hubLanding.js";
 import {
   enterMergePhase,
   recordCloseFailure,
@@ -55,6 +63,7 @@ export interface HubMergeTaskInput {
   readonly branch: string;
   readonly cwd: string;
   readonly runDir: string;
+  readonly hubProjectDir?: string;
 }
 
 export type HubMergeDiagnostics = Readonly<Record<string, unknown>> & {
@@ -77,6 +86,11 @@ export interface HubMergeIntegration {
   readonly cwd: string;
   readonly finalize: () => Promise<void>;
   readonly cleanup: () => Promise<void>;
+  readonly transactionId?: string;
+  readonly sourceOid?: string;
+  readonly baseOid?: string;
+  readonly candidateOid?: string;
+  readonly bindVerification?: (fingerprint: string) => Promise<void> | void;
 }
 
 export interface HubBranchCleanupResult {
@@ -199,6 +213,7 @@ export interface RunHubBatchMergeInput {
   readonly branchInspector?: HubMergeBranchInspector;
   readonly worktreeInspector?: HubMergeWorktreeInspector;
   readonly env?: NodeJS.ProcessEnv;
+  readonly hubProjectDir?: string;
 }
 
 export interface HubBatchMergeTaskResult {
@@ -245,10 +260,12 @@ const toLifecycleContext = (
 });
 
 type MergeProgressEventType =
-  | "merge_succeeded"
+  | "integration_candidate_created"
   | "verification_started"
-  | "verification_passed"
-  | "task_close_started";
+  | "candidate_verification_passed"
+  | "target_landing_succeeded"
+  | "task_close_started"
+  | "task_close_succeeded";
 
 const appendMergeProgressEvent = (
   input: RunHubBatchMergeInput,
@@ -258,6 +275,13 @@ const appendMergeProgressEvent = (
     readonly branch: string;
     readonly claim: HubTaskProjection["claim"];
     readonly createdAt: string;
+    readonly transactionId?: string;
+    readonly sourceOid?: string;
+    readonly baseOid?: string;
+    readonly candidateOid?: string;
+    readonly publishTargetOid?: string;
+    readonly verifierFingerprint?: string;
+    readonly status?: string;
   },
 ): void => {
   appendHubTaskEvent(input.runDir, {
@@ -267,8 +291,14 @@ const appendMergeProgressEvent = (
     taskId: event.taskId,
     branch: event.branch,
     createdAt: event.createdAt,
-    status: "merging",
+    status: event.status ?? "merging",
     claim: event.claim,
+    transactionId: event.transactionId,
+    sourceOid: event.sourceOid,
+    baseOid: event.baseOid,
+    candidateOid: event.candidateOid,
+    publishTargetOid: event.publishTargetOid,
+    verifierFingerprint: event.verifierFingerprint,
   });
 };
 
@@ -599,29 +629,6 @@ const defaultBranchInspector: HubMergeBranchInspector = async (branch, cwd) => {
 };
 
 const normalizeGitPath = (path: string): string => path.replace(/\\/g, "/");
-
-const gitPathsOverlap = (left: string, right: string): boolean => {
-  const normalizedLeft = normalizeGitPath(left);
-  const normalizedRight = normalizeGitPath(right);
-  return (
-    normalizedLeft === normalizedRight ||
-    normalizedLeft.startsWith(`${normalizedRight}/`) ||
-    normalizedRight.startsWith(`${normalizedLeft}/`)
-  );
-};
-
-const collectOverlappingGitPaths = (
-  dirtyFiles: readonly string[],
-  changedFiles: readonly string[],
-): readonly string[] =>
-  dirtyFiles.filter((dirtyFile) =>
-    changedFiles.some((changedFile) => gitPathsOverlap(dirtyFile, changedFile)),
-  );
-
-const formatDirtyWorktreeRemediation = (
-  dirtyFiles: readonly string[],
-): string =>
-  `commit, stash, or discard dirty source files (${dirtyFiles.join(", ")}), then rerun the same flow so the batch resumes.`;
 
 const isTaskStoreRuntimePath = (path: string): boolean => {
   const normalized = normalizeGitPath(path);
@@ -959,35 +966,13 @@ const evaluateHubBatchMergeSelection = async (input: {
     }
 
     if (input.worktreeState.dirtySourceFiles.length > 0) {
-      const branchChangedFiles = branchState.changedFiles;
-      const overlappingDirtyFiles = branchChangedFiles
-        ? collectOverlappingGitPaths(
-            input.worktreeState.dirtySourceFiles,
-            branchChangedFiles,
-          )
-        : input.worktreeState.dirtySourceFiles;
-      if (overlappingDirtyFiles.length === 0) {
-        selectedTasks.push(task);
-        diagnostics.push(
-          buildSelectionDiagnostic(task, {
-            decision: "selected",
-            reason: "selected",
-            branch,
-            message: `Branch ${branch} has unmerged work. Source worktree is dirty (${input.worktreeState.dirtySourceFiles.join(", ")}), but those files do not overlap this branch; Hub will merge and verify in a clean integration worktree before landing.`,
-          }),
-        );
-        continue;
-      }
-
+      selectedTasks.push(task);
       diagnostics.push(
         buildSelectionDiagnostic(task, {
-          decision: "blocked",
-          reason: "dirty_worktree",
+          decision: "selected",
+          reason: "selected",
           branch,
-          blockingPaths: overlappingDirtyFiles,
-          message: branchChangedFiles
-            ? `Git safety gate: dirty source files would be overwritten or conflict with ${branch} (${overlappingDirtyFiles.join(", ")}). ${formatDirtyWorktreeRemediation(overlappingDirtyFiles)}`
-            : `Git safety gate: unable to prove ${branch} is safe against dirty source files. ${formatDirtyWorktreeRemediation(overlappingDirtyFiles)}`,
+          message: `Branch ${branch} has unmerged work. Source worktree is dirty (${input.worktreeState.dirtySourceFiles.join(", ")}); Hub lands onto a Hub-owned publish target without mutating the checkout.`,
         }),
       );
       continue;
@@ -1048,6 +1033,7 @@ const processMergeTask = async (
     branch,
     cwd: input.cwd,
     runDir: input.runDir,
+    hubProjectDir: input.hubProjectDir,
   });
   const mergeFinishedAt = new Date().toISOString();
 
@@ -1078,13 +1064,20 @@ const processMergeTask = async (
   }
 
   const mergeIntegration = mergeResult.integration;
+  const landingIdentity = {
+    transactionId: mergeIntegration?.transactionId,
+    sourceOid: mergeIntegration?.sourceOid,
+    baseOid: mergeIntegration?.baseOid,
+    candidateOid: mergeIntegration?.candidateOid,
+  };
 
   appendMergeProgressEvent(input, {
-    type: "merge_succeeded",
+    type: "integration_candidate_created",
     taskId: task.id,
     branch,
     claim,
     createdAt: mergeFinishedAt,
+    ...landingIdentity,
   });
 
   appendMergeProgressEvent(input, {
@@ -1093,6 +1086,7 @@ const processMergeTask = async (
     branch,
     claim,
     createdAt: mergeFinishedAt,
+    ...landingIdentity,
   });
 
   const verifyResult = await input.verifier({
@@ -1128,6 +1122,21 @@ const processMergeTask = async (
     );
   }
 
+  const verifierFingerprint = computeHubVerifierFingerprint(input.cwd);
+  if (mergeIntegration?.bindVerification) {
+    await mergeIntegration.bindVerification(verifierFingerprint);
+  }
+
+  appendMergeProgressEvent(input, {
+    type: "candidate_verification_passed",
+    taskId: task.id,
+    branch,
+    claim,
+    createdAt: verifyFinishedAt,
+    ...landingIdentity,
+    verifierFingerprint,
+  });
+
   if (mergeIntegration) {
     try {
       await mergeIntegration.finalize();
@@ -1157,11 +1166,14 @@ const processMergeTask = async (
   }
 
   appendMergeProgressEvent(input, {
-    type: "verification_passed",
+    type: "target_landing_succeeded",
     taskId: task.id,
     branch,
     claim,
-    createdAt: verifyFinishedAt,
+    createdAt: new Date().toISOString(),
+    ...landingIdentity,
+    publishTargetOid: landingIdentity.candidateOid,
+    verifierFingerprint,
   });
 
   appendMergeProgressEvent(input, {
@@ -1170,14 +1182,44 @@ const processMergeTask = async (
     branch,
     claim,
     createdAt: verifyFinishedAt,
+    ...landingIdentity,
   });
 
   try {
     const lifecycleResult = await recordTaskClosure({
       ...lifecycleBase,
+      metadata: {
+        ...lifecycleBase.metadata,
+        ...(landingIdentity.transactionId
+          ? {
+              landingTransactionId: landingIdentity.transactionId,
+              landingCandidateOid: landingIdentity.candidateOid,
+              landingSourceOid: landingIdentity.sourceOid,
+              landingBaseOid: landingIdentity.baseOid,
+            }
+          : {}),
+      },
       createdAt: verifyFinishedAt,
       closer: input.closer,
     });
+    appendMergeProgressEvent(input, {
+      type: "task_close_succeeded",
+      taskId: task.id,
+      branch,
+      claim,
+      createdAt: new Date().toISOString(),
+      status: lifecycleResult.hubStatus,
+      ...landingIdentity,
+      publishTargetOid: landingIdentity.candidateOid,
+    });
+    if (landingIdentity.transactionId && landingIdentity.candidateOid) {
+      recordHubLandingTaskClosed({
+        hubProjectDir: input.hubProjectDir ?? join(input.runDir, "..", ".."),
+        transactionId: landingIdentity.transactionId,
+        taskId: task.id,
+        candidateOid: landingIdentity.candidateOid,
+      });
+    }
     const cleanupResult = await runTaskBranchCleanup(input, branch);
     recordTaskBranchCleanup(
       input,
@@ -1627,142 +1669,102 @@ const runGitMergeInCwd = async (options: {
   }
 };
 
-const readGitRevision = async (
-  cwd: string,
-  revision: string,
-): Promise<string> =>
-  (await readGitStdout(cwd, ["rev-parse", revision])).trim();
-
-const listChangedFilesBetween = async (
-  cwd: string,
-  baseRevision: string,
-  targetRevision: string,
-): Promise<readonly string[]> =>
-  (
-    await readGitStdout(cwd, [
-      "diff",
-      "--name-only",
-      baseRevision,
-      targetRevision,
-    ])
-  )
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-
-const runGitMergeInCleanIntegrationWorktree = async (options: {
-  readonly input: HubMergeTaskInput;
-  readonly cwd: string;
-  readonly env?: NodeJS.ProcessEnv;
-  readonly conflictResolver?: HubMergeConflictResolver;
-}): Promise<HubMergeTaskResult> => {
-  const integrationCwd = await mkdtemp(join(tmpdir(), "archloop-hub-merge-"));
-  let cleanupStarted = false;
-  const cleanup = async (): Promise<void> => {
-    if (cleanupStarted) {
-      return;
-    }
-    cleanupStarted = true;
-    try {
-      await execFileAsync(
-        "git",
-        ["worktree", "remove", "--force", integrationCwd],
-        {
-          cwd: options.cwd,
-        },
-      );
-    } catch {
-      await rm(integrationCwd, { recursive: true, force: true });
-      await execFileAsync("git", ["worktree", "prune"], {
-        cwd: options.cwd,
-      }).catch(() => undefined);
-    }
-  };
-
-  try {
-    await execFileAsync(
-      "git",
-      ["worktree", "add", "--detach", integrationCwd, "HEAD"],
-      { cwd: options.cwd },
-    );
-
-    const mergeResult = await runGitMergeInCwd({
-      input: options.input,
-      cwd: integrationCwd,
-      env: options.env,
-      conflictResolver: options.conflictResolver,
-    });
-
-    if (mergeResult.outcome !== "success") {
-      await cleanup();
-      return mergeResult;
-    }
-
-    const integrationHead = await readGitRevision(integrationCwd, "HEAD");
-    const finalize = async (): Promise<void> => {
-      const changedFiles = await listChangedFilesBetween(
-        options.cwd,
-        "HEAD",
-        integrationHead,
-      );
-      const currentWorktreeState = await inspectHubMergeWorktreeState(
-        options.cwd,
-      );
-      const overlappingDirtyFiles = collectOverlappingGitPaths(
-        currentWorktreeState.dirtySourceFiles,
-        changedFiles,
-      );
-      if (overlappingDirtyFiles.length > 0) {
-        throw new Error(
-          `Git safety gate: dirty source files would be overwritten or conflict with the verified merge (${overlappingDirtyFiles.join(", ")}). ${formatDirtyWorktreeRemediation(overlappingDirtyFiles)}`,
-        );
-      }
-
-      await execFileAsync("git", ["merge", "--ff-only", integrationHead], {
-        cwd: options.cwd,
-      });
-    };
-
-    return {
-      outcome: "success",
-      integration: {
-        cwd: integrationCwd,
-        finalize,
-        cleanup,
-      },
-    };
-  } catch (error) {
-    await cleanup().catch(() => undefined);
-    return {
-      outcome: "failed",
-      message: error instanceof Error ? error.message : String(error),
-      diagnostics: compactDiagnostics(extractErrorDiagnostics(error)),
-    };
-  }
-};
-
 export const createHubFlowRunMerger = (options: {
   readonly cwd: string;
+  readonly hubProjectDir?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly conflictResolver?: HubMergeConflictResolver;
 }): HubFlowMerger => {
   return async (input) => {
-    const worktreeState = await inspectHubMergeWorktreeState(options.cwd);
-    if (worktreeState.dirtySourceFiles.length === 0) {
-      return runGitMergeInCwd({
-        input,
-        cwd: options.cwd,
-        env: options.env,
-        conflictResolver: options.conflictResolver,
+    const hubProjectDir =
+      options.hubProjectDir ??
+      input.hubProjectDir ??
+      join(input.runDir, "..", "..");
+    try {
+      const candidate = await createHubLandingCandidate({
+        repoRoot: options.cwd,
+        hubProjectDir,
+        taskId: input.taskId,
+        branch: input.branch,
+        merge: async (worktreeDir) => {
+          const mergeResult = await runGitMergeInCwd({
+            input,
+            cwd: worktreeDir,
+            env: options.env,
+            conflictResolver:
+              options.conflictResolver ??
+              createHubMergeConflictResolver({
+                cwd: worktreeDir,
+                env: options.env,
+              }),
+          });
+          if (mergeResult.outcome !== "success") {
+            const error = new Error(
+              mergeResult.message ?? "Hub landing merge failed",
+            ) as Error & { mergeResult: HubMergeTaskResult };
+            error.mergeResult = mergeResult;
+            throw error;
+          }
+        },
       });
+      return {
+        outcome: "success",
+        integration: {
+          cwd: candidate.worktreeDir,
+          transactionId: candidate.transactionId,
+          sourceOid: candidate.sourceOid,
+          baseOid: candidate.baseOid,
+          candidateOid: candidate.candidateOid,
+          bindVerification: (fingerprint) => {
+            bindHubLandingVerification({
+              hubProjectDir,
+              transactionId: candidate.transactionId,
+              taskId: candidate.taskId,
+              candidateOid: candidate.candidateOid,
+              verifierFingerprint: fingerprint,
+            });
+          },
+          finalize: async () => {
+            await commitHubLandingTarget({
+              repoRoot: options.cwd,
+              hubProjectDir,
+              candidate,
+              verifierFingerprint: computeHubVerifierFingerprint(options.cwd),
+            });
+          },
+          cleanup: async () => {
+            await cleanupHubLandingCandidate({
+              repoRoot: options.cwd,
+              hubProjectDir,
+              candidate,
+            });
+          },
+        },
+      };
+    } catch (error) {
+      if (error instanceof HubLandingWorktreeError) {
+        await execFileAsync(
+          "git",
+          ["worktree", "remove", "--force", error.worktreeDir],
+          { cwd: options.cwd },
+        ).catch(async () => {
+          await rm(error.worktreeDir, { recursive: true, force: true });
+        });
+      }
+      const mergeResult = (
+        error instanceof HubLandingWorktreeError
+          ? (error.details as { mergeResult?: HubMergeTaskResult } | undefined)
+          : (error as { mergeResult?: HubMergeTaskResult })
+      )?.mergeResult;
+      if (mergeResult) {
+        return mergeResult;
+      }
+      return {
+        outcome: "failed",
+        message: error instanceof Error ? error.message : String(error),
+        diagnostics: compactDiagnostics(extractErrorDiagnostics(error)),
+      };
     }
-
-    return runGitMergeInCleanIntegrationWorktree({
-      input,
-      cwd: options.cwd,
-      env: options.env,
-      conflictResolver: options.conflictResolver,
-    });
   };
 };
 

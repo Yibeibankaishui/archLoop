@@ -24,6 +24,13 @@ The CLI remembers one selected project. Commands such as `project status`,
 `tasks list`, and `run --flow` use it by default. Pass `--project <name>` when a
 script or one-off command should target another project explicitly.
 
+## Landing policy
+
+The first upgraded Hub run pins the active host target branch into Hub-owned
+project state and defaults publication to `off`. The Hub publish target is a
+stable local Git ref. `archloop project configure --publish-policy` and
+`--remote-target` update that policy without dirtying the repository.
+
 ## Hub versus repo-local configuration
 
 Hub onboarding does not create `.archloop/` in the target repository. The

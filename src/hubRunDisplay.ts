@@ -411,9 +411,15 @@ const resolveTaskStage = (event: Extract<HubRunEvent, { taskId: string }>) => {
       return "Resolving merge conflict";
     case "verification_started":
       return "Verifying";
+    case "integration_candidate_created":
+      return "Creating landing candidate";
+    case "candidate_verification_passed":
     case "verification_passed":
+      return "Landing";
+    case "target_landing_succeeded":
     case "task_close_started":
       return "Closing";
+    case "task_close_succeeded":
     case "task_closed":
       return "Completed";
     default:

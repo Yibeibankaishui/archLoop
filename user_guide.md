@@ -79,6 +79,7 @@ npx archloop project status
 | 选择默认项目       | `archloop project select <name>`                         |
 | 查看项目状态       | `archloop project status`                                |
 | 修改项目类型约定   | `archloop project configure --project-profile <profile>` |
+| 配置落地与发布策略 | `archloop project configure --publish-policy off\|best_effort\|required` |
 | 修改显示名称       | `archloop project rename <project> <new-name>`           |
 | 仓库移动后重新关联 | `archloop project relink <project> --path <repo-path>`   |
 
@@ -193,11 +194,17 @@ npx archloop run --flow no-review
 npx archloop run --flow with-review
 ```
 
-- `no-review`：实现完成后进入验证和合并。
-- `with-review`：每个任务在合并前增加 reviewer 阶段。
+- `no-review`：实现完成后进入验证和落地。
+- `with-review`：每个任务在落地前增加 reviewer 阶段。
 
 任务型 Flow 默认按批次选择任务。若同一个 Flow 存在未完成的待合并批次，
 archLoop 会先恢复该批次，再领取新任务。
+
+落地使用 Hub 拥有的本地 Git ref 作为权威目标，不需要远程仓库。archLoop 冻结
+任务源提交、在独立 worktree 中构造并验证 merge candidate，再用一次 Git ref
+事务推进 publish target、fence 和 landing receipt，然后关闭任务。用户工作区、
+index 和未提交改动保持不变。远程发布默认 `off`，可用
+`archloop project configure --publish-policy` 显式打开。
 
 进程中断后再次执行同一个 `archloop run`，启动阶段会根据已经完成的实现或评审
 事件把任务恢复到下一个安全阶段，并保留已有分支和 worktree 内容。失败任务的
@@ -238,7 +245,7 @@ npx archloop tasks recover <task-id>
 | 没有初始提交                | 先在目标仓库创建一次 Git 提交                                                             |
 | 运行被中断                  | 重新执行同一 Flow，或先用 `tasks recover --stale` 预览                                    |
 | 任务状态和运行事件不一致    | 先运行 `tasks doctor`，再按建议 repair 或 recover                                         |
-| 合并被脏文件阻塞            | 提交、暂存或放弃 CLI 列出的重叠文件后重试同一 Flow                                        |
+| 落地后工作区看不到改动      | 权威结果在 Hub publish target；当前不会改写用户 checkout                                  |
 | GitHub 同步冲突             | 使用 `tasks resolve --keep local` 或 `--keep remote`                                      |
 | 工作分支仍有可恢复内容      | 使用 `tasks recover`，不要手动强删 worktree 或分支                                        |
 | 后续 iteration 启动即 abort | 只要还有剩余 iteration，运行会继续并带上进度摘要；全部用尽且无完成信号才记 `agent_failed` |
@@ -280,7 +287,7 @@ API 参数、返回值和生命周期说明见
 2. `project add` 注册项目并建立项目级约定。
 3. 任务进入本地任务表，并按需与 GitHub Issues 同步。
 4. `run --flow` 选择任务批次，调用实现与评审 agent。执行 agent 只拿到只读任务快照，结构化 notes 由 Hub 写回任务表。
-5. archLoop 验证并合并符合条件的任务分支。
+5. archLoop 验证候选提交，并把它落到 Hub publish target 后关闭任务。
 6. 运行状态、日志和恢复建议保存在 Hub 项目目录中。
 
 ## 文档修改记录
@@ -295,3 +302,4 @@ API 参数、返回值和生命周期说明见
 | 2026-08-13 | Hub 执行 agent 使用不可变任务快照，notes 由 Hub 写回        |
 | 2026-08-13 | 已有仓库内 Beads 库在首次变更型命令时自动迁移并可崩溃续跑   |
 | 2026-08-13 | 不安全迁移会延期，split brain 会停止自动写入                |
+| 2026-08-13 | 单任务通过 fenced local landing 落到 Hub publish target     |

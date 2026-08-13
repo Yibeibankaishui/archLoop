@@ -29,6 +29,10 @@ import {
   resolveHubProjectDevelopmentContractState,
 } from "./hubProjectDevelopmentContract.js";
 import {
+  readHubLandingPolicy,
+  type HubLandingPolicy,
+} from "./hubLandingPolicy.js";
+import {
   loadHubTaskBoard,
   type HubFailureReason,
   type HubTaskBoard,
@@ -112,6 +116,10 @@ export interface HubProjectStatus {
   readonly runDirectories: readonly string[];
   readonly recentEvents: readonly string[];
   readonly worktreeLeaseDiagnostics: readonly HubWorktreeLeaseDiagnostic[];
+  readonly landingHostTargetBranch?: string;
+  readonly landingPublishTargetRef?: string;
+  readonly landingRemoteTarget?: string;
+  readonly landingPublishPolicy?: HubLandingPolicy["publishPolicy"];
 }
 
 export interface HubProjectStatusOptions {
@@ -927,6 +935,7 @@ export const resolveHubProjectStatus = (
           board.tasks,
           (options.listWorktreeLeases ?? listWorktreeLeases)(repoRoot),
         );
+  const landingPolicy = readHubLandingPolicy(hubProjectDir);
 
   return {
     repoRoot,
@@ -954,6 +963,10 @@ export const resolveHubProjectStatus = (
     runDirectories,
     recentEvents,
     worktreeLeaseDiagnostics,
+    landingHostTargetBranch: landingPolicy?.hostTargetBranch,
+    landingPublishTargetRef: landingPolicy?.publishTargetRef,
+    landingRemoteTarget: landingPolicy?.remoteTarget,
+    landingPublishPolicy: landingPolicy?.publishPolicy,
   };
 };
 
@@ -1014,6 +1027,26 @@ const projectStatusIdentityRows = (
     : []),
   { key: "Task board ready", value: String(status.taskCounts.ready) },
   { key: "Task board total", value: String(status.taskCounts.total) },
+  ...(status.landingHostTargetBranch
+    ? [
+        {
+          key: "Host target branch",
+          value: status.landingHostTargetBranch,
+        },
+        {
+          key: "Hub publish target",
+          value: status.landingPublishTargetRef ?? "(unpinned)",
+        },
+        {
+          key: "Publish policy",
+          value: status.landingPublishPolicy ?? "off",
+        },
+        {
+          key: "Remote target",
+          value: status.landingRemoteTarget ?? "(none)",
+        },
+      ]
+    : []),
 ];
 
 export const buildHubProjectStatusSummaryModel = (

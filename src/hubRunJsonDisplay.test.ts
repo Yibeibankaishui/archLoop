@@ -111,6 +111,43 @@ describe("JSONL Hub run lifecycle output", () => {
     });
   });
 
+  it("carries landing transaction and commit identities in JSON output", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+    });
+    const event: HubRunEvent = {
+      type: "target_landing_succeeded",
+      eventId: "run-land:12",
+      sequence: 12,
+      runId: "run-land",
+      batchId: "batch-land",
+      taskId: "bd-land",
+      branch: "archloop/bd-land",
+      createdAt: "2026-08-13T10:00:00.000Z",
+      status: "merging",
+      transactionId: "ltx-bd-land-abc123",
+      sourceOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      baseOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      candidateOid: "cccccccccccccccccccccccccccccccccccccccc",
+      publishTargetOid: "cccccccccccccccccccccccccccccccccccccccc",
+      verifierFingerprint: "deadbeef",
+    };
+
+    expect(parseRecord(renderer.event(event)!)).toMatchObject({
+      type: "target_landing_succeeded",
+      taskId: "bd-land",
+      stage: "Target landing succeeded",
+      status: "merging",
+      data: {
+        transactionId: "ltx-bd-land-abc123",
+        candidateOid: "cccccccccccccccccccccccccccccccccccccccc",
+        publishTargetOid: "cccccccccccccccccccccccccccccccccccccccc",
+        verifierFingerprint: "deadbeef",
+      },
+    });
+  });
+
   it("suppresses duplicate and stale source events before assigning output order", () => {
     const renderer = createHubRunJsonRenderer({
       hubProjectName: "alpha",

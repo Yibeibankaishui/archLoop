@@ -529,6 +529,10 @@ export interface BuildHubProjectConfigureSummaryModelInput {
   readonly hubProjectDir: string;
   readonly contract: ConfigureHubProjectDevelopmentContractResult;
   readonly editOutcome: string;
+  readonly landingHostTargetBranch?: string;
+  readonly landingPublishTargetRef?: string;
+  readonly landingPublishPolicy?: string;
+  readonly landingRemoteTarget?: string;
 }
 
 const describeContractConfigureAction = (
@@ -546,7 +550,16 @@ const describeContractConfigureAction = (
 export const buildHubProjectConfigureSummaryModel = (
   input: BuildHubProjectConfigureSummaryModelInput,
 ): HubProjectConfigureSummaryModel => {
-  const { repoRoot, hubProjectDir, contract, editOutcome } = input;
+  const {
+    repoRoot,
+    hubProjectDir,
+    contract,
+    editOutcome,
+    landingHostTargetBranch,
+    landingPublishTargetRef,
+    landingPublishPolicy,
+    landingRemoteTarget,
+  } = input;
   const rows: SectionKvBlock["rows"][number][] = [
     { key: "Repository root", value: repoRoot },
     { key: "Hub project dir", value: hubProjectDir },
@@ -570,6 +583,26 @@ export const buildHubProjectConfigureSummaryModel = (
       value: contract.backupPath ?? "none",
     },
     { key: "Outcome", value: describeContractConfigureAction(contract) },
+    ...(landingHostTargetBranch
+      ? [
+          {
+            key: "Host target branch",
+            value: landingHostTargetBranch,
+          },
+          {
+            key: "Hub publish target",
+            value: landingPublishTargetRef ?? "(unpinned)",
+          },
+          {
+            key: "Publish policy",
+            value: landingPublishPolicy ?? "off",
+          },
+          {
+            key: "Remote target",
+            value: landingRemoteTarget ?? "(none)",
+          },
+        ]
+      : []),
   ];
 
   return {

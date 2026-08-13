@@ -23,7 +23,8 @@ metadata, and run events.
 - `with-review` — add a reviewer stage before verification and merge.
 
 Tasks within a batch can implement and review concurrently. Eligible branches
-merge serially so verification failures have a clear boundary.
+land serially onto a Hub-managed local publish target so verification failures
+have a clear boundary. Landing does not merge into the user's checkout.
 
 Implementer iterations continue past a provider startup abort that produced no
 agent output, as long as iterations remain. A turn that only explored (no

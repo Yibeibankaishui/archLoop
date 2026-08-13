@@ -122,6 +122,10 @@ import {
   hubProjectConfigureSummaryModelToBlocks,
 } from "./hubProjectDevelopmentContract.js";
 import {
+  configureHubLandingPolicy,
+  HUB_LANDING_PUBLISH_POLICIES,
+} from "./hubLandingPolicy.js";
+import {
   createHubFlowRunImplementer,
   createHubFlowRunReviewer,
   formatHubFlowResultLines,
@@ -1758,6 +1762,23 @@ const projectConfigureProjectProfileOption = Options.text(
 ).pipe(
   Options.withDescription(
     "Project profile for the Hub project development contract (e.g. generic, node). Defaults to a prompt in TTYs.",
+  ),
+  Options.optional,
+);
+
+const projectConfigurePublishPolicyOption = Options.choice(
+  "publish-policy",
+  HUB_LANDING_PUBLISH_POLICIES,
+).pipe(
+  Options.withDescription(
+    "Hub code publication policy: off (default, local-first), best_effort, or required.",
+  ),
+  Options.optional,
+);
+
+const projectConfigureRemoteTargetOption = Options.text("remote-target").pipe(
+  Options.withDescription(
+    "Optional remote publication target such as origin/main. Never implied by a Git remote existing.",
   ),
   Options.optional,
 );
@@ -3991,8 +4012,10 @@ const projectConfigureCommand = Command.make(
   {
     project: projectTargetOption,
     projectProfile: projectConfigureProjectProfileOption,
+    publishPolicy: projectConfigurePublishPolicyOption,
+    remoteTarget: projectConfigureRemoteTargetOption,
   },
-  ({ project, projectProfile }) =>
+  ({ project, projectProfile, publishPolicy, remoteTarget }) =>
     Effect.gen(function* () {
       const d = yield* Display;
       const status = yield* resolveProjectTargetStatus(project);
@@ -4030,6 +4053,21 @@ const projectConfigureCommand = Command.make(
         catch: toProjectStatusError,
       });
 
+      const landing = yield* Effect.try({
+        try: () =>
+          configureHubLandingPolicy({
+            repoRoot: status.repoRoot,
+            hubProjectDir: status.hubProjectDir,
+            ...(publishPolicy._tag === "Some"
+              ? { publishPolicy: publishPolicy.value }
+              : {}),
+            ...(remoteTarget._tag === "Some"
+              ? { remoteTarget: remoteTarget.value }
+              : {}),
+          }),
+        catch: toProjectStatusError,
+      });
+
       yield* d.section(
         "",
         hubProjectConfigureSummaryModelToBlocks(
@@ -4038,6 +4076,10 @@ const projectConfigureCommand = Command.make(
             hubProjectDir: status.hubProjectDir,
             contract,
             editOutcome: describeProjectConfigureEditOutcome(contract),
+            landingHostTargetBranch: landing.policy.hostTargetBranch,
+            landingPublishTargetRef: landing.policy.publishTargetRef,
+            landingPublishPolicy: landing.policy.publishPolicy,
+            landingRemoteTarget: landing.policy.remoteTarget,
           }),
         ),
       );

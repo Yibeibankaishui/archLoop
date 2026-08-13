@@ -31,6 +31,9 @@ TypeScript API to build your own orchestration.
 - Docker, Podman, Vercel, Daytona, and explicit no-sandbox execution
 - Git branches and worktrees for isolated changes
 - Review and merge flows with recovery after interrupted runs
+- Local-first landing onto a Hub publish target: a verified candidate ships
+  without a remote and without mutating the user's checkout. Publication stays
+  off until `archloop project configure --publish-policy` sets it.
 - Plain terminal and JSONL output for automation
 - Reusable TypeScript primitives such as `run()`, `createSandbox()`, and
   `createWorktree()`
@@ -88,6 +91,7 @@ npx archloop project list
 npx archloop project status
 npx archloop project select <name>
 npx archloop project configure --project-profile node
+npx archloop project configure --project-profile node --publish-policy off
 ```
 
 ### Manage tasks
@@ -117,8 +121,11 @@ npx archloop run --flow with-review --output json
 ```
 
 The task-board flows resume unfinished merge-ready work before claiming new
-tasks. Use `archloop project status`, `archloop tasks doctor`, and
-`archloop tasks recover <task-id>` when a run needs attention.
+tasks. Eligible tasks land through a durable fenced transaction onto a
+Hub-managed local Git ref; the checkout, index, and WIP stay untouched.
+Publication remains off unless configured. Use `archloop project status`,
+`archloop tasks doctor`, and `archloop tasks recover <task-id>` when a run
+needs attention.
 
 ## TypeScript API
 
