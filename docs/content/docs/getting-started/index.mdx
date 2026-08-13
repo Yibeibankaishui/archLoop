@@ -1,0 +1,40 @@
+---
+title: Getting started
+description: Configure archLoop and run a reviewed task flow against your first project.
+---
+
+This path uses the shared Hub, which is the recommended setup for new users.
+
+## What you will do
+
+1. Install the CLI package.
+2. Configure shared agent roles and credentials.
+3. Register an existing Git repository.
+4. Check readiness.
+5. run the project's first task flow.
+
+## Prerequisites
+
+- Node.js and npm
+- A target Git repository with at least one commit
+- Credentials or CLI login for the agent provider you will use
+- Docker or Podman if the selected workflow uses a local container
+
+## Quick start
+
+```bash
+npm install --save-dev @yibeibankaishui/archloop
+npx archloop initialize
+npx archloop project add
+npx archloop check
+npx archloop run --flow with-review
+```
+
+Continue with [Installation and Hub setup](/docs/getting-started/installation) for
+the purpose and success criteria of each command.
+
+## Existing `.archloop/` users
+
+Do not replace an existing scaffold just to adopt Hub. Read
+[Legacy repo-local setup](/docs/guides/legacy-repo-local-setup) first; the two
+paths can coexist while you migrate intentionally.

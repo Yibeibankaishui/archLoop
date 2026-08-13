@@ -1,0 +1,42 @@
+---
+title: Agent roles, environment, and authentication
+description: Reference for agent-config, env, and auth command groups.
+---
+
+## Agent roles
+
+```bash
+npx archloop agent-config path
+npx archloop agent-config show
+npx archloop agent-config init
+npx archloop agent-config set-role <role> --provider <provider> --model <model>
+```
+
+Role configuration stores provider, model, and supported provider options. It
+must not contain credentials.
+
+## Environment
+
+```bash
+npx archloop env path
+npx archloop env show
+npx archloop env init
+npx archloop env set <key> [value]
+```
+
+Interactive input is masked where appropriate. `process.env` overrides values
+from the Hub env file at runtime.
+
+## Provider-owned login sessions
+
+```bash
+npx archloop auth show
+npx archloop auth path codex
+npx archloop auth path github
+npx archloop auth login codex
+npx archloop auth login github
+```
+
+Codex CLI login is distinct from the `OPENAI_KEY` API billing path. GitHub login
+uses a Hub-owned CLI configuration directory so it can be reused across Hub
+projects.

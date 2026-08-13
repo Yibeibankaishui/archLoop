@@ -14,5 +14,7 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
+      - run: npm ci --prefix docs
       - run: npm run build
       - run: npm test
+      - run: npm run docs:check

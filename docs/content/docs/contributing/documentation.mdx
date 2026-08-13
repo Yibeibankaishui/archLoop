@@ -1,0 +1,38 @@
+---
+title: Documentation maintenance
+description: Keep user documentation consistent with the CLI and public TypeScript API.
+---
+
+## Source of truth
+
+- CLI syntax and behavior: `src/cli.ts`
+- Public exports and types: `src/index.ts` and the exported implementation files
+- Product terminology: `CONTEXT.md`
+- Full user documentation: `docs/content/docs/`
+
+README files are short entry pages. They must not become a second complete CLI
+or API manual. The bundled archLoop usage skill is a compact operational aid and
+must stay consistent with the same facts.
+
+## Required checks
+
+```bash
+npm run docs:lint
+npm run docs:build
+npm run docs:check
+```
+
+The content check validates required navigation pages, local links, canonical
+Hub quick-start commands, document size limits, product identity, and accidental
+personal paths. The build verifies that MDX and the documentation application
+compile together.
+
+## Change checklist
+
+When changing public behavior:
+
+1. Update the relevant task-oriented page and reference page.
+2. Update README only when the entry path or key capability changes.
+3. Reconcile the Chinese entry and user guide when their covered workflow changes.
+4. Update `skills/archloop-usage/SKILL.md` when its trigger or operational facts change.
+5. Add a patch changeset and run `npm run docs:check` plus the normal project checks.

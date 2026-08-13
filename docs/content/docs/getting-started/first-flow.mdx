@@ -1,0 +1,45 @@
+---
+title: Run your first flow
+description: Create or inspect a task, preview the run plan, and execute a reviewed implementation flow.
+---
+
+## Confirm a ready task exists
+
+```bash
+npx archloop tasks list
+```
+
+If the board is empty, create a task and triage it:
+
+```bash
+npx archloop tasks create "Improve the empty state"
+npx archloop tasks triage <task-id>
+```
+
+## Preview the flow
+
+```bash
+npx archloop run --flow with-review --dry-run
+```
+
+The plan identifies the selected project and flow without starting agents.
+
+## Run
+
+```bash
+npx archloop run --flow with-review
+```
+
+`with-review` implements selected tasks concurrently within a batch, reviews
+each successful task branch, then verifies and merges eligible work. Use
+`no-review` when reviewer approval is not required.
+
+## Verify
+
+```bash
+npx archloop project status
+npx archloop tasks list
+```
+
+If the run stops with a recovery action, follow the exact command shown by the
+CLI or open [Troubleshooting](/docs/reference/troubleshooting).

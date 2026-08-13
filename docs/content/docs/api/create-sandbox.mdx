@@ -1,0 +1,35 @@
+---
+title: createSandbox()
+description: Reuse one sandbox and branch across several agent runs or interactive sessions.
+---
+
+Use a long-lived sandbox when repeated setup would be wasteful or several stages
+must share installed dependencies and branch state.
+
+```typescript
+import { claudeCode, createSandbox } from "@yibeibankaishui/archloop";
+import { docker } from "@yibeibankaishui/archloop/sandboxes/docker";
+
+await using sandbox = await createSandbox({
+  branch: "archloop/task-42",
+  sandbox: docker(),
+});
+
+await sandbox.run({
+  agent: claudeCode("claude-opus-4-6"),
+  prompt: "Implement task 42.",
+});
+
+await sandbox.run({
+  agent: claudeCode("claude-sonnet-4-6"),
+  prompt: "Review the implementation and fix confirmed issues.",
+});
+```
+
+The top-level handle owns both its sandbox and worktree. `await using` closes it
+automatically. Manual `close()` returns a `preservedWorktreePath` when dirty
+uncommitted work prevented safe cleanup.
+
+Runs on one handle accumulate commits on the same branch. An aborted run does
+not make the handle unusable; later runs can continue unless the sandbox itself
+failed.

@@ -1,0 +1,45 @@
+---
+title: Register your first project
+description: Add, select, configure, and check an existing Git repository.
+---
+
+## Add a project interactively
+
+```bash
+npx archloop project add
+```
+
+archLoop asks for the repository path, a Hub display name, a project profile,
+and whether to initialize the local task store.
+
+For automation, provide the values explicitly:
+
+```bash
+npx archloop project add \
+  --name demo \
+  --path <repo-path> \
+  --project-profile node
+```
+
+The target must be an existing Git repository with at least one commit.
+
+## Check the selected project
+
+```bash
+npx archloop project list
+npx archloop project status
+npx archloop check
+```
+
+A successful registration marks the project as selected. Selection is stored in
+the shared Hub, so it remains active when you change directories.
+
+If the repository later moves, use:
+
+```bash
+npx archloop project relink demo --path <new-repo-path>
+```
+
+## Next step
+
+[Run your first flow](/docs/getting-started/first-flow).

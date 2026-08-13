@@ -1,0 +1,31 @@
+---
+title: Tasks and flows
+description: Understand local tasks, collaboration statuses, batches, and flow behavior.
+---
+
+archLoop uses a local Beads task store as the source of task-board state. GitHub
+Issues synchronization is optional and explicit.
+
+## Task lifecycle
+
+User-facing statuses include inbox, needs information, ready for an agent,
+in progress, review and merge stages, ready for a human, blocked, failed, done,
+and wontfix. The CLI projects these statuses from archLoop-managed labels,
+metadata, and run events.
+
+## Task-board flows
+
+- `no-review` — plan a batch, implement tasks, verify, and merge.
+- `with-review` — add a reviewer stage before verification and merge.
+
+Tasks within a batch can implement and review concurrently. Eligible branches
+merge serially so verification failures have a clear boundary.
+
+If the same flow already has an unfinished merge-ready batch, a later run
+recovers it before claiming new tasks.
+
+## Proposal flows
+
+PRD decomposition and Triage generate structured proposals first. They validate
+the proposal and guard against unexpected mutations before applying approved
+changes to the local task store.

@@ -1,0 +1,22 @@
+---
+title: Sandboxes and worktrees
+description: Understand isolation providers, branches, worktree ownership, and cleanup.
+---
+
+A sandbox provider controls where an agent process runs. Built-in provider
+packages cover Docker, Podman, Vercel, Daytona, and explicit no-sandbox use.
+
+Git worktrees isolate branch contents from the source checkout. A one-shot
+`run()` manages its worktree and sandbox automatically. `createSandbox()` owns a
+long-lived sandbox. `createWorktree()` exposes the worktree as an independent
+handle that can be reused across interactive and sandboxed work.
+
+## Cleanup rule
+
+Clean, owned resources are removed when their handle closes. A dirty worktree is
+preserved so uncommitted work is not lost. When a sandbox was created from an
+existing worktree handle, closing the sandbox removes only the sandbox; the
+worktree handle remains responsible for worktree cleanup.
+
+Do not manually delete a worktree or managed task branch while archLoop reports
+an active lease. Use project diagnostics or task recovery first.

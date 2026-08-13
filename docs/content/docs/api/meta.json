@@ -1,0 +1,10 @@
+{
+  "title": "TypeScript API",
+  "pages": [
+    "index",
+    "run",
+    "create-sandbox",
+    "create-worktree",
+    "providers-and-prompts"
+  ]
+}

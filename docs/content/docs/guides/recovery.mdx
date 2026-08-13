@@ -1,0 +1,84 @@
+---
+title: Recover interrupted work
+description: Diagnose failed tasks, stale state, merge blockers, and preserved branches without losing work.
+---
+
+Start with read-only information:
+
+```bash
+npx archloop project status
+npx archloop check
+npx archloop tasks doctor
+```
+
+Then follow the CLI's recommended action.
+
+## Interrupted run
+
+Re-run the same flow first:
+
+```bash
+npx archloop run --flow <flow-id>
+```
+
+Startup detects tasks left in implementation, review, or merge without a live
+worktree lease. Completed implementation or review events route the task to the
+next stage, while preserved branch and worktree changes remain available. The
+CLI reports each route; JSONL includes the structured `autoRecover` result.
+
+To preview all interrupted tasks without starting a flow:
+
+```bash
+npx archloop tasks recover --stale
+npx archloop tasks recover --stale --yes
+```
+
+The first command is a dry-run preview. Use `--yes` or interactive confirmation
+to apply the batch recovery.
+
+## Failed task
+
+```bash
+npx archloop tasks recover <task-id>
+```
+
+Recovery keeps branch work that can be retried and removes only safe managed
+resources. Rerun the same flow after recovery when instructed.
+
+## State projection drift
+
+When `tasks doctor` reports that events and Beads metadata disagree:
+
+```bash
+npx archloop tasks repair-state <task-id>
+```
+
+Review the preview before confirming. This does not directly mutate GitHub.
+`tasks doctor` remains read-only and groups interrupted, failed, stale, sync,
+lease, and cleanup findings by severity.
+
+## Dirty source checkout
+
+Non-overlapping uncommitted files do not necessarily block a merge. If a task
+branch overlaps dirty source files, archLoop lists the exact paths and keeps the
+task merge-ready. Commit, stash, or discard those paths, then rerun the same
+flow.
+
+## Active worktree lease
+
+Wait for the active process or use the task recovery path. Do not remove lock
+files, worktrees, or branches manually while a lease is active.
+
+## Managed branch cleanup
+
+```bash
+npx archloop tasks cleanup --dry-run
+npx archloop tasks cleanup --yes
+```
+
+The preview separates safe managed, blocked managed, and unowned historical
+branches. Historical unowned branches stay preserved unless
+`--include-unowned` is explicitly combined with confirmation.
+
+For symptom-specific entries, see
+[Troubleshooting](/docs/reference/troubleshooting).

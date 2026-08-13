@@ -1,0 +1,123 @@
+---
+title: Troubleshooting
+description: Diagnose archLoop by symptom and choose the least destructive recovery action.
+---
+
+Start with:
+
+```bash
+npx archloop project status
+npx archloop check
+npx archloop tasks doctor
+```
+
+## No project is selected
+
+**Cause:** the Hub has no selected project, or the previous selection no longer
+exists.
+
+```bash
+npx archloop project list
+npx archloop project select <name>
+```
+
+## Registered repository path is missing
+
+**Cause:** the repository moved after registration.
+
+```bash
+npx archloop project relink <project> --path <repo-path>
+```
+
+## Git repository has no initial commit
+
+**Cause:** worktrees and branch-based execution need a real commit as a base.
+
+Create the repository's intended initial commit, then rerun `archloop check`.
+
+## Agent role or credential is missing
+
+```bash
+npx archloop agent-config show
+npx archloop env show
+npx archloop auth show
+```
+
+Run `archloop initialize` to repair shared setup, or configure only the missing
+role or credential with the corresponding command group.
+
+## Docker or Podman is unavailable
+
+Confirm the selected provider is installed and running. If direct host execution
+is intentional and safe for the workflow, choose a documented no-sandbox path;
+do not silently remove isolation from an existing workflow.
+
+## Run stopped with dirty-file overlap
+
+archLoop lists the source files that overlap the merge result. Commit, stash, or
+discard only those files, then rerun the same flow. The merge-ready task and its
+branch are preserved.
+
+## Task status disagrees with run history
+
+```bash
+npx archloop tasks doctor
+npx archloop tasks repair-state <task-id>
+```
+
+Use repair only when doctor marks the state as repairable. Preview the mutation
+before confirming.
+
+## Failed task has branch work
+
+```bash
+npx archloop tasks recover <task-id>
+```
+
+Recovery preserves retryable work. Do not delete the branch or worktree first.
+
+## Run ended while tasks still look active
+
+Re-run the same `archloop run --flow ...` command. Startup detects tasks left in
+implementation, review, or merge without a live lease and resumes from the next
+safe event-backed phase. `tasks list` marks these rows `⚠ interrupted`; JSON
+sets `interrupted: true`.
+
+Use `archloop tasks recover --stale` to preview all interrupted routes without
+starting a flow, then add `--yes` or confirm interactively to apply them. A run
+summary points to this command for real task failures, but points back to
+`archloop run` for interruption without failed tasks.
+
+## Implementer exited non-zero after finishing
+
+Hub derives success from observed branch work plus the completion signal. A
+recognized trailing provider disconnect does not erase completed work. A
+zero-new-commit rerun is also accepted when prior run evidence proves the task
+was already merged and closed; a completion signal alone is not sufficient.
+
+## Worktree is already in use
+
+An active lease owns the worktree. Wait for the owning process or use the task
+recovery guidance. Do not manually remove lock files.
+
+## GitHub synchronization conflict
+
+```bash
+npx archloop tasks resolve <task-id> --keep local
+# or
+npx archloop tasks resolve <task-id> --keep remote
+```
+
+Preview the next `tasks sync` or `tasks push` after resolving.
+
+## Provider connection stalled or timed out
+
+Hub execution retries recognized transient provider failures with backoff unless
+the agent already emitted its completion signal. Inspect `project status` and
+the run directory reported by the CLI before retrying or recovering the task.
+
+## Preserved worktree after close
+
+The worktree contains uncommitted changes and was intentionally kept to avoid
+data loss. Inspect it, commit or move the useful work, then use the normal task
+recovery or cleanup command. Avoid force deletion.
