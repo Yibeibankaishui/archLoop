@@ -33,8 +33,6 @@ const SNAPSHOT_FILE_NAME = "snapshot.json";
 const MAX_NOTES_BYTES = 32_768;
 const MAX_NOTE_COMMENTS = 8;
 const MAX_COMMENT_BYTES = 8_192;
-const CREDENTIAL_KEY_PATTERN =
-  /secret|token|password|credential|api[_-]?key|authorization|private[_-]?key/i;
 
 export class HubTaskSnapshotError extends Error {
   constructor(message: string) {
@@ -78,7 +76,6 @@ export interface CreateHubTaskSnapshotInput {
   readonly role: "implement" | "review";
   readonly attemptId?: string;
   readonly env?: NodeJS.ProcessEnv;
-  readonly hubProjectDir?: string;
 }
 
 export interface HubTaskNotes {
@@ -154,11 +151,7 @@ const mkdirExclusive = (dir: string, mode: number): void => {
   try {
     mkdirSync(dir, { recursive: false, mode });
   } catch (error) {
-    const code =
-      typeof error === "object" && error !== null && "code" in error
-        ? String((error as { code?: unknown }).code)
-        : undefined;
-    if (code === "EEXIST") {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
       assertNoSymlinkReplacement(dir);
       throw new HubTaskSnapshotError(
         `Hub task snapshot directory already exists: ${dir}`,
@@ -194,22 +187,6 @@ const writeExclusiveFile = (filePath: string, content: string): void => {
       closeSync(fd);
     }
   }
-};
-
-const sanitizeMetadata = (
-  metadata: Readonly<Record<string, unknown>>,
-): Readonly<Record<string, unknown>> => {
-  const sanitized: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(metadata)) {
-    if (CREDENTIAL_KEY_PATTERN.test(key)) {
-      continue;
-    }
-    if (typeof value === "string" && CREDENTIAL_KEY_PATTERN.test(value)) {
-      continue;
-    }
-    sanitized[key] = value;
-  }
-  return sanitized;
 };
 
 const toSnapshotRecord = (task: HubTaskProjection): HubTaskSnapshotRecord => {
@@ -283,18 +260,14 @@ const tryLoadTask = (
   }
 };
 
-const resolveParentPrdId = (
-  task: HubTaskProjection,
-): string | undefined => {
-  const record = sanitizeMetadata(task.metadata);
-  return readFirstString(record, [
+const resolveParentPrdId = (task: HubTaskProjection): string | undefined =>
+  readFirstString(task.metadata, [
     "prd_ref",
     "prdRef",
     "parent_prd",
     "parentPrd",
     "parent",
   ]);
-};
 
 const buildSnapshotDocument = (input: {
   readonly cwd: string;

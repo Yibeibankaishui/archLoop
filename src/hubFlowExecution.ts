@@ -87,7 +87,6 @@ import {
   cleanupHubTaskSnapshot,
   createHubTaskSnapshot,
   mergeHubAgentSandboxEnv,
-  type HubTaskSnapshot,
 } from "./hubTaskSnapshot.js";
 import type { SandboxProvider } from "./SandboxProvider.js";
 import {
@@ -151,7 +150,6 @@ export interface HubReviewTaskInput {
   readonly promptFile: string;
   readonly cwd: string;
   readonly runDir: string;
-  readonly hubProjectDir?: string;
   readonly implementCommitCount: number;
   readonly signal?: AbortSignal;
 }
@@ -686,15 +684,19 @@ const buildHubAgentPromptArgs = (
 
 const HUB_COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
 
-const readCompletionSignalFromLog = (logPath: string): string | undefined => {
+const readTextFileOrEmpty = (path: string): string => {
   try {
-    const content = readFileSync(logPath, "utf8");
-    return content.includes(HUB_COMPLETION_SIGNAL)
-      ? HUB_COMPLETION_SIGNAL
-      : undefined;
+    return readFileSync(path, "utf8");
   } catch {
-    return undefined;
+    return "";
   }
+};
+
+const readCompletionSignalFromLog = (logPath: string): string | undefined => {
+  const content = readTextFileOrEmpty(logPath);
+  return content.includes(HUB_COMPLETION_SIGNAL)
+    ? HUB_COMPLETION_SIGNAL
+    : undefined;
 };
 
 const DEFAULT_PROVIDER_RETRY_ATTEMPTS = 3;
@@ -788,11 +790,17 @@ const errorMessage = (error: unknown): string =>
 const withSnapshotSandbox = (
   sandbox: SandboxProvider,
   snapshotEnv: Readonly<Record<string, string>>,
-): SandboxProvider =>
-  ({
-    ...sandbox,
-    env: mergeHubAgentSandboxEnv(sandbox.env, snapshotEnv),
-  }) as SandboxProvider;
+): SandboxProvider => {
+  const env = { ...mergeHubAgentSandboxEnv(sandbox.env, snapshotEnv) };
+  switch (sandbox.tag) {
+    case "bind-mount":
+      return { ...sandbox, env };
+    case "isolated":
+      return { ...sandbox, env };
+    case "none":
+      return { ...sandbox, env };
+  }
+};
 
 const applyHubAgentNotes = (input: {
   readonly cwd: string;
@@ -805,14 +813,7 @@ const applyHubAgentNotes = (input: {
   readonly logPath: string;
   readonly env?: NodeJS.ProcessEnv;
 }): void => {
-  const logText = (() => {
-    try {
-      return readFileSync(input.logPath, "utf8");
-    } catch {
-      return "";
-    }
-  })();
-  const text = `${input.stdout ?? ""}\n${logText}`;
+  const text = `${input.stdout ?? ""}\n${readTextFileOrEmpty(input.logPath)}`;
   const result = applyHubTaskNotes({
     cwd: input.cwd,
     taskId: input.taskId,
@@ -823,22 +824,33 @@ const applyHubAgentNotes = (input: {
     return;
   }
 
-  appendHubTaskEvent(input.runDir, {
-    type: result.status === "applied" ? "task_notes_applied" : "task_notes_rejected",
+  const eventBase = {
     runId: basename(input.runDir),
     batchId: input.batchId,
     taskId: input.taskId,
     branch: input.branch,
     createdAt: new Date().toISOString(),
     status: input.status,
-    message:
-      result.status === "applied"
-        ? `Applied ${result.commentCount} Hub task note(s)`
-        : `Rejected Hub task notes: ${result.diagnostic}`,
-    diagnostics:
-      result.status === "applied"
-        ? { fingerprint: result.fingerprint, commentCount: result.commentCount }
-        : { diagnostic: result.diagnostic },
+  };
+
+  if (result.status === "applied") {
+    appendHubTaskEvent(input.runDir, {
+      ...eventBase,
+      type: "task_notes_applied",
+      message: `Applied ${result.commentCount} Hub task note(s)`,
+      diagnostics: {
+        fingerprint: result.fingerprint,
+        commentCount: result.commentCount,
+      },
+    });
+    return;
+  }
+
+  appendHubTaskEvent(input.runDir, {
+    ...eventBase,
+    type: "task_notes_rejected",
+    message: `Rejected Hub task notes: ${result.diagnostic}`,
+    diagnostics: { diagnostic: result.diagnostic },
   });
 };
 
@@ -852,7 +864,6 @@ const runHubAgent = async (input: {
   readonly title: string;
   readonly branch: string;
   readonly runDir: string;
-  readonly hubProjectDir?: string;
   readonly name: string;
   readonly role: "implement" | "review";
   readonly logFileName: string;
@@ -892,16 +903,14 @@ const runHubAgent = async (input: {
   const logPath = join(input.runDir, "logs", input.logFileName);
   const retryConfig = resolveProviderRetryConfig(input.env);
   const status = input.role === "review" ? "reviewing" : "implementing";
-  let snapshot: HubTaskSnapshot | undefined;
 
   const invoke = async () => {
-    snapshot = createTaskSnapshot({
+    const snapshot = createTaskSnapshot({
       cwd: input.cwd,
       taskId: input.taskId,
       runDir: input.runDir,
       role: input.role,
       env: input.env,
-      hubProjectDir: input.hubProjectDir,
     });
     try {
       return await run({
@@ -952,7 +961,7 @@ const runHubAgent = async (input: {
         env: input.env,
       });
     } catch {
-      // Invalid notes are recorded as diagnostics; they must not fail Hub orchestration.
+      // Notes application must not fail Hub orchestration.
     }
   };
 
@@ -1047,7 +1056,6 @@ const reviewSelectedTask = async (
       promptFile,
       cwd,
       runDir: context.runDir,
-      hubProjectDir: context.hubProjectDir,
       implementCommitCount,
       signal: input.signal,
     });
@@ -2004,7 +2012,6 @@ export const createHubFlowRunImplementer = (options: {
         showAgentStartup: options.showAgentStartup,
         idleTimeoutSeconds: options.idleTimeoutSeconds,
         signal: input.signal,
-        hubProjectDir: input.hubProjectDir,
         sandbox: options.sandbox,
         createTaskSnapshot: options.createTaskSnapshot,
         cleanupTaskSnapshot: options.cleanupTaskSnapshot,
@@ -2122,7 +2129,6 @@ export const createHubFlowRunReviewer = (options: {
         showAgentStartup: options.showAgentStartup,
         idleTimeoutSeconds: options.idleTimeoutSeconds,
         signal: input.signal,
-        hubProjectDir: input.hubProjectDir,
         sandbox: options.sandbox,
         createTaskSnapshot: options.createTaskSnapshot,
         cleanupTaskSnapshot: options.cleanupTaskSnapshot,
