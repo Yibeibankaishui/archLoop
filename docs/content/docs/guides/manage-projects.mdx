@@ -21,17 +21,21 @@ npx archloop check --project <name>
 ```
 
 `project list` shows path validity, profile, task readiness, task counts, and
-active runs. `project status` adds the development contract, run artifacts,
-failed-task actions, and managed branch cleanup diagnostics.
+active runs. `project status` adds the development contract, landing policy,
+run artifacts, failed-task actions, and managed branch cleanup diagnostics.
 
 ## Configure the development contract
 
 ```bash
 npx archloop project configure --project-profile node
+npx archloop project configure --project-profile node --publish-policy off
 ```
 
 Running the command again with the same profile refreshes detected project facts
 while preserving user-edited setup, verification, and context sections.
+`--publish-policy` and `--remote-target` update Hub-owned landing policy and do
+not dirty the code repository. Publication stays off until you set it, even if
+a Git remote exists.
 
 ## Rename or move
 

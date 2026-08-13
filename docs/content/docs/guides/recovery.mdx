@@ -59,10 +59,11 @@ lease, and cleanup findings by severity.
 
 ## Dirty source checkout
 
-Non-overlapping uncommitted files do not necessarily block a merge. If a task
-branch overlaps dirty source files, archLoop lists the exact paths and keeps the
-task merge-ready. Commit, stash, or discard those paths, then rerun the same
-flow.
+Hub landing does not merge into the user's checkout. Overlapping uncommitted
+files, staged Beads exports, and other WIP stay unchanged and do not block a
+local landing onto the Hub publish target. Landed code lives on the Hub
+publish ref until a later checkout-projection slice can fast-forward the host
+branch safely.
 
 ## Active worktree lease
 

@@ -363,12 +363,14 @@ describe("runHubBatchMerge", () => {
       [
         "task_claimed",
         "merge_started",
-        "merge_succeeded",
+        "integration_candidate_created",
         "verification_started",
-        "verification_passed",
+        "candidate_verification_passed",
+        "target_landing_succeeded",
         "task_close_started",
         "task_closed",
         "task_status_advanced",
+        "task_close_succeeded",
         "task_branch_cleanup",
       ],
     );
@@ -449,7 +451,11 @@ describe("runHubBatchMerge", () => {
       runId: context.runId,
       batchId,
       env,
-      merger: createHubFlowRunMerger({ cwd: repoDir }),
+      hubProjectDir: context.hubProjectDir,
+      merger: createHubFlowRunMerger({
+        cwd: repoDir,
+        hubProjectDir: context.hubProjectDir,
+      }),
       verifier: successVerifier,
       worktreeInspector: cleanWorktreeInspector,
     });
@@ -461,7 +467,8 @@ describe("runHubBatchMerge", () => {
         outcome: "merged",
         hubStatus: "done",
         cleanup: expect.objectContaining({
-          outcome: "deleted",
+          outcome: "skipped",
+          reasonCodes: ["unmerged_work"],
         }),
       }),
     ]);
@@ -469,7 +476,7 @@ describe("runHubBatchMerge", () => {
       execAsync(`git show-ref --verify --quiet refs/heads/${branch}`, {
         cwd: repoDir,
       }),
-    ).rejects.toThrow();
+    ).resolves.toMatchObject({ stdout: "", stderr: "" });
 
     const taskEvents = await readJsonl(
       join(context.runDir, "events", "task.jsonl"),
@@ -478,11 +485,12 @@ describe("runHubBatchMerge", () => {
       type: "task_branch_cleanup",
       cleanup: {
         policy: "safe_managed",
-        outcome: "deleted",
+        outcome: "skipped",
+        reasonCodes: ["unmerged_work"],
       },
     });
     expect(formatHubBatchMergeResultLines(result).join("\n")).toContain(
-      "bd-safe-cleanup: merged -> done; cleanup deleted",
+      "bd-safe-cleanup: merged -> done; cleanup skipped (unmerged_work)",
     );
   });
 
@@ -549,7 +557,11 @@ describe("runHubBatchMerge", () => {
       runId: context.runId,
       batchId,
       env,
-      merger: createHubFlowRunMerger({ cwd: repoDir }),
+      hubProjectDir: context.hubProjectDir,
+      merger: createHubFlowRunMerger({
+        cwd: repoDir,
+        hubProjectDir: context.hubProjectDir,
+      }),
       verifier: successVerifier,
       branchCleanup: async () => ({
         outcome: "failed",
@@ -1228,7 +1240,7 @@ describe("runHubBatchMerge", () => {
     );
   });
 
-  it("blocks merge preflight when dirty source files overlap the task branch", async () => {
+  it("selects overlapping dirty source files because landing does not mutate checkout", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-merge-dirty-"));
     await initRepo(repoDir);
     await commitFile(repoDir, "shared.txt", "base\n", "initial commit");
@@ -1280,26 +1292,21 @@ describe("runHubBatchMerge", () => {
       verifier: successVerifier,
     });
 
-    expect(mergeCalls).toBe(0);
-    expect(result.batchStatus).toBe("skipped");
-    expect(result.selectedTaskIds).toEqual([]);
+    expect(mergeCalls).toBe(1);
+    expect(result.batchStatus).toBe("done");
+    expect(result.selectedTaskIds).toEqual(["bd-dirty"]);
     expect(result.selectionDiagnostics).toContainEqual(
       expect.objectContaining({
         taskId: "bd-dirty",
-        decision: "blocked",
-        reason: "dirty_worktree",
+        decision: "selected",
+        reason: "selected",
         branch,
-        blockingPaths: ["shared.txt"],
-        message: expect.stringContaining("shared.txt"),
+        message: expect.stringContaining("without mutating the checkout"),
       }),
     );
-    const summary = formatHubBatchMergeResultLines(result).join("\n");
-    expect(summary).toContain(
-      `Git safety gate: dirty source files would be overwritten or conflict with ${branch}`,
+    await expect(readFile(join(repoDir, "shared.txt"), "utf-8")).resolves.toBe(
+      "local uncommitted\n",
     );
-    expect(summary).toContain("shared.txt");
-    expect(summary).toContain("commit, stash, or discard dirty source files");
-    expect(summary).toContain("then rerun the same flow so the batch resumes.");
   });
 
   it("does not block merge preflight for dirty Beads runtime/export files in the source worktree", async () => {
@@ -1435,7 +1442,11 @@ test ! -f notes.txt
       runId: context.runId,
       batchId,
       env,
-      merger: createHubFlowRunMerger({ cwd: repoDir }),
+      hubProjectDir: context.hubProjectDir,
+      merger: createHubFlowRunMerger({
+        cwd: repoDir,
+        hubProjectDir: context.hubProjectDir,
+      }),
       verifier: createHubFlowRunVerifier({ cwd: repoDir }),
     });
 
@@ -1456,15 +1467,50 @@ test ! -f notes.txt
     expect(verificationCwd).not.toBe(repoDir);
     expect(verifiedFeature).toBe("feature");
     expect(verifiedNotes).toBe("notes-absent");
-    await expect(readFile(join(repoDir, "feature.txt"), "utf-8")).resolves.toBe(
-      "feature\n",
-    );
+    await expect(
+      readFile(join(repoDir, "feature.txt"), "utf-8"),
+    ).rejects.toBeTruthy();
     await expect(readFile(join(repoDir, "notes.txt"), "utf-8")).resolves.toBe(
       "local notes\n",
     );
     await expect(
       execAsync("git status --short -- notes.txt", { cwd: repoDir }),
     ).resolves.toMatchObject({ stdout: "?? notes.txt\n" });
+    const policy = JSON.parse(
+      await readFile(join(context.hubProjectDir, "landing-policy.json"), "utf-8"),
+    ) as { publishTargetRef: string };
+    const { stdout: publishTree } = await execAsync(
+      `git ls-tree -r --name-only ${policy.publishTargetRef}`,
+      { cwd: repoDir },
+    );
+    expect(publishTree).toContain("feature.txt");
+    const taskEvents = await readJsonl(
+      join(context.runDir, "events", "task.jsonl"),
+    );
+    const landingEvents = taskEvents.filter((event) => {
+      const type = (event as { type?: string }).type;
+      return (
+        type === "integration_candidate_created" ||
+        type === "candidate_verification_passed" ||
+        type === "target_landing_succeeded" ||
+        type === "task_close_succeeded"
+      );
+    }) as Array<{
+      type: string;
+      transactionId?: string;
+      candidateOid?: string;
+    }>;
+    expect(landingEvents.map((event) => event.type)).toEqual([
+      "integration_candidate_created",
+      "candidate_verification_passed",
+      "target_landing_succeeded",
+      "task_close_succeeded",
+    ]);
+    expect(landingEvents[0]?.transactionId).toMatch(/^ltx-/);
+    expect(
+      new Set(landingEvents.map((event) => event.transactionId)).size,
+    ).toBe(1);
+    expect(landingEvents.every((event) => event.candidateOid)).toBe(true);
   });
 
   it("blocks task branches that include Beads runtime/export files in their diff", async () => {
@@ -1920,12 +1966,15 @@ test ! -f notes.txt
     await commitFile(repoDir, "feature.txt", "feature", "feature commit");
     await execAsync("git checkout main", { cwd: repoDir });
 
-    const merger = createHubFlowRunMerger({ cwd: repoDir });
     const context = createMergeContext(
       repoDir,
       "batch-default-git",
       join(repoDir, "data", "archloop", "hub"),
     );
+    const merger = createHubFlowRunMerger({
+      cwd: repoDir,
+      hubProjectDir: context.hubProjectDir,
+    });
     const result = await merger({
       flowId: "no-review",
       runId: context.runId,
@@ -1934,12 +1983,17 @@ test ! -f notes.txt
       title: "Feature",
       branch,
       cwd: repoDir,
-      runDir: join(repoDir, "runs"),
+      runDir: context.runDir,
+      hubProjectDir: context.hubProjectDir,
     });
 
     expect(result.outcome).toBe("success");
-    const merged = await readFile(join(repoDir, "feature.txt"), "utf-8");
-    expect(merged).toBe("feature");
+    await expect(
+      readFile(join(repoDir, "feature.txt"), "utf-8"),
+    ).rejects.toBeTruthy();
+    await expect(
+      readFile(join(result.integration!.cwd, "feature.txt"), "utf-8"),
+    ).resolves.toBe("feature");
   });
 
   it("uses an agent conflict resolver when the default merger hits conflicts", async () => {
@@ -1959,9 +2013,9 @@ test ! -f notes.txt
     const conflictResolver: HubMergeConflictResolver = async (input) => {
       seenInputs.push({ conflictedFiles: input.conflictedFiles });
       expect(input.gitStatus).toContain("UU shared.txt");
-      await writeFile(join(repoDir, "shared.txt"), "resolved\n");
-      await execAsync("git add shared.txt", { cwd: repoDir });
-      await execAsync("git commit --no-edit", { cwd: repoDir });
+      await writeFile(join(input.cwd, "shared.txt"), "resolved\n");
+      await execAsync("git add shared.txt", { cwd: input.cwd });
+      await execAsync("git commit --no-edit", { cwd: input.cwd });
       return { outcome: "success" };
     };
     const context = createMergeContext(
@@ -1972,6 +2026,7 @@ test ! -f notes.txt
 
     const merger = createHubFlowRunMerger({
       cwd: repoDir,
+      hubProjectDir: context.hubProjectDir,
       conflictResolver,
     });
     const result = await merger({
@@ -1983,12 +2038,16 @@ test ! -f notes.txt
       branch,
       cwd: repoDir,
       runDir: context.runDir,
+      hubProjectDir: context.hubProjectDir,
     });
 
     expect(result.outcome).toBe("success");
     expect(seenInputs).toEqual([{ conflictedFiles: ["shared.txt"] }]);
+    await expect(
+      readFile(join(result.integration!.cwd, "shared.txt"), "utf-8"),
+    ).resolves.toBe("resolved\n");
     await expect(readFile(join(repoDir, "shared.txt"), "utf-8")).resolves.toBe(
-      "resolved\n",
+      "main\n",
     );
     await expect(
       execAsync("git diff --name-only --diff-filter=U", { cwd: repoDir }),
@@ -2028,6 +2087,7 @@ test ! -f notes.txt
     );
     const merger = createHubFlowRunMerger({
       cwd: repoDir,
+      hubProjectDir: context.hubProjectDir,
       conflictResolver: async () => ({ outcome: "success" }),
     });
     const result = await merger({
@@ -2039,6 +2099,7 @@ test ! -f notes.txt
       branch,
       cwd: repoDir,
       runDir: context.runDir,
+      hubProjectDir: context.hubProjectDir,
     });
 
     expect(result).toMatchObject({

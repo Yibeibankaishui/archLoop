@@ -166,11 +166,15 @@ export interface HubTaskEvent {
     | "merge_conflict_resolution_started"
     | "merge_conflict_resolution_succeeded"
     | "merge_conflict_resolution_failed"
+    | "integration_candidate_created"
     | "verification_started"
     | "verification_passed"
+    | "candidate_verification_passed"
     | "verification_failed"
+    | "target_landing_succeeded"
     | "task_close_started"
     | "task_closed"
+    | "task_close_succeeded"
     | "task_close_failed"
     | "task_branch_cleanup"
     | "task_status_advanced";
@@ -196,6 +200,12 @@ export interface HubTaskEvent {
     readonly diagnosticSummary?: string;
     readonly diagnostics?: Readonly<Record<string, unknown>>;
   };
+  readonly transactionId?: string;
+  readonly sourceOid?: string;
+  readonly baseOid?: string;
+  readonly candidateOid?: string;
+  readonly publishTargetOid?: string;
+  readonly verifierFingerprint?: string;
 }
 
 type HubRunEventData =
