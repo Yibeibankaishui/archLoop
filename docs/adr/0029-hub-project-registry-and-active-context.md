@@ -1,5 +1,7 @@
 # Hub project registry and active context
 
+> Amended by [ADR-0035](./0035-hub-landing-uses-durable-fenced-transactions.md) and [ADR-0036](./0036-hub-owns-the-beads-task-store.md). The stable registry `hubProjectDir` is the sole state root for landing journals/receipts, the Hub-owned task store, and run/event projections; path-hash fallback must not split project state.
+
 **archLoop Hub** uses a shared **Hub project registry** with stable **Hub project ids**, unique user-facing **Hub project names**, and updateable repo paths. Hub commands target a client-owned **active Hub project context** unless the user specifies a project explicitly; the current working directory is not an implicit project selector.
 
 ## Decision

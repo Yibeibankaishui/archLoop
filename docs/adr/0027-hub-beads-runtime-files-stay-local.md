@@ -1,5 +1,7 @@
 # Hub keeps Beads runtime files out of code branch merges
 
+> Superseded by [ADR-0036](./0036-hub-owns-the-beads-task-store.md). Runtime-file classification remains a legacy migration safeguard; the steady-state task store lives outside the code repository.
+
 **archLoop Hub** treats Beads files under `.beads/` as **local task store** runtime/export state, not ordinary code owned by task branches. Hub flows may read and write the local task store while planning, claiming, recovering, or closing tasks, but batch merge must not require `.beads/issues.jsonl`, `.beads/interactions.jsonl`, or related `.beads/` files to be clean before normal source branches can merge.
 
 ## Decision

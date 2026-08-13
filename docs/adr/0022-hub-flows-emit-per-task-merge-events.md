@@ -1,6 +1,8 @@
 # Hub flows emit per-task merge events
 
-**archLoop Hub** flows must make merge progress observable per task, even when the UI presents a whole **flow batch** as merging together. Existing scaffold templates can only infer merger outcomes after a black-box merger agent run, but Hub task board state requires per-task events such as merge started, merge succeeded, merge failed, and task closed.
+> Amended by [ADR-0035](./0035-hub-landing-uses-durable-fenced-transactions.md). Per-task observability remains required, but events project durable OID-bearing landing checkpoints and are not recovery truth. The ambiguous `merge_succeeded` milestone is retired.
+
+**archLoop Hub** flows must make merge progress observable per task, even when the UI presents a whole **flow batch** as merging together. Existing scaffold templates can only infer merger outcomes after a black-box merger agent run, but Hub task board state requires per-task milestones for candidate creation, verification, target landing, optional publication, and task closure.
 
 ## Considered Options
 

@@ -94,6 +94,18 @@ _Avoid_: "backlog manager" (source system), "issue tracker", "run log"
 The Beads-backed task store that **archLoop Hub** uses as the local source for task planning, triage, dependencies, and task board state.
 _Avoid_: "Hub tasks JSON", "issue tracker", "remote backlog"
 
+**Hub-owned task store**:
+The **local task store** whose Beads database and runtime/export files live in the stable per-project **Hub project directory**, outside the code repository. A Git-ignored `.beads/redirect` may preserve direct `bd` command compatibility from the repository.
+_Avoid_: "repo task store", "task branch data", "shared remote database"
+
+**Task snapshot**:
+An immutable, attempt-scoped projection of the selected task and required dependency/context data supplied to an execution agent. Agents do not receive write access to the live **Hub-owned task store**.
+_Avoid_: "Beads clone", "task database copy", "cached task"
+
+**Task-store migration**:
+The journaled, idempotent relocation of an existing repository-local Beads store into the **Hub-owned task store**, followed by installation of a Git-ignored `.beads/redirect`. Hub quarantines the legacy database from new writes, verifies the cold copy before switching, and preserves the original as a recoverable backup.
+_Avoid_: "Beads reset", "task import", "JSONL migration"
+
 **Remote task source**:
 An external task system such as GitHub Issues that can synchronize with the **local task store**.
 _Avoid_: "source of truth" (the Hub works from the local task store), "backlog manager" when discussing sync direction
@@ -181,6 +193,66 @@ _Avoid_: "working branch", "agent branch"
 **Target branch**:
 The **host**'s active branch at `run()` time -- the branch archLoop merges into when using **merge-to-head**.
 _Avoid_: "base branch", "destination branch", "merge target"
+
+**Hub publish target**:
+The authoritative Git ref for one **Hub project** against which verified task work is atomically landed.
+_Avoid_: "target branch", "current branch", "host checkout"
+
+**Hub-managed local target**:
+The archLoop-owned local Git ref used as the default **Hub publish target** without requiring a remote repository.
+_Avoid_: "integration branch", "temporary branch", "remote branch"
+
+**Merge candidate**:
+A commit created by integrating a task's source work against a pinned **Hub publish target**, before it is landed.
+_Avoid_: "merged task", "shipped commit", "target branch"
+
+**Candidate chain**:
+An ordered sequence of **merge candidates** in which each candidate is built on the prior candidate for the same **Hub publish target**. Exact candidate OIDs may be verified concurrently, but landing preserves the chain order.
+_Avoid_: "parallel merges", "batch merge commit", "candidate queue"
+
+**Merge input fingerprint**:
+The durable identity of the task source commit, pinned **Hub publish target**, merge-resolution policy, and verification configuration used to produce and verify one **merge candidate**. Hub retries a terminal merge conflict only after this fingerprint changes or the user explicitly requests a retry.
+_Avoid_: "run id", "merge hash", "retry token"
+
+**Candidate repair**:
+A bounded agent attempt to modify an isolated **merge candidate** after semantic conflict resolution or project verification fails. Each repair is followed by full verification and never mutates the user's checkout.
+_Avoid_: "retry merge", "hotfix on target", "post-merge fix"
+
+**Landing**:
+The compare-and-swap advancement of a **Hub publish target** to a verified **merge candidate**.
+_Avoid_: "checkout update", "workspace sync", "force push"
+
+**Landing transaction**:
+The durable per-task workflow that pins a **merge input fingerprint**, creates and verifies a **merge candidate**, advances the **Hub publish target** with compare-and-swap, closes the local task, and reconciles optional publication and checkout projections.
+_Avoid_: "batch merge", "git merge command", "run transaction"
+
+**Landing receipt**:
+A transaction-specific Git ref advanced atomically with the **Hub publish target** and its fence, proving which exact verified candidate completed local landing.
+_Avoid_: "merge event", "reflog entry", "task status"
+
+**Target quiet wait**:
+A durable, automatically retried landing condition entered after repeated target drift. The oldest transaction retains its FIFO position while Hub waits for a stable target window.
+_Avoid_: "merge failed", "retry exhausted", "requeue"
+
+**Remote publication**:
+The compare-and-swap advancement of an explicitly configured remote Git ref from a landed **Hub publish target**. It is asynchronous under the `best_effort` **publish policy** and required delivery under `required`.
+_Avoid_: "landing", "task sync", "GitHub issue sync"
+
+**Publish policy**:
+The per-project code-delivery rule: `off` keeps delivery local and is the default, `best_effort` publishes asynchronously without blocking **shipped**, and `required` requires remote ancestry proof before **shipped**.
+_Avoid_: "merge mode", "remote mode", "sync policy"
+
+**Shipped task**:
+A task whose verified **merge candidate** has completed **landing** and whose local task record has been closed. Under the `required` **publish policy**, the required **remote publication** must also have completed.
+_Avoid_: "merge succeeded", "integration succeeded", "agent finished"
+
+**Checkout sync**:
+A best-effort update that makes the **host**'s checked-out branch reflect a landed **Hub publish target** without changing uncommitted user work.
+_Avoid_: "landing", "merge completion", "stash and replay"
+
+**Checkout sync pending**:
+A non-failure reconciliation condition (`checkout_sync_pending`) recorded when **checkout sync** cannot safely update the host's checked-out branch. It does not change whether a task is **shipped**, does not block later tasks, and is retried automatically.
+_Avoid_: "merge failed", "recovery required", "dirty worktree failure"
 
 ### Agents
 
@@ -474,10 +546,21 @@ _Avoid_: "log event" (the log file contains more than just agent output), "displ
 - A **verification entrypoint** is separate from the generated bootstrap script: bootstrap prepares the repo before agent work, while verification checks the result after agent changes.
 - The WeChat Mini Program **capability pack** uses layered verification: native fallback verification is the required core loop when a project-specific `wx:check` is absent, while `miniprogram-ci` platform validation is recommended, automatically enabled when its configuration is detected, and host-dependent runtime or cloud validation is optional.
 - **archLoop Hub** uses the **local task store** as the local source for task planning and the **Hub task board**; **remote task sources** synchronize into and out of it through **task sync**.
+- Hub projects use a **Hub-owned task store** outside the code repository. A local `.beads/redirect` preserves direct `bd` command discovery, while execution agents consume a read-only **task snapshot** and Hub orchestration owns task-state writes.
+- Existing Hub projects perform **task-store migration** automatically on first use. Migration contention or an incomplete attempt keeps the verified old store active, is retried from its durable journal, and does not by itself block a flow run.
+- A **Hub-managed local target** is the default **Hub publish target**; a remote repository is optional rather than a dependency of **landing**.
+- A **merge candidate** is verified before **landing**; **checkout sync** happens only when it is safe and does not determine whether landing succeeded.
+- The default **publish policy** is `off`. `best_effort` preserves local-first completion while **remote publication** is pending; `required` is an explicit per-project delivery contract and never becomes active merely because a Git remote exists.
+- If **checkout sync** cannot preserve the user's uncommitted state, Hub records **checkout sync pending**, continues later work, and retries reconciliation without stash or replay.
+- A semantic merge conflict gets at most two agent resolution-and-verification attempts for the same **merge input fingerprint**. If both fail, the task enters **blocked** with reason `merge_conflict_unresolved`; independent tasks continue, and Hub does not retry the unchanged conflict indefinitely.
+- Each eligible task in a **flow batch** has its own **landing transaction**. A successful task is not rolled back when a sibling task fails; independent siblings continue, dependent siblings remain **blocked**, and the batch reports `partial_failed` when outcomes are mixed.
+- A failed candidate verification receives at most two **candidate repair** attempts for the same **merge input fingerprint**. If full verification still fails, the task enters **blocked** with reason `verification_failed`; the unverified candidate never lands and independent tasks continue.
+- Tasks for one target form a durable FIFO/dependency-ordered **candidate chain**. Candidate OIDs may verify concurrently, but only the queue head may land; after repeated drift it retains its position in **target quiet wait** instead of requeuing behind newer tasks.
+- **Landing** atomically advances the expected target, fencing ref, and **landing receipt**. Recovery derives missing checkpoints from those refs and exact OIDs rather than trusting display events.
 - **Blocked** is a **Hub task board** status with a reason, not a family of separate task statuses.
 - Durable human decisions or human work should be represented as separate **tasks**; dependent agent-ready **tasks** are **blocked** by those human-owned dependencies.
 - **Waiting for merge** is a stable **Hub task board** status because a task may finish implementation and review before the rest of its flow batch is ready to merge.
-- When a **flow batch** enters merge, all eligible **tasks** in that batch move from waiting for merge to merging together.
+- When a **flow batch** reaches landing, each eligible **task** independently enters its ordered **landing transaction**; the batch aggregates outcomes but is not a shared Git transaction boundary.
 - A **project profile** is an **init** scaffolding choice, not a public runtime option on `run()`, `createSandbox()`, or a **sandbox provider**.
 - The generated bootstrap script is a user-editable scaffold artifact owned by the host repo after **init**.
 - The generated bootstrap script prepares the repo for agent work; it does not run full project verification by default.
@@ -577,6 +660,16 @@ _Avoid_: "log event" (the log file contains more than just agent output), "displ
 
 > **Domain expert:** "No -- **built-in prompt arguments** can't be overridden. If you pass `TARGET_BRANCH` in `promptArgs`, **prompt argument substitution** fails with an error. Use a different key name if you need a custom value."
 
+### Hub landing and checkout sync
+
+> **Dev:** "Does a Hub flow need `origin/main` before it can finish merging a task?"
+>
+> **Domain expert:** "No. The verified **merge candidate** lands on the **Hub-managed local target** by default. Remote publication is optional."
+>
+> **Dev:** "What if my checked-out branch has uncommitted changes?"
+>
+> **Domain expert:** "Those changes do not block **landing**. archLoop attempts **checkout sync** only when it can preserve the user's uncommitted state without stash or replay."
+
 ## Flagged ambiguities
 
 - **"Worktree mode"** -- The old name for **branch strategy**. Use **branch strategy** -- it describes where changes land, not the mechanism.
@@ -590,6 +683,7 @@ _Avoid_: "log event" (the log file contains more than just agent output), "displ
 - **"Variable"** vs **"Argument"** -- **Prompt arguments** are host-side values substituted into `{{KEY}}` placeholders. Env vars are passed into the **sandbox** environment. Don't call prompt arguments "variables".
 - **"File mode"** vs **"Log-to-file mode"** -- Use **log-to-file mode**. "File mode" is ambiguous. Similarly, avoid "stdout mode" for **terminal mode**.
 - **"Base branch"** vs **"Target branch"** -- Use **target branch**. "Base branch" is ambiguous in archLoop's context.
+- **"Target branch"** vs **"Hub publish target"** -- **Target branch** belongs to the programmatic branch-strategy interface and follows the host's active branch at `run()` time; **Hub publish target** is the stable authoritative Git ref used by Hub landing and must not be inferred from the current checkout.
 - **"Built-in"** vs **"Default"** prompt arguments -- "Default" implies overridable. **Built-in prompt arguments** cannot be overridden. Use "built-in".
 - **"No sandbox"** vs **"local"** vs **"none"** -- The provider type is `NoSandboxProvider`, the factory is `noSandbox()`, the tag is `"none"`. Say **no-sandbox provider** in prose.
 - **"Workspace"** -- Retired term. Use **worktree** for the git worktree on the **host**, and **sandbox** for the isolation boundary. Don't say "workspace" in this project.
