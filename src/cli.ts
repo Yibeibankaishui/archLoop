@@ -2002,10 +2002,13 @@ const resolveTaskCommandProjectTarget = (
         hubProjectDir: resolved.project.hubProjectDir,
       };
       if (options.migrateLegacyStore) {
-        ensureHubTaskStoreMigrated({
+        const migrated = ensureHubTaskStoreMigrated({
           repoRoot: target.repoRoot,
           hubProjectDir: target.hubProjectDir,
         });
+        if (migrated.kind === "split_brain") {
+          throw new TaskBoardError({ message: migrated.integrityError });
+        }
       }
       return target;
     },

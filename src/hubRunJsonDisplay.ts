@@ -255,9 +255,21 @@ export const createHubRunJsonRenderer = (input: {
                         phase: result.taskStoreMigration.phase,
                         backupDir: result.taskStoreMigration.backupDir,
                       }
-                    : {
-                        reason: result.taskStoreMigration.reason,
-                      }),
+                    : result.taskStoreMigration.kind === "deferred"
+                      ? {
+                          reason: result.taskStoreMigration.reason,
+                          phase: result.taskStoreMigration.phase,
+                          pendingUntil: result.taskStoreMigration.pendingUntil,
+                        }
+                      : result.taskStoreMigration.kind === "split_brain"
+                        ? {
+                            reason: "task_store_split_brain",
+                            integrityError:
+                              result.taskStoreMigration.integrityError,
+                          }
+                        : {
+                            reason: result.taskStoreMigration.reason,
+                          }),
                 },
               }
             : {}),

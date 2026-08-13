@@ -19,7 +19,7 @@ repo-local 自定义工作流。
 
 - 在共享 Hub 中注册和切换多个 Git 项目
 - 配置规划、实现、评审、合并、Triage 和 Recovery 等 agent role
-- 使用保存在 Hub 项目目录中的本地 Beads 任务表（仓库内旧库会自动迁移），并可与 GitHub Issues 同步。Hub flow 执行 agent 只拿到不可变任务快照，结构化 notes 由 Hub 在 attempt 之后写回
+- 使用保存在 Hub 项目目录中的本地 Beads 任务表（仓库内旧库会自动迁移；有活跃 writer 时延期，redirect 后 split brain 会停止自动写入），并可与 GitHub Issues 同步。Hub flow 执行 agent 只拿到不可变任务快照，结构化 notes 由 Hub 在 attempt 之后写回
 - 在 Docker、Podman、Vercel、Daytona 或 no-sandbox 环境中执行代理
 - 管理分支和 git worktree，收集并合并代理提交
 - 从中断的运行和待合并批次继续执行

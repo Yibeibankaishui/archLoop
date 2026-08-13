@@ -22,6 +22,11 @@ import {
   isInterruptedHubTaskExecution,
 } from "./hubTaskInterruptedExecutionDetector.js";
 import { latestPhaseCompletionEventByTask } from "./hubTaskRecoveryRouter.js";
+import { readHubProjectRegistry } from "./hubProjectRegistry.js";
+import {
+  formatHubTaskStoreMigrationMessage,
+  inspectHubTaskStoreMigration,
+} from "./hubTaskStoreMigration.js";
 import {
   resolveGitRepoRoot,
   resolveHubProjectDir,
@@ -102,6 +107,7 @@ export interface DoctorHubTaskStateInput {
 export interface DoctorHubTaskStateResult {
   readonly diagnostics: readonly HubTaskStateDiagnostic[];
   readonly managedBranchCleanupDiagnostics: readonly string[];
+  readonly taskStoreDiagnostics?: readonly string[];
 }
 
 export interface HubTaskStatePlannedRepair {
@@ -502,11 +508,16 @@ export const doctorHubTaskState = async (
   input: DoctorHubTaskStateInput,
 ): Promise<DoctorHubTaskStateResult> => {
   const repoRoot = resolveGitRepoRoot(input.cwd);
-  const hubProjectDir = resolveHubProjectDir(
-    input.archloopUserDataDir ??
-      resolveArchloopUserDataDir(input.env ?? process.env),
-    repoRoot,
+  const env = input.env ?? process.env;
+  const registeredProject = readHubProjectRegistry({ env }).find(
+    (project) => project.repoRoot === repoRoot,
   );
+  const hubProjectDir =
+    registeredProject?.hubProjectDir ??
+    resolveHubProjectDir(
+      input.archloopUserDataDir ?? resolveArchloopUserDataDir(env),
+      repoRoot,
+    );
   const board = loadHubTaskBoard(repoRoot, input.env);
   const taskEvents = readTaskEvents(hubProjectDir);
   const mergeReadyEvents = latestMergeReadyEventsByTask(taskEvents);
@@ -643,12 +654,32 @@ export const doctorHubTaskState = async (
     }
   }
 
+  const taskStoreMigration = inspectHubTaskStoreMigration({
+    repoRoot,
+    hubProjectDir,
+  });
+  const taskStoreDiagnostics: string[] = [];
+  if (
+    taskStoreMigration.integrityIncident ||
+    taskStoreMigration.pendingReason
+  ) {
+    taskStoreDiagnostics.push(
+      formatHubTaskStoreMigrationMessage(taskStoreMigration),
+    );
+    if (taskStoreMigration.nextAction) {
+      taskStoreDiagnostics.push(
+        `Next action: ${taskStoreMigration.nextAction}`,
+      );
+    }
+  }
+
   return {
     diagnostics,
     managedBranchCleanupDiagnostics:
       formatHubManagedBranchCleanupDiagnosticsLines(
         managedBranchCleanupEvaluation,
       ),
+    taskStoreDiagnostics,
   };
 };
 
@@ -860,6 +891,7 @@ export const formatHubTaskStateDoctorLines = (
   );
   return [
     ...flattenSectionForLog(blocks),
+    ...(result.taskStoreDiagnostics ?? []),
     ...result.managedBranchCleanupDiagnostics,
   ];
 };

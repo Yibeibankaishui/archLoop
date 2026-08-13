@@ -17,7 +17,11 @@ they receive a read-only task snapshot and Hub applies any structured notes
 after the attempt. An existing writer-free repository-local store migrates
 automatically on `tasks init` and on the first mutating `archloop run` or task
 command. The original database is quarantined, copied, verified, and retained
-as a recoverable backup.
+as a recoverable backup. If a writer, fingerprint change, unsafe snapshot, or
+migration owner is present before quarantine, Hub keeps the legacy store and
+retries later. Split brain after redirect stops automatic writes; inspect both
+stores with `project status` or `tasks doctor` and do not delete either one
+automatically.
 
 ## List and inspect
 

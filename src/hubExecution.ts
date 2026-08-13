@@ -77,10 +77,12 @@ export interface HubTaskStoreMigrationEvent {
   readonly type: "task_store_migration";
   readonly runId: string;
   readonly createdAt: string;
-  readonly kind: "migrated" | "not_needed";
+  readonly kind: "migrated" | "not_needed" | "deferred" | "split_brain";
   readonly phase?: string;
   readonly beadsDir: string;
   readonly message: string;
+  readonly reason?: string;
+  readonly pendingUntil?: string;
 }
 
 export interface HubBatchStartedEvent {

@@ -27,8 +27,13 @@ directory, not in the Git repository. It also installs a Git-ignored
 same store. Hub flow agents consume an immutable task snapshot rather than
 that live store. An existing writer-free repository-local store migrates
 automatically on `tasks init` and on the first mutating `archloop run` or task
-command. Migration is journaled and resumes after a crash; it is not a task
-failure and does not require `tasks recover`.
+command. Migration is journaled and resumes after a crash. An active Beads
+writer, source fingerprint change, unsafe snapshot, or live migration owner
+defers the switch, keeps the verified legacy store, and retries automatically.
+If both the leftover repository-local database and the Hub-owned store change
+after redirect, Hub reports split brain, stops automatic task-store writes, and
+does not merge or delete either database. None of these cases is a task failure
+or requires `tasks recover`.
 
 Use `--json` where offered for machine-readable output. Preview synchronization,
 cleanup, and deletion with `--dry-run` before applying them in automation.

@@ -71,11 +71,28 @@ export class HubTaskStoreMigrationCrash extends Error {
   }
 }
 
+export const HUB_TASK_STORE_MIGRATION_PENDING_REASONS = [
+  "active_writer",
+  "source_fingerprint_changed",
+  "unsafe_snapshot",
+  "migration_contention",
+] as const;
+
+export type HubTaskStoreMigrationPendingReason =
+  (typeof HUB_TASK_STORE_MIGRATION_PENDING_REASONS)[number];
+
+export const HUB_TASK_STORE_SPLIT_BRAIN_INCIDENT = "task_store_split_brain";
+
+export type HubTaskStoreIntegrityIncident =
+  | typeof HUB_TASK_STORE_SPLIT_BRAIN_INCIDENT
+  | "invalid_redirect";
+
 export interface HubTaskStoreMigrationInput {
   readonly repoRoot: string;
   readonly hubProjectDir: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly faultInjection?: HubTaskStoreMigrationFaultInjection;
+  readonly now?: () => Date;
 }
 
 export type HubTaskStoreMigrationOutcome =
@@ -96,6 +113,22 @@ export type HubTaskStoreMigrationOutcome =
       readonly beadsDir: string;
       readonly backupDir: string;
       readonly journalPath: string;
+    }
+  | {
+      readonly kind: "deferred";
+      readonly reason: HubTaskStoreMigrationPendingReason;
+      readonly phase: HubTaskStoreMigrationPhase;
+      readonly beadsDir: string;
+      readonly pendingUntil: string;
+      readonly journalPath: string;
+    }
+  | {
+      readonly kind: "split_brain";
+      readonly beadsDir: string;
+      readonly legacyBeadsDir: string;
+      readonly managedBeadsDir: string;
+      readonly integrityError: string;
+      readonly journalPath: string;
     };
 
 export interface HubTaskStoreMigrationInspection {
@@ -106,6 +139,10 @@ export interface HubTaskStoreMigrationInspection {
   readonly backupPresent: boolean;
   readonly backupDir?: string;
   readonly integrityError?: string;
+  readonly integrityIncident?: HubTaskStoreIntegrityIncident;
+  readonly pendingReason?: HubTaskStoreMigrationPendingReason;
+  readonly pendingUntil?: string;
+  readonly nextAction?: string;
 }
 
 const RUNTIME_ENTRY_NAMES = [
@@ -140,13 +177,29 @@ interface StoreIdentity {
   readonly commentCount: number;
   readonly workingState: Readonly<Record<string, number>>;
   readonly fingerprint: string;
+  readonly sourceGeneration: string;
 }
 
 interface JournalRecord {
-  readonly phase: HubTaskStoreMigrationPhase;
+  readonly phase?: HubTaskStoreMigrationPhase;
+  readonly status?: string;
   readonly at: string;
   readonly fingerprint?: string;
+  readonly reason?: string;
 }
+
+interface PendingRecord {
+  readonly status: "task_store_migration_pending";
+  readonly reason: HubTaskStoreMigrationPendingReason;
+  readonly attempt: number;
+  readonly ownerPid: number;
+  readonly ownerNonce: string;
+  readonly detectedAt: string;
+  readonly nextRetryAt: string;
+  readonly phase: HubTaskStoreMigrationPhase;
+}
+
+const MIGRATION_BACKOFF_MS = [2_000, 10_000, 30_000, 120_000] as const;
 
 const PHASE_RANK = new Map(
   HUB_TASK_STORE_MIGRATION_PHASES.map((phase, index) => [phase, index]),
@@ -181,9 +234,20 @@ const resolveLeasePath = (hubProjectDir: string): string =>
 const resolveSnapshotPath = (hubProjectDir: string): string =>
   join(resolveMigrationStateDir(hubProjectDir), "snapshot.json");
 
+const resolvePendingPath = (hubProjectDir: string): string =>
+  join(resolveMigrationStateDir(hubProjectDir), "pending.json");
+
 const isPhase = (value: unknown): value is HubTaskStoreMigrationPhase =>
   typeof value === "string" &&
   (HUB_TASK_STORE_MIGRATION_PHASES as readonly string[]).includes(value);
+
+const isPendingReason = (
+  value: unknown,
+): value is HubTaskStoreMigrationPendingReason =>
+  typeof value === "string" &&
+  (HUB_TASK_STORE_MIGRATION_PENDING_REASONS as readonly string[]).includes(
+    value,
+  );
 
 const readJournalPhases = (
   journalPath: string,
@@ -210,6 +274,18 @@ const readJournalPhases = (
   );
 };
 
+const appendJournalRecord = (
+  journalPath: string,
+  record: JournalRecord,
+): void => {
+  mkdirSync(dirname(journalPath), { recursive: true });
+  writeFileSync(journalPath, `${JSON.stringify(record)}\n`, {
+    flag: "a",
+    encoding: "utf8",
+  });
+  fsyncPath(journalPath);
+};
+
 const appendJournalPhase = (
   journalPath: string,
   phase: HubTaskStoreMigrationPhase,
@@ -219,17 +295,78 @@ const appendJournalPhase = (
   if (existing.includes(phase)) {
     return;
   }
-  mkdirSync(dirname(journalPath), { recursive: true });
-  const record: JournalRecord = {
+  appendJournalRecord(journalPath, {
     phase,
     at: new Date().toISOString(),
     ...extra,
-  };
-  writeFileSync(journalPath, `${JSON.stringify(record)}\n`, {
-    flag: "a",
-    encoding: "utf8",
   });
-  fsyncPath(journalPath);
+};
+
+const readPending = (hubProjectDir: string): PendingRecord | undefined => {
+  const pendingPath = resolvePendingPath(hubProjectDir);
+  if (!existsSync(pendingPath)) {
+    return undefined;
+  }
+  const record = readJsonFile(pendingPath);
+  if (
+    record.status !== "task_store_migration_pending" ||
+    !isPendingReason(record.reason) ||
+    typeof record.nextRetryAt !== "string" ||
+    typeof record.attempt !== "number"
+  ) {
+    return undefined;
+  }
+  return {
+    status: "task_store_migration_pending",
+    reason: record.reason,
+    attempt: record.attempt,
+    ownerPid: typeof record.ownerPid === "number" ? record.ownerPid : 0,
+    ownerNonce:
+      typeof record.ownerNonce === "string" ? record.ownerNonce : "",
+    detectedAt:
+      typeof record.detectedAt === "string"
+        ? record.detectedAt
+        : new Date().toISOString(),
+    nextRetryAt: record.nextRetryAt,
+    phase: isPhase(record.phase) ? record.phase : "legacy_active",
+  };
+};
+
+const clearPending = (hubProjectDir: string): void => {
+  const pendingPath = resolvePendingPath(hubProjectDir);
+  if (existsSync(pendingPath)) {
+    rmSync(pendingPath, { force: true });
+  }
+};
+
+const recordPending = (input: {
+  readonly hubProjectDir: string;
+  readonly journalPath: string;
+  readonly reason: HubTaskStoreMigrationPendingReason;
+  readonly phase: HubTaskStoreMigrationPhase;
+  readonly now: Date;
+  readonly previous?: PendingRecord;
+}): PendingRecord => {
+  const attempt = (input.previous?.attempt ?? 0) + 1;
+  const delayIndex = Math.min(attempt - 1, MIGRATION_BACKOFF_MS.length - 1);
+  const delay = MIGRATION_BACKOFF_MS[delayIndex] ?? 120_000;
+  const pending: PendingRecord = {
+    status: "task_store_migration_pending",
+    reason: input.reason,
+    attempt,
+    ownerPid: process.pid,
+    ownerNonce: `${process.pid}:${input.now.toISOString()}`,
+    detectedAt: input.now.toISOString(),
+    nextRetryAt: new Date(input.now.getTime() + delay).toISOString(),
+    phase: input.phase,
+  };
+  writeAtomicJson(resolvePendingPath(input.hubProjectDir), pending);
+  appendJournalRecord(input.journalPath, {
+    status: "task_store_migration_pending",
+    reason: input.reason,
+    at: pending.detectedAt,
+  });
+  return pending;
 };
 
 const maybeCrash = (
@@ -355,6 +492,81 @@ const execBdJson = (
   return extractJsonValue(stdout);
 };
 
+const hashPathGeneration = (root: string, hash: ReturnType<typeof createHash>): void => {
+  if (!existsSync(root)) {
+    return;
+  }
+  const stats = statSync(root);
+  hash.update(root);
+  hash.update("\0");
+  hash.update(String(stats.size));
+  hash.update("\0");
+  hash.update(String(Math.trunc(stats.mtimeMs)));
+  hash.update("\n");
+  if (stats.isDirectory()) {
+    for (const entry of readdirSync(root).sort()) {
+      hashPathGeneration(join(root, entry), hash);
+    }
+  }
+};
+
+const hashStoreTree = (root: string): string => {
+  const hash = createHash("sha256");
+  const walk = (path: string, rel: string): void => {
+    if (!existsSync(path)) {
+      return;
+    }
+    const stats = statSync(path);
+    hash.update(rel);
+    hash.update("\n");
+    if (stats.isDirectory()) {
+      for (const entry of readdirSync(path).sort()) {
+        walk(join(path, entry), rel.length > 0 ? `${rel}/${entry}` : entry);
+      }
+      return;
+    }
+    hash.update(readFileSync(path));
+  };
+  walk(root, "");
+  return hash.digest("hex");
+};
+
+export const detectHubTaskStoreSplitBrain = (input: {
+  readonly repoRoot: string;
+  readonly hubProjectDir?: string;
+}):
+  | {
+      readonly legacyBeadsDir: string;
+      readonly managedBeadsDir: string;
+    }
+  | undefined => {
+  const resolution = resolveHubTaskStore(input);
+  if (resolution.kind !== "redirect" || resolution.redirectError) {
+    return undefined;
+  }
+  const leftoverDb = join(resolution.repoBeadsDir, "embeddeddolt");
+  const managedDir = resolution.redirectTarget ?? resolution.beadsDir;
+  const managedDb = join(managedDir, "embeddeddolt");
+  if (!existsSync(leftoverDb) || !existsSync(managedDb)) {
+    return undefined;
+  }
+  if (hashStoreTree(leftoverDb) === hashStoreTree(managedDb)) {
+    return undefined;
+  }
+  return {
+    legacyBeadsDir: resolution.repoBeadsDir,
+    managedBeadsDir: managedDir,
+  };
+};
+
+const hashBeadsRuntimeGeneration = (beadsDir: string): string => {
+  const hash = createHash("sha256");
+  for (const name of RUNTIME_ENTRY_NAMES) {
+    hashPathGeneration(join(beadsDir, name), hash);
+  }
+  return hash.digest("hex");
+};
+
 const captureStoreIdentity = (
   cwd: string,
   beadsDir: string,
@@ -411,6 +623,13 @@ const captureStoreIdentity = (
     .update(String(dependencyCount))
     .update("\n")
     .update(String(commentCount))
+    .update("\n")
+    .update(
+      Object.entries(workingState)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([status, count]) => `${status}:${count}`)
+        .join(","),
+    )
     .digest("hex");
 
   return {
@@ -423,6 +642,7 @@ const captureStoreIdentity = (
     commentCount,
     workingState,
     fingerprint,
+    sourceGeneration: hashBeadsRuntimeGeneration(beadsDir),
   };
 };
 
@@ -485,7 +705,21 @@ const quarantineLegacyStore = (
     if (existsSync(to)) {
       continue;
     }
-    renameSync(from, to);
+    try {
+      renameSync(from, to);
+    } catch (error) {
+      const code =
+        error && typeof error === "object" && "code" in error
+          ? String((error as NodeJS.ErrnoException).code)
+          : undefined;
+      if (code === "EXDEV") {
+        throw new TaskBoardError({
+          message:
+            "Hub Beads migration cannot move a live database across filesystems. Quarantine the store on its original filesystem first; only the cold quarantined copy is copied to Hub-owned storage.",
+        });
+      }
+      throw error;
+    }
   }
   ensureHubTaskStoreMigrationGitExcludes(repoRoot);
 };
@@ -541,21 +775,22 @@ const isProcessAlive = (pid: number): boolean => {
   }
 };
 
-const acquireMigrationLease = (hubProjectDir: string): void => {
+const acquireMigrationLease = (
+  hubProjectDir: string,
+): { readonly acquired: true } | { readonly acquired: false; readonly ownerPid: number } => {
   const leasePath = resolveLeasePath(hubProjectDir);
   if (existsSync(leasePath)) {
     const lease = readJsonFile(leasePath);
     const pid = typeof lease.pid === "number" ? lease.pid : undefined;
     if (pid !== undefined && pid !== process.pid && isProcessAlive(pid)) {
-      throw new TaskBoardError({
-        message: `Hub Beads store migration is already running (pid ${pid}). Retry the same command after that process exits. This is not a task failure and does not require \`archloop tasks recover\`.`,
-      });
+      return { acquired: false, ownerPid: pid };
     }
   }
   writeAtomicJson(leasePath, {
     pid: process.pid,
     acquiredAt: new Date().toISOString(),
   });
+  return { acquired: true };
 };
 
 const releaseMigrationLease = (hubProjectDir: string): void => {
@@ -637,6 +872,24 @@ export const inspectHubTaskStoreMigration = (
     journalPhases,
   });
   const backupPresent = isBeadsStoreDatabasePresent(quarantineDir);
+  const pending = readPending(input.hubProjectDir);
+  const splitBrain = detectHubTaskStoreSplitBrain({
+    repoRoot: input.repoRoot,
+    hubProjectDir: input.hubProjectDir,
+  });
+  const integrityIncident = resolution.redirectError
+    ? ("invalid_redirect" as const)
+    : splitBrain
+      ? HUB_TASK_STORE_SPLIT_BRAIN_INCIDENT
+      : undefined;
+  const integrityError = resolution.redirectError
+    ? resolution.redirectError
+    : splitBrain
+      ? formatHubTaskStoreSplitBrainMessage(
+          splitBrain.legacyBeadsDir,
+          splitBrain.managedBeadsDir,
+        )
+      : undefined;
   return {
     kind: resolution.kind,
     beadsDir: resolution.beadsDir,
@@ -644,8 +897,16 @@ export const inspectHubTaskStoreMigration = (
     phases: journalPhases.length > 0 ? journalPhases : phase ? [phase] : [],
     backupPresent,
     ...(backupPresent ? { backupDir: quarantineDir } : {}),
-    ...(resolution.redirectError
-      ? { integrityError: resolution.redirectError }
+    ...(integrityError
+      ? { integrityError, integrityIncident, nextAction: integrityError }
+      : {}),
+    ...(pending && !splitBrain
+      ? {
+          pendingReason: pending.reason,
+          pendingUntil: pending.nextRetryAt,
+          nextAction:
+            "Wait for the automatic retry; keep using the verified repository-local Beads store. This is not a task failure and does not require a recovery command.",
+        }
       : {}),
   };
 };
@@ -653,7 +914,37 @@ export const inspectHubTaskStoreMigration = (
 const isMigrationOutcome = (
   value: HubTaskStoreMigrationOutcome | HubTaskStoreMigrationInspection,
 ): value is HubTaskStoreMigrationOutcome =>
-  value.kind === "migrated" || value.kind === "not_needed";
+  value.kind === "migrated" ||
+  value.kind === "not_needed" ||
+  value.kind === "deferred" ||
+  value.kind === "split_brain";
+
+const formatPendingReason = (
+  reason: HubTaskStoreMigrationPendingReason,
+): string => {
+  if (reason === "active_writer") {
+    return "an active Beads writer";
+  }
+  if (reason === "source_fingerprint_changed") {
+    return "a source fingerprint change";
+  }
+  if (reason === "unsafe_snapshot") {
+    return "an unsafe snapshot";
+  }
+  return "migration lease contention";
+};
+
+const formatDeferredMigrationMessage = (
+  reason: HubTaskStoreMigrationPendingReason,
+  pendingUntil: string,
+): string =>
+  `Hub Beads store migration is pending because ${formatPendingReason(reason)} was detected before quarantine. The verified repository-local store remains active. Automatic retry is scheduled by ${pendingUntil}. This is not a task failure and does not require a recovery command.`;
+
+export const formatHubTaskStoreSplitBrainMessage = (
+  legacyBeadsDir: string,
+  managedBeadsDir: string,
+): string =>
+  `Hub Beads task-store split brain detected: both ${legacyBeadsDir} and ${managedBeadsDir} were modified independently after redirect. Automatic task-store writes are stopped. Inspect both databases and keep the intended history; do not merge or delete either store automatically. This is not a task failure and does not require a recovery command.`;
 
 export const formatHubTaskStoreMigrationMessage = (
   outcome: HubTaskStoreMigrationOutcome | HubTaskStoreMigrationInspection,
@@ -661,6 +952,15 @@ export const formatHubTaskStoreMigrationMessage = (
   if (isMigrationOutcome(outcome)) {
     if (outcome.kind === "migrated") {
       return `Migrated the repository-local Beads store into Hub-owned storage at ${outcome.beadsDir}. Direct \`bd\` commands continue through .beads/redirect. A recoverable backup remains at ${outcome.backupDir}.`;
+    }
+    if (outcome.kind === "deferred") {
+      return formatDeferredMigrationMessage(
+        outcome.reason,
+        outcome.pendingUntil,
+      );
+    }
+    if (outcome.kind === "split_brain") {
+      return outcome.integrityError;
     }
     if (outcome.reason === "verified" || outcome.phase === "verified") {
       return `Hub-owned Beads store is already migrated at ${outcome.beadsDir}.`;
@@ -671,6 +971,12 @@ export const formatHubTaskStoreMigrationMessage = (
   if (outcome.integrityError) {
     return outcome.integrityError;
   }
+  if (outcome.pendingReason && outcome.pendingUntil) {
+    return formatDeferredMigrationMessage(
+      outcome.pendingReason,
+      outcome.pendingUntil,
+    );
+  }
   if (outcome.phase === "verified") {
     return `Hub-owned Beads store is migrated and verified at ${outcome.beadsDir}.`;
   }
@@ -680,18 +986,53 @@ export const formatHubTaskStoreMigrationMessage = (
   return "Hub Beads store migration has not started.";
 };
 
-const assertWriterFree = (repoBeadsDir: string): void => {
-  const pidPath = join(repoBeadsDir, "dolt-server.pid");
-  if (!existsSync(pidPath)) {
-    return;
+const readPidFile = (path: string): number | undefined => {
+  if (!existsSync(path)) {
+    return undefined;
   }
-  const raw = readFileSync(pidPath, "utf8").trim();
-  const pid = Number.parseInt(raw, 10);
-  if (isProcessAlive(pid)) {
-    throw new TaskBoardError({
-      message: `Hub Beads store migration found an active Beads writer (pid ${pid}). Retry the same mutating command after that writer exits. This is not a task failure and does not require \`archloop tasks recover\`.`,
-    });
+  const raw = readFileSync(path, "utf8").trim();
+  const match = raw.match(/\d+/);
+  if (!match) {
+    return undefined;
   }
+  const pid = Number.parseInt(match[0], 10);
+  return Number.isInteger(pid) && pid > 0 ? pid : undefined;
+};
+
+const findActiveWriterPid = (repoBeadsDir: string): number | undefined => {
+  for (const name of ["dolt-server.pid", ".exclusive-lock"] as const) {
+    const pid = readPidFile(join(repoBeadsDir, name));
+    if (pid !== undefined && isProcessAlive(pid)) {
+      return pid;
+    }
+  }
+  return undefined;
+};
+
+const deferMigration = (input: {
+  readonly hubProjectDir: string;
+  readonly journalPath: string;
+  readonly beadsDir: string;
+  readonly reason: HubTaskStoreMigrationPendingReason;
+  readonly phase: HubTaskStoreMigrationPhase;
+  readonly now: Date;
+}): Extract<HubTaskStoreMigrationOutcome, { kind: "deferred" }> => {
+  const pending = recordPending({
+    hubProjectDir: input.hubProjectDir,
+    journalPath: input.journalPath,
+    reason: input.reason,
+    phase: input.phase,
+    now: input.now,
+    previous: readPending(input.hubProjectDir),
+  });
+  return {
+    kind: "deferred",
+    reason: input.reason,
+    phase: input.phase,
+    beadsDir: input.beadsDir,
+    pendingUntil: pending.nextRetryAt,
+    journalPath: input.journalPath,
+  };
 };
 
 const verifyManagedStore = (
@@ -738,6 +1079,7 @@ export const ensureHubTaskStoreMigrated = (
   input: HubTaskStoreMigrationInput,
 ): HubTaskStoreMigrationOutcome => {
   const env = input.env ?? process.env;
+  const now = input.now?.() ?? new Date();
   if (!isBdAvailable(env)) {
     throw new TaskBoardError({
       message:
@@ -752,6 +1094,29 @@ export const ensureHubTaskStoreMigrated = (
   const resolution = resolveHubTaskStore(location);
   if (resolution.redirectError) {
     throw new TaskBoardError({ message: resolution.redirectError });
+  }
+
+  const splitBrain = detectHubTaskStoreSplitBrain({
+    repoRoot: input.repoRoot,
+    hubProjectDir: input.hubProjectDir,
+  });
+  if (splitBrain) {
+    const integrityError = formatHubTaskStoreSplitBrainMessage(
+      splitBrain.legacyBeadsDir,
+      splitBrain.managedBeadsDir,
+    );
+    appendJournalRecord(resolveJournalPath(input.hubProjectDir), {
+      status: HUB_TASK_STORE_SPLIT_BRAIN_INCIDENT,
+      at: now.toISOString(),
+    });
+    return {
+      kind: "split_brain",
+      beadsDir: resolution.beadsDir,
+      legacyBeadsDir: splitBrain.legacyBeadsDir,
+      managedBeadsDir: splitBrain.managedBeadsDir,
+      integrityError,
+      journalPath: resolveJournalPath(input.hubProjectDir),
+    };
   }
 
   const managedBeadsDir =
@@ -788,10 +1153,48 @@ export const ensureHubTaskStoreMigrated = (
     };
   }
 
+  const existingPending = readPending(input.hubProjectDir);
+  if (existingPending) {
+    const pendingUntilMs = Date.parse(existingPending.nextRetryAt);
+    if (Number.isFinite(pendingUntilMs) && now.getTime() < pendingUntilMs) {
+      return {
+        kind: "deferred",
+        reason: existingPending.reason,
+        phase: existingPending.phase,
+        beadsDir: resolution.beadsDir,
+        pendingUntil: existingPending.nextRetryAt,
+        journalPath,
+      };
+    }
+    if (
+      existingPending.ownerPid !== process.pid &&
+      isProcessAlive(existingPending.ownerPid)
+    ) {
+      return {
+        kind: "deferred",
+        reason: "migration_contention",
+        phase: existingPending.phase,
+        beadsDir: resolution.beadsDir,
+        pendingUntil: existingPending.nextRetryAt,
+        journalPath,
+      };
+    }
+  }
+
   if (resolution.kind === "legacy" && !quarantinePresent) {
     try {
       captureStoreIdentity(input.repoRoot, repoBeadsDir, env);
     } catch {
+      if (readSnapshot(resolveSnapshotPath(input.hubProjectDir))) {
+        return deferMigration({
+          hubProjectDir: input.hubProjectDir,
+          journalPath,
+          beadsDir: resolution.beadsDir,
+          reason: "unsafe_snapshot",
+          phase: "snapshot_prepared",
+          now,
+        });
+      }
       return {
         kind: "not_needed",
         reason: "legacy",
@@ -800,7 +1203,17 @@ export const ensureHubTaskStoreMigrated = (
     }
   }
 
-  acquireMigrationLease(input.hubProjectDir);
+  const lease = acquireMigrationLease(input.hubProjectDir);
+  if (!lease.acquired) {
+    return deferMigration({
+      hubProjectDir: input.hubProjectDir,
+      journalPath,
+      beadsDir: resolution.beadsDir,
+      reason: "migration_contention",
+      phase: inspection.phase ?? "legacy_active",
+      now,
+    });
+  }
   try {
     let snapshot = readSnapshot(snapshotPath);
     const fault = input.faultInjection;
@@ -826,7 +1239,17 @@ export const ensureHubTaskStoreMigrated = (
     const startPhase = readProgress().phase;
     if (startPhase === undefined || startPhase === "legacy_active") {
       if (resolution.kind === "legacy") {
-        assertWriterFree(repoBeadsDir);
+        const writerPid = findActiveWriterPid(repoBeadsDir);
+        if (writerPid !== undefined) {
+          return deferMigration({
+            hubProjectDir: input.hubProjectDir,
+            journalPath,
+            beadsDir: resolution.beadsDir,
+            reason: "active_writer",
+            phase: "legacy_active",
+            now,
+          });
+        }
       }
       // Durable lease/journal start boundary. The source fingerprint is
       // recorded with the snapshot in the next step.
@@ -859,6 +1282,43 @@ export const ensureHubTaskStoreMigrated = (
     }
     snapshot = sourceSnapshot;
 
+    if (
+      isBeadsStoreDatabasePresent(repoBeadsDir) &&
+      !isBeadsStoreDatabasePresent(quarantineDir)
+    ) {
+      let currentIdentity: StoreIdentity | undefined;
+      try {
+        currentIdentity = captureStoreIdentity(
+          input.repoRoot,
+          repoBeadsDir,
+          env,
+        );
+      } catch {
+        return deferMigration({
+          hubProjectDir: input.hubProjectDir,
+          journalPath,
+          beadsDir: resolution.beadsDir,
+          reason: "unsafe_snapshot",
+          phase: "snapshot_prepared",
+          now,
+        });
+      }
+      if (!identitiesMatch(sourceSnapshot, currentIdentity)) {
+        if (existsSync(snapshotPath)) {
+          rmSync(snapshotPath, { force: true });
+        }
+        snapshot = undefined;
+        return deferMigration({
+          hubProjectDir: input.hubProjectDir,
+          journalPath,
+          beadsDir: resolution.beadsDir,
+          reason: "source_fingerprint_changed",
+          phase: "legacy_active",
+          now,
+        });
+      }
+    }
+
     const quarantineProgress = readProgress();
     if (
       quarantineProgress.phase === "snapshot_prepared" ||
@@ -874,12 +1334,19 @@ export const ensureHubTaskStoreMigrated = (
     }
 
     const copyProgress = readProgress();
+    const journalPhases = readJournalPhases(journalPath);
     if (
-      copyProgress.phase === "legacy_quarantined" ||
-      (isBeadsStoreDatabasePresent(quarantineDir) &&
+      isBeadsStoreDatabasePresent(quarantineDir) &&
+      !journalPhases.includes("verified") &&
+      (copyProgress.phase === "legacy_quarantined" ||
+        copyProgress.phase === "managed_copied" ||
+        copyProgress.phase === "redirect_installed" ||
         !isBeadsStoreFullyInitialized(managedBeadsDir))
     ) {
       withSideEffect(fault, "copy_managed", () => {
+        if (existsSync(managedBeadsDir)) {
+          rmSync(managedBeadsDir, { recursive: true, force: true });
+        }
         copyManagedStore(repoBeadsDir, quarantineDir, managedBeadsDir);
       });
       syncJournal("managed_copied", {
@@ -905,6 +1372,7 @@ export const ensureHubTaskStoreMigrated = (
       verifyManagedStore(input.repoRoot, managedBeadsDir, sourceSnapshot, env);
     });
     syncJournal("verified", { fingerprint: sourceSnapshot.fingerprint });
+    clearPending(input.hubProjectDir);
 
     return {
       kind: "migrated",
@@ -915,7 +1383,11 @@ export const ensureHubTaskStoreMigrated = (
     };
   } finally {
     const finished = inspectHubTaskStoreMigration(input);
-    if (finished.phase === "verified") {
+    if (
+      finished.phase === "verified" ||
+      finished.pendingReason !== undefined ||
+      finished.integrityIncident === HUB_TASK_STORE_SPLIT_BRAIN_INCIDENT
+    ) {
       releaseMigrationLease(input.hubProjectDir);
     }
   }

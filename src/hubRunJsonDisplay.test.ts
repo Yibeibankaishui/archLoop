@@ -547,4 +547,57 @@ describe("JSONL Hub run lifecycle output", () => {
       counts: testCase.counts,
     });
   });
+
+  it("distinguishes deferred migration from split-brain in the run outcome", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+      now: () => new Date("2026-08-13T12:00:00.000Z"),
+    });
+
+    const deferred = parseRecord(
+      renderer
+        .outcome(
+          makeRunResult({
+            taskStoreMigration: {
+              kind: "deferred",
+              reason: "active_writer",
+              phase: "legacy_active",
+              beadsDir: "/tmp/repo/.beads",
+              pendingUntil: "2026-08-13T12:00:02.000Z",
+              journalPath: "/tmp/hub/journal.jsonl",
+            },
+          }),
+          projectHubRunOutcome(makeRunResult({})),
+        )
+        .at(-1)!,
+    );
+    expect(deferred.taskStoreMigration).toMatchObject({
+      kind: "deferred",
+      reason: "active_writer",
+      pendingUntil: "2026-08-13T12:00:02.000Z",
+    });
+
+    const splitBrain = parseRecord(
+      renderer
+        .outcome(
+          makeRunResult({
+            taskStoreMigration: {
+              kind: "split_brain",
+              beadsDir: "/tmp/hub/.beads",
+              legacyBeadsDir: "/tmp/repo/.beads",
+              managedBeadsDir: "/tmp/hub/.beads",
+              integrityError: "Hub Beads task-store split brain detected.",
+              journalPath: "/tmp/hub/journal.jsonl",
+            },
+          }),
+          projectHubRunOutcome(makeRunResult({})),
+        )
+        .at(-1)!,
+    );
+    expect(splitBrain.taskStoreMigration).toMatchObject({
+      kind: "split_brain",
+      reason: "task_store_split_brain",
+    });
+  });
 });

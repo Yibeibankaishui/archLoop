@@ -102,6 +102,8 @@ export interface HubProjectStatus {
   readonly taskStoreRedirectError?: string;
   readonly taskStoreMigrationPhase?: HubTaskStoreMigrationPhase;
   readonly taskStoreMigrationMessage?: string;
+  readonly taskStoreMigrationPendingReason?: string;
+  readonly taskStoreIntegrityIncident?: string;
   readonly taskCounts: HubProjectTaskCounts;
   readonly statusCounts: Partial<Record<HubTaskStatus, number>>;
   readonly failedTasks: readonly HubProjectFailedTask[];
@@ -942,6 +944,8 @@ export const resolveHubProjectStatus = (
     taskStoreMigrationPhase: taskStoreMigration.phase,
     taskStoreMigrationMessage:
       formatHubTaskStoreMigrationMessage(taskStoreMigration),
+    taskStoreMigrationPendingReason: taskStoreMigration.pendingReason,
+    taskStoreIntegrityIncident: taskStoreMigration.integrityIncident,
     taskCounts,
     statusCounts,
     failedTasks,

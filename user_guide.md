@@ -50,8 +50,11 @@ npx archloop project add
 交互式流程会询问仓库路径、项目名、Project profile，以及是否初始化 Hub 拥有的
 任务表。新项目把 Beads 数据库放在 Hub 项目目录中，并安装 Git-ignored 的
 `.beads/redirect`，以便主机上的 `bd` 命令继续指向同一套任务。已有的仓库内
-Beads 库会在第一次变更型 `archloop run` 或 task 命令时自动迁移，崩溃后按
-journal 续跑，不需要 `tasks recover`。
+Beads 库会在第一次变更型 `archloop run` 或 task 命令时自动迁移；若迁移前检测到
+活跃 writer、fingerprint 变化、不安全快照或迁移租约占用，则继续使用已验证的
+旧库并自动重试。redirect 之后若两套库被独立修改，Hub 会停止自动写入并报告
+split brain，不会合并或删除任何一侧。崩溃后按 journal 续跑，不需要
+`tasks recover`。
 脚本中可以显式提供参数：
 
 ```bash
@@ -291,3 +294,4 @@ API 参数、返回值和生命周期说明见
 | 2026-08-13 | 新 Hub 项目将 Beads 任务表放到 Hub 项目目录，并保留 bd 跳转 |
 | 2026-08-13 | Hub 执行 agent 使用不可变任务快照，notes 由 Hub 写回        |
 | 2026-08-13 | 已有仓库内 Beads 库在首次变更型命令时自动迁移并可崩溃续跑   |
+| 2026-08-13 | 不安全迁移会延期，split brain 会停止自动写入                |

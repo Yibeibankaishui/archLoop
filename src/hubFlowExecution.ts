@@ -4,7 +4,7 @@ import { basename, join } from "node:path";
 import { promisify } from "node:util";
 
 import { assertAgentCredentialsConfigured } from "./agentAuthGuidance.js";
-import { HubFlowError } from "./errors.js";
+import { HubFlowError, TaskBoardError } from "./errors.js";
 import type { AgentProvider } from "./AgentProvider.js";
 import {
   appendHubRunEvent,
@@ -1420,6 +1420,11 @@ const runObservedHubFlow = async (
     hubProjectDir,
     env: input.env,
   });
+  if (taskStoreMigration.kind === "split_brain") {
+    throw new TaskBoardError({
+      message: taskStoreMigration.integrityError,
+    });
+  }
   // Run-startup auto-recover: detect tasks left stuck in an execution status by
   // a previously-interrupted run and route each one through the event-aware
   // recovery wiring before the run loads the board for the resumed-batch scan.
@@ -1475,15 +1480,25 @@ const runObservedHubFlow = async (
     env: input.env,
   });
   mkdirSync(join(context.runDir, "logs"), { recursive: true });
-  if (taskStoreMigration.kind === "migrated") {
+  if (taskStoreMigration.kind !== "not_needed") {
     appendHubRunEvent(context.runDir, {
       type: "task_store_migration",
       runId: context.runId,
       createdAt: new Date().toISOString(),
       kind: taskStoreMigration.kind,
-      phase: taskStoreMigration.phase,
+      phase:
+        taskStoreMigration.kind === "migrated" ||
+        taskStoreMigration.kind === "deferred"
+          ? taskStoreMigration.phase
+          : undefined,
       beadsDir: taskStoreMigration.beadsDir,
       message: formatHubTaskStoreMigrationMessage(taskStoreMigration),
+      ...(taskStoreMigration.kind === "deferred"
+        ? {
+            reason: taskStoreMigration.reason,
+            pendingUntil: taskStoreMigration.pendingUntil,
+          }
+        : {}),
     });
   }
   const batchResults: HubFlowBatchResult[] = [];
@@ -1778,7 +1793,11 @@ export const formatHubFlowResultLines = (
   for (const line of formatHubRunAutoRecoverLines(result.autoRecoverSummary)) {
     lines.push(line);
   }
-  if (result.taskStoreMigration?.kind === "migrated") {
+  if (
+    result.taskStoreMigration?.kind === "migrated" ||
+    result.taskStoreMigration?.kind === "deferred" ||
+    result.taskStoreMigration?.kind === "split_brain"
+  ) {
     lines.push(formatHubTaskStoreMigrationMessage(result.taskStoreMigration));
   }
   if (result.worktreeWarning) {
