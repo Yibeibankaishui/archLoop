@@ -234,6 +234,7 @@ npx archloop tasks recover <task-id>
 | 合并被脏文件阻塞         | 提交、暂存或放弃 CLI 列出的重叠文件后重试同一 Flow     |
 | GitHub 同步冲突          | 使用 `tasks resolve --keep local` 或 `--keep remote`   |
 | 工作分支仍有可恢复内容   | 使用 `tasks recover`，不要手动强删 worktree 或分支     |
+| 后续 iteration 启动即 abort | 只要还有剩余 iteration，运行会继续并带上进度摘要；全部用尽且无完成信号才记 `agent_failed` |
 
 完整诊断索引见
 [Troubleshooting](./docs/content/docs/reference/troubleshooting.mdx)。
@@ -282,3 +283,4 @@ API 参数、返回值和生命周期说明见
 | 2026-06-12 | 创建 Unified Interface 用户指南                         |
 | 2026-08-01 | 按用户任务重组指南，统一 Hub 优先路径并拆出详细参考链接 |
 | 2026-08-13 | 补充中断自动恢复、批量恢复与任务诊断输出说明            |
+| 2026-08-13 | 说明后续 iteration 启动 abort 会继续运行，而不是整次失败 |

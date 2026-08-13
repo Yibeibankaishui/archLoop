@@ -116,6 +116,19 @@ Hub execution retries recognized transient provider failures with backoff unless
 the agent already emitted its completion signal. Inspect `project status` and
 the run directory reported by the CLI before retrying or recovering the task.
 
+## Run died on a later iteration after an exploration-only turn
+
+A provider startup abort with no agent output (for example a SessionStart hook
+failure and `stop_reason: abort`) no longer fails the whole multi-iteration
+run while iterations remain. The next iteration continues and receives a
+progress summary plus a "make implementation progress" nudge when the previous
+turn produced no commits.
+
+The run still records `agent_failed` when every iteration is exhausted with
+neither commits nor a completion signal, or when the last remaining iteration
+aborts during startup. An already-merged zero-commit rerun with a completion
+signal is unchanged — see "Implementer exited non-zero after finishing".
+
 ## Preserved worktree after close
 
 The worktree contains uncommitted changes and was intentionally kept to avoid

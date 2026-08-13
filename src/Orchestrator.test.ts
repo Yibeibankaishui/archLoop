@@ -26,7 +26,7 @@ import {
   pi as piFactory,
   DEFAULT_MODEL,
 } from "./AgentProvider.js";
-import { Sandbox } from "./SandboxFactory.js";
+import { Sandbox, type ExecResult } from "./SandboxFactory.js";
 import type { DockerError, SandboxError } from "./errors.js";
 import { AgentError, AgentIdleTimeoutError } from "./errors.js";
 import { SandboxFactory } from "./SandboxFactory.js";
@@ -1549,7 +1549,8 @@ describe("Orchestrator error handling", () => {
       }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
     );
 
-    // Should have failed on iteration 2
+    // Iteration 2's empty startup abort is skipped while iterations remain;
+    // the run still fails when the last iteration also aborts.
     expect(exit._tag).toBe("Failure");
 
     // But iteration 1's commit should be preserved on host
@@ -1998,6 +1999,249 @@ describe("Orchestrator error handling", () => {
         expect(err.message).not.toContain("some stdout output");
       }
     }
+  });
+});
+
+describe("Orchestrator iteration resilience", () => {
+  const startupAbortStdout = JSON.stringify({
+    stop_reason: "abort",
+    is_error: true,
+    errors: ["stop_reason=abort"],
+    output_tokens: 0,
+  });
+
+  const makeHostRepo = async (prefix: string): Promise<string> => {
+    const hostDir = await mkdtemp(join(tmpdir(), prefix));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+    return hostDir;
+  };
+
+  const emitAgentText = (
+    onLine: (line: string) => void,
+    output: string,
+    failure?: { readonly stderr: string; readonly exitCode: number },
+  ): ExecResult => {
+    const streamOutput = toStreamJson(output);
+    for (const line of streamOutput.split("\n")) {
+      onLine(line);
+    }
+    return {
+      stdout: streamOutput,
+      stderr: failure?.stderr ?? "",
+      exitCode: failure?.exitCode ?? 0,
+    };
+  };
+
+  const emitStartupAbort = (onLine: (line: string) => void): ExecResult => {
+    onLine(startupAbortStdout);
+    return {
+      stdout: startupAbortStdout,
+      stderr: "/bin/sh: 1: bd: not found\n",
+      exitCode: 1,
+    };
+  };
+
+  const interceptClaudeLayer = (
+    dir: string,
+    onClaude: (input: {
+      readonly onLine: (line: string) => void;
+      readonly stdin: string;
+    }) => ExecResult,
+  ): Layer.Layer<Sandbox> => {
+    const fsLayer = makeLocalSandboxLayer(dir);
+    return Layer.succeed(Sandbox, {
+      exec: (command, options) => {
+        if (command.startsWith("claude ") && options?.onLine) {
+          return Effect.succeed(
+            onClaude({
+              onLine: options.onLine,
+              stdin: options.stdin ?? "",
+            }),
+          );
+        }
+        return Effect.flatMap(Sandbox, (real) =>
+          real.exec(command, options),
+        ).pipe(Effect.provide(fsLayer));
+      },
+      copyIn: (hostPath, sandboxPath) =>
+        Effect.flatMap(Sandbox, (real) =>
+          real.copyIn(hostPath, sandboxPath),
+        ).pipe(Effect.provide(fsLayer)),
+      copyFileOut: (sandboxPath, hostPath) =>
+        Effect.flatMap(Sandbox, (real) =>
+          real.copyFileOut(sandboxPath, hostPath),
+        ).pipe(Effect.provide(fsLayer)),
+    });
+  };
+
+  const orchestrateTest = (
+    hostDir: string,
+    iterations: number,
+    buildLayer: (dir: string) => Layer.Layer<Sandbox>,
+  ) =>
+    orchestrate({
+      provider: testProvider,
+      hostRepoDir: hostDir,
+      iterations,
+      prompt: "do some work",
+    }).pipe(
+      Effect.provide(
+        Layer.merge(
+          makeTestSandboxFactory(hostDir, buildLayer).factoryLayer,
+          testDisplayLayer,
+        ),
+      ),
+    );
+
+  it("continues after a transient startup abort on iteration 2 following zero-progress exploration", async () => {
+    const hostDir = await makeHostRepo("orch-transient-abort-");
+    let callCount = 0;
+
+    const result = await Effect.runPromise(
+      orchestrateTest(hostDir, 3, (dir) =>
+        interceptClaudeLayer(dir, ({ onLine }) => {
+          callCount++;
+          if (callCount === 1) {
+            return emitAgentText(
+              onLine,
+              "Now let me look at Orchestrator.ts and related tests.",
+            );
+          }
+          if (callCount === 2) {
+            return emitStartupAbort(onLine);
+          }
+          return emitAgentText(
+            onLine,
+            "Implemented the fix. <promise>COMPLETE</promise>",
+          );
+        }),
+      ),
+    );
+
+    expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
+    expect(result.iterations.length).toBe(3);
+    expect(callCount).toBe(3);
+  });
+
+  it("nudges the next iteration to implement after a zero-progress exploration turn", async () => {
+    const hostDir = await makeHostRepo("orch-zero-progress-nudge-");
+    const capturedStdins: string[] = [];
+    let callCount = 0;
+
+    const result = await Effect.runPromise(
+      orchestrateTest(hostDir, 3, (dir) =>
+        interceptClaudeLayer(dir, ({ onLine, stdin }) => {
+          callCount++;
+          capturedStdins.push(stdin);
+          return emitAgentText(
+            onLine,
+            callCount === 1
+              ? "Now let me look at hubFlowExecution.ts before writing anything."
+              : "Implemented the fix. <promise>COMPLETE</promise>",
+          );
+        }),
+      ),
+    );
+
+    expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
+    expect(capturedStdins).toHaveLength(2);
+    expect(capturedStdins[0]).toBe("do some work");
+    expect(capturedStdins[1]).toContain("do some work");
+    expect(capturedStdins[1]).toContain("Make implementation progress");
+    expect(capturedStdins[1]).toContain(
+      "Now let me look at hubFlowExecution.ts before writing anything.",
+    );
+    expect(capturedStdins[1]).toContain("Do not repeat that exploration");
+  });
+
+  it("still fails when the last remaining iteration aborts during provider startup", async () => {
+    const hostDir = await makeHostRepo("orch-last-iter-abort-");
+
+    const exit = await Effect.runPromiseExit(
+      orchestrateTest(hostDir, 1, (dir) =>
+        interceptClaudeLayer(dir, ({ onLine }) => emitStartupAbort(onLine)),
+      ),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    if (exit._tag === "Failure") {
+      const err = Cause.squash(exit.cause);
+      expect(err).toBeInstanceOf(AgentError);
+      if (err instanceof AgentError) {
+        expect(err.transientStartupAbort).toBe(true);
+        expect(err.message).toContain("claude-code exited with code 1:");
+      }
+    }
+  });
+
+  it("still fails a non-zero exit that produced agent output while iterations remain", async () => {
+    const hostDir = await makeHostRepo("orch-midrun-crash-");
+    let callCount = 0;
+
+    const exit = await Effect.runPromiseExit(
+      orchestrateTest(hostDir, 3, (dir) =>
+        interceptClaudeLayer(dir, ({ onLine }) => {
+          callCount++;
+          return emitAgentText(
+            onLine,
+            "I started editing files, then the provider crashed.",
+            {
+              stderr: "fatal: provider crashed mid-turn",
+              exitCode: 1,
+            },
+          );
+        }),
+      ),
+    );
+
+    expect(exit._tag).toBe("Failure");
+    expect(callCount).toBe(1);
+    if (exit._tag === "Failure") {
+      const err = Cause.squash(exit.cause);
+      expect(err).toBeInstanceOf(AgentError);
+      if (err instanceof AgentError) {
+        expect(err.transientStartupAbort).toBeFalsy();
+      }
+    }
+  });
+
+  it("carries prior exploration output into the iteration after a startup abort", async () => {
+    const hostDir = await makeHostRepo("orch-abort-carry-");
+    const capturedStdins: string[] = [];
+    let callCount = 0;
+
+    const result = await Effect.runPromise(
+      orchestrateTest(hostDir, 3, (dir) =>
+        interceptClaudeLayer(dir, ({ onLine, stdin }) => {
+          callCount++;
+          capturedStdins.push(stdin);
+          if (callCount === 1) {
+            return emitAgentText(
+              onLine,
+              "Now let me look at Orchestrator.ts and related tests.",
+            );
+          }
+          if (callCount === 2) {
+            return emitStartupAbort(onLine);
+          }
+          return emitAgentText(
+            onLine,
+            "Implemented the fix. <promise>COMPLETE</promise>",
+          );
+        }),
+      ),
+    );
+
+    expect(result.completionSignal).toBe("<promise>COMPLETE</promise>");
+    expect(capturedStdins).toHaveLength(3);
+    expect(capturedStdins[2]).toContain("aborted during provider startup");
+    expect(capturedStdins[2]).toContain(
+      "Now let me look at Orchestrator.ts and related tests.",
+    );
+    expect(capturedStdins[2]).toContain(
+      "Do not restart exploration from scratch",
+    );
   });
 });
 
