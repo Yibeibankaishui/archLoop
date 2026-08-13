@@ -11,6 +11,7 @@ import {
   runBdTextForHubTaskStore,
 } from "./hubTaskStore.js";
 import {
+  isHubOwnedTaskStoreKind,
   resolveHubTaskStore,
   type HubTaskStoreKind,
 } from "./hubTaskStoreResolver.js";
@@ -480,10 +481,7 @@ const formatTaskStoreLocationValue = (status: HubProjectStatus): string => {
   if (status.taskStoreRedirectError) {
     return "invalid redirect";
   }
-  if (
-    status.taskStoreKind === "managed" ||
-    status.taskStoreKind === "redirect"
-  ) {
+  if (isHubOwnedTaskStoreKind(status.taskStoreKind)) {
     return status.taskStoreDir ?? "hub-owned";
   }
   if (status.taskStoreInitialized || status.taskStoreKind === "legacy") {
@@ -773,14 +771,16 @@ const resolveTaskStoreInitialized = (
   beadsAvailable: boolean,
   detectTaskStoreInitialized: HubProjectStatusOptions["detectTaskStoreInitialized"],
   hubProjectDir: string,
-): boolean =>
-  beadsAvailable
-    ? (
-        detectTaskStoreInitialized ??
-        ((repoRootPath) =>
-          isHubTaskStoreInitialized(repoRootPath, { hubProjectDir }))
-      )(repoRoot)
-    : false;
+): boolean => {
+  if (!beadsAvailable) {
+    return false;
+  }
+  const detect =
+    detectTaskStoreInitialized ??
+    ((repoRootPath: string) =>
+      isHubTaskStoreInitialized(repoRootPath, { hubProjectDir }));
+  return detect(repoRoot);
+};
 
 const resolveTaskCounts = (
   repoRoot: string,

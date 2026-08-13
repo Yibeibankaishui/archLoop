@@ -8,6 +8,7 @@ import {
   resolveGitRepoRoot,
 } from "./projectStatus.js";
 import type { HubProjectRegistryEntry } from "./hubProjectRegistry.js";
+import { isHubOwnedTaskStoreKind } from "./hubTaskStoreResolver.js";
 import {
   formatReadinessCheckLines,
   type HubReadinessCheckReport,
@@ -201,10 +202,9 @@ const buildTaskStoreSection = (
   }
 
   if (status.taskStoreInitialized) {
-    const message =
-      status.taskStoreKind === "managed" || status.taskStoreKind === "redirect"
-        ? `Hub-owned task store is initialized at ${status.taskStoreDir}.`
-        : "Local task store is initialized.";
+    const message = isHubOwnedTaskStoreKind(status.taskStoreKind)
+      ? `Hub-owned task store is initialized at ${status.taskStoreDir}.`
+      : "Local task store is initialized.";
     return createSection("Checking local task store", [
       createFinding("success", "Local task store is initialized", message),
     ]);

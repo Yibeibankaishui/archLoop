@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
-const HUB_TASK_STORE_INIT_COMMAND = "archloop tasks init";
+export const HUB_TASK_STORE_INIT_COMMAND = "archloop tasks init";
 
 export const HUB_TASK_STORE_REDIRECT_FILE_NAME = "redirect";
 export const HUB_TASK_STORE_GIT_EXCLUDE_PATTERN = ".beads/redirect";
@@ -18,6 +18,11 @@ export type HubTaskStoreKind =
   | "legacy"
   | "managed"
   | "redirect";
+
+export const isHubOwnedTaskStoreKind = (
+  kind: HubTaskStoreKind | undefined,
+): kind is "managed" | "redirect" =>
+  kind === "managed" || kind === "redirect";
 
 export interface ResolveHubTaskStoreInput {
   readonly repoRoot: string;
@@ -80,14 +85,6 @@ const readRedirectTarget = (
   }
 };
 
-const isDirectory = (path: string): boolean => {
-  try {
-    return existsSync(path);
-  } catch {
-    return false;
-  }
-};
-
 export const resolveHubTaskStore = (
   input: ResolveHubTaskStoreInput,
 ): HubTaskStoreResolution => {
@@ -99,7 +96,7 @@ export const resolveHubTaskStore = (
 
   if (existsSync(redirectPath)) {
     const redirectTarget = readRedirectTarget(input.repoRoot, redirectPath);
-    if (!redirectTarget || !isDirectory(redirectTarget)) {
+    if (!redirectTarget || !existsSync(redirectTarget)) {
       return {
         kind: "redirect",
         beadsDir: repoBeadsDir,
@@ -174,7 +171,7 @@ const ensureGitExcludePattern = (repoRoot: string, pattern: string): void => {
   try {
     existing = readFileSync(excludePath, "utf8");
   } catch {
-    existing = "";
+    // `.git/info/exclude` is created below when the repo has none yet.
   }
   const lines = existing.split(/\r?\n/);
   if (lines.some((line) => line.trim() === pattern)) {

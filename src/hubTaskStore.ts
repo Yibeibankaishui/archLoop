@@ -5,21 +5,20 @@ import { basename, join } from "node:path";
 import { TaskBoardError } from "./errors.js";
 import { isBdAvailable, resolveBdExecutable } from "./resolveBdExecutable.js";
 import {
+  HUB_TASK_STORE_INIT_COMMAND,
   installHubTaskStoreRedirect,
   isBeadsStoreFullyInitialized,
   isBeadsStoreMarkerPresent,
+  isHubOwnedTaskStoreKind,
   resolveHubTaskStore,
   resolveManagedHubTaskStoreDir,
   type HubTaskStoreResolution,
 } from "./hubTaskStoreResolver.js";
 
-export const HUB_TASK_STORE_INIT_COMMAND = "archloop tasks init";
+export { HUB_TASK_STORE_INIT_COMMAND };
 
 export const resolveHubTaskStoreDir = (cwd: string): string =>
   join(cwd, ".beads");
-
-const resolveHubTaskStoreMetadataPath = (cwd: string): string =>
-  join(resolveHubTaskStoreDir(cwd), "metadata.json");
 
 /**
  * Embedded Dolt database directory written by `bd init`. Presence of this
@@ -29,9 +28,6 @@ const resolveHubTaskStoreMetadataPath = (cwd: string): string =>
  */
 const resolveHubTaskStoreDatabaseDir = (cwd: string): string =>
   join(resolveHubTaskStoreDir(cwd), "embeddeddolt");
-
-const isHubTaskStoreDatabasePresent = (cwd: string): boolean =>
-  existsSync(resolveHubTaskStoreDatabaseDir(cwd));
 
 export interface HubTaskStoreLocationOptions {
   readonly hubProjectDir?: string;
@@ -45,6 +41,19 @@ const resolveTaskStoreLocation = (
     repoRoot: cwd,
     hubProjectDir: options.hubProjectDir,
   });
+
+/**
+ * Directory used for marker/database presence checks. When the resolver has
+ * not classified a live store yet, inspect repository-local `.beads` so an
+ * orphaned `metadata.json` is still visible even if `hubProjectDir` is set.
+ */
+const resolveBeadsDirForPresenceCheck = (
+  cwd: string,
+  resolution: HubTaskStoreResolution,
+): string =>
+  resolution.kind === "uninitialized"
+    ? resolveHubTaskStoreDir(cwd)
+    : resolution.beadsDir;
 
 /**
  * Marker-file check only. True when `.beads/metadata.json` exists, regardless
@@ -61,13 +70,10 @@ export const isHubTaskStoreInitialized = (
   options: HubTaskStoreLocationOptions = {},
 ): boolean => {
   const resolution = resolveTaskStoreLocation(cwd, options);
-  if (resolution.redirectError) {
-    return false;
-  }
-  if (resolution.kind !== "uninitialized") {
-    return isBeadsStoreMarkerPresent(resolution.beadsDir);
-  }
-  return existsSync(resolveHubTaskStoreMetadataPath(cwd));
+  return (
+    !resolution.redirectError &&
+    isBeadsStoreMarkerPresent(resolveBeadsDirForPresenceCheck(cwd, resolution))
+  );
 };
 
 /**
@@ -81,15 +87,11 @@ export const isHubTaskStoreFullyInitialized = (
   options: HubTaskStoreLocationOptions = {},
 ): boolean => {
   const resolution = resolveTaskStoreLocation(cwd, options);
-  if (resolution.redirectError) {
-    return false;
-  }
-  if (resolution.kind !== "uninitialized") {
-    return isBeadsStoreFullyInitialized(resolution.beadsDir);
-  }
   return (
-    existsSync(resolveHubTaskStoreMetadataPath(cwd)) &&
-    isHubTaskStoreDatabasePresent(cwd)
+    !resolution.redirectError &&
+    isBeadsStoreFullyInitialized(
+      resolveBeadsDirForPresenceCheck(cwd, resolution),
+    )
   );
 };
 
@@ -134,7 +136,9 @@ export const formatHubTaskStoreCommandFailure = (
   }
   const message = readErrorMessage(error);
   if (
-    !isHubTaskStoreFullyInitialized(cwd, options) ||
+    !isBeadsStoreFullyInitialized(
+      resolveBeadsDirForPresenceCheck(cwd, resolution),
+    ) ||
     isTaskStoreInitError(message)
   ) {
     return formatHubTaskStoreNotInitializedMessage(failureLabel);
@@ -147,7 +151,7 @@ const beadsEnvForResolution = (
   env: NodeJS.ProcessEnv,
   resolution: HubTaskStoreResolution,
 ): NodeJS.ProcessEnv => {
-  if (resolution.kind === "managed" || resolution.kind === "redirect") {
+  if (isHubOwnedTaskStoreKind(resolution.kind)) {
     return {
       ...env,
       BEADS_DIR: resolution.beadsDir,
@@ -172,7 +176,7 @@ export const assertHubTaskStoreInitialized = (
   cwd: string,
   failureLabel: string,
   options: HubTaskStoreLocationOptions = {},
-): void => {
+): HubTaskStoreResolution => {
   const resolution = resolveTaskStoreLocation(cwd, options);
   if (resolution.redirectError) {
     throw new TaskBoardError({
@@ -180,8 +184,10 @@ export const assertHubTaskStoreInitialized = (
     });
   }
 
-  if (isHubTaskStoreInitialized(cwd, options)) {
-    return;
+  if (
+    isBeadsStoreMarkerPresent(resolveBeadsDirForPresenceCheck(cwd, resolution))
+  ) {
+    return resolution;
   }
 
   throw new TaskBoardError({
@@ -202,9 +208,7 @@ export const runBdTextForHubTaskStore = (
     });
   }
 
-  assertHubTaskStoreInitialized(cwd, failureLabel, options);
-
-  const resolution = resolveTaskStoreLocation(cwd, options);
+  const resolution = assertHubTaskStoreInitialized(cwd, failureLabel, options);
 
   try {
     return execBdText(cwd, args, beadsEnvForResolution(env, resolution));
@@ -272,36 +276,35 @@ const initManagedHubTaskStore = (
   projectName: string | undefined,
 ): InitHubTaskStoreResult => {
   const managedBeadsDir = resolveManagedHubTaskStoreDir(hubProjectDir);
+  const alreadyInitialized = isBeadsStoreFullyInitialized(managedBeadsDir);
+  let output = "";
 
-  if (isBeadsStoreFullyInitialized(managedBeadsDir)) {
-    installHubTaskStoreRedirect(cwd, managedBeadsDir);
-    return { alreadyInitialized: true, output: "" };
-  }
+  if (!alreadyInitialized) {
+    output = execBdText(
+      cwd,
+      [
+        "init",
+        "--non-interactive",
+        "--skip-agents",
+        "--skip-hooks",
+        "--prefix",
+        sanitizeBeadsPrefix(projectName, cwd),
+      ],
+      {
+        ...env,
+        BEADS_DIR: managedBeadsDir,
+      },
+    );
 
-  const output = execBdText(
-    cwd,
-    [
-      "init",
-      "--non-interactive",
-      "--skip-agents",
-      "--skip-hooks",
-      "--prefix",
-      sanitizeBeadsPrefix(projectName, cwd),
-    ],
-    {
-      ...env,
-      BEADS_DIR: managedBeadsDir,
-    },
-  );
-
-  if (!isBeadsStoreFullyInitialized(managedBeadsDir)) {
-    throw new TaskBoardError({
-      message: INIT_STILL_MISSING_MESSAGE,
-    });
+    if (!isBeadsStoreFullyInitialized(managedBeadsDir)) {
+      throw new TaskBoardError({
+        message: INIT_STILL_MISSING_MESSAGE,
+      });
+    }
   }
 
   installHubTaskStoreRedirect(cwd, managedBeadsDir);
-  return { alreadyInitialized: false, output };
+  return { alreadyInitialized, output };
 };
 
 export const initHubTaskStore = (
