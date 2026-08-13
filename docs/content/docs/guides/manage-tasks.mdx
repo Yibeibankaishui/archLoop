@@ -3,6 +3,18 @@ title: Manage tasks
 description: Work with the local Hub task board safely.
 ---
 
+## Initialize the task store
+
+```bash
+npx archloop tasks init
+```
+
+For a registered Hub project without a repository-local Beads database, this
+creates the live store under the Hub project directory and installs a
+Git-ignored `.beads/redirect`. Direct host `bd ready` and `bd show` then use
+the same tasks as `archloop tasks`. Existing repository-local stores stay in
+place until migration is implemented.
+
 ## List and inspect
 
 ```bash

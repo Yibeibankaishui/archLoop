@@ -10,7 +10,9 @@ npx archloop project add
 ```
 
 archLoop asks for the repository path, a Hub display name, a project profile,
-and whether to initialize the local task store.
+and whether to initialize the Hub-owned task store. New projects keep the live
+Beads database under the Hub project directory and add a Git-ignored
+`.beads/redirect` so host `bd` commands keep working.
 
 For automation, provide the values explicitly:
 

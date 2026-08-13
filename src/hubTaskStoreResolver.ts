@@ -1,0 +1,195 @@
+import { execFileSync } from "node:child_process";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
+
+export const HUB_TASK_STORE_INIT_COMMAND = "archloop tasks init";
+
+export const HUB_TASK_STORE_REDIRECT_FILE_NAME = "redirect";
+export const HUB_TASK_STORE_GIT_EXCLUDE_PATTERN = ".beads/redirect";
+
+export type HubTaskStoreKind =
+  | "uninitialized"
+  | "legacy"
+  | "managed"
+  | "redirect";
+
+export const isHubOwnedTaskStoreKind = (
+  kind: HubTaskStoreKind | undefined,
+): kind is "managed" | "redirect" => kind === "managed" || kind === "redirect";
+
+export interface ResolveHubTaskStoreInput {
+  readonly repoRoot: string;
+  readonly hubProjectDir?: string;
+}
+
+export interface HubTaskStoreResolution {
+  readonly kind: HubTaskStoreKind;
+  readonly beadsDir: string;
+  readonly repoBeadsDir: string;
+  readonly managedBeadsDir?: string;
+  readonly redirectPath?: string;
+  readonly redirectTarget?: string;
+  readonly redirectError?: string;
+}
+
+const HUB_TASK_STORE_METADATA_FILE_NAME = "metadata.json";
+const HUB_TASK_STORE_DATABASE_DIR_NAME = "embeddeddolt";
+
+const resolveBeadsMetadataPath = (beadsDir: string): string =>
+  join(beadsDir, HUB_TASK_STORE_METADATA_FILE_NAME);
+
+const resolveBeadsDatabaseDir = (beadsDir: string): string =>
+  join(beadsDir, HUB_TASK_STORE_DATABASE_DIR_NAME);
+
+export const isBeadsStoreMarkerPresent = (beadsDir: string): boolean =>
+  existsSync(resolveBeadsMetadataPath(beadsDir));
+
+export const isBeadsStoreFullyInitialized = (beadsDir: string): boolean =>
+  isBeadsStoreMarkerPresent(beadsDir) &&
+  existsSync(resolveBeadsDatabaseDir(beadsDir));
+
+export const resolveManagedHubTaskStoreDir = (hubProjectDir: string): string =>
+  join(hubProjectDir, ".beads");
+
+const resolveRepoBeadsDir = (repoRoot: string): string =>
+  join(repoRoot, ".beads");
+
+export const resolveHubTaskStoreRedirectPath = (repoRoot: string): string =>
+  join(resolveRepoBeadsDir(repoRoot), HUB_TASK_STORE_REDIRECT_FILE_NAME);
+
+export const formatInvalidHubTaskStoreRedirectMessage = (
+  redirectPath: string,
+  redirectTarget: string,
+): string =>
+  `Hub Beads redirect at ${redirectPath} is invalid or inaccessible (${redirectTarget}). Fix the redirect path, or run \`${HUB_TASK_STORE_INIT_COMMAND}\` to recreate the Hub-owned task store.`;
+
+const readRedirectTarget = (
+  repoRoot: string,
+  redirectPath: string,
+): string | undefined => {
+  try {
+    const raw = readFileSync(redirectPath, "utf8").split(/\r?\n/, 1)[0]?.trim();
+    if (!raw) {
+      return undefined;
+    }
+    return isAbsolute(raw) ? raw : resolve(repoRoot, raw);
+  } catch {
+    return undefined;
+  }
+};
+
+export const resolveHubTaskStore = (
+  input: ResolveHubTaskStoreInput,
+): HubTaskStoreResolution => {
+  const repoBeadsDir = resolveRepoBeadsDir(input.repoRoot);
+  const managedBeadsDir = input.hubProjectDir
+    ? resolveManagedHubTaskStoreDir(input.hubProjectDir)
+    : undefined;
+  const redirectPath = resolveHubTaskStoreRedirectPath(input.repoRoot);
+
+  if (existsSync(redirectPath)) {
+    const redirectTarget = readRedirectTarget(input.repoRoot, redirectPath);
+    if (!redirectTarget || !existsSync(redirectTarget)) {
+      return {
+        kind: "redirect",
+        beadsDir: repoBeadsDir,
+        repoBeadsDir,
+        managedBeadsDir,
+        redirectPath,
+        redirectTarget,
+        redirectError: formatInvalidHubTaskStoreRedirectMessage(
+          redirectPath,
+          redirectTarget ?? "(empty redirect)",
+        ),
+      };
+    }
+
+    return {
+      kind: "redirect",
+      beadsDir: redirectTarget,
+      repoBeadsDir,
+      managedBeadsDir,
+      redirectPath,
+      redirectTarget,
+    };
+  }
+
+  if (managedBeadsDir && isBeadsStoreFullyInitialized(managedBeadsDir)) {
+    return {
+      kind: "managed",
+      beadsDir: managedBeadsDir,
+      repoBeadsDir,
+      managedBeadsDir,
+    };
+  }
+
+  if (isBeadsStoreFullyInitialized(repoBeadsDir)) {
+    return {
+      kind: "legacy",
+      beadsDir: repoBeadsDir,
+      repoBeadsDir,
+      managedBeadsDir,
+    };
+  }
+
+  return {
+    kind: "uninitialized",
+    beadsDir: managedBeadsDir ?? repoBeadsDir,
+    repoBeadsDir,
+    managedBeadsDir,
+  };
+};
+
+const resolveGitExcludePath = (repoRoot: string): string => {
+  try {
+    const gitPath = execFileSync(
+      "git",
+      ["rev-parse", "--git-path", "info/exclude"],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    ).trim();
+    return isAbsolute(gitPath) ? gitPath : resolve(repoRoot, gitPath);
+  } catch {
+    return join(repoRoot, ".git", "info", "exclude");
+  }
+};
+
+const ensureGitExcludePattern = (repoRoot: string, pattern: string): void => {
+  const excludePath = resolveGitExcludePath(repoRoot);
+  mkdirSync(dirname(excludePath), { recursive: true });
+  let existing = "";
+  try {
+    existing = readFileSync(excludePath, "utf8");
+  } catch {
+    // `.git/info/exclude` is created below when the repo has none yet.
+  }
+  const lines = existing.split(/\r?\n/);
+  if (lines.some((line) => line.trim() === pattern)) {
+    return;
+  }
+  const prefix = existing.length === 0 || existing.endsWith("\n") ? "" : "\n";
+  appendFileSync(excludePath, `${prefix}${pattern}\n`);
+};
+
+export const installHubTaskStoreRedirect = (
+  repoRoot: string,
+  managedBeadsDir: string,
+): void => {
+  const repoBeadsDir = resolveRepoBeadsDir(repoRoot);
+  mkdirSync(repoBeadsDir, { recursive: true });
+  writeFileSync(
+    resolveHubTaskStoreRedirectPath(repoRoot),
+    `${managedBeadsDir}\n`,
+    "utf8",
+  );
+  ensureGitExcludePattern(repoRoot, HUB_TASK_STORE_GIT_EXCLUDE_PATTERN);
+};

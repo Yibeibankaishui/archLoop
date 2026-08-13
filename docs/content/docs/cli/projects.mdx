@@ -13,6 +13,10 @@ description: Reference for the Hub project command group.
 | `project rename <project> <new-name>`    | Change the display name                           |
 | `project relink <project> --path <path>` | Point an existing identity at a moved repository  |
 
+`project add` can initialize the Hub-owned Beads task store. `project status`
+reports whether that store is Hub-owned, repository-local, missing, or blocked
+by an invalid `.beads/redirect`.
+
 Most project-aware commands accept `--project <name>` as an explicit override.
 Interactive pickers are available when required values are omitted in a TTY;
 scripts should provide explicit names and paths.

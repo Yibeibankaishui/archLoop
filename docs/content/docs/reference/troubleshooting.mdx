@@ -35,6 +35,20 @@ npx archloop project relink <project> --path <repo-path>
 
 Create the repository's intended initial commit, then rerun `archloop check`.
 
+## Task store redirect is invalid
+
+**Cause:** `.beads/redirect` points at a missing or inaccessible Hub-owned
+Beads directory.
+
+```bash
+npx archloop project status
+npx archloop tasks init
+```
+
+Fix the redirect path, or rerun `tasks init` for the registered project to
+recreate the Hub-owned store and redirect. Do not initialize a second database
+in the Git repository.
+
 ## Agent role or credential is missing
 
 ```bash

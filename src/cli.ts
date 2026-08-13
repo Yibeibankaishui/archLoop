@@ -1979,7 +1979,11 @@ const taskSelectorsArg = Args.atLeast(
 const resolveTaskCommandProjectTarget = (
   project: OptionalTextFlag,
 ): Effect.Effect<
-  { readonly repoRoot: string; readonly projectName: string },
+  {
+    readonly repoRoot: string;
+    readonly projectName: string;
+    readonly hubProjectDir: string;
+  },
   TaskBoardError,
   never
 > =>
@@ -1993,6 +1997,7 @@ const resolveTaskCommandProjectTarget = (
       return {
         repoRoot: resolved.project.repoRoot,
         projectName: resolved.project.name,
+        hubProjectDir: resolved.project.hubProjectDir,
       };
     },
     catch: toTaskBoardError,
@@ -2093,9 +2098,13 @@ const tasksInitCommand = Command.make(
   ({ project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const target = yield* resolveTaskCommandProjectTarget(project);
       const result = yield* Effect.try({
-        try: () => initHubTaskStore(cwd),
+        try: () =>
+          initHubTaskStore(target.repoRoot, process.env, {
+            hubProjectDir: target.hubProjectDir,
+            projectName: target.projectName,
+          }),
         catch: toTaskBoardError,
       });
 
@@ -3673,11 +3682,18 @@ const confirmProjectAddTaskStoreInitialization = async (): Promise<boolean> => {
 
 const initializeProjectAddTaskStore = (
   display: DisplayService,
-  repoRoot: string,
+  project: {
+    readonly repoRoot: string;
+    readonly hubProjectDir: string;
+    readonly name: string;
+  },
 ): Effect.Effect<boolean> =>
   Effect.gen(function* () {
     try {
-      const result = initHubTaskStore(repoRoot);
+      const result = initHubTaskStore(project.repoRoot, process.env, {
+        hubProjectDir: project.hubProjectDir,
+        projectName: project.name,
+      });
       const output = result.output.trim();
       if (output.length > 0) {
         yield* display.text(output);
@@ -3764,7 +3780,7 @@ const projectAddCommand = Command.make(
         if (shouldInitializeTaskStore) {
           taskStoreInitialized = yield* initializeProjectAddTaskStore(
             d,
-            result.project.repoRoot,
+            result.project,
           );
         }
       }

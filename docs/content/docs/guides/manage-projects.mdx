@@ -40,6 +40,8 @@ npx archloop project rename <project> <new-name>
 npx archloop project relink <project> --path <new-repo-path>
 ```
 
-Both operations preserve the stable project identity, task data, and run
-history. Relinking validates that the new path is an existing Git repository
-with at least one commit.
+Both operations preserve the stable project identity, Hub-owned task store, and
+run history. Relinking validates that the new path is an existing Git
+repository with at least one commit and, when a managed store already exists,
+installs `.beads/redirect` in the new repository instead of creating a second
+database.
