@@ -230,6 +230,18 @@ _Avoid_: "batch merge", "git merge command", "run transaction"
 A transaction-specific Git ref advanced atomically with the **Hub publish target** and its fence, proving which exact verified candidate completed local landing.
 _Avoid_: "merge event", "reflog entry", "task status"
 
+**Landing lease**:
+Short-lived exclusive ownership of one **Hub publish target**'s compare-and-swap window. The owner is identified by a nonce, process start identity, and boot identity. A demonstrably live owner is not displaced merely because a TTL elapsed.
+_Avoid_: "file lock", "worktree lease", "merge lock"
+
+**Landing coordinator**:
+The per-**Hub publish target** owner of the **landing lease**, fenced target advancement, and queue-head rebuild after **target drift**.
+_Avoid_: "batch merger", "git lock", "scheduler"
+
+**Target drift**:
+The **Hub publish target** OID changed after a **merge candidate** was built against it. The stale candidate and its verification artifact are invalidated, rebuilt on the new target, and fully reverified before another landing attempt.
+_Avoid_: "merge failed", "CAS retry without rebuild"
+
 **Landing transaction reconciliation**:
 Reconstructing missing **landing transaction** checkpoints from durable physical evidence (candidate refs/manifests, verification artifacts, atomic **landing receipts**, Beads close metadata, and resource absence) at mutating entry points. Read-only commands may display the evidence but must not write checkpoints or advance the transaction.
 _Avoid_: "tasks recover", "event replay", "merge recovery"

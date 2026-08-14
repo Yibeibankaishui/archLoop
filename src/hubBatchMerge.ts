@@ -30,10 +30,16 @@ import {
   computeHubVerifierFingerprint,
   createHubLandingCandidate,
   HubLandingWorktreeError,
+  invalidateHubLandingCandidate,
   recordHubLandingTaskClosed,
   snapshotHubLandingCandidateGeneration,
   type HubLandingCandidate,
 } from "./hubLanding.js";
+import {
+  landHubCandidateWithLease,
+  type HubLandingAttemptResult,
+  type HubLandingOidEvidence,
+} from "./hubLandingCoordinator.js";
 import {
   computeHubLandingMergeInputFingerprint,
   isTransientHubLandingError,
@@ -102,6 +108,8 @@ export interface HubMergeIntegration {
   readonly candidateOid?: string;
   readonly bindVerification?: (fingerprint: string) => Promise<void> | void;
   readonly snapshotCandidate?: () => Promise<HubLandingCandidate>;
+  readonly landWithLease?: () => Promise<HubLandingAttemptResult>;
+  readonly rebuildOnTargetDrift?: () => Promise<HubLandingCandidate>;
   readonly filteredBeadsRuntimePaths?: readonly string[];
 }
 
@@ -298,25 +306,38 @@ type MergeProgressEventType =
   | "verification_started"
   | "candidate_verification_passed"
   | "target_landing_succeeded"
+  | "target_landing_rebuild"
+  | "target_landing_pending"
+  | "target_landing_stale_owner_rejected"
   | "task_close_started"
   | "task_close_succeeded";
 
+type MergeProgressEventFields = {
+  readonly type: MergeProgressEventType;
+  readonly createdAt: string;
+  readonly transactionId?: string;
+  readonly sourceOid?: string;
+  readonly baseOid?: string;
+  readonly candidateOid?: string;
+  readonly publishTargetOid?: string;
+  readonly expectedTargetOid?: string;
+  readonly observedTargetOid?: string;
+  readonly expectedFenceOid?: string;
+  readonly observedFenceOid?: string;
+  readonly fenceOid?: string;
+  readonly verifierFingerprint?: string;
+  readonly filteredBeadsRuntimePaths?: readonly string[];
+  readonly status?: string;
+  readonly reason?: string;
+  readonly message?: string;
+};
+
 const appendMergeProgressEvent = (
   input: RunHubBatchMergeInput,
-  event: {
-    readonly type: MergeProgressEventType;
+  event: MergeProgressEventFields & {
     readonly taskId: string;
     readonly branch: string;
     readonly claim: HubTaskProjection["claim"];
-    readonly createdAt: string;
-    readonly transactionId?: string;
-    readonly sourceOid?: string;
-    readonly baseOid?: string;
-    readonly candidateOid?: string;
-    readonly publishTargetOid?: string;
-    readonly verifierFingerprint?: string;
-    readonly filteredBeadsRuntimePaths?: readonly string[];
-    readonly status?: string;
   },
 ): void => {
   appendHubTaskEvent(input.runDir, {
@@ -333,8 +354,15 @@ const appendMergeProgressEvent = (
     baseOid: event.baseOid,
     candidateOid: event.candidateOid,
     publishTargetOid: event.publishTargetOid,
+    expectedTargetOid: event.expectedTargetOid,
+    observedTargetOid: event.observedTargetOid,
+    expectedFenceOid: event.expectedFenceOid,
+    observedFenceOid: event.observedFenceOid,
+    fenceOid: event.fenceOid,
     verifierFingerprint: event.verifierFingerprint,
     filteredBeadsRuntimePaths: event.filteredBeadsRuntimePaths,
+    reason: event.reason,
+    message: event.message,
   });
 };
 
@@ -1447,36 +1475,76 @@ const verifyWithBoundedRepair = async (
   };
 };
 
-const finalizeLandedCandidate = async (
+const oidEventFields = (
+  landing: HubLandingIdentity,
+  oids?: Partial<HubLandingOidEvidence> & { readonly fenceOid?: string },
+) => ({
+  ...landing,
+  expectedTargetOid: oids?.expectedTargetOid,
+  observedTargetOid: oids?.observedTargetOid,
+  expectedFenceOid: oids?.expectedFenceOid,
+  observedFenceOid: oids?.observedFenceOid,
+  fenceOid: oids?.fenceOid,
+});
+
+type FinalizeLandingResult =
+  | {
+      readonly outcome: "landed";
+      readonly landingIdentity: HubLandingIdentity;
+      readonly mergeIntegration: HubMergeIntegration;
+    }
+  | { readonly outcome: "failed"; readonly result: HubBatchMergeTaskResult };
+
+const LANDING_REJECTION_EVENT_TYPE = {
+  pending_contention: "target_landing_pending",
+  stale_owner_rejected: "target_landing_stale_owner_rejected",
+} as const;
+
+const emitMergeLandingEvent = (
+  session: MergeTaskSession,
+  event: MergeProgressEventFields,
+): void => {
+  appendMergeProgressEvent(session.input, {
+    taskId: session.task.id,
+    branch: session.branch,
+    claim: session.claim,
+    ...event,
+  });
+};
+
+const failLandedCandidate = async (
   session: MergeTaskSession,
   mergeIntegration: HubMergeIntegration,
   landingIdentity: HubLandingIdentity,
-): Promise<HubBatchMergeTaskResult | undefined> => {
-  try {
-    await mergeIntegration.finalize();
-  } catch (error) {
-    await mergeIntegration.cleanup().catch(() => undefined);
-    const diagnostics = compactDiagnostics(extractErrorDiagnostics(error));
-    const diagnosticSummary = formatMergeDiagnosticSummary(diagnostics);
-    if (
-      isTransientHubLandingError(error) ||
-      isTransientHubLandingError(diagnostics)
-    ) {
-      return toPendingMergeTaskResult(
+  error: unknown,
+): Promise<Extract<FinalizeLandingResult, { outcome: "failed" }>> => {
+  await mergeIntegration.cleanup().catch(() => undefined);
+  const diagnostics = compactDiagnostics(extractErrorDiagnostics(error));
+  const diagnosticSummary = formatMergeDiagnosticSummary(diagnostics);
+  if (
+    isTransientHubLandingError(error) ||
+    isTransientHubLandingError(diagnostics)
+  ) {
+    return {
+      outcome: "failed",
+      result: toPendingMergeTaskResult(
         session,
         diagnosticSummary,
         diagnostics,
         landingIdentity,
-      );
-    }
-    const lifecycleResult = recordMergeFailure({
-      ...session.lifecycleBase,
-      failureReason: "merge_failed",
-      createdAt: new Date().toISOString(),
-      diagnosticSummary,
-      diagnostics,
-    });
-    return toBatchMergeTaskResult(
+      ),
+    };
+  }
+  const lifecycleResult = recordMergeFailure({
+    ...session.lifecycleBase,
+    failureReason: "merge_failed",
+    createdAt: new Date().toISOString(),
+    diagnosticSummary,
+    diagnostics,
+  });
+  return {
+    outcome: "failed",
+    result: toBatchMergeTaskResult(
       session.task,
       session.branch,
       "merge_failed",
@@ -1487,10 +1555,240 @@ const finalizeLandedCandidate = async (
         diagnostics,
         ...landingIdentity,
       },
+    ),
+  };
+};
+
+const finalizeWithoutLease = async (
+  session: MergeTaskSession,
+  mergeIntegration: HubMergeIntegration,
+  landingIdentity: HubLandingIdentity,
+  verifierFingerprint: string,
+): Promise<FinalizeLandingResult> => {
+  try {
+    await mergeIntegration.finalize();
+  } catch (error) {
+    return failLandedCandidate(
+      session,
+      mergeIntegration,
+      landingIdentity,
+      error,
     );
   }
   await mergeIntegration.cleanup().catch(() => undefined);
-  return undefined;
+  emitMergeLandingEvent(session, {
+    type: "target_landing_succeeded",
+    createdAt: new Date().toISOString(),
+    ...landingIdentity,
+    publishTargetOid: landingIdentity.candidateOid,
+    verifierFingerprint,
+  });
+  return {
+    outcome: "landed",
+    landingIdentity,
+    mergeIntegration,
+  };
+};
+
+const rejectLeaseLandingAttempt = async (
+  session: MergeTaskSession,
+  mergeIntegration: HubMergeIntegration,
+  landingIdentity: HubLandingIdentity,
+  attempt: Extract<
+    HubLandingAttemptResult,
+    { kind: "pending_contention" | "stale_owner_rejected" }
+  >,
+  verifierFingerprint: string,
+): Promise<FinalizeLandingResult> => {
+  emitMergeLandingEvent(session, {
+    type: LANDING_REJECTION_EVENT_TYPE[attempt.kind],
+    createdAt: new Date().toISOString(),
+    reason: attempt.kind,
+    message: attempt.message,
+    ...oidEventFields(landingIdentity, attempt),
+    verifierFingerprint,
+  });
+  await mergeIntegration.cleanup().catch(() => undefined);
+  return {
+    outcome: "failed",
+    result: toPendingMergeTaskResult(
+      session,
+      attempt.message,
+      { message: attempt.message },
+      landingIdentity,
+    ),
+  };
+};
+
+const rebuildAfterTargetDrift = async (
+  session: MergeTaskSession,
+  mergeIntegration: HubMergeIntegration,
+  landingIdentity: HubLandingIdentity,
+  attempt: Extract<HubLandingAttemptResult, { kind: "target_drift" }>,
+  verifierFingerprint: string,
+): Promise<
+  | {
+      readonly outcome: "rebuilt";
+      readonly mergeIntegration: HubMergeIntegration;
+      readonly landingIdentity: HubLandingIdentity;
+    }
+  | { readonly outcome: "failed"; readonly result: HubBatchMergeTaskResult }
+> => {
+  emitMergeLandingEvent(session, {
+    type: "target_landing_rebuild",
+    createdAt: new Date().toISOString(),
+    reason: "target_drift",
+    message: attempt.message,
+    ...oidEventFields(landingIdentity, attempt),
+    verifierFingerprint,
+  });
+  if (landingIdentity.transactionId) {
+    invalidateHubLandingCandidate({
+      hubProjectDir: session.hubProjectDir,
+      transactionId: landingIdentity.transactionId,
+    });
+  }
+  if (!mergeIntegration.rebuildOnTargetDrift) {
+    return failLandedCandidate(
+      session,
+      mergeIntegration,
+      landingIdentity,
+      new Error(attempt.message),
+    );
+  }
+  let rebuilt: HubLandingCandidate;
+  try {
+    rebuilt = await mergeIntegration.rebuildOnTargetDrift();
+  } catch (error) {
+    const mergeResult = (error as { mergeResult?: HubMergeTaskResult })
+      .mergeResult;
+    if (mergeResult) {
+      await mergeIntegration.cleanup().catch(() => undefined);
+      return {
+        outcome: "failed",
+        result: settleUnsuccessfulMerge(
+          session,
+          mergeResult,
+          new Date().toISOString(),
+        ),
+      };
+    }
+    return failLandedCandidate(
+      session,
+      mergeIntegration,
+      landingIdentity,
+      error,
+    );
+  }
+  const applied = applyCandidateSnapshot(mergeIntegration, rebuilt);
+  emitMergeLandingEvent(session, {
+    type: "integration_candidate_created",
+    createdAt: new Date().toISOString(),
+    ...applied.landingIdentity,
+  });
+  const verified = await verifyWithBoundedRepair(
+    session,
+    applied.mergeIntegration,
+    applied.landingIdentity,
+    new Date().toISOString(),
+  );
+  if (verified.outcome === "failed") {
+    return { outcome: "failed", result: verified.result };
+  }
+  const nextIntegration = verified.mergeIntegration ?? applied.mergeIntegration;
+  if (nextIntegration.bindVerification) {
+    await nextIntegration.bindVerification(verifierFingerprint);
+  }
+  emitMergeLandingEvent(session, {
+    type: "candidate_verification_passed",
+    createdAt: verified.verifyFinishedAt,
+    ...verified.landingIdentity,
+    verifierFingerprint,
+  });
+  return {
+    outcome: "rebuilt",
+    mergeIntegration: nextIntegration,
+    landingIdentity: verified.landingIdentity,
+  };
+};
+
+const finalizeLandedCandidate = async (
+  session: MergeTaskSession,
+  mergeIntegration: HubMergeIntegration,
+  landingIdentity: HubLandingIdentity,
+  verifierFingerprint: string,
+): Promise<FinalizeLandingResult> => {
+  let activeIntegration = mergeIntegration;
+  let activeLanding = landingIdentity;
+
+  for (;;) {
+    if (!activeIntegration.landWithLease) {
+      return finalizeWithoutLease(
+        session,
+        activeIntegration,
+        activeLanding,
+        verifierFingerprint,
+      );
+    }
+
+    let attempt: HubLandingAttemptResult;
+    try {
+      attempt = await activeIntegration.landWithLease();
+    } catch (error) {
+      return failLandedCandidate(
+        session,
+        activeIntegration,
+        activeLanding,
+        error,
+      );
+    }
+
+    if (attempt.kind === "landed") {
+      await activeIntegration.cleanup().catch(() => undefined);
+      const landedIdentity = toLandingIdentity(attempt.candidate);
+      emitMergeLandingEvent(session, {
+        type: "target_landing_succeeded",
+        createdAt: new Date().toISOString(),
+        ...oidEventFields(landedIdentity, {
+          ...attempt,
+          fenceOid: attempt.commit.fenceOid,
+        }),
+        publishTargetOid: attempt.commit.publishTargetOid,
+        verifierFingerprint,
+      });
+      return {
+        outcome: "landed",
+        landingIdentity: landedIdentity,
+        mergeIntegration: activeIntegration,
+      };
+    }
+
+    if (
+      attempt.kind === "pending_contention" ||
+      attempt.kind === "stale_owner_rejected"
+    ) {
+      return rejectLeaseLandingAttempt(
+        session,
+        activeIntegration,
+        activeLanding,
+        attempt,
+        verifierFingerprint,
+      );
+    }
+
+    const rebuilt = await rebuildAfterTargetDrift(
+      session,
+      activeIntegration,
+      activeLanding,
+      attempt,
+      verifierFingerprint,
+    );
+    if (rebuilt.outcome === "failed") {
+      return rebuilt;
+    }
+    activeIntegration = rebuilt.mergeIntegration;
+    activeLanding = rebuilt.landingIdentity;
+  }
 };
 
 const closeLandedTask = async (
@@ -1653,27 +1951,30 @@ const processMergeTask = async (
     verifierFingerprint,
   });
 
+  let landedIdentity = verified.landingIdentity;
   if (verified.mergeIntegration) {
-    const finalizeFailure = await finalizeLandedCandidate(
+    const landed = await finalizeLandedCandidate(
       session,
       verified.mergeIntegration,
       verified.landingIdentity,
+      verifierFingerprint,
     );
-    if (finalizeFailure) {
-      return finalizeFailure;
+    if (landed.outcome === "failed") {
+      return landed.result;
     }
+    landedIdentity = landed.landingIdentity;
+  } else {
+    appendMergeProgressEvent(input, {
+      type: "target_landing_succeeded",
+      taskId: task.id,
+      branch,
+      claim,
+      createdAt: new Date().toISOString(),
+      ...verified.landingIdentity,
+      publishTargetOid: verified.landingIdentity.candidateOid,
+      verifierFingerprint,
+    });
   }
-
-  appendMergeProgressEvent(input, {
-    type: "target_landing_succeeded",
-    taskId: task.id,
-    branch,
-    claim,
-    createdAt: new Date().toISOString(),
-    ...verified.landingIdentity,
-    publishTargetOid: verified.landingIdentity.candidateOid,
-    verifierFingerprint,
-  });
 
   appendMergeProgressEvent(input, {
     type: "task_close_started",
@@ -1686,7 +1987,7 @@ const processMergeTask = async (
 
   return closeLandedTask(
     session,
-    verified.landingIdentity,
+    landedIdentity,
     verified.verifyFinishedAt,
   );
 };
@@ -2275,6 +2576,41 @@ export const createHubFlowRunMerger = (options: {
         },
       });
       let activeCandidate = candidate;
+      const rebuildCandidate = async (): Promise<HubLandingCandidate> => {
+        await cleanupHubLandingCandidate({
+          repoRoot: options.cwd,
+          hubProjectDir,
+          candidate: activeCandidate,
+        }).catch(() => undefined);
+        activeCandidate = await createHubLandingCandidate({
+          repoRoot: options.cwd,
+          hubProjectDir,
+          taskId: input.taskId,
+          branch: input.branch,
+          merge: async (worktreeDir) => {
+            const mergeResult = await runGitMergeInCwd({
+              input,
+              cwd: worktreeDir,
+              env: options.env,
+              hubProjectDir,
+              conflictResolver:
+                options.conflictResolver ??
+                createHubMergeConflictResolver({
+                  cwd: worktreeDir,
+                  env: options.env,
+                }),
+            });
+            if (mergeResult.outcome !== "success") {
+              const error = new Error(
+                mergeResult.message ?? "Hub landing merge failed",
+              ) as Error & { mergeResult: HubMergeTaskResult };
+              error.mergeResult = mergeResult;
+              throw error;
+            }
+          },
+        });
+        return activeCandidate;
+      };
       return {
         outcome: "success",
         integration: {
@@ -2302,6 +2638,14 @@ export const createHubFlowRunMerger = (options: {
             });
             return activeCandidate;
           },
+          landWithLease: async () =>
+            landHubCandidateWithLease({
+              repoRoot: options.cwd,
+              hubProjectDir,
+              candidate: activeCandidate,
+              verifierFingerprint: computeHubVerifierFingerprint(options.cwd),
+            }),
+          rebuildOnTargetDrift: rebuildCandidate,
           finalize: async () => {
             await commitHubLandingTarget({
               repoRoot: options.cwd,

@@ -423,6 +423,12 @@ const resolveTaskStage = (event: Extract<HubRunEvent, { taskId: string }>) => {
     case "target_landing_succeeded":
     case "task_close_started":
       return "Closing";
+    case "target_landing_rebuild":
+      return "Rebuilding landing candidate";
+    case "target_landing_pending":
+      return "Landing pending";
+    case "target_landing_stale_owner_rejected":
+      return "Stale landing owner rejected";
     case "task_close_succeeded":
     case "task_closed":
       return "Completed";
@@ -658,6 +664,13 @@ export const reduceHubRunDisplayState = (
 const textField = (name: string, value: string): string =>
   `${name}=${JSON.stringify(value)}`;
 
+const optionalTextFields = (
+  entries: ReadonlyArray<readonly [string, string | undefined]>,
+): string[] =>
+  entries.flatMap(([name, value]) =>
+    value ? [textField(name, value)] : [],
+  );
+
 const numberField = (name: string, value: number): string => `${name}=${value}`;
 
 export const formatPlainHubRunOutcome = (
@@ -772,6 +785,13 @@ export const formatPlainHubRunEvent = (
       textField("batch_id", event.batchId),
       textField("task_id", event.taskId),
       textField("stage", resolveTaskStage(event)),
+      ...optionalTextFields([
+        ["expected_target_oid", event.expectedTargetOid],
+        ["observed_target_oid", event.observedTargetOid],
+        ["expected_fence_oid", event.expectedFenceOid],
+        ["observed_fence_oid", event.observedFenceOid],
+        ["reason", event.reason],
+      ]),
     ].join(" ");
   }
 

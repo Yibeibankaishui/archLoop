@@ -890,4 +890,59 @@ describe("plain Hub run lifecycle output", () => {
     expect(line).toContain('kind="pending"');
     expect(line).not.toMatch(/tasks recover/);
   });
+
+  it("formats landing rebuild, contention, and stale-owner events with target and fence OIDs", () => {
+    const state = createHubRunDisplayState({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+    });
+    const base = {
+      eventId: "run-1:20",
+      sequence: 20,
+      runId: "run-1",
+      batchId: "batch-1",
+      taskId: "bd-land",
+      branch: "archloop/bd-land",
+      createdAt: "2026-08-14T16:00:00.000Z",
+      status: "merging",
+      expectedTargetOid: "a".repeat(40),
+      observedTargetOid: "b".repeat(40),
+      expectedFenceOid: "c".repeat(40),
+      observedFenceOid: "d".repeat(40),
+    } as const;
+
+    const rebuild = formatPlainHubRunEvent(
+      { ...base, type: "target_landing_rebuild", reason: "target_drift" },
+      state,
+    );
+    expect(rebuild).toContain("event=target_landing_rebuild");
+    expect(rebuild).toContain("Rebuilding landing candidate");
+    expect(rebuild).toContain(`expected_target_oid="${"a".repeat(40)}"`);
+    expect(rebuild).toContain(`observed_target_oid="${"b".repeat(40)}"`);
+    expect(rebuild).not.toMatch(/tasks recover/);
+
+    const pending = formatPlainHubRunEvent(
+      {
+        ...base,
+        type: "target_landing_pending",
+        reason: "pending_contention",
+      },
+      state,
+    );
+    expect(pending).toContain("event=target_landing_pending");
+    expect(pending).toContain("Landing pending");
+    expect(pending).toContain(`expected_fence_oid="${"c".repeat(40)}"`);
+
+    const stale = formatPlainHubRunEvent(
+      {
+        ...base,
+        type: "target_landing_stale_owner_rejected",
+        reason: "stale_owner_rejected",
+      },
+      state,
+    );
+    expect(stale).toContain("event=target_landing_stale_owner_rejected");
+    expect(stale).toContain("Stale landing owner rejected");
+    expect(stale).toContain(`observed_fence_oid="${"d".repeat(40)}"`);
+  });
 });

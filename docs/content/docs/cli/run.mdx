@@ -48,6 +48,17 @@ receipts, then finishes close and cleanup without landing or closing twice.
 Pending reconciliation is not a task failure and does not require
 `archloop tasks recover`.
 
+Two runs for the same project or the same task share a landing lease identified
+by owner nonce, process start identity, and boot identity. A live owner is not
+displaced just because a TTL elapsed. Compare-and-swap checks the expected
+target and fence OIDs atomically, so a paused or stale owner cannot land after
+the fence or target changes. If the publish target drifts before landing, Hub
+invalidates that candidate and verification artifact, rebuilds on the new
+target, and fully reverifies the exact OID before retrying CAS. Lease, lock,
+and CAS contention stay pending for automatic retry. Plain and JSON output
+include the expected and observed target/fence OIDs and distinguish rebuild,
+pending contention, stale-owner rejection, and successful landing.
+
 If a legacy task branch committed known Beads runtime/export files
 (`.beads/issues.jsonl`, `.beads/interactions.jsonl`, `.beads/events.jsonl`,
 and other allowlisted Dolt/backup/lock paths), Hub strips only those paths

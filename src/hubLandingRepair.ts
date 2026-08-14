@@ -241,7 +241,7 @@ export const recordHubLandingRepairAttempt = (input: {
 };
 
 const TRANSIENT_ERROR_PATTERN =
-  /index\.lock|\/.*?\.lock\b|unable to create.*lock|cannot lock ref|resource temporarily unavailable|eagain|ebusy|enospc|input\/output error|\beio\b|etxtbsy|emfile|enfile/i;
+  /index\.lock|\/.*?\.lock\b|unable to create.*lock|cannot lock ref|resource temporarily unavailable|eagain|ebusy|enospc|input\/output error|\beio\b|etxtbsy|emfile|enfile|publish target drifted|cas failed|pending contention|stale hub landing owner|landing lease/i;
 
 const TRANSIENT_NODE_CODES = new Set([
   "EAGAIN",
@@ -257,6 +257,13 @@ const TRANSIENT_NODE_CODES = new Set([
 export const isTransientHubLandingError = (error: unknown): boolean => {
   if (!error) {
     return false;
+  }
+  if (
+    typeof error === "object" &&
+    "name" in error &&
+    error.name === "HubLandingPendingError"
+  ) {
+    return true;
   }
   if (typeof error === "object") {
     const record = error as Record<string, unknown>;

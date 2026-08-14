@@ -2739,4 +2739,100 @@ describe("Hub batch merge independent landing and bounded repair", () => {
     expect(finalState[0]?.labels).toContain("waiting-for-merge");
     expect(finalState[0]?.status).not.toBe("blocked");
   });
+
+  it("keeps lease contention pending and emits target/fence OIDs", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-merge-lease-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const batchId = "batch-lease";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-lease",
+        title: "Lease task",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch: "branch-lease",
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "archloop", "hub"),
+    );
+    const expectedTargetOid = "a".repeat(40);
+    const observedTargetOid = "b".repeat(40);
+    const expectedFenceOid = "c".repeat(40);
+    const observedFenceOid = "d".repeat(40);
+    const merger: HubFlowMerger = async () => ({
+      outcome: "success",
+      integration: {
+        cwd: repoDir,
+        transactionId: "ltx-bd-lease-aaaaaaaaaaaaaaaa",
+        sourceOid: expectedTargetOid,
+        baseOid: expectedTargetOid,
+        candidateOid: observedTargetOid,
+        bindVerification: async () => undefined,
+        landWithLease: async () =>
+          ({
+            kind: "pending_contention",
+            candidate: {
+              transactionId: "ltx-bd-lease-aaaaaaaaaaaaaaaa",
+            } as never,
+            message:
+              "Hub landing lease is held by a live owner. Transient contention remains pending and does not require a recovery command.",
+            expectedTargetOid,
+            observedTargetOid,
+            expectedFenceOid,
+            observedFenceOid,
+          }) as never,
+        finalize: async () => undefined,
+        cleanup: async () => undefined,
+      },
+    });
+
+    const result = await runHubBatchMerge({
+      flowId: "no-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger,
+      verifier: successVerifier,
+      branchInspector: branchReadyInspector,
+      worktreeInspector: cleanWorktreeInspector,
+    });
+
+    expect(result.results[0]).toMatchObject({
+      taskId: "bd-lease",
+      outcome: "pending",
+      hubStatus: "waiting_for_merge",
+    });
+    const events = await readJsonl(
+      join(context.runDir, "events", "task.jsonl"),
+    );
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "target_landing_pending",
+          reason: "pending_contention",
+          expectedTargetOid,
+          observedTargetOid,
+          expectedFenceOid,
+          observedFenceOid,
+        }),
+      ]),
+    );
+    expect(JSON.stringify(events)).not.toMatch(/tasks recover/);
+  });
 });

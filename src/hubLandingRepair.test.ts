@@ -111,6 +111,19 @@ describe("Hub landing repair budget", () => {
         message: "fatal: refusing to merge unrelated histories",
       }),
     ).toBe(false);
+    expect(
+      isTransientHubLandingError({
+        name: "HubLandingPendingError",
+        kind: "pending_contention",
+        message: "Hub landing lease is held by a live owner",
+      }),
+    ).toBe(true);
+    expect(
+      isTransientHubLandingError({
+        message:
+          "Hub publish target drifted before landing ltx-1: expected aaa, found bbb.",
+      }),
+    ).toBe(true);
   });
 });
 
