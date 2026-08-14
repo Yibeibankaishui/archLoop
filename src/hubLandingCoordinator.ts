@@ -62,17 +62,20 @@ export interface HubLandingLeaseProbe {
   readonly readBootIdentity?: () => string | undefined;
 }
 
+export interface HubLandingOidEvidence {
+  readonly expectedTargetOid: string;
+  readonly observedTargetOid: string;
+  readonly expectedFenceOid: string;
+  readonly observedFenceOid: string;
+}
+
 export type HubLandingLeaseAcquireResult =
   | { readonly status: "acquired"; readonly lease: HubLandingLease }
-  | {
+  | (HubLandingOidEvidence & {
       readonly status: "pending_contention";
       readonly owner: HubLandingLease;
-      readonly expectedTargetOid: string;
-      readonly observedTargetOid: string;
-      readonly expectedFenceOid: string;
-      readonly observedFenceOid: string;
       readonly message: string;
-    };
+    });
 
 const gitText = async (
   cwd: string,
@@ -263,6 +266,17 @@ const isSameProcessOwner = (
   lease.processStartIdentity === identity.processStartIdentity &&
   lease.bootIdentity === identity.bootIdentity;
 
+const pendingLeaseContention = (
+  owner: HubLandingLease,
+  oids: HubLandingOidEvidence,
+  message: string,
+): HubLandingLeaseAcquireResult => ({
+  status: "pending_contention",
+  owner,
+  message,
+  ...oids,
+});
+
 export const acquireHubLandingLease = async (input: {
   readonly repoRoot: string;
   readonly hubProjectDir: string;
@@ -285,15 +299,16 @@ export const acquireHubLandingLease = async (input: {
     isLiveHubLandingLeaseOwner(existing, input.probe) &&
     !isSameProcessOwner(existing, identity)
   ) {
-    return {
-      status: "pending_contention",
-      owner: existing,
-      expectedTargetOid: existing.expectedTargetOid,
-      observedTargetOid,
-      expectedFenceOid: existing.expectedFenceOid,
-      observedFenceOid,
-      message: `Hub landing lease is held by a live owner (pid ${existing.pid}, nonce ${existing.ownerNonce}). Transient contention remains pending and does not require a recovery command.`,
-    };
+    return pendingLeaseContention(
+      existing,
+      {
+        expectedTargetOid: existing.expectedTargetOid,
+        observedTargetOid,
+        expectedFenceOid: existing.expectedFenceOid,
+        observedFenceOid,
+      },
+      `Hub landing lease is held by a live owner (pid ${existing.pid}, nonce ${existing.ownerNonce}). Transient contention remains pending and does not require a recovery command.`,
+    );
   }
 
   const acquiredAt = probe.now().toISOString();
@@ -312,16 +327,16 @@ export const acquireHubLandingLease = async (input: {
   writeAtomicJson(resolveHubLandingLeasePath(input.hubProjectDir), lease);
   const confirmed = readHubLandingLease(input.hubProjectDir);
   if (!confirmed || confirmed.ownerNonce !== lease.ownerNonce) {
-    const owner = confirmed ?? lease;
-    return {
-      status: "pending_contention",
-      owner,
-      expectedTargetOid: lease.expectedTargetOid,
-      observedTargetOid,
-      expectedFenceOid: lease.expectedFenceOid,
-      observedFenceOid,
-      message: `Hub landing lease contention prevented exclusive ownership. Automatic retry will continue without a recovery command.`,
-    };
+    return pendingLeaseContention(
+      confirmed ?? lease,
+      {
+        expectedTargetOid: lease.expectedTargetOid,
+        observedTargetOid,
+        expectedFenceOid: lease.expectedFenceOid,
+        observedFenceOid,
+      },
+      `Hub landing lease contention prevented exclusive ownership. Automatic retry will continue without a recovery command.`,
+    );
   }
   return { status: "acquired", lease: confirmed };
 };
@@ -339,13 +354,6 @@ export const releaseHubLandingLease = (
   }
   rmSync(resolveHubLandingLeasePath(hubProjectDir), { force: true });
 };
-
-export interface HubLandingOidEvidence {
-  readonly expectedTargetOid: string;
-  readonly observedTargetOid: string;
-  readonly expectedFenceOid: string;
-  readonly observedFenceOid: string;
-}
 
 export type HubLandingCoordinatorResult = HubLandingOidEvidence &
   (
@@ -397,6 +405,59 @@ const maybeCrash = (
   }
 };
 
+const toLandedAttempt = (
+  candidate: HubLandingCandidate,
+  commit: HubLandingCommitResult,
+  expectedFenceOid?: string,
+): HubLandingCoordinatorResult => ({
+  kind: "landed",
+  commit,
+  candidate,
+  expectedTargetOid: candidate.baseOid,
+  observedTargetOid: commit.publishTargetOid,
+  expectedFenceOid: expectedFenceOid ?? commit.fenceOid,
+  observedFenceOid: commit.fenceOid,
+});
+
+const toPendingAttempt = (
+  candidate: HubLandingCandidate,
+  acquired: Extract<HubLandingLeaseAcquireResult, { status: "pending_contention" }>,
+): HubLandingCoordinatorResult => ({
+  kind: "pending_contention",
+  candidate,
+  message: acquired.message,
+  expectedTargetOid: acquired.expectedTargetOid,
+  observedTargetOid: acquired.observedTargetOid,
+  expectedFenceOid: acquired.expectedFenceOid,
+  observedFenceOid: acquired.observedFenceOid,
+});
+
+const commitCandidateWithLease = async (input: {
+  readonly repoRoot: string;
+  readonly hubProjectDir: string;
+  readonly candidate: HubLandingCandidate;
+  readonly verifierFingerprint: string;
+  readonly now?: Date;
+  readonly faultInjection?: HubLandingFaultInjection;
+  readonly lease?: HubLandingLease;
+}): Promise<HubLandingCoordinatorResult> => {
+  const commit = await commitHubLandingTarget({
+    repoRoot: input.repoRoot,
+    hubProjectDir: input.hubProjectDir,
+    candidate: input.candidate,
+    verifierFingerprint: input.verifierFingerprint,
+    now: input.now,
+    faultInjection: input.faultInjection,
+    expectedFenceOid: input.lease?.expectedFenceOid,
+    ownerNonce: input.lease?.ownerNonce,
+  });
+  return toLandedAttempt(
+    input.candidate,
+    commit,
+    input.lease?.expectedFenceOid,
+  );
+};
+
 export const landHubCandidateWithLease = async (input: {
   readonly repoRoot: string;
   readonly hubProjectDir: string;
@@ -406,39 +467,22 @@ export const landHubCandidateWithLease = async (input: {
   readonly probe?: HubLandingLeaseProbe;
   readonly lease?: HubLandingLease;
   readonly faultInjection?: HubLandingFaultInjection;
-}): Promise<
-  | HubLandingCoordinatorResult
-  | (HubLandingOidEvidence & {
-      readonly kind: "target_drift";
-      readonly candidate: HubLandingCandidate;
-      readonly message: string;
-    })
-> => {
+}): Promise<HubLandingAttemptResult> => {
   const { candidate } = input;
   const existingReceipt = readHubLandingReceipt(
     input.repoRoot,
     candidate.transactionId,
   );
   if (existingReceipt?.receipt.candidateOid === candidate.candidateOid) {
-    const commit = await commitHubLandingTarget({
+    return commitCandidateWithLease({
       repoRoot: input.repoRoot,
       hubProjectDir: input.hubProjectDir,
       candidate,
       verifierFingerprint: input.verifierFingerprint,
       now: input.now,
       faultInjection: input.faultInjection,
-      expectedFenceOid: input.lease?.expectedFenceOid,
-      ownerNonce: input.lease?.ownerNonce,
+      lease: input.lease,
     });
-    return {
-      kind: "landed",
-      commit,
-      candidate,
-      expectedTargetOid: candidate.baseOid,
-      observedTargetOid: commit.publishTargetOid,
-      expectedFenceOid: input.lease?.expectedFenceOid ?? commit.fenceOid,
-      observedFenceOid: commit.fenceOid,
-    };
   }
   maybeCrash(input.faultInjection, "landing_lease", "before");
   const acquired = input.lease
@@ -452,15 +496,7 @@ export const landHubCandidateWithLease = async (input: {
   try {
     maybeCrash(input.faultInjection, "landing_lease", "after");
     if (acquired.status === "pending_contention") {
-      return {
-        kind: "pending_contention",
-        candidate,
-        message: acquired.message,
-        expectedTargetOid: acquired.expectedTargetOid,
-        observedTargetOid: acquired.observedTargetOid,
-        expectedFenceOid: acquired.expectedFenceOid,
-        observedFenceOid: acquired.observedFenceOid,
-      };
+      return toPendingAttempt(candidate, acquired);
     }
 
     const currentLease = readHubLandingLease(input.hubProjectDir);
@@ -468,18 +504,16 @@ export const landHubCandidateWithLease = async (input: {
       input.lease &&
       currentLease?.ownerNonce !== input.lease.ownerNonce
     ) {
-      const observedTargetOid = currentLease?.expectedTargetOid ??
-        input.lease.expectedTargetOid;
-      const observedFenceOid =
-        currentLease?.expectedFenceOid ?? input.lease.expectedFenceOid;
       return {
         kind: "stale_owner_rejected",
         candidate,
         message: `Stale Hub landing owner rejected for ${candidate.transactionId}: lease nonce ${input.lease.ownerNonce} is no longer the owner.`,
         expectedTargetOid: input.lease.expectedTargetOid,
-        observedTargetOid,
+        observedTargetOid:
+          currentLease?.expectedTargetOid ?? input.lease.expectedTargetOid,
         expectedFenceOid: input.lease.expectedFenceOid,
-        observedFenceOid,
+        observedFenceOid:
+          currentLease?.expectedFenceOid ?? input.lease.expectedFenceOid,
       };
     }
 
@@ -489,55 +523,37 @@ export const landHubCandidateWithLease = async (input: {
       expectedFenceOid: acquired.lease.expectedFenceOid,
       observedFenceOid: acquired.lease.expectedFenceOid,
     };
+    if (acquired.lease.expectedTargetOid !== candidate.baseOid) {
+      return {
+        kind: "target_drift",
+        candidate,
+        message: `Hub publish target drifted before landing ${candidate.transactionId}: expected ${candidate.baseOid}, found ${acquired.lease.expectedTargetOid}.`,
+        expectedTargetOid: candidate.baseOid,
+        observedTargetOid: acquired.lease.expectedTargetOid,
+        expectedFenceOid: acquired.lease.expectedFenceOid,
+        observedFenceOid: acquired.lease.expectedFenceOid,
+      };
+    }
     try {
-      if (acquired.lease.expectedTargetOid !== candidate.baseOid) {
-        throw new HubLandingPendingError(
-          "target_drift",
-          `Hub publish target drifted before landing ${candidate.transactionId}: expected ${candidate.baseOid}, found ${acquired.lease.expectedTargetOid}.`,
-          candidate.baseOid,
-          acquired.lease.expectedTargetOid,
-          acquired.lease.expectedFenceOid,
-          acquired.lease.expectedFenceOid,
-        );
-      }
-      const commit = await commitHubLandingTarget({
+      return await commitCandidateWithLease({
         repoRoot: input.repoRoot,
         hubProjectDir: input.hubProjectDir,
         candidate,
         verifierFingerprint: input.verifierFingerprint,
         now: input.now,
         faultInjection: input.faultInjection,
-        expectedFenceOid: acquired.lease.expectedFenceOid,
-        ownerNonce: acquired.lease.ownerNonce,
+        lease: acquired.lease,
       });
-      return {
-        kind: "landed",
-        commit,
-        candidate,
-        expectedTargetOid: candidate.baseOid,
-        observedTargetOid: commit.publishTargetOid,
-        expectedFenceOid: acquired.lease.expectedFenceOid,
-        observedFenceOid: commit.fenceOid,
-      };
     } catch (error) {
-      if (error instanceof HubLandingPendingError) {
-        const oids = oidsFromPending(error, fallbackOids);
-        if (error.kind === "target_drift") {
-          return {
-            kind: "target_drift",
-            candidate,
-            message: error.message,
-            ...oids,
-          };
-        }
-        return {
-          kind: error.kind,
-          candidate,
-          message: error.message,
-          ...oids,
-        };
+      if (!(error instanceof HubLandingPendingError)) {
+        throw error;
       }
-      throw error;
+      return {
+        kind: error.kind,
+        candidate,
+        message: error.message,
+        ...oidsFromPending(error, fallbackOids),
+      };
     }
   } finally {
     if (acquired.status === "acquired") {

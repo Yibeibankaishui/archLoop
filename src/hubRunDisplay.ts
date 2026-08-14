@@ -664,6 +664,13 @@ export const reduceHubRunDisplayState = (
 const textField = (name: string, value: string): string =>
   `${name}=${JSON.stringify(value)}`;
 
+const optionalTextFields = (
+  entries: ReadonlyArray<readonly [string, string | undefined]>,
+): string[] =>
+  entries.flatMap(([name, value]) =>
+    value ? [textField(name, value)] : [],
+  );
+
 const numberField = (name: string, value: number): string => `${name}=${value}`;
 
 export const formatPlainHubRunOutcome = (
@@ -778,19 +785,13 @@ export const formatPlainHubRunEvent = (
       textField("batch_id", event.batchId),
       textField("task_id", event.taskId),
       textField("stage", resolveTaskStage(event)),
-      ...(event.expectedTargetOid
-        ? [textField("expected_target_oid", event.expectedTargetOid)]
-        : []),
-      ...(event.observedTargetOid
-        ? [textField("observed_target_oid", event.observedTargetOid)]
-        : []),
-      ...(event.expectedFenceOid
-        ? [textField("expected_fence_oid", event.expectedFenceOid)]
-        : []),
-      ...(event.observedFenceOid
-        ? [textField("observed_fence_oid", event.observedFenceOid)]
-        : []),
-      ...(event.reason ? [textField("reason", event.reason)] : []),
+      ...optionalTextFields([
+        ["expected_target_oid", event.expectedTargetOid],
+        ["observed_target_oid", event.observedTargetOid],
+        ["expected_fence_oid", event.expectedFenceOid],
+        ["observed_fence_oid", event.observedFenceOid],
+        ["reason", event.reason],
+      ]),
     ].join(" ");
   }
 

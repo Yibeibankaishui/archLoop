@@ -145,18 +145,30 @@ export type HubLandingPendingKind =
   | "target_drift"
   | "stale_owner_rejected";
 
+export interface HubLandingOidFields {
+  readonly expectedTargetOid?: string;
+  readonly observedTargetOid?: string;
+  readonly expectedFenceOid?: string;
+  readonly observedFenceOid?: string;
+}
+
 export class HubLandingPendingError extends Error {
   readonly name = "HubLandingPendingError";
+  readonly expectedTargetOid?: string;
+  readonly observedTargetOid?: string;
+  readonly expectedFenceOid?: string;
+  readonly observedFenceOid?: string;
 
   constructor(
     readonly kind: HubLandingPendingKind,
     message: string,
-    readonly expectedTargetOid?: string,
-    readonly observedTargetOid?: string,
-    readonly expectedFenceOid?: string,
-    readonly observedFenceOid?: string,
+    oids: HubLandingOidFields = {},
   ) {
     super(message);
+    this.expectedTargetOid = oids.expectedTargetOid;
+    this.observedTargetOid = oids.observedTargetOid;
+    this.expectedFenceOid = oids.expectedFenceOid;
+    this.observedFenceOid = oids.observedFenceOid;
   }
 }
 
@@ -1191,21 +1203,93 @@ export const invalidateHubLandingCandidate = (input: {
 const pendingError = (
   kind: HubLandingPendingKind,
   message: string,
-  oids: {
-    readonly expectedTargetOid?: string;
-    readonly observedTargetOid?: string;
-    readonly expectedFenceOid?: string;
-    readonly observedFenceOid?: string;
-  },
+  oids: HubLandingOidFields,
 ): HubLandingPendingError =>
-  new HubLandingPendingError(
-    kind,
-    message,
-    oids.expectedTargetOid,
-    oids.observedTargetOid,
-    oids.expectedFenceOid,
-    oids.observedFenceOid,
+  new HubLandingPendingError(kind, message, oids);
+
+type ObservedLandingOids = {
+  readonly expectedTargetOid: string;
+  readonly observedTargetOid: string;
+  readonly expectedFenceOid: string;
+  readonly observedFenceOid: string;
+};
+
+const toTargetLandedCommit = (input: {
+  readonly hubProjectDir: string;
+  readonly candidate: HubLandingCandidate;
+  readonly verifierFingerprint: string;
+  readonly fenceOid: string;
+  readonly receiptRef: string;
+  readonly receiptOid: string;
+  readonly createdAt: string;
+  readonly publishTargetOid: string;
+}): HubLandingCommitResult => {
+  const state = recordTargetLandedCheckpoint({
+    hubProjectDir: input.hubProjectDir,
+    candidate: input.candidate,
+    verifierFingerprint: input.verifierFingerprint,
+    fenceOid: input.fenceOid,
+    receiptRef: input.receiptRef,
+    receiptOid: input.receiptOid,
+    createdAt: input.createdAt,
+  });
+  return {
+    transactionId: input.candidate.transactionId,
+    candidateOid: input.candidate.candidateOid,
+    publishTargetOid: input.publishTargetOid,
+    fenceOid: input.fenceOid,
+    receiptOid: input.receiptOid,
+    receiptRef: input.receiptRef,
+    state,
+  };
+};
+
+const throwIfPinnedLandingOidsMismatch = (
+  candidate: HubLandingCandidate,
+  oids: ObservedLandingOids,
+): void => {
+  if (oids.observedTargetOid !== oids.expectedTargetOid) {
+    throw pendingError(
+      "target_drift",
+      `Hub publish target drifted before landing ${candidate.transactionId}: expected ${oids.expectedTargetOid}, found ${oids.observedTargetOid}.`,
+      oids,
+    );
+  }
+  if (oids.observedFenceOid !== oids.expectedFenceOid) {
+    throw pendingError(
+      "stale_owner_rejected",
+      `Stale Hub landing owner rejected for ${candidate.transactionId}: expected fence ${oids.expectedFenceOid}, found ${oids.observedFenceOid}.`,
+      oids,
+    );
+  }
+};
+
+const throwFromFailedLandingCas = (
+  candidate: HubLandingCandidate,
+  error: unknown,
+  oids: ObservedLandingOids,
+): never => {
+  const casMessage = error instanceof Error ? error.message : String(error);
+  if (oids.observedFenceOid !== oids.expectedFenceOid) {
+    throw pendingError(
+      "stale_owner_rejected",
+      `Stale Hub landing owner rejected for ${candidate.transactionId}: expected fence ${oids.expectedFenceOid}, found ${oids.observedFenceOid}.`,
+      oids,
+    );
+  }
+  if (oids.observedTargetOid !== oids.expectedTargetOid) {
+    throw pendingError(
+      "target_drift",
+      `Hub publish target drifted before landing ${candidate.transactionId}: expected ${oids.expectedTargetOid}, found ${oids.observedTargetOid}.`,
+      oids,
+    );
+  }
+  throw pendingError(
+    "pending_contention",
+    `Fenced Hub landing CAS failed for ${candidate.transactionId}: ${casMessage}`,
+    oids,
   );
+};
 
 export const commitHubLandingTarget = async (input: {
   readonly repoRoot: string;
@@ -1257,7 +1341,7 @@ export const commitHubLandingTarget = async (input: {
         `${HUB_LANDING_INTEGRITY_INCIDENT}: landing receipt exists for ${candidate.transactionId} but the Hub publish target no longer contains candidate ${candidate.candidateOid}.`,
       );
     }
-    const state = recordTargetLandedCheckpoint({
+    return toTargetLandedCommit({
       hubProjectDir: input.hubProjectDir,
       candidate,
       verifierFingerprint: input.verifierFingerprint,
@@ -1265,16 +1349,8 @@ export const commitHubLandingTarget = async (input: {
       receiptRef: resolveReceiptRef(candidate.transactionId),
       receiptOid: existingReceipt.oid,
       createdAt: existingReceipt.receipt.landedAt,
-    });
-    return {
-      transactionId: candidate.transactionId,
-      candidateOid: candidate.candidateOid,
       publishTargetOid,
-      fenceOid,
-      receiptOid: existingReceipt.oid,
-      receiptRef: resolveReceiptRef(candidate.transactionId),
-      state,
-    };
+    });
   }
 
   const observedTargetOid = await gitText(input.repoRoot, [
@@ -1285,28 +1361,14 @@ export const commitHubLandingTarget = async (input: {
     "rev-parse",
     candidate.policy.fenceRef,
   ]);
-  const expectedTargetOid = candidate.baseOid;
-  const expectedFenceOid = input.expectedFenceOid ?? observedFenceOid;
-  const oidFields = {
-    expectedTargetOid,
+  const oidFields: ObservedLandingOids = {
+    expectedTargetOid: candidate.baseOid,
     observedTargetOid,
-    expectedFenceOid,
+    expectedFenceOid: input.expectedFenceOid ?? observedFenceOid,
     observedFenceOid,
   };
-  if (observedTargetOid !== expectedTargetOid) {
-    throw pendingError(
-      "target_drift",
-      `Hub publish target drifted before landing ${candidate.transactionId}: expected ${expectedTargetOid}, found ${observedTargetOid}.`,
-      oidFields,
-    );
-  }
-  if (observedFenceOid !== expectedFenceOid) {
-    throw pendingError(
-      "stale_owner_rejected",
-      `Stale Hub landing owner rejected for ${candidate.transactionId}: expected fence ${expectedFenceOid}, found ${observedFenceOid}.`,
-      oidFields,
-    );
-  }
+  throwIfPinnedLandingOidsMismatch(candidate, oidFields);
+  const { expectedTargetOid, expectedFenceOid } = oidFields;
 
   const now = (input.now ?? new Date()).toISOString();
   const receipt: HubLandingReceipt = {
@@ -1359,7 +1421,7 @@ export const commitHubLandingTarget = async (input: {
           "rev-parse",
           candidate.policy.fenceRef,
         ])) ?? racedReceipt.oid;
-      const state = recordTargetLandedCheckpoint({
+      return toTargetLandedCommit({
         hubProjectDir: input.hubProjectDir,
         candidate,
         verifierFingerprint: input.verifierFingerprint,
@@ -1367,58 +1429,27 @@ export const commitHubLandingTarget = async (input: {
         receiptRef,
         receiptOid: racedReceipt.oid,
         createdAt: racedReceipt.receipt.landedAt,
-      });
-      return {
-        transactionId: candidate.transactionId,
-        candidateOid: candidate.candidateOid,
         publishTargetOid,
-        fenceOid: fenceAfter,
-        receiptOid: racedReceipt.oid,
-        receiptRef,
-        state,
-      };
+      });
     }
-    const currentTarget =
-      (await tryGitText(input.repoRoot, [
-        "rev-parse",
-        candidate.policy.publishTargetRef,
-      ])) ?? observedTargetOid;
-    const currentFence =
-      (await tryGitText(input.repoRoot, [
-        "rev-parse",
-        candidate.policy.fenceRef,
-      ])) ?? observedFenceOid;
-    const casOids = {
+    throwFromFailedLandingCas(candidate, error, {
       expectedTargetOid,
-      observedTargetOid: currentTarget,
+      observedTargetOid:
+        (await tryGitText(input.repoRoot, [
+          "rev-parse",
+          candidate.policy.publishTargetRef,
+        ])) ?? observedTargetOid,
       expectedFenceOid,
-      observedFenceOid: currentFence,
-    };
-    const casMessage =
-      error instanceof Error ? error.message : String(error);
-    if (currentFence !== expectedFenceOid) {
-      throw pendingError(
-        "stale_owner_rejected",
-        `Stale Hub landing owner rejected for ${candidate.transactionId}: expected fence ${expectedFenceOid}, found ${currentFence}.`,
-        casOids,
-      );
-    }
-    if (currentTarget !== expectedTargetOid) {
-      throw pendingError(
-        "target_drift",
-        `Hub publish target drifted before landing ${candidate.transactionId}: expected ${expectedTargetOid}, found ${currentTarget}.`,
-        casOids,
-      );
-    }
-    throw pendingError(
-      "pending_contention",
-      `Fenced Hub landing CAS failed for ${candidate.transactionId}: ${casMessage}`,
-      casOids,
-    );
+      observedFenceOid:
+        (await tryGitText(input.repoRoot, [
+          "rev-parse",
+          candidate.policy.fenceRef,
+        ])) ?? observedFenceOid,
+    });
   }
   maybeCrash(input.faultInjection, "atomic_landing", "after");
 
-  const state = recordTargetLandedCheckpoint({
+  return toTargetLandedCommit({
     hubProjectDir: input.hubProjectDir,
     candidate,
     verifierFingerprint: input.verifierFingerprint,
@@ -1426,17 +1457,8 @@ export const commitHubLandingTarget = async (input: {
     receiptRef,
     receiptOid,
     createdAt: now,
-  });
-
-  return {
-    transactionId: candidate.transactionId,
-    candidateOid: candidate.candidateOid,
     publishTargetOid: candidate.candidateOid,
-    fenceOid,
-    receiptOid,
-    receiptRef,
-    state,
-  };
+  });
 };
 
 export const cleanupHubLandingCandidate = async (input: {
