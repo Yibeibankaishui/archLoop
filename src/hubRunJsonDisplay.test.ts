@@ -148,6 +148,41 @@ describe("JSONL Hub run lifecycle output", () => {
     });
   });
 
+  it("carries expected and observed target/fence OIDs for rebuild and contention", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+    });
+    const event: HubRunEvent = {
+      type: "target_landing_rebuild",
+      eventId: "run-land:13",
+      sequence: 13,
+      runId: "run-land",
+      batchId: "batch-land",
+      taskId: "bd-land",
+      branch: "archloop/bd-land",
+      createdAt: "2026-08-14T16:00:00.000Z",
+      status: "merging",
+      reason: "target_drift",
+      expectedTargetOid: "a".repeat(40),
+      observedTargetOid: "b".repeat(40),
+      expectedFenceOid: "c".repeat(40),
+      observedFenceOid: "d".repeat(40),
+    };
+
+    expect(parseRecord(renderer.event(event)!)).toMatchObject({
+      type: "target_landing_rebuild",
+      stage: "Target landing rebuild",
+      data: {
+        reason: "target_drift",
+        expectedTargetOid: "a".repeat(40),
+        observedTargetOid: "b".repeat(40),
+        expectedFenceOid: "c".repeat(40),
+        observedFenceOid: "d".repeat(40),
+      },
+    });
+  });
+
   it("suppresses duplicate and stale source events before assigning output order", () => {
     const renderer = createHubRunJsonRenderer({
       hubProjectName: "alpha",

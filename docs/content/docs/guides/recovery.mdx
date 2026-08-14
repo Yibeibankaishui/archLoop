@@ -79,8 +79,11 @@ state without changing it. Do not run `archloop tasks recover` for this.
 A semantic merge conflict or verification failure is repaired automatically up
 to two times. If that budget is exhausted, only that task becomes `blocked`
 with `merge_conflict_unresolved` or `verification_failed`. Independent siblings
-in the same batch still land. Transient Git lock and I/O errors stay pending
-and retry on the next run.
+in the same batch still land. Transient Git lock, landing-lease, and I/O errors
+stay pending and retry on the next run. If the Hub publish target moves before
+landing, Hub invalidates that candidate, rebuilds on the new target, and
+re-runs full verification. A live landing-lease owner is not displaced just
+because a TTL elapsed.
 
 ## Active worktree lease
 

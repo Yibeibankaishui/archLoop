@@ -193,6 +193,9 @@ export interface HubTaskEvent {
     | "candidate_verification_passed"
     | "verification_failed"
     | "target_landing_succeeded"
+    | "target_landing_rebuild"
+    | "target_landing_pending"
+    | "target_landing_stale_owner_rejected"
     | "task_close_started"
     | "task_closed"
     | "task_close_succeeded"
@@ -226,6 +229,11 @@ export interface HubTaskEvent {
   readonly baseOid?: string;
   readonly candidateOid?: string;
   readonly publishTargetOid?: string;
+  readonly expectedTargetOid?: string;
+  readonly observedTargetOid?: string;
+  readonly expectedFenceOid?: string;
+  readonly observedFenceOid?: string;
+  readonly fenceOid?: string;
   readonly verifierFingerprint?: string;
   readonly filteredBeadsRuntimePaths?: readonly string[];
 }

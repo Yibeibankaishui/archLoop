@@ -219,6 +219,11 @@ npx archloop tasks cleanup --dry-run
   on target drift or process restart. Exhaustion blocks only that task as
   `merge_conflict_unresolved` or `verification_failed`. Transient lock/I/O
   errors stay pending. Unverified or stale candidates cannot land.
+- Concurrent `archloop run` processes share a landing lease (owner nonce,
+  process start identity, boot identity). A live owner is not stolen when a
+  TTL elapses. Git fence, target, and receipt OIDs advance atomically. Target
+  drift rebuilds and fully reverifies the queue head before another CAS.
+  Contention and stale-owner rejection stay pending, not task failures.
 - Interrupted landing transactions resume automatically on the next
   `archloop run` from candidate refs, verification artifacts, atomic receipts,
   Beads close metadata, and resource absence. Do not run `tasks recover` for

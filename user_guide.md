@@ -212,7 +212,9 @@ runtime/export 文件（例如 `.beads/issues.jsonl`），Hub 只会从 candidat
 落地事务：一个任务被拦住时，独立兄弟任务继续落地，依赖未落地前置任务的兄弟
 会等待。Git 冲突和验证失败各最多自动修复两次；耗尽后只把该任务标为
 `blocked`（`merge_conflict_unresolved` 或 `verification_failed`），批次在有
-成功也有失败时报告 `partial_failed`。
+成功也有失败时报告 `partial_failed`。同一项目或同一任务的两次运行共用 landing
+lease 和 fenced CAS；publish target 在落地前变化时会作废旧 candidate、在新
+目标上重建并重新验证。lease / lock / CAS 争用保持 pending，不会变成任务失败。
 
 进程中断后再次执行同一个 `archloop run`，启动阶段会根据已经完成的实现或评审
 事件把任务恢复到下一个安全阶段，并保留已有分支和 worktree 内容。未完成的落地
@@ -316,3 +318,4 @@ API 参数、返回值和生命周期说明见
 | 2026-08-14 | 中断的落地事务从物理证据自动续跑，doctor 保持只读           |
 | 2026-08-14 | 独立兄弟任务分别落地；有界 Agent 修复隔离坏任务             |
 | 2026-08-14 | 旧任务分支上的 allowlist Beads runtime 文件会从 candidate 剥离 |
+| 2026-08-14 | 并发落地用 lease 与 fence CAS 互斥；target drift 会重建并重验 |

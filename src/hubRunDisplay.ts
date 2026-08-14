@@ -423,6 +423,12 @@ const resolveTaskStage = (event: Extract<HubRunEvent, { taskId: string }>) => {
     case "target_landing_succeeded":
     case "task_close_started":
       return "Closing";
+    case "target_landing_rebuild":
+      return "Rebuilding landing candidate";
+    case "target_landing_pending":
+      return "Landing pending";
+    case "target_landing_stale_owner_rejected":
+      return "Stale landing owner rejected";
     case "task_close_succeeded":
     case "task_closed":
       return "Completed";
@@ -772,6 +778,19 @@ export const formatPlainHubRunEvent = (
       textField("batch_id", event.batchId),
       textField("task_id", event.taskId),
       textField("stage", resolveTaskStage(event)),
+      ...(event.expectedTargetOid
+        ? [textField("expected_target_oid", event.expectedTargetOid)]
+        : []),
+      ...(event.observedTargetOid
+        ? [textField("observed_target_oid", event.observedTargetOid)]
+        : []),
+      ...(event.expectedFenceOid
+        ? [textField("expected_fence_oid", event.expectedFenceOid)]
+        : []),
+      ...(event.observedFenceOid
+        ? [textField("observed_fence_oid", event.observedFenceOid)]
+        : []),
+      ...(event.reason ? [textField("reason", event.reason)] : []),
     ].join(" ");
   }
 
