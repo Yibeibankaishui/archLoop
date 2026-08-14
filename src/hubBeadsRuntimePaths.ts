@@ -23,14 +23,16 @@ export const HUB_BEADS_RUNTIME_EXPORT_DIRECTORIES = [
   ".beads/export-state",
 ] as const;
 
+const HUB_BEADS_RUNTIME_EXPORT_FILE_SET: ReadonlySet<string> = new Set(
+  HUB_BEADS_RUNTIME_EXPORT_FILES,
+);
+
 export const normalizeHubGitPath = (path: string): string =>
   path.replace(/\\/g, "/");
 
 export const isAllowlistedBeadsRuntimePath = (path: string): boolean => {
   const normalized = normalizeHubGitPath(path);
-  if (
-    (HUB_BEADS_RUNTIME_EXPORT_FILES as readonly string[]).includes(normalized)
-  ) {
+  if (HUB_BEADS_RUNTIME_EXPORT_FILE_SET.has(normalized)) {
     return true;
   }
   return HUB_BEADS_RUNTIME_EXPORT_DIRECTORIES.some(

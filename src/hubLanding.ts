@@ -271,6 +271,23 @@ const requiredStrings = <K extends string>(
   return result;
 };
 
+const readOptionalNonEmptyStrings = (
+  value: unknown,
+): readonly string[] | undefined => {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const items = value.filter(
+    (item): item is string => typeof item === "string" && item.trim().length > 0,
+  );
+  return items.length > 0 ? items : undefined;
+};
+
+const optionalNonEmptyPaths = (
+  paths: readonly string[] | undefined,
+): readonly string[] | undefined =>
+  paths !== undefined && paths.length > 0 ? paths : undefined;
+
 export const resolveHubLandingCandidateRef = (transactionId: string): string =>
   `refs/archloop/candidates/${transactionId}`;
 
@@ -469,16 +486,13 @@ export const readHubLandingCandidateManifest = (
   if (!required) {
     return undefined;
   }
-  const filtered = Array.isArray(value.filteredBeadsRuntimePaths)
-    ? value.filteredBeadsRuntimePaths.filter(
-        (item): item is string =>
-          typeof item === "string" && item.trim().length > 0,
-      )
-    : undefined;
+  const filteredBeadsRuntimePaths = readOptionalNonEmptyStrings(
+    value.filteredBeadsRuntimePaths,
+  );
   return {
     ...required,
-    ...(filtered && filtered.length > 0
-      ? { filteredBeadsRuntimePaths: filtered }
+    ...(filteredBeadsRuntimePaths
+      ? { filteredBeadsRuntimePaths }
       : {}),
   };
 };
@@ -637,9 +651,10 @@ const writeCandidateManifestAndRef = async (
       candidateOid: input.candidateOid,
       candidateRef: input.candidateRef,
       createdAt: input.createdAt,
-      ...(input.filteredBeadsRuntimePaths &&
-      input.filteredBeadsRuntimePaths.length > 0
-        ? { filteredBeadsRuntimePaths: input.filteredBeadsRuntimePaths }
+      ...(optionalNonEmptyPaths(input.filteredBeadsRuntimePaths)
+        ? {
+            filteredBeadsRuntimePaths: input.filteredBeadsRuntimePaths,
+          }
         : {}),
     } satisfies HubLandingCandidateManifest,
   );
@@ -664,7 +679,31 @@ const recordCandidateCreatedCheckpoint = (
     filteredBeadsRuntimePaths: input.filteredBeadsRuntimePaths,
   });
 
-const stripAllowlistedBeadsRuntimeFromCandidate = async (input: {
+const restoreAllowlistedPathFromBase = async (input: {
+  readonly worktreeDir: string;
+  readonly baseOid: string;
+  readonly path: string;
+}): Promise<void> => {
+  const existsOnBase = await gitOk(input.worktreeDir, [
+    "cat-file",
+    "-e",
+    `${input.baseOid}:${input.path}`,
+  ]);
+  if (existsOnBase) {
+    await execFileAsync("git", ["checkout", input.baseOid, "--", input.path], {
+      cwd: input.worktreeDir,
+      env: gitEnv(),
+    });
+    return;
+  }
+  await execFileAsync(
+    "git",
+    ["rm", "-f", "--ignore-unmatch", "--", input.path],
+    { cwd: input.worktreeDir, env: gitEnv() },
+  );
+};
+
+const listAllowlistedBeadsRuntimeDiffPaths = async (input: {
   readonly worktreeDir: string;
   readonly baseOid: string;
 }): Promise<readonly string[]> => {
@@ -676,35 +715,32 @@ const stripAllowlistedBeadsRuntimeFromCandidate = async (input: {
     input.baseOid,
     "HEAD",
   ]);
-  const filtered = [
+  return [
     ...new Set(
       diff
         .split("\0")
-        .filter((path) => path.length > 0 && isAllowlistedBeadsRuntimePath(path)),
+        .filter(
+          (path) => path.length > 0 && isAllowlistedBeadsRuntimePath(path),
+        ),
     ),
   ].sort();
+};
+
+const stripAllowlistedBeadsRuntimeFromCandidate = async (input: {
+  readonly worktreeDir: string;
+  readonly baseOid: string;
+}): Promise<readonly string[]> => {
+  const filtered = await listAllowlistedBeadsRuntimeDiffPaths(input);
   if (filtered.length === 0) {
     return [];
   }
 
   for (const path of filtered) {
-    const existsOnBase = await gitOk(input.worktreeDir, [
-      "cat-file",
-      "-e",
-      `${input.baseOid}:${path}`,
-    ]);
-    if (existsOnBase) {
-      await execFileAsync("git", ["checkout", input.baseOid, "--", path], {
-        cwd: input.worktreeDir,
-        env: gitEnv(),
-      });
-    } else {
-      await execFileAsync(
-        "git",
-        ["rm", "-f", "--ignore-unmatch", "--", path],
-        { cwd: input.worktreeDir, env: gitEnv() },
-      );
-    }
+    await restoreAllowlistedPathFromBase({
+      worktreeDir: input.worktreeDir,
+      baseOid: input.baseOid,
+      path,
+    });
   }
 
   const status = await gitText(input.worktreeDir, ["status", "--porcelain=v1"]);
@@ -876,10 +912,7 @@ export const createHubLandingCandidate = async (input: {
       worktreeDir,
       baseOid,
     });
-  const recordedFilters =
-    filteredBeadsRuntimePaths.length > 0
-      ? filteredBeadsRuntimePaths
-      : undefined;
+  const recordedFilters = optionalNonEmptyPaths(filteredBeadsRuntimePaths);
   const candidateOid = await gitText(worktreeDir, ["rev-parse", "HEAD"]);
   const candidateRef = resolveCandidateRef(transactionId);
   const persistedCandidate = {
@@ -944,9 +977,8 @@ export const snapshotHubLandingCandidateGeneration = async (input: {
     candidateRef,
     createdAt: (input.now ?? new Date()).toISOString(),
     filteredBeadsRuntimePaths:
-      filteredBeadsRuntimePaths.length > 0
-        ? filteredBeadsRuntimePaths
-        : input.candidate.filteredBeadsRuntimePaths,
+      optionalNonEmptyPaths(filteredBeadsRuntimePaths) ??
+      input.candidate.filteredBeadsRuntimePaths,
   };
   await writeCandidateManifestAndRef(persistedCandidate);
   return {
