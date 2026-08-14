@@ -20,13 +20,14 @@ safe pending deferral, and surfaces a split-brain integrity incident when
 both stores were modified independently after redirect. After the first
 upgraded Hub run or `project configure`, it also shows the pinned host target
 branch, Hub publish target, optional remote target, and publish policy.
-It can also show pending landing reconciliation, pending checkout sync, or
-classified legacy landing history without mutating them.
+It can also show pending landing reconciliation, pending checkout sync, pending
+code publication, or classified legacy landing history without mutating them.
 
 `project configure` accepts `--publish-policy off|best_effort|required` and
 `--remote-target <ref>`. These write Hub-owned landing policy and do not dirty
 the repository. Publication stays `off` until configured, even when `origin`
-exists.
+exists. `best_effort` plus an explicit remote target publishes through a durable
+outbox after local shipped proof.
 
 Most project-aware commands accept `--project <name>` as an explicit override.
 Interactive pickers are available when required values are omitted in a TTY;

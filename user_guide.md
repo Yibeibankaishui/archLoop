@@ -213,8 +213,11 @@ sparse checkout、submodule 和其他 worktree 都安全时才快进。否则记
 runtime/export 文件（例如 `.beads/issues.jsonl`），Hub 只会从 candidate 中
 去掉这些路径并记录过滤结果，不会改写任务分支或用户 checkout；Beads 配置、
 文档、hooks 以及未知的 `.beads/**` 路径仍按普通源码变更审查。远程发布默认
-`off`，可用
-`archloop project configure --publish-policy` 显式打开。每个待合并任务有自己的
+`off`，仅发现 `origin` 不会开启推送。显式配置
+`archloop project configure --publish-policy best_effort --remote-target origin/main`
+后，本地 shipped 会入队 durable publication outbox：网络、凭证、受保护分支或
+未知推送结果记为 `target_publish_pending`，自动重试，不撤销本地交付，且与
+GitHub 任务同步分开显示。每个待合并任务有自己的
 落地事务：一个任务被拦住时，独立兄弟任务继续落地，依赖未落地前置任务的兄弟
 会等待。Git 冲突和验证失败各最多自动修复两次；耗尽后只把该任务标为
 `blocked`（`merge_conflict_unresolved` 或 `verification_failed`），批次在有
@@ -268,6 +271,7 @@ npx archloop tasks recover <task-id>
 | 运行被中断                  | 重新执行同一 Flow，或先用 `tasks recover --stale` 预览                                    |
 | 任务状态和运行事件不一致    | 先运行 `tasks doctor`，再按建议 repair 或 recover                                         |
 | 落地后工作区看不到改动      | 权威结果在 Hub publish target；宿主分支仅在安全时快进，否则 `checkout_sync_pending`，清理或切换工作区后再跑同一 Flow |
+| 代码已 shipped 但远程未更新 | 显式 `best_effort` 发布会记 `target_publish_pending`；检查 `--remote-target`、凭证与受保护分支，再跑同一 Flow 自动重试 |
 | GitHub 同步冲突             | 使用 `tasks resolve --keep local` 或 `--keep remote`                                      |
 | 工作分支仍有可恢复内容      | 使用 `tasks recover`，不要手动强删 worktree 或分支                                        |
 | 后续 iteration 启动即 abort | 只要还有剩余 iteration，运行会继续并带上进度摘要；全部用尽且无完成信号才记 `agent_failed` |
@@ -331,3 +335,4 @@ API 参数、返回值和生命周期说明见
 | 2026-08-14 | 并发落地用 lease 与 fence CAS 互斥；target drift 会重建并重验 |
 | 2026-08-14 | 升级时接纳旧落地历史：已关闭保持完成，无祖先证明不视为落地 |
 | 2026-08-14 | 落地后安全快进宿主分支；不安全 WIP 保持 checkout_sync_pending |
+| 2026-08-14 | best-effort 远程发布 outbox；失败保持 target_publish_pending |

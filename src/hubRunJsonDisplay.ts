@@ -336,6 +336,25 @@ export const createHubRunJsonRenderer = (input: {
                 },
               }
             : {}),
+          ...(result.publication && result.publication.pendingCount > 0
+            ? {
+                codePublication: {
+                  pendingCount: result.publication.pendingCount,
+                  succeededCount: result.publication.succeededCount,
+                  message: result.publication.message,
+                  nextAction: result.publication.nextAction,
+                  items: result.publication.items
+                    .filter((item) => item.status === "pending")
+                    .map((item) => ({
+                      transactionId: item.transactionId,
+                      candidateOid: item.candidateOid,
+                      remoteRef: item.remoteRef,
+                      expectedRemoteOid: item.expectedRemoteOid,
+                      pendingReason: item.pendingReason,
+                    })),
+                },
+              }
+            : {}),
           ...(result.mergeResult
             ? {
                 merge: {

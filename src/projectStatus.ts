@@ -22,6 +22,7 @@ import {
 } from "./hubLandingReconciliation.js";
 import { formatHubLegacyLandingHistoryLines } from "./hubLandingLegacyHistory.js";
 import { inspectHubCheckoutOutbox } from "./hubCheckoutProjection.js";
+import { inspectHubPublicationOutbox } from "./hubPublication.js";
 import {
   formatHubTaskStoreMigrationMessage,
   inspectHubTaskStoreMigration,
@@ -134,6 +135,8 @@ export interface HubProjectStatus {
   readonly landingLegacyHistory?: readonly string[];
   readonly checkoutSyncPendingCount?: number;
   readonly checkoutSyncMessage?: string;
+  readonly codePublicationPendingCount?: number;
+  readonly codePublicationMessage?: string;
 }
 
 export interface HubProjectStatusOptions {
@@ -723,6 +726,15 @@ export const formatHubProjectStatusLines = (
     lines.push(`  ${status.checkoutSyncMessage}`);
     lines.push("");
   }
+  if (
+    status.codePublicationPendingCount &&
+    status.codePublicationPendingCount > 0 &&
+    status.codePublicationMessage
+  ) {
+    lines.push("Code publication");
+    lines.push(`  ${status.codePublicationMessage}`);
+    lines.push("");
+  }
   lines.push("");
   appendActiveBatchLines(lines, status.activeBatches);
   lines.push("");
@@ -985,6 +997,7 @@ export const resolveHubProjectStatus = (
     tasks: board?.tasks,
   });
   const checkoutSync = inspectHubCheckoutOutbox({ hubProjectDir });
+  const codePublication = inspectHubPublicationOutbox({ hubProjectDir });
 
   return {
     repoRoot,
@@ -1026,6 +1039,8 @@ export const resolveHubProjectStatus = (
     ),
     checkoutSyncPendingCount: checkoutSync.pendingCount,
     checkoutSyncMessage: checkoutSync.message,
+    codePublicationPendingCount: codePublication.pendingCount,
+    codePublicationMessage: codePublication.message,
   };
 };
 
@@ -1128,6 +1143,15 @@ const projectStatusIdentityRows = (
         {
           key: "Checkout sync",
           value: `pending (${status.checkoutSyncPendingCount})`,
+        },
+      ]
+    : []),
+  ...(status.codePublicationPendingCount &&
+  status.codePublicationPendingCount > 0
+    ? [
+        {
+          key: "Code publication",
+          value: `pending (${status.codePublicationPendingCount})`,
         },
       ]
     : []),

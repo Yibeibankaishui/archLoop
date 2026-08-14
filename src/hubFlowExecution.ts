@@ -54,6 +54,13 @@ import {
   syncHubCheckoutProjections,
   type HubCheckoutOutboxInspection,
 } from "./hubCheckoutProjection.js";
+import {
+  inspectHubPublicationOutbox,
+  hubPublicationEventReason,
+  hubPublicationEventType,
+  syncHubPublications,
+  type HubPublicationOutboxInspection,
+} from "./hubPublication.js";
 import type { HubLandingTaskCloser } from "./hubLanding.js";
 import {
   ensureHubTaskStoreMigrated,
@@ -285,6 +292,7 @@ export interface RunHubFlowResult {
   readonly taskStoreMigration?: HubTaskStoreMigrationOutcome;
   readonly landingReconciliation?: HubLandingReconciliationOutcome;
   readonly checkoutSync?: HubCheckoutOutboxInspection;
+  readonly publication?: HubPublicationOutboxInspection;
 }
 
 type HubFlowLifecycleMutation = <T>(
@@ -1641,6 +1649,30 @@ const runObservedHubFlow = async (
     }
   };
   await appendCheckoutProjectionEvents();
+  const appendPublicationEvents = async (): Promise<void> => {
+    const synced = await syncHubPublications({
+      repoRoot,
+      hubProjectDir,
+    });
+    for (const attempt of synced.deltas) {
+      appendHubTaskEvent(context.runDir, {
+        type: hubPublicationEventType(attempt.status),
+        runId: context.runId,
+        batchId: resumedBatchId ?? context.batchId,
+        taskId: attempt.item.taskId,
+        branch: attempt.item.remoteTarget,
+        createdAt: new Date().toISOString(),
+        status: "done",
+        transactionId: attempt.item.transactionId,
+        candidateOid: attempt.item.candidateOid,
+        remoteRef: attempt.item.remoteRef,
+        expectedRemoteOid: attempt.item.expectedRemoteOid,
+        reason: hubPublicationEventReason(attempt),
+        message: attempt.message,
+      });
+    }
+  };
+  await appendPublicationEvents();
   const batchResults: HubFlowBatchResult[] = [];
   const results: HubFlowTaskResult[] = [];
   const selectedTaskIds: string[] = [];
@@ -1928,6 +1960,7 @@ const runObservedHubFlow = async (
     taskStoreMigration,
     landingReconciliation: completedLandingReconciliation,
     checkoutSync: inspectHubCheckoutOutbox({ hubProjectDir }),
+    publication: inspectHubPublicationOutbox({ hubProjectDir }),
   };
 };
 
@@ -1967,6 +2000,9 @@ export const formatHubFlowResultLines = (
   }
   if (result.checkoutSync && result.checkoutSync.pendingCount > 0) {
     lines.push(result.checkoutSync.message);
+  }
+  if (result.publication && result.publication.pendingCount > 0) {
+    lines.push(result.publication.message);
   }
   if (result.worktreeWarning) {
     lines.push(

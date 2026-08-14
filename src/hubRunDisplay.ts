@@ -433,6 +433,10 @@ const resolveTaskStage = (event: Extract<HubRunEvent, { taskId: string }>) => {
       return "Checkout sync pending";
     case "checkout_sync_succeeded":
       return "Checkout synced";
+    case "target_publish_pending":
+      return "Code publication pending";
+    case "target_publish_succeeded":
+      return "Code published";
     case "task_close_succeeded":
     case "task_closed":
       return "Completed";
@@ -796,6 +800,8 @@ export const formatPlainHubRunEvent = (
         ["observed_fence_oid", event.observedFenceOid],
         ["transaction_id", event.transactionId],
         ["candidate_oid", event.candidateOid],
+        ["remote_ref", event.remoteRef],
+        ["expected_remote_oid", event.expectedRemoteOid],
         ["reason", event.reason],
         ["message", event.message],
       ]),

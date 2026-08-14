@@ -988,4 +988,51 @@ describe("plain Hub run lifecycle output", () => {
     expect(synced).toContain("Checkout synced");
     expect(synced).not.toMatch(/tasks recover/);
   });
+
+  it("formats code publication pending and success separately from task sync", () => {
+    const state = createHubRunDisplayState({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+    });
+    const base = {
+      eventId: "run-1:50",
+      sequence: 50,
+      runId: "run-1",
+      batchId: "batch-1",
+      taskId: "bd-land",
+      branch: "origin/main",
+      createdAt: "2026-08-14T19:00:00.000Z",
+      status: "done",
+      transactionId: "ltx-bd-land-abc123",
+      candidateOid: "c".repeat(40),
+      remoteRef: "refs/heads/main",
+      expectedRemoteOid: "b".repeat(40),
+    } as const;
+
+    const pending = formatPlainHubRunEvent(
+      {
+        ...base,
+        type: "target_publish_pending",
+        reason: "network_error",
+        message: "Code publication pending for bd-land (network_error).",
+      },
+      state,
+    );
+    expect(pending).toContain("event=target_publish_pending");
+    expect(pending).toContain("Code publication pending");
+    expect(pending).toContain('reason="network_error"');
+    expect(pending).toContain(`transaction_id="${base.transactionId}"`);
+    expect(pending).toContain(`candidate_oid="${base.candidateOid}"`);
+    expect(pending).toContain(`remote_ref="${base.remoteRef}"`);
+    expect(pending).toContain(`expected_remote_oid="${base.expectedRemoteOid}"`);
+    expect(pending).not.toMatch(/tasks recover/);
+
+    const published = formatPlainHubRunEvent(
+      { ...base, type: "target_publish_succeeded" },
+      state,
+    );
+    expect(published).toContain("event=target_publish_succeeded");
+    expect(published).toContain("Code published");
+    expect(published).not.toMatch(/tasks recover/);
+  });
 });

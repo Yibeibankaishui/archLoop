@@ -29,9 +29,13 @@ script or one-off command should target another project explicitly.
 The first upgraded Hub run pins the active host target branch into Hub-owned
 project state and defaults publication to `off`. The Hub publish target is a
 stable local Git ref. `archloop project configure --publish-policy` and
-`--remote-target` update that policy without dirtying the repository. Checkout
-synchronization is a separate projection of that host branch: it fast-forwards
-only when safe and otherwise remains `checkout_sync_pending`.
+`--remote-target` update that policy without dirtying the repository.
+Publication stays `off` until configured; discovering `origin` alone never
+enables pushes. With `best_effort`, local shipped proof enqueues a durable
+publication outbox that retries as `target_publish_pending` without undoing
+shipped. Checkout synchronization is a separate projection of that host
+branch: it fast-forwards only when safe and otherwise remains
+`checkout_sync_pending`.
 
 ## Hub versus repo-local configuration
 

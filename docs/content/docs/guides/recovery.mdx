@@ -68,6 +68,13 @@ unsafe checkouts stay `checkout_sync_pending` and are retried automatically
 on a later `archloop run`. Cleaning or switching the checkout is enough; do
 not run `tasks recover`. Pending checkout sync never changes `shipped`.
 
+Best-effort remote code publication is separate: when configured with
+`--publish-policy best_effort` and `--remote-target`, network, credential,
+protected-branch, or unknown push outcomes stay `target_publish_pending` and
+retry automatically without undoing local shipped proof. Remote divergence
+that changes the deliverable stays pending for fresh reconciliation instead of
+force-overwriting. Discovering `origin` alone never enables publication.
+
 A task branch that already committed allowlisted Beads runtime/export files
 can still land: Hub removes only those paths from the candidate tree, records
 every filtered path, and leaves the source branch and checkout unchanged.
