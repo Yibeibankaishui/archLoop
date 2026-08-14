@@ -32,14 +32,18 @@ rebuilds independent successors while dependents stay blocked. Committed
 host-target tips (behind, descendant, or diverged) enter the canonical chain
 before task candidates continue; uncommitted host WIP is never imported. That
 host contribution uses a synthetic landing transaction, not a Beads task, and
-reconciliation completes it without Beads close. After
+reconciliation completes it without Beads close. A deterministic host-target
+merge conflict is `host_contribution_conflict` (pending merge, not shipped or
+failed); resolve it then rerun the same flow — not `tasks recover`. After
 at most three immediate drift rebuilds the queue head retains
 `target_quiet_wait` until a stable window resumes automatically without
 resetting repair budgets or requiring `tasks recover`. A semantic conflict
 or verification failure is repaired in bounded Agent attempts, then fully
 reverified; exhaustion blocks only that task. Independent siblings continue to
 verified landing, dependents wait for an unshipped prerequisite, and mixed
-outcomes report `partial_failed`. Landing does not merge into the user's
+outcomes report `partial_failed`. All-pending batches report `pending` /
+`completed_with_pending_merge` instead of counting as shipped or failed.
+Landing does not merge into the user's
 checkout. After landing, Hub projects the host branch only when a fast-forward
 is provably safe; otherwise `checkout_sync_pending` stays visible and retries
 automatically without affecting `shipped`. With an explicit `best_effort`

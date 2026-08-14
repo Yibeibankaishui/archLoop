@@ -2,11 +2,16 @@ import { join } from "node:path";
 
 import type { HubRunEvent, HubRunStopReason } from "./hubExecution.js";
 import type { RunHubFlowResult } from "./hubFlowExecution.js";
+import {
+  HUB_HOST_CONTRIBUTION_CONFLICT,
+  HUB_HOST_CONTRIBUTION_PENDING,
+} from "./hubLandingQueue.js";
 
 export type HubRunOutcome =
   | "completed"
   | "completed_with_failures"
   | "completed_with_pending_delivery"
+  | "completed_with_pending_merge"
   | "failed"
   | "cancelled";
 
@@ -293,6 +298,33 @@ const projectMergeFailureDetails = (
     ];
   });
 
+const isHostContributionPendingReason = (reason: string | undefined): boolean =>
+  reason === HUB_HOST_CONTRIBUTION_CONFLICT ||
+  reason === HUB_HOST_CONTRIBUTION_PENDING;
+
+const pendingMergeStageLabel = (reason: string | undefined): string =>
+  isHostContributionPendingReason(reason)
+    ? "Host contribution pending"
+    : "Waiting for merge";
+
+const projectPendingMergeDetails = (
+  result: RunHubFlowResult,
+): readonly HubRunTaskDetail[] =>
+  (result.mergeResult?.results ?? []).flatMap((task) =>
+    task.outcome === "pending"
+      ? [
+          {
+            taskId: task.taskId,
+            stage: pendingMergeStageLabel(task.reason),
+            diagnostic:
+              task.diagnosticSummary ??
+              "Landing is still pending. The task is not semantically failed and does not require a recovery command.",
+            recoveryCommand: `archloop run --flow ${result.flowId}`,
+          },
+        ]
+      : [],
+  );
+
 const projectPendingDeliveryDetails = (
   result: RunHubFlowResult,
 ): readonly HubRunTaskDetail[] =>
@@ -314,6 +346,7 @@ const resolveHubRunOutcomeKind = (
   result: RunHubFlowResult,
   options: { readonly cancelled?: boolean },
   hasPendingDelivery: boolean,
+  hasPendingMerge: boolean,
   hasPartialProgress: boolean,
 ): HubRunOutcome => {
   if (options.cancelled === true) {
@@ -321,6 +354,9 @@ const resolveHubRunOutcomeKind = (
   }
   if (hasPendingDelivery && result.stopReason !== "batch_failed") {
     return "completed_with_pending_delivery";
+  }
+  if (hasPendingMerge && result.stopReason !== "batch_failed") {
+    return "completed_with_pending_merge";
   }
   if (result.stopReason !== "batch_failed") {
     return "completed";
@@ -337,6 +373,8 @@ const summarizeHubRunOutcome = (
       return "Run cancelled";
     case "completed_with_pending_delivery":
       return "Run completed with pending required delivery";
+    case "completed_with_pending_merge":
+      return "Run completed with pending merge";
     case "completed_with_failures":
       return "Run completed with failures";
     case "failed":
@@ -365,10 +403,16 @@ export const projectHubRunOutcome = (
     result.mergeResult?.results.some(
       (task) => task.outcome === "pending_delivery",
     ) === true;
+  const hasPendingMerge =
+    result.mergeResult?.results.some((task) => task.outcome === "pending") ===
+      true ||
+    result.batchResults.some((batch) => batch.batchStatus === "pending") ||
+    result.stopReason === "batch_pending";
   const outcome = resolveHubRunOutcomeKind(
     result,
     options,
     hasPendingDelivery,
+    hasPendingMerge,
     hasPartialProgress,
   );
 
@@ -381,10 +425,49 @@ export const projectHubRunOutcome = (
       ...projectMergeSelectionDetails(result),
       ...projectMergeFailureDetails(result),
       ...projectWaitingMergeDetails(result),
+      ...projectPendingMergeDetails(result),
       ...projectPendingDeliveryDetails(result),
     ],
     exitCode: resolveHubRunExitCode(outcome),
   };
+};
+
+export type HubRunDisplayBatchStatus =
+  | "planning"
+  | "merging"
+  | "done"
+  | "partial_failed"
+  | "pending";
+
+export const isTerminalHubRunBatchStatus = (
+  status: HubRunDisplayBatchStatus,
+): boolean =>
+  status === "done" || status === "partial_failed" || status === "pending";
+
+const resolveBatchMergeCompletedStage = (
+  batchStatus: "done" | "partial_failed" | "pending",
+): string => {
+  switch (batchStatus) {
+    case "done":
+      return "Completed";
+    case "pending":
+      return "Pending";
+    case "partial_failed":
+      return "Completed with failures";
+  }
+};
+
+const resolveRunCompletedDisplayStatus = (
+  stopReason: HubRunStopReason,
+): HubRunDisplayState["status"] => {
+  switch (stopReason) {
+    case "batch_failed":
+      return "completed_with_failures";
+    case "batch_pending":
+      return "completed_with_pending_merge";
+    default:
+      return "completed";
+  }
 };
 
 export interface HubRunDisplayState {
@@ -398,6 +481,7 @@ export interface HubRunDisplayState {
     | "completed"
     | "completed_with_failures"
     | "completed_with_pending_delivery"
+    | "completed_with_pending_merge"
     | "failed"
     | "cancelled";
   readonly completedBatchCount: number;
@@ -410,7 +494,7 @@ export interface HubRunDisplayState {
         readonly batchId: string;
         readonly selectedTaskIds: readonly string[];
         readonly taskTitles?: Readonly<Record<string, string>>;
-        readonly status: "planning" | "merging" | "done" | "partial_failed";
+        readonly status: HubRunDisplayBatchStatus;
         readonly stage: string;
       }
     >
@@ -629,10 +713,7 @@ const reduceBatchEvent = (
         selectedTaskIds: event.taskIds,
         taskTitles: current?.taskTitles,
         status: event.batchStatus,
-        stage:
-          event.batchStatus === "done"
-            ? "Completed"
-            : "Completed with failures",
+        stage: resolveBatchMergeCompletedStage(event.batchStatus),
       };
     default:
       return current;
@@ -717,10 +798,7 @@ export const reduceHubRunDisplayState = (
       return {
         ...state,
         runId: event.runId,
-        status:
-          event.stopReason === "batch_failed"
-            ? "completed_with_failures"
-            : "completed",
+        status: resolveRunCompletedDisplayStatus(event.stopReason),
         completedBatchCount: event.completedBatchCount,
         completedTaskCount: event.completedTaskCount,
         stopReason: event.stopReason,

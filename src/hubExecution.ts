@@ -54,13 +54,14 @@ export interface HubRunCompletedBatchResult {
   readonly batchId: string;
   readonly selectedTaskIds: readonly string[];
   readonly completedTaskCount: number;
-  readonly batchStatus: "completed" | "failed";
+  readonly batchStatus: "completed" | "failed" | "pending";
 }
 
 export type HubRunStopReason =
   | "no_ready_tasks"
   | "max_batches_reached"
-  | "batch_failed";
+  | "batch_failed"
+  | "batch_pending";
 
 export interface HubRunCompletedEvent {
   readonly type: "run_completed";
@@ -150,7 +151,7 @@ export interface HubBatchMergeCompletedEvent {
   readonly batchId: string;
   readonly createdAt: string;
   readonly taskIds: readonly string[];
-  readonly batchStatus: "done" | "partial_failed";
+  readonly batchStatus: "done" | "partial_failed" | "pending";
   readonly failedTaskId?: string;
   readonly failureReason?: string;
   readonly failureSummary?: string;

@@ -205,9 +205,12 @@ target 上的待合并任务领取 durable FIFO/依赖票据；投机候选链�
 精确 OID 在依赖允许时并行验证，只有队头用 fenced CAS 落地。前置修复、失败、
 已提交宿主贡献或目标漂移只会使受影响后缀失效。已提交的 behind/descendant/
 diverged 宿主 tip 会并入权威链并完成验证后，任务候选才继续；未提交宿主状态
-既不导入也不修改。队头激活最多立即重建三次目标漂移，随后保留
+既不导入也不修改。宿主 tip 与 publish target 的确定性 merge conflict 记为
+`host_contribution_conflict`（pending，不算 shipped 或任务失败）：先解决冲突再
+跑同一 Flow，不要用 `tasks recover`。队头激活最多立即重建三次目标漂移，随后保留
 `target_quiet_wait`，稳定窗口到来后自动续跑，不重置语义修复预算，也不要求
-`tasks recover`。archLoop 冻结
+`tasks recover`。全 pending 批次报告 `pending` / `completed_with_pending_merge`，
+不会把未落地任务算成 shipped 或语义失败。archLoop 冻结
 任务源提交、在独立 worktree 中构造并验证 merge candidate，再用一次 Git ref
 事务推进 publish target、fence 和 landing receipt，然后关闭任务。用户工作区、
 index 和未提交改动在落地事务中保持不变。落地之后，Hub 会把宿主分支的快进记入
@@ -351,3 +354,4 @@ API 参数、返回值和生命周期说明见
 | 2026-08-14 | best-effort 远程发布 outbox；失败保持 target_publish_pending |
 | 2026-08-14 | FIFO 投机链并行验证；宿主贡献入链；target_quiet_wait 防超车 |
 | 2026-08-14 | required 远程交付：publishing、有序 proof、超时 completed_with_pending_delivery |
+| 2026-08-15 | 宿主贡献冲突记为 host_contribution_conflict / pending，不算 shipped 或失败 |

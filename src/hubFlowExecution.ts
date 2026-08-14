@@ -494,10 +494,10 @@ const resolveHubFlowCompletedTaskCount = (input: {
   readonly taskResults: readonly HubFlowTaskResult[];
   readonly mergeResult?: RunHubBatchMergeResult;
 }): number => {
-  if (input.taskResults.length > 0) {
-    return countSuccessfulHubTaskResults(input.taskResults);
+  if (input.mergeResult) {
+    return countSuccessfulMergeResults(input.mergeResult);
   }
-  return countSuccessfulMergeResults(input.mergeResult);
+  return countSuccessfulHubTaskResults(input.taskResults);
 };
 
 const resolveHubFlowWorktreeWarning = (
@@ -529,6 +529,9 @@ const resolveHubFlowBatchStatus = (input: {
 }): HubFlowBatchResult["batchStatus"] => {
   if (input.taskResults.some((result) => !isSuccessfulHubTaskResult(result))) {
     return "failed";
+  }
+  if (input.mergeResult?.batchStatus === "pending") {
+    return "pending";
   }
   if (input.mergeResult && input.mergeResult.batchStatus !== "done") {
     return "failed";
@@ -2184,6 +2187,8 @@ const runObservedHubFlow = async (
       }
       if (resumedBatchResult?.batchStatus === "failed") {
         stopReason = "batch_failed";
+      } else if (resumedBatchResult?.batchStatus === "pending") {
+        stopReason = "batch_pending";
       } else if (batchResults.length >= maxBatches) {
         stopReason = "max_batches_reached";
       } else {
@@ -2194,6 +2199,7 @@ const runObservedHubFlow = async (
 
   while (
     stopReason !== "batch_failed" &&
+    stopReason !== "batch_pending" &&
     stopReason !== "max_batches_reached"
   ) {
     const batchExecution = await executeSelectedBatch(currentBatchId);
@@ -2216,6 +2222,10 @@ const runObservedHubFlow = async (
       batchResults.push(batchExecution.batchResult);
       if (batchExecution.batchResult.batchStatus === "failed") {
         stopReason = "batch_failed";
+        break;
+      }
+      if (batchExecution.batchResult.batchStatus === "pending") {
+        stopReason = "batch_pending";
         break;
       }
     }

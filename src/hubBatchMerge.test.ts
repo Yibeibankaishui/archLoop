@@ -2842,4 +2842,153 @@ describe("Hub batch merge independent landing and bounded repair", () => {
     );
     expect(JSON.stringify(events)).not.toMatch(/tasks recover/);
   });
+
+  it("keeps add/add host-contribution conflicts pending without shipping or failing the task", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-batch-merge-host-conflict-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello\n", "initial commit");
+    const hubProjectDir = join(repoDir, "data", "archloop", "hub");
+    const { ensureHubLandingPolicy } = await import("./hubLandingPolicy.js");
+    const policy = ensureHubLandingPolicy({
+      repoRoot: repoDir,
+      hubProjectDir,
+    }).policy;
+
+    await execAsync("git checkout -b pub-side", { cwd: repoDir });
+    await commitFile(repoDir, "README.md", "publish readme\n", "publish readme");
+    const { stdout: publishOidRaw } = await execAsync("git rev-parse HEAD", {
+      cwd: repoDir,
+    });
+    await execAsync(
+      `git update-ref "${policy.publishTargetRef}" ${publishOidRaw.trim()}`,
+      { cwd: repoDir },
+    );
+    await execAsync("git checkout main", { cwd: repoDir });
+    await commitFile(repoDir, "README.md", "host readme\n", "host readme");
+    await commitFile(repoDir, ".gitignore", "host-ignore\n", "host gitignore");
+
+    const branch = "archloop/bd-host-conflict-task";
+    await execAsync(`git checkout -b "${branch}"`, { cwd: repoDir });
+    await commitFile(repoDir, "feature.txt", "feature\n", "feature commit");
+    await execAsync("git checkout main", { cwd: repoDir });
+    const { stdout: baseHead } = await execAsync("git rev-parse HEAD", {
+      cwd: repoDir,
+    });
+
+    const batchId = "batch-host-conflict";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-host-conflict",
+        title: "Host conflict task",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch,
+            claimedAt: "2026-06-12T10:00:00Z",
+            baseHead: baseHead.trim(),
+            branchExistedBeforeClaim: false,
+          },
+        },
+      },
+    ]);
+
+    const context = createMergeContext(repoDir, batchId, hubProjectDir);
+    seedTaskClaimEvent(context, {
+      batchId,
+      taskId: "bd-host-conflict",
+      branch,
+      claim: {
+        runId: "run-merge-test",
+        batchId,
+        branch,
+        claimedAt: "2026-06-12T10:00:00Z",
+        baseHead: baseHead.trim(),
+        branchExistedBeforeClaim: false,
+      },
+    });
+
+    const result = await runHubBatchMerge({
+      flowId: "no-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger: successMerger,
+      verifier: successVerifier,
+      branchInspector: branchReadyInspector,
+      worktreeInspector: cleanWorktreeInspector,
+    });
+
+    expect(result.batchStatus).toBe("pending");
+    expect(result.results).toEqual([
+      expect.objectContaining({
+        taskId: "bd-host-conflict",
+        outcome: "pending",
+        hubStatus: "waiting_for_merge",
+        reason: "host_contribution_conflict",
+      }),
+    ]);
+    expect(result.results[0]?.diagnosticSummary).toMatch(/conflict/i);
+    expect(result.results[0]?.diagnosticSummary).not.toMatch(
+      /tasks recover|target_quiet_wait/,
+    );
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(finalState[0]?.labels).toContain("waiting-for-merge");
+    expect(finalState[0]?.status).not.toBe("closed");
+    expect(finalState[0]?.metadata.hubStatus).toBe("waiting_for_merge");
+
+    const taskEvents = await readJsonl(
+      join(context.runDir, "events", "task.jsonl"),
+    );
+    expect(taskEvents).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "host_contribution_reconciled",
+          taskId: "bd-host-conflict",
+        }),
+        expect.objectContaining({
+          type: "task_status_advanced",
+          taskId: "bd-host-conflict",
+          status: "waiting_for_merge",
+          reason: "host_contribution_conflict",
+        }),
+      ]),
+    );
+    const lastTaskStatus = [...taskEvents]
+      .reverse()
+      .find(
+        (event) =>
+          (event as { taskId?: string }).taskId === "bd-host-conflict" &&
+          typeof (event as { status?: string }).status === "string",
+      ) as { status: string };
+    expect(lastTaskStatus.status).toBe("waiting_for_merge");
+
+    const batchEvents = await readJsonl(
+      join(context.runDir, "events", "batch.jsonl"),
+    );
+    expect(batchEvents.at(-1)).toMatchObject({
+      type: "batch_merge_completed",
+      batchStatus: "pending",
+      taskResults: [
+        expect.objectContaining({
+          taskId: "bd-host-conflict",
+          outcome: "pending",
+          hubStatus: "waiting_for_merge",
+          reason: "host_contribution_conflict",
+        }),
+      ],
+    });
+    expect(JSON.stringify(batchEvents.at(-1))).not.toMatch(/tasks recover/);
+  });
 });

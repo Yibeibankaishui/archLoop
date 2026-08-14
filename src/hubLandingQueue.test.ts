@@ -668,6 +668,64 @@ describe("Hub host-target contribution", () => {
     expect(behind?.imported).toBe(false);
     expect(behind?.relation).toBe("behind");
   });
+
+  it("classifies a deterministic add/add host merge conflict as host_contribution_conflict, not target_quiet_wait", async () => {
+    const prepared = await prepareRepo("host-add-add");
+    await execFileAsync("git", ["checkout", "-b", "pub-side"], {
+      cwd: prepared.repoDir,
+    });
+    await commitFile(
+      prepared.repoDir,
+      "README.md",
+      "publish readme\n",
+      "publish readme",
+    );
+    const publishOid = await gitText(prepared.repoDir, ["rev-parse", "HEAD"]);
+    await execFileAsync(
+      "git",
+      ["update-ref", prepared.policy.publishTargetRef, publishOid],
+      { cwd: prepared.repoDir },
+    );
+    await execFileAsync("git", ["checkout", "main"], {
+      cwd: prepared.repoDir,
+    });
+    await commitFile(
+      prepared.repoDir,
+      "README.md",
+      "host readme\n",
+      "host readme",
+    );
+    await commitFile(
+      prepared.repoDir,
+      ".gitignore",
+      "host-ignore\n",
+      "host gitignore",
+    );
+    expect(
+      (
+        await classifyHubHostTargetRelation({
+          repoRoot: prepared.repoDir,
+          policy: prepared.policy,
+        })
+      ).relation,
+    ).toBe("diverged");
+
+    const result = await reconcileHubHostTargetContribution({
+      repoRoot: prepared.repoDir,
+      hubProjectDir: prepared.hubProjectDir,
+      policy: prepared.policy,
+      clock: silentClock(),
+    });
+
+    expect(result?.imported).toBe(false);
+    expect(result?.pending).toBe(true);
+    expect(result?.pendingReason).toBe("host_contribution_conflict");
+    expect(result?.message).toMatch(/host contribution/i);
+    expect(result?.message).toMatch(/conflict/i);
+    expect(result?.message).not.toMatch(/target_quiet_wait|quiet wait/i);
+    expect(result?.message).toMatch(/does not require a recovery command/i);
+    expect(result?.message).toMatch(/resolve|rerun|archloop run/i);
+  });
 });
 
 describe("Hub target quiet wait", () => {
