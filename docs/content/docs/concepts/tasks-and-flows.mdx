@@ -30,7 +30,9 @@ land only at the queue head with fenced CAS. Suffix invalidation after
 predecessor repair, failure, committed host contribution, or target drift
 rebuilds independent successors while dependents stay blocked. Committed
 host-target tips (behind, descendant, or diverged) enter the canonical chain
-before task candidates continue; uncommitted host WIP is never imported. After
+before task candidates continue; uncommitted host WIP is never imported. That
+host contribution uses a synthetic landing transaction, not a Beads task, and
+reconciliation completes it without Beads close. After
 at most three immediate drift rebuilds the queue head retains
 `target_quiet_wait` until a stable window resumes automatically without
 resetting repair budgets or requiring `tasks recover`. A semantic conflict

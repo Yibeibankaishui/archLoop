@@ -21,6 +21,10 @@ import {
 } from "./hubLanding.js";
 import { ensureHubLandingPolicy } from "./hubLandingPolicy.js";
 import {
+  HUB_HOST_CONTRIBUTION_TASK_ID,
+  reconcileHubHostTargetContribution,
+} from "./hubLandingQueue.js";
+import {
   inspectHubLandingTransactions,
   reconcileHubLandingTransactions,
 } from "./hubLandingReconciliation.js";
@@ -546,6 +550,289 @@ describe("Hub landing transaction reconciliation", () => {
           publishTargetOid: candidate.candidateOid,
         }).shipped,
       ).toBe(true);
+    },
+  );
+});
+
+describe("Hub host-contribution landing reconciliation", () => {
+  const productionShapedBeadsAdapters = () => {
+    const reads: string[] = [];
+    const closes: string[] = [];
+    return {
+      reads,
+      closes,
+      readTaskClose: (taskId: string) => {
+        reads.push(taskId);
+        throw new Error(
+          `archloop tasks selector "${taskId}" did not match a Beads id or an exact task title.`,
+        );
+      },
+      closeTask: async ({ taskId }: { readonly taskId: string }) => {
+        closes.push(taskId);
+        throw new Error(
+          `archloop tasks selector "${taskId}" did not match a Beads id or an exact task title.`,
+        );
+      },
+    };
+  };
+
+  const expectNoBeadsContact = (adapters: {
+    readonly reads: readonly string[];
+    readonly closes: readonly string[];
+  }) => {
+    expect(adapters.reads).toEqual([]);
+    expect(adapters.closes).toEqual([]);
+  };
+
+  const expectHostContributionCleaned = async (input: {
+    readonly repoDir: string;
+    readonly hubProjectDir: string;
+    readonly publishTargetRef: string;
+    readonly candidate: {
+      readonly transactionId: string;
+      readonly candidateOid: string;
+      readonly worktreeDir: string;
+    };
+  }) => {
+    expect(
+      loadHubLandingTransaction(
+        input.hubProjectDir,
+        input.candidate.transactionId,
+      )?.checkpoint,
+    ).toBe("cleaned");
+    expect(existsSync(input.candidate.worktreeDir)).toBe(false);
+    expect(
+      await gitText(input.repoDir, ["rev-parse", input.publishTargetRef]),
+    ).toBe(input.candidate.candidateOid);
+  };
+
+  const importHostContribution = async (label: string) => {
+    const root = await mkdtemp(join(tmpdir(), `hub-host-contrib-${label}-`));
+    const repoDir = join(root, "repo");
+    const hubProjectDir = join(root, "hub-project");
+    await mkdir(repoDir, { recursive: true });
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello\n", "init");
+    const policy = ensureHubLandingPolicy({
+      repoRoot: repoDir,
+      hubProjectDir,
+    }).policy;
+    await commitFile(repoDir, "human.txt", `${label}\n`, "human commit");
+    const result = await reconcileHubHostTargetContribution({
+      repoRoot: repoDir,
+      hubProjectDir,
+      policy,
+    });
+    expect(result?.imported).toBe(true);
+    expect(result?.candidate?.taskId).toBe(HUB_HOST_CONTRIBUTION_TASK_ID);
+    expect(
+      loadHubLandingTransaction(
+        hubProjectDir,
+        result!.candidate!.transactionId,
+      )?.checkpoint,
+    ).toBe("target_landed");
+    return {
+      repoDir,
+      hubProjectDir,
+      policy,
+      candidate: result!.candidate!,
+    };
+  };
+
+  it("completes a landed host contribution without Beads close reader or closer", async () => {
+    const { repoDir, hubProjectDir, candidate, policy } =
+      await importHostContribution("reconcile-close");
+    const adapters = productionShapedBeadsAdapters();
+
+    const outcome = await reconcileHubLandingTransactions({
+      repoRoot: repoDir,
+      hubProjectDir,
+      readTaskClose: adapters.readTaskClose,
+      closeTask: adapters.closeTask,
+    });
+
+    expectNoBeadsContact(adapters);
+    expect(outcome.kind === "integrity_incident").toBe(false);
+    expect(outcome.message).not.toMatch(/tasks recover/);
+    expect(outcome.message).not.toMatch(HUB_HOST_CONTRIBUTION_TASK_ID);
+    const evidence = outcome.transactions.find(
+      (entry) => entry.transactionId === candidate.transactionId,
+    );
+    expect(evidence?.taskBacked).toBe(false);
+    expect(evidence?.taskId).toBe(HUB_HOST_CONTRIBUTION_TASK_ID);
+    expect(evidence?.landed).toBe(true);
+    expect(evidence?.closed).toBe(true);
+    expect(evidence?.cleaned).toBe(true);
+    expect(evidence?.pending).toBe(false);
+    await expectHostContributionCleaned({
+      repoDir,
+      hubProjectDir,
+      publishTargetRef: policy.publishTargetRef,
+      candidate,
+    });
+  });
+
+  it("idempotently re-reconciles a landed host contribution on restart without Beads or re-import", async () => {
+    const { repoDir, hubProjectDir, candidate, policy } =
+      await importHostContribution("reconcile-restart");
+    const adapters = productionShapedBeadsAdapters();
+    const first = await reconcileHubLandingTransactions({
+      repoRoot: repoDir,
+      hubProjectDir,
+      readTaskClose: adapters.readTaskClose,
+      closeTask: adapters.closeTask,
+    });
+    const publishOidAfterFirst = await gitText(repoDir, [
+      "rev-parse",
+      policy.publishTargetRef,
+    ]);
+    const journalAfterFirst = await readFile(
+      resolveHubLandingJournalPath(hubProjectDir, candidate.transactionId),
+      "utf8",
+    );
+
+    const second = await reconcileHubLandingTransactions({
+      repoRoot: repoDir,
+      hubProjectDir,
+      readTaskClose: adapters.readTaskClose,
+      closeTask: adapters.closeTask,
+    });
+    const inspect = await inspectHubLandingTransactions({
+      repoRoot: repoDir,
+      hubProjectDir,
+      readTaskClose: adapters.readTaskClose,
+    });
+
+    expectNoBeadsContact(adapters);
+    expect(first.kind === "integrity_incident").toBe(false);
+    expect(second.kind === "integrity_incident").toBe(false);
+    expect(second.message).not.toMatch(/tasks recover/);
+    expect(inspect.kind).toBe("clean");
+    expect(inspect.pendingCount).toBe(0);
+    expect(inspect.transactions[0]?.taskBacked).toBe(false);
+    expect(inspect.transactions[0]?.cleaned).toBe(true);
+    expect(await gitText(repoDir, ["rev-parse", policy.publishTargetRef])).toBe(
+      publishOidAfterFirst,
+    );
+    expect(
+      await readFile(
+        resolveHubLandingJournalPath(hubProjectDir, candidate.transactionId),
+        "utf8",
+      ),
+    ).toBe(journalAfterFirst);
+    // A second host-contribution pass must not create another transaction.
+    const reimport = await reconcileHubHostTargetContribution({
+      repoRoot: repoDir,
+      hubProjectDir,
+      policy,
+    });
+    expect(reimport?.imported).toBe(false);
+    // Descendant import may land a merge tip ahead of the host branch tip.
+    expect(["equal", "behind"]).toContain(reimport?.relation);
+  });
+
+  it.each([
+    { sideEffect: "atomic_landing" as const, timing: "before" as const },
+    { sideEffect: "atomic_landing" as const, timing: "after" as const },
+    { sideEffect: "cleanup" as const, timing: "before" as const },
+    { sideEffect: "cleanup" as const, timing: "after" as const },
+  ])(
+    "resumes host contribution after crash $timing $sideEffect without Beads close",
+    async ({ sideEffect, timing }) => {
+      const root = await mkdtemp(
+        join(tmpdir(), `hub-host-fault-${timing}-${sideEffect}-`),
+      );
+      const repoDir = join(root, "repo");
+      const hubProjectDir = join(root, "hub-project");
+      await mkdir(repoDir, { recursive: true });
+      await initRepo(repoDir);
+      await commitFile(repoDir, "hello.txt", "hello\n", "init");
+      const policy = ensureHubLandingPolicy({
+        repoRoot: repoDir,
+        hubProjectDir,
+      }).policy;
+      await commitFile(repoDir, "human.txt", "fault\n", "human commit");
+      const fingerprint = computeHubVerifierFingerprint(repoDir);
+      const adapters = productionShapedBeadsAdapters();
+      const faultInjection =
+        timing === "before"
+          ? { crashBefore: sideEffect }
+          : { crashAfter: sideEffect };
+
+      const runStep = async <T>(
+        operation: (fault?: typeof faultInjection) => Promise<T>,
+      ): Promise<T> => {
+        try {
+          return await operation(faultInjection);
+        } catch (error) {
+          expect(error).toBeInstanceOf(HubLandingCrash);
+          return await operation(undefined);
+        }
+      };
+
+      // Drive the synthetic transaction through the same land/reconcile seam as
+      // production, injecting faults at target/receipt and cleanup boundaries.
+      const candidate = await createHubLandingCandidate({
+        repoRoot: repoDir,
+        hubProjectDir,
+        taskId: HUB_HOST_CONTRIBUTION_TASK_ID,
+        branch: policy.hostTargetBranch,
+        baseOid: await gitText(repoDir, [
+          "rev-parse",
+          policy.publishTargetRef,
+        ]),
+      });
+      bindHubLandingVerification({
+        hubProjectDir,
+        transactionId: candidate.transactionId,
+        taskId: HUB_HOST_CONTRIBUTION_TASK_ID,
+        candidateOid: candidate.candidateOid,
+        verifierFingerprint: fingerprint,
+        repoRoot: repoDir,
+      });
+      await runStep((fault) =>
+        commitHubLandingTarget({
+          repoRoot: repoDir,
+          hubProjectDir,
+          candidate,
+          verifierFingerprint: fingerprint,
+          faultInjection: fault,
+        }),
+      );
+
+      const outcome = await runStep((fault) =>
+        reconcileHubLandingTransactions({
+          repoRoot: repoDir,
+          hubProjectDir,
+          readTaskClose: adapters.readTaskClose,
+          closeTask: adapters.closeTask,
+          faultInjection: fault,
+        }),
+      );
+
+      expectNoBeadsContact(adapters);
+      expect(outcome.kind === "integrity_incident").toBe(false);
+      expect(outcome.message).not.toMatch(/tasks recover/);
+      expect(outcome.message).not.toMatch(
+        /did not match a Beads id or an exact task title/,
+      );
+      await expectHostContributionCleaned({
+        repoDir,
+        hubProjectDir,
+        publishTargetRef: policy.publishTargetRef,
+        candidate,
+      });
+
+      const again = await reconcileHubLandingTransactions({
+        repoRoot: repoDir,
+        hubProjectDir,
+        readTaskClose: adapters.readTaskClose,
+        closeTask: adapters.closeTask,
+      });
+      expectNoBeadsContact(adapters);
+      expect(again.transactions[0]?.taskBacked).toBe(false);
+      expect(again.transactions[0]?.cleaned).toBe(true);
+      expect(again.pendingCount).toBe(0);
     },
   );
 });

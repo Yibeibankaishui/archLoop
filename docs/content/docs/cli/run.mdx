@@ -48,7 +48,9 @@ invalidates only the affected speculative suffix; independent successors
 rebuild and reverify while dependents stay blocked until their prerequisite
 ships. Committed behind, descendant, and diverged host-target tips are
 reconciled into the canonical chain and fully verified before task candidates
-continue; uncommitted host state is neither imported nor modified. A
+continue; uncommitted host state is neither imported nor modified. After a
+host contribution lands, reconciliation finishes that synthetic transaction
+internally without Beads close or `tasks recover`. A
 queue-head activation performs at most three immediate target-drift rebuilds
 with jittered backoff, then retains its ticket in `target_quiet_wait` without
 a busy loop or later-task overtaking. A subsequent stable target window starts

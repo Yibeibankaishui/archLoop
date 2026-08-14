@@ -89,10 +89,13 @@ npx archloop project status
 
 The next mutating `archloop run` resumes from durable Git refs, artifacts, and
 receipts. It reuses the exact candidate and a matching verification artifact,
-recognizes an atomic landing receipt, retries Beads close idempotently, and
-retries cleanup without undoing `shipped`. `tasks doctor` is read-only.
-Pending reconciliation is not a task failure; do not run
-`archloop tasks recover` for this.
+recognizes an atomic landing receipt, retries Beads close idempotently for
+task-backed landings, and retries cleanup without undoing `shipped`. Synthetic
+host-contribution landings (`hub-host-contribution`) complete with internal
+journal evidence only — they are not Beads tasks and must never be passed to
+`tasks recover` or Beads close. `tasks doctor` is read-only. Pending
+reconciliation is not a task failure; do not run `archloop tasks recover` for
+this.
 
 ## Checkout sync pending
 

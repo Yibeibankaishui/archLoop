@@ -18,6 +18,7 @@ import {
   commitHubLandingTarget,
   computeHubVerifierFingerprint,
   createHubLandingCandidate,
+  HUB_HOST_CONTRIBUTION_TASK_ID,
   invalidateHubLandingCandidate,
   type HubLandingCandidate,
   type HubLandingCommitResult,
@@ -30,6 +31,12 @@ import type {
 import { readHubLandingPolicy } from "./hubLandingPolicy.js";
 import { isGitOid } from "./hubLandingTransaction.js";
 
+export {
+  HUB_HOST_CONTRIBUTION_TASK_ID,
+  isHubHostContributionTaskId,
+  isHubLandingTaskBacked,
+} from "./hubLanding.js";
+
 const execFileAsync = promisify(execFile);
 
 const gitEnv = (): NodeJS.ProcessEnv => ({
@@ -41,7 +48,6 @@ const gitEnv = (): NodeJS.ProcessEnv => ({
 export const HUB_LANDING_TARGET_DRIFT_REBUILD_LIMIT = 3 as const;
 export const HUB_LANDING_SPECULATIVE_CHAIN_LIMIT = 8 as const;
 export const HUB_TARGET_QUIET_WAIT = "target_quiet_wait";
-export const HUB_HOST_CONTRIBUTION_TASK_ID = "hub-host-contribution";
 
 const NO_RECOVER_SUFFIX =
   "This is not a task failure and does not require a recovery command.";
