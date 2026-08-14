@@ -47,6 +47,11 @@ import {
   reconcileHubLandingTransactions,
   type HubLandingReconciliationOutcome,
 } from "./hubLandingReconciliation.js";
+import {
+  inspectHubCheckoutOutbox,
+  syncHubCheckoutProjections,
+  type HubCheckoutOutboxInspection,
+} from "./hubCheckoutProjection.js";
 import type { HubLandingTaskCloser } from "./hubLanding.js";
 import {
   ensureHubTaskStoreMigrated,
@@ -277,6 +282,7 @@ export interface RunHubFlowResult {
   readonly autoRecoverSummary?: HubRunAutoRecoverSummary;
   readonly taskStoreMigration?: HubTaskStoreMigrationOutcome;
   readonly landingReconciliation?: HubLandingReconciliationOutcome;
+  readonly checkoutSync?: HubCheckoutOutboxInspection;
 }
 
 type HubFlowLifecycleMutation = <T>(
@@ -1611,6 +1617,34 @@ const runObservedHubFlow = async (
     });
   };
   appendLandingReconciliationEvent(landingReconciliation);
+  const appendCheckoutProjectionEvents = async (): Promise<void> => {
+    const synced = await syncHubCheckoutProjections({
+      repoRoot,
+      hubProjectDir,
+    });
+    for (const attempt of synced.deltas) {
+      appendHubTaskEvent(context.runDir, {
+        type:
+          attempt.status === "succeeded"
+            ? "checkout_sync_succeeded"
+            : "checkout_sync_pending",
+        runId: context.runId,
+        batchId: resumedBatchId ?? context.batchId,
+        taskId: attempt.item.taskId,
+        branch: attempt.item.hostTargetBranch,
+        createdAt: new Date().toISOString(),
+        status: "done",
+        transactionId: attempt.item.transactionId,
+        candidateOid: attempt.item.candidateOid,
+        reason:
+          attempt.status === "pending"
+            ? attempt.pendingReason ?? "checkout_sync_pending"
+            : undefined,
+        message: attempt.message,
+      });
+    }
+  };
+  await appendCheckoutProjectionEvents();
   const batchResults: HubFlowBatchResult[] = [];
   const results: HubFlowTaskResult[] = [];
   const selectedTaskIds: string[] = [];
@@ -1860,6 +1894,7 @@ const runObservedHubFlow = async (
     landingReconciliationInput,
   );
   appendLandingReconciliationEvent(completedLandingReconciliation);
+  await appendCheckoutProjectionEvents();
 
   appendHubRunEvent(context.runDir, {
     type: "run_completed",
@@ -1896,6 +1931,7 @@ const runObservedHubFlow = async (
     autoRecoverSummary,
     taskStoreMigration,
     landingReconciliation: completedLandingReconciliation,
+    checkoutSync: inspectHubCheckoutOutbox({ hubProjectDir }),
   };
 };
 
@@ -1932,6 +1968,9 @@ export const formatHubFlowResultLines = (
     lines.push(
       formatHubLandingReconciliationMessage(result.landingReconciliation),
     );
+  }
+  if (result.checkoutSync && result.checkoutSync.pendingCount > 0) {
+    lines.push(result.checkoutSync.message);
   }
   if (result.worktreeWarning) {
     lines.push(

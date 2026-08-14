@@ -203,7 +203,13 @@ archLoop 会先恢复该批次，再领取新任务。
 落地使用 Hub 拥有的本地 Git ref 作为权威目标，不需要远程仓库。archLoop 冻结
 任务源提交、在独立 worktree 中构造并验证 merge candidate，再用一次 Git ref
 事务推进 publish target、fence 和 landing receipt，然后关闭任务。用户工作区、
-index 和未提交改动保持不变。若任务分支已经提交了 allowlist 内的 Beads
+index 和未提交改动在落地事务中保持不变。落地之后，Hub 会把宿主分支的快进记入
+durable outbox：未被任何 worktree 检出的本地分支用 OID CAS 推进；已检出的分
+支只在所属 worktree 里、且 Git 能证明 index、工作区、操作状态、未跟踪文件、
+sparse checkout、submodule 和其他 worktree 都安全时才快进。否则记录
+`checkout_sync_pending`，用户状态一字不改，并在之后的 `archloop run` 自动重
+试。后台投影不会 stash、切分支、force-reset 或跑用户 hooks。待同步不影响
+`shipped`，也不拦住后续任务。若任务分支已经提交了 allowlist 内的 Beads
 runtime/export 文件（例如 `.beads/issues.jsonl`），Hub 只会从 candidate 中
 去掉这些路径并记录过滤结果，不会改写任务分支或用户 checkout；Beads 配置、
 文档、hooks 以及未知的 `.beads/**` 路径仍按普通源码变更审查。远程发布默认
@@ -261,7 +267,7 @@ npx archloop tasks recover <task-id>
 | 没有初始提交                | 先在目标仓库创建一次 Git 提交                                                             |
 | 运行被中断                  | 重新执行同一 Flow，或先用 `tasks recover --stale` 预览                                    |
 | 任务状态和运行事件不一致    | 先运行 `tasks doctor`，再按建议 repair 或 recover                                         |
-| 落地后工作区看不到改动      | 权威结果在 Hub publish target；当前不会改写用户 checkout                                  |
+| 落地后工作区看不到改动      | 权威结果在 Hub publish target；宿主分支仅在安全时快进，否则 `checkout_sync_pending`，清理或切换工作区后再跑同一 Flow |
 | GitHub 同步冲突             | 使用 `tasks resolve --keep local` 或 `--keep remote`                                      |
 | 工作分支仍有可恢复内容      | 使用 `tasks recover`，不要手动强删 worktree 或分支                                        |
 | 后续 iteration 启动即 abort | 只要还有剩余 iteration，运行会继续并带上进度摘要；全部用尽且无完成信号才记 `agent_failed` |
@@ -324,3 +330,4 @@ API 参数、返回值和生命周期说明见
 | 2026-08-14 | 旧任务分支上的 allowlist Beads runtime 文件会从 candidate 剥离 |
 | 2026-08-14 | 并发落地用 lease 与 fence CAS 互斥；target drift 会重建并重验 |
 | 2026-08-14 | 升级时接纳旧落地历史：已关闭保持完成，无祖先证明不视为落地 |
+| 2026-08-14 | 落地后安全快进宿主分支；不安全 WIP 保持 checkout_sync_pending |

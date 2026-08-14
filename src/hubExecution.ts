@@ -196,6 +196,8 @@ export interface HubTaskEvent {
     | "target_landing_rebuild"
     | "target_landing_pending"
     | "target_landing_stale_owner_rejected"
+    | "checkout_sync_pending"
+    | "checkout_sync_succeeded"
     | "task_close_started"
     | "task_closed"
     | "task_close_succeeded"

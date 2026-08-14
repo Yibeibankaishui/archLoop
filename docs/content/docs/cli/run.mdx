@@ -40,9 +40,19 @@ Hub-managed local Git ref. archLoop freezes source and base OIDs, builds and
 verifies the exact candidate in a Hub-owned detached worktree, then advances
 the publish target, fence, and landing receipt in one Git ref transaction
 before closing the task. The user's checkout, index, HEAD, and WIP are not
-modified. A remote repository is not required. `shipped` means the verified
-candidate is on the publish target and the Beads task closed with matching
-transaction metadata. If a run is interrupted, the next `archloop run`
+modified during that landing transaction. After landing, Hub enqueues a
+durable checkout projection. A local host branch that is not checked out
+anywhere advances with OID compare-and-swap. A checked-out branch
+fast-forwards only in its owning worktree when Git can prove the index,
+working tree, operation state, untracked paths, sparse checkout, submodules,
+and other worktrees safe. Otherwise Hub records `checkout_sync_pending`,
+leaves every byte of user state unchanged, and retries on a later run or
+other mutating entry point. archLoop never stashes, replays, creates hidden
+WIP commits, switches branches, force-resets, or runs user hooks during
+background projection. Pending checkout sync does not change `shipped` and
+does not block later tasks. A remote repository is not required. `shipped`
+means the verified candidate is on the publish target and the Beads task
+closed with matching transaction metadata. If a run is interrupted, the next `archloop run`
 reconstructs missing checkpoints from those durable refs, artifacts, and
 receipts, then finishes close and cleanup without landing or closing twice.
 Pending reconciliation is not a task failure and does not require
@@ -64,7 +74,9 @@ invalidates that candidate and verification artifact, rebuilds on the new
 target, and fully reverifies the exact OID before retrying CAS. Lease, lock,
 and CAS contention stay pending for automatic retry. Plain and JSON output
 include the expected and observed target/fence OIDs and distinguish rebuild,
-pending contention, stale-owner rejection, and successful landing.
+pending contention, stale-owner rejection, and successful landing. Checkout
+pending and checkout success are distinct events (`checkout_sync_pending`,
+`checkout_sync_succeeded`) in plain and JSON output.
 
 If a legacy task branch committed known Beads runtime/export files
 (`.beads/issues.jsonl`, `.beads/interactions.jsonl`, `.beads/events.jsonl`,

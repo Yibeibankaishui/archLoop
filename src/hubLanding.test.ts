@@ -19,6 +19,7 @@ import {
   loadHubLandingTransaction,
   resolveHubLandingJournalPath,
 } from "./hubLandingTransaction.js";
+import { listHubCheckoutOutboxItems } from "./hubCheckoutProjection.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -183,6 +184,13 @@ describe("Hub fenced local landing", () => {
       loadHubLandingTransaction(hubProjectDir, candidate.transactionId)
         ?.checkpoint,
     ).toBe("cleaned");
+    expect(listHubCheckoutOutboxItems(hubProjectDir)).toEqual([
+      expect.objectContaining({
+        transactionId: candidate.transactionId,
+        candidateOid: candidate.candidateOid,
+        status: "pending",
+      }),
+    ]);
   });
 
   it("refuses to land an unverified or stale candidate", async () => {

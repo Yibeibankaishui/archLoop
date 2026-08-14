@@ -148,6 +148,52 @@ describe("JSONL Hub run lifecycle output", () => {
     });
   });
 
+  it("emits distinct checkout sync pending and success JSON events", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+    });
+    const pending: HubRunEvent = {
+      type: "checkout_sync_pending",
+      eventId: "run-land:40",
+      sequence: 40,
+      runId: "run-land",
+      batchId: "batch-land",
+      taskId: "bd-land",
+      branch: "main",
+      createdAt: "2026-08-14T18:00:00.000Z",
+      status: "done",
+      transactionId: "ltx-bd-land-abc123",
+      candidateOid: "cccccccccccccccccccccccccccccccccccccccc",
+      reason: "unstaged_changes",
+      message: "Checkout sync pending for bd-land (unstaged_changes).",
+    };
+    expect(parseRecord(renderer.event(pending)!)).toMatchObject({
+      type: "checkout_sync_pending",
+      taskId: "bd-land",
+      stage: "Checkout sync pending",
+      status: "done",
+      data: {
+        transactionId: "ltx-bd-land-abc123",
+        candidateOid: "cccccccccccccccccccccccccccccccccccccccc",
+        reason: "unstaged_changes",
+      },
+    });
+
+    const succeeded: HubRunEvent = {
+      ...pending,
+      type: "checkout_sync_succeeded",
+      eventId: "run-land:41",
+      sequence: 41,
+      reason: undefined,
+      message: "Checkout synced main to cccccccccccccccccccccccccccccccccccccccc.",
+    };
+    expect(parseRecord(renderer.event(succeeded)!)).toMatchObject({
+      type: "checkout_sync_succeeded",
+      stage: "Checkout sync succeeded",
+    });
+  });
+
   it("carries expected and observed target/fence OIDs for rebuild and contention", () => {
     const renderer = createHubRunJsonRenderer({
       hubProjectName: "alpha",
@@ -704,6 +750,29 @@ describe("JSONL Hub run lifecycle output", () => {
       pendingCount: 1,
     });
     expect(JSON.stringify(pending)).not.toMatch(/tasks recover/);
+
+    const checkoutPending = parseRecord(
+      renderer
+        .outcome(
+          makeRunResult({
+            checkoutSync: {
+              items: [],
+              pendingCount: 1,
+              succeededCount: 0,
+              message:
+                "Checkout sync pending for bd-land (unstaged_changes): host branch main was not updated. Landed candidate cccccccccccccccccccccccccccccccccccccccc remains on the Hub publish target and the task can stay shipped. This is not a task failure and does not require a recovery command.",
+              nextAction:
+                "Wait for the automatic retry; Hub will fast-forward the host branch when Git can prove the checkout safe.",
+            },
+          }),
+          projectHubRunOutcome(makeRunResult({})),
+        )
+        .at(-1)!,
+    );
+    expect(checkoutPending.checkoutSync).toMatchObject({
+      pendingCount: 1,
+    });
+    expect(JSON.stringify(checkoutPending)).not.toMatch(/tasks recover/);
 
     const incident = parseRecord(
       renderer

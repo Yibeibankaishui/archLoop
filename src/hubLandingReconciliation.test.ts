@@ -29,6 +29,7 @@ import {
   loadHubLandingTransaction,
   resolveHubLandingJournalPath,
 } from "./hubLandingTransaction.js";
+import { projectHubCheckoutOutbox } from "./hubCheckoutProjection.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -504,6 +505,13 @@ describe("Hub landing transaction reconciliation", () => {
           repoRoot: repoDir,
           hubProjectDir,
           candidate,
+          faultInjection: fault,
+        }),
+      );
+      await runStep((fault) =>
+        projectHubCheckoutOutbox({
+          repoRoot: repoDir,
+          hubProjectDir,
           faultInjection: fault,
         }),
       );

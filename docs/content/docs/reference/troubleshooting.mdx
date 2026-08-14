@@ -79,6 +79,23 @@ retries cleanup without undoing `shipped`. `tasks doctor` is read-only.
 Pending reconciliation is not a task failure; do not run
 `archloop tasks recover` for this.
 
+## Checkout sync pending
+
+**Cause:** Hub landed the verified candidate on the publish target, but the
+configured host branch could not be fast-forwarded without touching WIP,
+operation state, sparse checkout, submodules, divergence, or another unsafe
+worktree condition.
+
+```bash
+npx archloop project status
+npx archloop tasks doctor
+npx archloop run --flow with-review
+```
+
+User state is left byte-for-byte unchanged. `shipped` is unchanged. Clean or
+switch the checkout, then rerun the same flow; Hub retries the same outbox
+item automatically. Do not run `archloop tasks recover` for this.
+
 ## Legacy Hub landing history
 
 **Cause:** The project has pre-transaction merge history from before durable

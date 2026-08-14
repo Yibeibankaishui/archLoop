@@ -34,6 +34,9 @@ import {
   type HubLandingTransactionState,
 } from "./hubLandingTransaction.js";
 import {
+  enqueueHubCheckoutProjection,
+} from "./hubCheckoutProjection.js";
+import {
   isCompletedHubStatus,
   type HubTaskProjection,
 } from "./taskBoard.js";
@@ -759,6 +762,19 @@ export const reconcileHubLandingTransactions = async (
         candidate,
         now: input.now,
         faultInjection: input.faultInjection,
+      });
+    }
+    if (before.landed && before.taskId && before.candidateOid) {
+      enqueueHubCheckoutProjection({
+        repoRoot: input.repoRoot,
+        hubProjectDir: input.hubProjectDir,
+        candidate: {
+          transactionId,
+          taskId: before.taskId,
+          policy,
+        },
+        candidateOid: before.candidateOid,
+        now: input.now,
       });
     }
   }

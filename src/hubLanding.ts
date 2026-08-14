@@ -20,6 +20,9 @@ import {
   type HubLandingPolicy,
 } from "./hubLandingPolicy.js";
 import {
+  enqueueHubCheckoutProjection,
+} from "./hubCheckoutProjection.js";
+import {
   appendHubLandingCheckpoint,
   loadHubLandingTransaction,
   resolveHubLandingTransactionDir,
@@ -120,6 +123,7 @@ export const HUB_LANDING_SIDE_EFFECTS = [
   "atomic_landing",
   "task_close",
   "cleanup",
+  "checkout_projection",
 ] as const;
 
 export type HubLandingSideEffect = (typeof HUB_LANDING_SIDE_EFFECTS)[number];
@@ -1215,6 +1219,7 @@ type ObservedLandingOids = {
 };
 
 const toTargetLandedCommit = (input: {
+  readonly repoRoot: string;
   readonly hubProjectDir: string;
   readonly candidate: HubLandingCandidate;
   readonly verifierFingerprint: string;
@@ -1232,6 +1237,12 @@ const toTargetLandedCommit = (input: {
     receiptRef: input.receiptRef,
     receiptOid: input.receiptOid,
     createdAt: input.createdAt,
+  });
+  enqueueHubCheckoutProjection({
+    repoRoot: input.repoRoot,
+    hubProjectDir: input.hubProjectDir,
+    candidate: input.candidate,
+    candidateOid: input.candidate.candidateOid,
   });
   return {
     transactionId: input.candidate.transactionId,
@@ -1342,6 +1353,7 @@ export const commitHubLandingTarget = async (input: {
       );
     }
     return toTargetLandedCommit({
+      repoRoot: input.repoRoot,
       hubProjectDir: input.hubProjectDir,
       candidate,
       verifierFingerprint: input.verifierFingerprint,
@@ -1422,6 +1434,7 @@ export const commitHubLandingTarget = async (input: {
           candidate.policy.fenceRef,
         ])) ?? racedReceipt.oid;
       return toTargetLandedCommit({
+        repoRoot: input.repoRoot,
         hubProjectDir: input.hubProjectDir,
         candidate,
         verifierFingerprint: input.verifierFingerprint,
@@ -1450,6 +1463,7 @@ export const commitHubLandingTarget = async (input: {
   maybeCrash(input.faultInjection, "atomic_landing", "after");
 
   return toTargetLandedCommit({
+    repoRoot: input.repoRoot,
     hubProjectDir: input.hubProjectDir,
     candidate,
     verifierFingerprint: input.verifierFingerprint,

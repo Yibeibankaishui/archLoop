@@ -32,7 +32,10 @@ TypeScript API to build your own orchestration.
 - Git branches and worktrees for isolated changes
 - Review and merge flows with recovery after interrupted runs
 - Local-first landing onto a Hub publish target: a verified candidate ships
-  without a remote and without mutating the user's checkout. Publication stays
+  without a remote and without mutating the user's checkout during landing.
+  After landing, Hub fast-forwards the host branch only when Git can prove it
+  safe; otherwise `checkout_sync_pending` retries automatically without
+  changing `shipped`. Publication stays
   off until `archloop project configure --publish-policy` sets it. Interrupted
   landings resume from durable evidence on the next run. Independent siblings
   keep landing when one task is blocked; repair is bounded. Legacy task
@@ -127,7 +130,9 @@ npx archloop run --flow with-review --output json
 
 The task-board flows resume unfinished merge-ready work before claiming new
 tasks. Eligible tasks land through a durable fenced transaction onto a
-Hub-managed local Git ref; the checkout, index, and WIP stay untouched.
+Hub-managed local Git ref; landing does not rewrite the checkout, index, or
+WIP. A later safe fast-forward may update the host branch; unsafe WIP stays
+`checkout_sync_pending` and does not change `shipped`.
 Publication remains off unless configured. Use `archloop project status`,
 `archloop tasks doctor`, and `archloop tasks recover <task-id>` when a run
 needs attention.

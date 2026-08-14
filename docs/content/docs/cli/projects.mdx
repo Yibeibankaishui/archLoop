@@ -20,8 +20,8 @@ safe pending deferral, and surfaces a split-brain integrity incident when
 both stores were modified independently after redirect. After the first
 upgraded Hub run or `project configure`, it also shows the pinned host target
 branch, Hub publish target, optional remote target, and publish policy.
-It can also show pending landing reconciliation or classified legacy landing
-history without mutating it.
+It can also show pending landing reconciliation, pending checkout sync, or
+classified legacy landing history without mutating them.
 
 `project configure` accepts `--publish-policy off|best_effort|required` and
 `--remote-target <ref>`. These write Hub-owned landing policy and do not dirty

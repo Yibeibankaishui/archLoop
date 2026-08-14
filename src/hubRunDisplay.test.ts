@@ -945,4 +945,47 @@ describe("plain Hub run lifecycle output", () => {
     expect(stale).toContain("Stale landing owner rejected");
     expect(stale).toContain(`observed_fence_oid="${"d".repeat(40)}"`);
   });
+
+  it("formats checkout sync pending and success without recover or shipped failure", () => {
+    const state = createHubRunDisplayState({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+    });
+    const base = {
+      eventId: "run-1:30",
+      sequence: 30,
+      runId: "run-1",
+      batchId: "batch-1",
+      taskId: "bd-land",
+      branch: "main",
+      createdAt: "2026-08-14T18:00:00.000Z",
+      status: "done",
+      transactionId: "ltx-bd-land-abc123",
+      candidateOid: "c".repeat(40),
+    } as const;
+
+    const pending = formatPlainHubRunEvent(
+      {
+        ...base,
+        type: "checkout_sync_pending",
+        reason: "unstaged_changes",
+        message: "Checkout sync pending for bd-land (unstaged_changes).",
+      },
+      state,
+    );
+    expect(pending).toContain("event=checkout_sync_pending");
+    expect(pending).toContain("Checkout sync pending");
+    expect(pending).toContain('reason="unstaged_changes"');
+    expect(pending).toContain(`transaction_id="${base.transactionId}"`);
+    expect(pending).toContain(`candidate_oid="${base.candidateOid}"`);
+    expect(pending).not.toMatch(/tasks recover/);
+
+    const synced = formatPlainHubRunEvent(
+      { ...base, type: "checkout_sync_succeeded" },
+      state,
+    );
+    expect(synced).toContain("event=checkout_sync_succeeded");
+    expect(synced).toContain("Checkout synced");
+    expect(synced).not.toMatch(/tasks recover/);
+  });
 });

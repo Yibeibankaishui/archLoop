@@ -473,6 +473,22 @@ describe("formatHubProjectStatusLines", () => {
     );
     expect(emptyLines.join("\n")).toContain("No Hub run directories");
 
+    const checkoutLines = formatHubProjectStatusLines({
+      ...resolveHubProjectStatus({
+        cwd: "/tmp/repo",
+        archloopUserDataDir: "/tmp/data/archloop",
+        resolveRepoRoot: () => "/tmp/repo",
+        detectBeadsAvailable: () => true,
+        detectTaskStoreInitialized: () => true,
+      }),
+      checkoutSyncPendingCount: 1,
+      checkoutSyncMessage:
+        "Checkout sync pending for bd-land (unstaged_changes): host branch main was not updated. Landed candidate cccccccccccccccccccccccccccccccccccccccc remains on the Hub publish target and the task can stay shipped. This is not a task failure and does not require a recovery command.",
+    });
+    expect(checkoutLines.join("\n")).toContain("Checkout sync");
+    expect(checkoutLines.join("\n")).toContain("Checkout sync pending");
+    expect(checkoutLines.join("\n")).not.toMatch(/tasks recover/);
+
     const activeLines = formatHubProjectStatusLines(
       resolveHubProjectStatus({
         cwd: "/tmp/repo",

@@ -28,7 +28,9 @@ or verification failure is repaired in bounded Agent attempts, then fully
 reverified; exhaustion blocks only that task. Independent siblings continue to
 verified landing, dependents wait for an unshipped prerequisite, and mixed
 outcomes report `partial_failed`. Landing does not merge into the user's
-checkout. Concurrent runs share a landing lease and fenced compare-and-swap;
+checkout. After landing, Hub projects the host branch only when a fast-forward
+is provably safe; otherwise `checkout_sync_pending` stays visible and retries
+automatically without affecting `shipped`. Concurrent runs share a landing lease and fenced compare-and-swap;
 target drift rebuilds and reverifies the queue head before another landing
 attempt. Lease and CAS contention stay pending. A crashed landing resumes from
 durable evidence on the next run without `tasks recover`. Already closed

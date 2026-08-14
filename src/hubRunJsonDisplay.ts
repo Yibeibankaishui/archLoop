@@ -326,6 +326,16 @@ export const createHubRunJsonRenderer = (input: {
                 },
               }
             : {}),
+          ...(result.checkoutSync && result.checkoutSync.pendingCount > 0
+            ? {
+                checkoutSync: {
+                  pendingCount: result.checkoutSync.pendingCount,
+                  succeededCount: result.checkoutSync.succeededCount,
+                  message: result.checkoutSync.message,
+                  nextAction: result.checkoutSync.nextAction,
+                },
+              }
+            : {}),
           ...(result.mergeResult
             ? {
                 merge: {

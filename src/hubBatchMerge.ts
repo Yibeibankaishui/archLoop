@@ -47,6 +47,9 @@ import {
   type HubLandingOidEvidence,
 } from "./hubLandingCoordinator.js";
 import {
+  syncHubCheckoutProjections,
+} from "./hubCheckoutProjection.js";
+import {
   computeHubLandingMergeInputFingerprint,
   isTransientHubLandingError,
   recordHubLandingRepairAttempt,
@@ -316,6 +319,8 @@ type MergeProgressEventType =
   | "target_landing_rebuild"
   | "target_landing_pending"
   | "target_landing_stale_owner_rejected"
+  | "checkout_sync_pending"
+  | "checkout_sync_succeeded"
   | "task_close_started"
   | "task_close_succeeded";
 
@@ -1551,6 +1556,39 @@ const emitMergeLandingEvent = (
   });
 };
 
+const emitCheckoutProjectionEvents = async (
+  session: MergeTaskSession,
+  landingIdentity: HubLandingIdentity,
+): Promise<void> => {
+  const synced = await syncHubCheckoutProjections({
+    repoRoot: session.input.cwd,
+    hubProjectDir: session.hubProjectDir,
+  });
+  for (const attempt of synced.deltas) {
+    if (
+      landingIdentity.transactionId &&
+      attempt.item.transactionId !== landingIdentity.transactionId
+    ) {
+      continue;
+    }
+    emitMergeLandingEvent(session, {
+      type:
+        attempt.status === "succeeded"
+          ? "checkout_sync_succeeded"
+          : "checkout_sync_pending",
+      createdAt: new Date().toISOString(),
+      status: "done",
+      ...landingIdentity,
+      candidateOid: attempt.item.candidateOid,
+      reason:
+        attempt.status === "pending"
+          ? attempt.pendingReason ?? "checkout_sync_pending"
+          : undefined,
+      message: attempt.message,
+    });
+  }
+};
+
 const failLandedCandidate = async (
   session: MergeTaskSession,
   mergeIntegration: HubMergeIntegration,
@@ -2014,6 +2052,8 @@ const processMergeTask = async (
       verifierFingerprint,
     });
   }
+
+  await emitCheckoutProjectionEvents(session, landedIdentity);
 
   appendMergeProgressEvent(input, {
     type: "task_close_started",
