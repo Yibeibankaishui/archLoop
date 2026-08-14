@@ -204,6 +204,17 @@ export interface HubHostContributionResult {
   readonly pending?: boolean;
 }
 
+const HUB_LANDING_TICKET_STATUSES = [
+  "queued",
+  "speculating",
+  "verified",
+  "landed",
+  "invalidated",
+  "blocked_unshipped_prerequisite",
+  "failed",
+  "target_quiet_wait",
+] as const satisfies readonly HubLandingTicketStatus[];
+
 const ELIGIBLE_STATUSES = new Set<HubLandingTicketStatus>([
   "queued",
   "speculating",
@@ -216,6 +227,11 @@ const TERMINAL_STATUSES = new Set<HubLandingTicketStatus>([
   "landed",
   "failed",
 ]);
+
+const isHubLandingTicketStatus = (
+  value: string,
+): value is HubLandingTicketStatus =>
+  (HUB_LANDING_TICKET_STATUSES as readonly string[]).includes(value);
 
 export const resolveHubLandingQueuePath = (hubProjectDir: string): string =>
   join(hubProjectDir, "landing", "queue.json");
@@ -235,23 +251,14 @@ const parseTicket = (value: unknown): HubLandingQueueTicket | undefined => {
   const sequence = numberField(record.sequence);
   const taskId = stringField(record.taskId);
   const assignedAt = stringField(record.assignedAt);
-  const status = stringField(record.status) as HubLandingTicketStatus | undefined;
+  const statusField = stringField(record.status);
   if (
     !ticketId ||
     sequence === undefined ||
     !taskId ||
     !assignedAt ||
-    !status ||
-    ![
-      "queued",
-      "speculating",
-      "verified",
-      "landed",
-      "invalidated",
-      "blocked_unshipped_prerequisite",
-      "failed",
-      "target_quiet_wait",
-    ].includes(status)
+    !statusField ||
+    !isHubLandingTicketStatus(statusField)
   ) {
     return undefined;
   }
@@ -260,7 +267,7 @@ const parseTicket = (value: unknown): HubLandingQueueTicket | undefined => {
     sequence,
     taskId,
     assignedAt,
-    status,
+    status: statusField,
     blockerTaskIds: stringArrayField(record.blockerTaskIds) ?? [],
     sourceOid: stringField(record.sourceOid),
     predecessorOid: stringField(record.predecessorOid),
@@ -307,6 +314,14 @@ export const readHubLandingQueue = (
   return parseQueue(parseJsonRecord(readFileSync(path, "utf8")));
 };
 
+export const findHubLandingQueueTicket = (
+  hubProjectDir: string,
+  taskId: string,
+): HubLandingQueueTicket | undefined =>
+  readHubLandingQueue(hubProjectDir)?.tickets.find(
+    (ticket) => ticket.taskId === taskId,
+  );
+
 const writeQueue = (
   hubProjectDir: string,
   queue: HubLandingQueueState,
@@ -332,6 +347,11 @@ const replaceTicket = (
   ),
 });
 
+const refreshInvalidatedTicketStatus = (
+  status: HubLandingTicketStatus,
+): HubLandingTicketStatus =>
+  status === "invalidated" ? "queued" : status;
+
 export const assignHubLandingQueueTickets = (input: {
   readonly hubProjectDir: string;
   readonly publishTargetRef: string;
@@ -354,11 +374,7 @@ export const assignHubLandingQueueTickets = (input: {
         ...current,
         blockerTaskIds: task.blockerTaskIds ?? current.blockerTaskIds,
         sourceOid: task.sourceOid ?? current.sourceOid,
-        status:
-          current.status === "invalidated" &&
-          !TERMINAL_STATUSES.has(current.status)
-            ? "queued"
-            : current.status,
+        status: refreshInvalidatedTicketStatus(current.status),
       };
       const index = tickets.findIndex(
         (ticket) => ticket.ticketId === current.ticketId,
@@ -441,6 +457,40 @@ const updateTicket = (
   const next = { ...current, ...patch };
   writeQueue(hubProjectDir, replaceTicket(queue, next));
   return next;
+};
+
+const quietWaitInspection = (
+  tickets: readonly HubLandingQueueTicket[],
+  head: HubLandingQueueTicket,
+  pendingQuietWaitCount: number,
+): HubLandingQueueInspection => ({
+  tickets,
+  pendingQuietWaitCount,
+  fifoHeadTaskId: head.taskId,
+  fifoHeadPosition: head.sequence,
+  message: `Target quiet wait for ${head.taskId} at FIFO position ${head.sequence}. Later transactions cannot overtake this ticket. ${NO_RECOVER_SUFFIX}`,
+  nextAction:
+    "Wait for a stable Hub publish target window; Hub will start a new activation automatically without resetting semantic repair budgets.",
+});
+
+const activeHeadInspection = (
+  tickets: readonly HubLandingQueueTicket[],
+  head: HubLandingQueueTicket,
+  pendingQuietWaitCount: number,
+): HubLandingQueueInspection => {
+  const oidParts = [
+    head.predecessorOid ? `predecessor ${head.predecessorOid}` : undefined,
+    head.candidateOid ? `candidate ${head.candidateOid}` : undefined,
+  ].filter((part): part is string => part !== undefined);
+  const oidSuffix = oidParts.length > 0 ? `; ${oidParts.join("; ")}` : "";
+  return {
+    tickets,
+    pendingQuietWaitCount,
+    fifoHeadTaskId: head.taskId,
+    fifoHeadPosition: head.sequence,
+    message: `Landing queue head ${head.taskId} at FIFO position ${head.sequence}${oidSuffix}.`,
+    nextAction: "Hub will land the queue head with fenced CAS when verified.",
+  };
 };
 
 export const recordHubLandingQueueCandidate = (input: {
@@ -547,25 +597,6 @@ export const inspectHubLandingQueue = (
   const pendingQuietWaitCount = tickets.filter(
     (ticket) => ticket.status === "target_quiet_wait",
   ).length;
-  if (!head && pendingQuietWaitCount === 0) {
-    return {
-      tickets,
-      pendingQuietWaitCount: 0,
-      message: "",
-      nextAction: "",
-    };
-  }
-  if (head?.status === "target_quiet_wait") {
-    return {
-      tickets,
-      pendingQuietWaitCount,
-      fifoHeadTaskId: head.taskId,
-      fifoHeadPosition: head.sequence,
-      message: `Target quiet wait for ${head.taskId} at FIFO position ${head.sequence}. Later transactions cannot overtake this ticket. ${NO_RECOVER_SUFFIX}`,
-      nextAction:
-        "Wait for a stable Hub publish target window; Hub will start a new activation automatically without resetting semantic repair budgets.",
-    };
-  }
   if (!head) {
     return {
       tickets,
@@ -574,16 +605,10 @@ export const inspectHubLandingQueue = (
       nextAction: "",
     };
   }
-  return {
-    tickets,
-    pendingQuietWaitCount,
-    fifoHeadTaskId: head.taskId,
-    fifoHeadPosition: head.sequence,
-    message: `Landing queue head ${head.taskId} at FIFO position ${head.sequence}${
-      head.predecessorOid ? `; predecessor ${head.predecessorOid}` : ""
-    }${head.candidateOid ? `; candidate ${head.candidateOid}` : ""}.`,
-    nextAction: "Hub will land the queue head with fenced CAS when verified.",
-  };
+  if (head.status === "target_quiet_wait") {
+    return quietWaitInspection(tickets, head, pendingQuietWaitCount);
+  }
+  return activeHeadInspection(tickets, head, pendingQuietWaitCount);
 };
 
 export const computeHubLandingDriftBackoffMs = (
@@ -615,8 +640,9 @@ export const recordHubLandingDriftRebuild = (input: {
   readonly observedTargetOid: string;
   readonly clock?: HubLandingQueueClock;
 }): HubLandingQueueTicket | undefined => {
-  const current = readHubLandingQueue(input.hubProjectDir)?.tickets.find(
-    (ticket) => ticket.taskId === input.taskId,
+  const current = findHubLandingQueueTicket(
+    input.hubProjectDir,
+    input.taskId,
   );
   const activationId =
     current?.activationId ?? `act-${input.taskId}-${nowIso(input.clock)}`;
@@ -632,11 +658,11 @@ export const shouldEnterHubLandingQuietWait = (input: {
   readonly hubProjectDir: string;
   readonly taskId: string;
 }): boolean => {
-  const ticket = readHubLandingQueue(input.hubProjectDir)?.tickets.find(
-    (entry) => entry.taskId === input.taskId,
+  const ticket = findHubLandingQueueTicket(input.hubProjectDir, input.taskId);
+  return (
+    (ticket?.activationDriftRebuilds ?? 0) >=
+    HUB_LANDING_TARGET_DRIFT_REBUILD_LIMIT
   );
-  return (ticket?.activationDriftRebuilds ?? 0) >=
-    HUB_LANDING_TARGET_DRIFT_REBUILD_LIMIT;
 };
 
 export const enterHubLandingQuietWait = (input: {
@@ -657,9 +683,7 @@ export const resumeHubLandingQuietWaitIfStable = (input: {
   readonly observedTargetOid: string;
   readonly clock?: HubLandingQueueClock;
 }): "resumed" | "waiting" | "not_waiting" => {
-  const ticket = readHubLandingQueue(input.hubProjectDir)?.tickets.find(
-    (entry) => entry.taskId === input.taskId,
-  );
+  const ticket = findHubLandingQueueTicket(input.hubProjectDir, input.taskId);
   if (!ticket || ticket.status !== "target_quiet_wait") {
     return "not_waiting";
   }
@@ -761,6 +785,46 @@ export type HubHostContributionLand = (
   | { readonly kind: string; readonly message?: string }
 >;
 
+const defaultHostContributionVerify =
+  (hubProjectDir: string, repoRoot: string, fingerprint: string) =>
+  (next: HubLandingCandidate): void => {
+    bindHubLandingVerification({
+      hubProjectDir,
+      transactionId: next.transactionId,
+      taskId: next.taskId,
+      candidateOid: next.candidateOid,
+      verifierFingerprint: fingerprint,
+      repoRoot,
+    });
+  };
+
+const defaultHostContributionLand =
+  (
+    repoRoot: string,
+    hubProjectDir: string,
+    fingerprint: string,
+    now: Date | undefined,
+    faultInjection: HubLandingFaultInjection | undefined,
+  ): HubHostContributionLand =>
+  async (next) => {
+    const commit = await commitHubLandingTarget({
+      repoRoot,
+      hubProjectDir,
+      candidate: next,
+      verifierFingerprint: fingerprint,
+      now,
+      faultInjection,
+    });
+    return { kind: "landed" as const, commit };
+  };
+
+const isLandedHostContribution = (
+  landed: Awaited<ReturnType<HubHostContributionLand>>,
+): landed is {
+  readonly kind: "landed";
+  readonly commit: HubLandingCommitResult;
+} => landed.kind === "landed" && "commit" in landed && Boolean(landed.commit);
+
 export const reconcileHubHostTargetContribution = async (input: {
   readonly repoRoot: string;
   readonly hubProjectDir: string;
@@ -781,21 +845,23 @@ export const reconcileHubHostTargetContribution = async (input: {
     repoRoot: input.repoRoot,
     policy,
   });
-  const finish = (
+  const finish = async (
     result: Omit<
       HubHostContributionResult,
       "beforeDirty" | "afterDirty" | "hostDirtyUnchanged" | "hostOid" | "targetOid"
     > &
       Partial<Pick<HubHostContributionResult, "hostOid" | "targetOid">>,
-  ): Promise<HubHostContributionResult> =>
-    readHubHostDirtySnapshot(input.repoRoot).then((afterDirty) => ({
+  ): Promise<HubHostContributionResult> => {
+    const afterDirty = await readHubHostDirtySnapshot(input.repoRoot);
+    return {
       hostOid: classified.hostOid,
       targetOid: classified.targetOid,
       beforeDirty,
       afterDirty,
       hostDirtyUnchanged: hubHostDirtySnapshotsEqual(beforeDirty, afterDirty),
       ...result,
-    }));
+    };
+  };
 
   if (classified.relation === "equal" || classified.relation === "behind") {
     return finish({
@@ -818,32 +884,23 @@ export const reconcileHubHostTargetContribution = async (input: {
     const fingerprint = computeHubVerifierFingerprint(input.repoRoot);
     const verify =
       input.verify ??
-      ((next: HubLandingCandidate) => {
-        bindHubLandingVerification({
-          hubProjectDir: input.hubProjectDir,
-          transactionId: next.transactionId,
-          taskId: next.taskId,
-          candidateOid: next.candidateOid,
-          verifierFingerprint: fingerprint,
-          repoRoot: input.repoRoot,
-        });
-      });
+      defaultHostContributionVerify(
+        input.hubProjectDir,
+        input.repoRoot,
+        fingerprint,
+      );
     await verify(candidate);
     const land =
       input.land ??
-      (async (next: HubLandingCandidate) => {
-        const commit = await commitHubLandingTarget({
-          repoRoot: input.repoRoot,
-          hubProjectDir: input.hubProjectDir,
-          candidate: next,
-          verifierFingerprint: fingerprint,
-          now: input.now,
-          faultInjection: input.faultInjection,
-        });
-        return { kind: "landed" as const, commit };
-      });
+      defaultHostContributionLand(
+        input.repoRoot,
+        input.hubProjectDir,
+        fingerprint,
+        input.now,
+        input.faultInjection,
+      );
     const landed = await land(candidate);
-    if (landed.kind !== "landed" || !("commit" in landed) || !landed.commit) {
+    if (!isLandedHostContribution(landed)) {
       return finish({
         relation: classified.relation,
         imported: false,

@@ -52,6 +52,7 @@ import {
   canLandHubLandingTicket,
   enterHubLandingQuietWait,
   fifoPositionForTicket,
+  findHubLandingQueueTicket,
   invalidateHubLandingSpeculativeSuffix,
   markHubLandingQueueBlockedPrerequisite,
   markHubLandingQueueFailed,
@@ -65,6 +66,8 @@ import {
   shouldEnterHubLandingQuietWait,
   waitHubLandingDriftBackoff,
   type HubLandingQueueClock,
+  type HubLandingQueueState,
+  type HubLandingQueueTicket,
 } from "./hubLandingQueue.js";
 import {
   ensureHubLandingPolicy,
@@ -498,6 +501,47 @@ const toBatchMergeTaskResult = (
     ? {}
     : { filteredBeadsRuntimePaths: extras.filteredBeadsRuntimePaths }),
 });
+
+const fifoPositionOrUndefined = (
+  ticket: HubLandingQueueTicket | undefined,
+): number | undefined =>
+  ticket ? fifoPositionForTicket(ticket) : undefined;
+
+const quietWaitBlockExtras = (input: {
+  readonly taskId: string;
+  readonly headTaskId: string;
+  readonly fifoPosition?: number;
+}): Pick<
+  HubBatchMergeTaskResultExtras,
+  "diagnosticSummary" | "reason" | "fifoPosition"
+> => {
+  if (input.taskId === input.headTaskId) {
+    return {
+      diagnosticSummary: `Retaining FIFO ticket in ${HUB_TARGET_QUIET_WAIT}.`,
+      reason: "target_quiet_wait",
+      fifoPosition: input.fifoPosition,
+    };
+  }
+  return {
+    diagnosticSummary: `Waiting for FIFO queue head ${input.headTaskId} in ${HUB_TARGET_QUIET_WAIT}.`,
+    reason: "queue_head_blocked",
+    fifoPosition: input.fifoPosition,
+  };
+};
+
+const earlierQuietWaitTicket = (
+  queue: HubLandingQueueState | undefined,
+  ticket: HubLandingQueueTicket | undefined,
+): HubLandingQueueTicket | undefined => {
+  if (!queue) {
+    return undefined;
+  }
+  return queue.tickets.find(
+    (entry) =>
+      entry.status === "target_quiet_wait" &&
+      entry.sequence < (ticket?.sequence ?? Number.MAX_SAFE_INTEGER),
+  );
+};
 
 const toLandingIdentity = (
   integration:
@@ -1892,8 +1936,9 @@ const finalizeLandedCandidate = async (
   let activeIntegration = mergeIntegration;
   let activeLanding = landingIdentity;
   const clock = session.input.landingQueueClock;
-  const ticket = readHubLandingQueue(session.hubProjectDir)?.tickets.find(
-    (entry) => entry.taskId === session.task.id,
+  const ticket = findHubLandingQueueTicket(
+    session.hubProjectDir,
+    session.task.id,
   );
   const observedTarget = activeLanding.baseOid;
 
@@ -2056,10 +2101,12 @@ const finalizeLandedCandidate = async (
           clock,
         });
       }
-      const message =
-        attempt.kind === "target_quiet_wait"
-          ? attempt.message
-          : `Queue head ${session.task.id} entered ${HUB_TARGET_QUIET_WAIT} after repeated target drift. Later transactions cannot overtake this ticket. This is not a task failure and does not require a recovery command.`;
+      let message: string;
+      if (attempt.kind === "target_quiet_wait") {
+        message = attempt.message;
+      } else {
+        message = `Queue head ${session.task.id} entered ${HUB_TARGET_QUIET_WAIT} after repeated target drift. Later transactions cannot overtake this ticket. This is not a task failure and does not require a recovery command.`;
+      }
       emitMergeLandingEvent(session, {
         type: "target_quiet_wait",
         createdAt: new Date().toISOString(),
@@ -2096,9 +2143,8 @@ const finalizeLandedCandidate = async (
 
     await waitHubLandingDriftBackoff(
       clock,
-      readHubLandingQueue(session.hubProjectDir)?.tickets.find(
-        (entry) => entry.taskId === session.task.id,
-      )?.activationDriftRebuilds ?? 0,
+      findHubLandingQueueTicket(session.hubProjectDir, session.task.id)
+        ?.activationDriftRebuilds ?? 0,
     );
     recordHubLandingDriftRebuild({
       hubProjectDir: session.hubProjectDir,
@@ -2583,7 +2629,7 @@ export const runHubBatchMerge = async (
           {
             diagnosticSummary: `Waiting for unshipped prerequisite ${unshippedBlockers.join(", ")}.`,
             reason: "unshipped_prerequisite",
-            fifoPosition: ticket ? fifoPositionForTicket(ticket) : undefined,
+            fifoPosition: fifoPositionOrUndefined(ticket),
           },
         ),
       );
@@ -2592,11 +2638,7 @@ export const runHubBatchMerge = async (
 
     if (
       ticket?.status === "target_quiet_wait" ||
-      queue?.tickets.some(
-        (entry) =>
-          entry.status === "target_quiet_wait" &&
-          entry.sequence < (ticket?.sequence ?? Number.MAX_SAFE_INTEGER),
-      )
+      earlierQuietWaitTicket(queue, ticket)
     ) {
       const observedTarget = await execFileAsync(
         "git",
@@ -2625,19 +2667,11 @@ export const runHubBatchMerge = async (
               resolveBranch(task),
               "pending",
               "waiting_for_merge",
-              {
-                diagnosticSummary:
-                  task.id === headTicket.taskId
-                    ? `Retaining FIFO ticket in ${HUB_TARGET_QUIET_WAIT}.`
-                    : `Waiting for FIFO queue head ${headTicket.taskId} in ${HUB_TARGET_QUIET_WAIT}.`,
-                reason:
-                  task.id === headTicket.taskId
-                    ? "target_quiet_wait"
-                    : "queue_head_blocked",
-                fifoPosition: ticket
-                  ? fifoPositionForTicket(ticket)
-                  : undefined,
-              },
+              quietWaitBlockExtras({
+                taskId: task.id,
+                headTaskId: headTicket.taskId,
+                fifoPosition: fifoPositionOrUndefined(ticket),
+              }),
             ),
           );
           continue;
@@ -2647,7 +2681,7 @@ export const runHubBatchMerge = async (
 
     const result = await processMergeTask(input, task, claim, {
       predecessorOid,
-      fifoPosition: ticket ? fifoPositionForTicket(ticket) : undefined,
+      fifoPosition: fifoPositionOrUndefined(ticket),
       verificationConcurrency: 1,
     });
     results.push(result);
@@ -2665,9 +2699,7 @@ export const runHubBatchMerge = async (
           env: input.env,
           task: later,
         });
-        const laterTicket = readHubLandingQueue(hubProjectDir)?.tickets.find(
-          (entry) => entry.taskId === later.id,
-        );
+        const laterTicket = findHubLandingQueueTicket(hubProjectDir, later.id);
         results.push(
           toBatchMergeTaskResult(
             later,
@@ -2677,9 +2709,7 @@ export const runHubBatchMerge = async (
             {
               diagnosticSummary: `Waiting for FIFO queue head ${task.id} in ${HUB_TARGET_QUIET_WAIT}.`,
               reason: "queue_head_blocked",
-              fifoPosition: laterTicket
-                ? fifoPositionForTicket(laterTicket)
-                : undefined,
+              fifoPosition: fifoPositionOrUndefined(laterTicket),
             },
           ),
         );
