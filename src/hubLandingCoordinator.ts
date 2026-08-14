@@ -36,8 +36,7 @@ import {
   enterHubLandingQuietWait,
   findHubLandingQueueTicket,
   invalidateHubLandingSpeculativeSuffix,
-  markHubLandingQueueLanded,
-  markHubLandingQueuePublishing,
+  markHubLandingQueueAfterLocalLand,
   readHubLandingQueue,
   recordHubLandingDriftRebuild,
   recordHubLandingQueueCandidate,
@@ -772,11 +771,11 @@ export const coordinateHubQueueHeadLanding = async (input: {
     });
     if (outcome.kind !== "target_drift") {
       if (outcome.kind === "landed") {
-        if (candidate.policy.publishPolicy === "required") {
-          markHubLandingQueuePublishing(input.hubProjectDir, input.taskId);
-        } else {
-          markHubLandingQueueLanded(input.hubProjectDir, input.taskId);
-        }
+        markHubLandingQueueAfterLocalLand(
+          input.hubProjectDir,
+          input.taskId,
+          candidate.policy.publishPolicy,
+        );
       }
       return outcome;
     }

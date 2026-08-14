@@ -1124,13 +1124,16 @@ export const driveHubRequiredPublication = async (input: {
 }): Promise<HubRequiredDeliveryDriveResult> => {
   const policy =
     input.policy ?? readHubLandingPolicy(input.hubProjectDir);
-  if (!policy || policy.publishPolicy !== "required") {
-    const publication = await projectHubPublicationOutbox({
+  const projectOnce = (): Promise<HubPublicationOutcome> =>
+    projectHubPublicationOutbox({
       repoRoot: input.repoRoot,
       hubProjectDir: input.hubProjectDir,
       now: input.now,
       faultInjection: input.faultInjection,
     });
+
+  if (!policy || policy.publishPolicy !== "required") {
+    const publication = await projectOnce();
     return {
       outcome: "not_required",
       publication,
@@ -1141,20 +1144,16 @@ export const driveHubRequiredPublication = async (input: {
   }
 
   const timeoutMs = resolveHubDeliveryTimeoutMs(policy);
-  const startedAt = (input.clock?.now ?? Date.now)();
+  const nowMs = input.clock?.now ?? Date.now;
   const sleep =
     input.clock?.sleep ??
     ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const pollIntervalMs = input.pollIntervalMs ?? 50;
-  let publication = await projectHubPublicationOutbox({
-    repoRoot: input.repoRoot,
-    hubProjectDir: input.hubProjectDir,
-    now: input.now,
-    faultInjection: input.faultInjection,
-  });
+  const startedAt = nowMs();
+  let publication = await projectOnce();
 
   while (publication.pendingCount > 0) {
-    const elapsed = (input.clock?.now ?? Date.now)() - startedAt;
+    const elapsed = nowMs() - startedAt;
     if (elapsed >= timeoutMs) {
       const message = `Required delivery timed out after ${timeoutMs}ms with ${publication.pendingCount} pending publication(s). Local landing and automatic retry state are preserved; the task is not semantically failed. Outcome: ${HUB_COMPLETED_WITH_PENDING_DELIVERY}.`;
       return {
@@ -1169,12 +1168,7 @@ export const driveHubRequiredPublication = async (input: {
       };
     }
     await sleep(Math.min(pollIntervalMs, Math.max(1, timeoutMs - elapsed)));
-    publication = await projectHubPublicationOutbox({
-      repoRoot: input.repoRoot,
-      hubProjectDir: input.hubProjectDir,
-      now: input.now,
-      faultInjection: input.faultInjection,
-    });
+    publication = await projectOnce();
   }
 
   return {

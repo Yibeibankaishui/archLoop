@@ -23,7 +23,10 @@ import {
   type HubLandingCommitResult,
   type HubLandingFaultInjection,
 } from "./hubLanding.js";
-import type { HubLandingPolicy } from "./hubLandingPolicy.js";
+import type {
+  HubLandingPolicy,
+  HubLandingPublishPolicy,
+} from "./hubLandingPolicy.js";
 import { readHubLandingPolicy } from "./hubLandingPolicy.js";
 import { isGitOid } from "./hubLandingTransaction.js";
 
@@ -230,9 +233,6 @@ const TERMINAL_STATUSES = new Set<HubLandingTicketStatus>([
   "failed",
 ]);
 
-/** Locally landed under required publication; blocks successor delivery. */
-const DELIVERY_HOLD_STATUSES = new Set<HubLandingTicketStatus>(["publishing"]);
-
 const isHubLandingTicketStatus = (
   value: string,
 ): value is HubLandingTicketStatus =>
@@ -429,7 +429,8 @@ export const resolveHubLandingQueueHead = (
     )
     .sort((left, right) => left.sequence - right.sequence)[0];
 
-const hasEarlierRequiredDeliveryHold = (
+/** Earliest earlier ticket still holding ordered required delivery. */
+const findEarlierRequiredDeliveryHold = (
   queue: HubLandingQueueState | undefined,
   taskId: string,
 ): HubLandingQueueTicket | undefined => {
@@ -443,8 +444,7 @@ const hasEarlierRequiredDeliveryHold = (
   return queue.tickets
     .filter(
       (ticket) =>
-        ticket.sequence < mine.sequence &&
-        DELIVERY_HOLD_STATUSES.has(ticket.status),
+        ticket.sequence < mine.sequence && ticket.status === "publishing",
     )
     .sort((left, right) => left.sequence - right.sequence)[0];
 };
@@ -455,7 +455,7 @@ export const canLandHubLandingTicket = (input: {
   readonly shippedTaskIds?: ReadonlySet<string>;
 }): boolean => {
   const queue = readHubLandingQueue(input.hubProjectDir);
-  if (hasEarlierRequiredDeliveryHold(queue, input.taskId)) {
+  if (findEarlierRequiredDeliveryHold(queue, input.taskId)) {
     return false;
   }
   const head = resolveHubLandingQueueHead(
@@ -469,7 +469,7 @@ export const resolveRequiredDeliveryPredecessor = (input: {
   readonly hubProjectDir: string;
   readonly taskId: string;
 }): HubLandingQueueTicket | undefined =>
-  hasEarlierRequiredDeliveryHold(
+  findEarlierRequiredDeliveryHold(
     readHubLandingQueue(input.hubProjectDir),
     input.taskId,
   );
@@ -571,6 +571,16 @@ export const markHubLandingQueuePublishing = (
     activationDriftRebuilds: 0,
     quietWaitEnteredAt: undefined,
   });
+
+/** After local land: required stays `publishing`; otherwise advances to `landed`. */
+export const markHubLandingQueueAfterLocalLand = (
+  hubProjectDir: string,
+  taskId: string,
+  publishPolicy: HubLandingPublishPolicy,
+): HubLandingQueueTicket | undefined =>
+  publishPolicy === "required"
+    ? markHubLandingQueuePublishing(hubProjectDir, taskId)
+    : markHubLandingQueueLanded(hubProjectDir, taskId);
 
 export const markHubLandingQueueFailed = (
   hubProjectDir: string,

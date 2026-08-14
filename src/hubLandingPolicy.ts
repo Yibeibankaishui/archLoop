@@ -316,38 +316,53 @@ export const configureHubLandingPolicy = (
   }
 
   const now = (input.now ?? new Date()).toISOString();
-  const remoteTarget =
-    input.remoteTarget === undefined
-      ? ensured.policy.remoteTarget
-      : input.remoteTarget === null || input.remoteTarget.trim().length === 0
-        ? undefined
-        : input.remoteTarget.trim();
-  const deliveryTimeoutMs =
-    input.deliveryTimeoutMs === undefined
-      ? ensured.policy.deliveryTimeoutMs
-      : input.deliveryTimeoutMs === null || input.deliveryTimeoutMs <= 0
-        ? undefined
-        : Math.floor(input.deliveryTimeoutMs);
+  const remoteTarget = resolveConfiguredRemoteTarget(
+    input.remoteTarget,
+    ensured.policy.remoteTarget,
+  );
+  const deliveryTimeoutMs = resolveConfiguredDeliveryTimeoutMs(
+    input.deliveryTimeoutMs,
+    ensured.policy.deliveryTimeoutMs,
+  );
+  // Rebuild without spreading so cleared optional fields stay omitted.
   const policy: HubLandingPolicy = {
-    ...ensured.policy,
+    version: 1,
+    hostTargetBranch: ensured.policy.hostTargetBranch,
+    publishTargetRef: ensured.policy.publishTargetRef,
+    fenceRef: ensured.policy.fenceRef,
     publishPolicy: input.publishPolicy ?? ensured.policy.publishPolicy,
     ...(remoteTarget ? { remoteTarget } : {}),
     ...(deliveryTimeoutMs !== undefined ? { deliveryTimeoutMs } : {}),
+    checkoutSyncPolicy: ensured.policy.checkoutSyncPolicy,
+    createdAt: ensured.policy.createdAt,
     updatedAt: now,
   };
-  // Drop cleared optional fields when explicitly nulled.
-  const cleared: HubLandingPolicy = {
-    version: 1,
-    hostTargetBranch: policy.hostTargetBranch,
-    publishTargetRef: policy.publishTargetRef,
-    fenceRef: policy.fenceRef,
-    publishPolicy: policy.publishPolicy,
-    ...(remoteTarget ? { remoteTarget } : {}),
-    ...(deliveryTimeoutMs !== undefined ? { deliveryTimeoutMs } : {}),
-    checkoutSyncPolicy: policy.checkoutSyncPolicy,
-    createdAt: policy.createdAt,
-    updatedAt: now,
-  };
-  writeAtomicJson(ensured.path, cleared);
-  return { policy: cleared, path: ensured.path };
+  writeAtomicJson(ensured.path, policy);
+  return { policy, path: ensured.path };
+};
+
+const resolveConfiguredRemoteTarget = (
+  input: string | null | undefined,
+  current: string | undefined,
+): string | undefined => {
+  if (input === undefined) {
+    return current;
+  }
+  if (input === null || input.trim().length === 0) {
+    return undefined;
+  }
+  return input.trim();
+};
+
+const resolveConfiguredDeliveryTimeoutMs = (
+  input: number | null | undefined,
+  current: number | undefined,
+): number | undefined => {
+  if (input === undefined) {
+    return current;
+  }
+  if (input === null || input <= 0) {
+    return undefined;
+  }
+  return Math.floor(input);
 };

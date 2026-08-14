@@ -310,6 +310,51 @@ const projectPendingDeliveryDetails = (
       : [],
   );
 
+const resolveHubRunOutcomeKind = (
+  result: RunHubFlowResult,
+  options: { readonly cancelled?: boolean },
+  hasPendingDelivery: boolean,
+  hasPartialProgress: boolean,
+): HubRunOutcome => {
+  if (options.cancelled === true) {
+    return "cancelled";
+  }
+  if (hasPendingDelivery && result.stopReason !== "batch_failed") {
+    return "completed_with_pending_delivery";
+  }
+  if (result.stopReason !== "batch_failed") {
+    return "completed";
+  }
+  return hasPartialProgress ? "completed_with_failures" : "failed";
+};
+
+const summarizeHubRunOutcome = (
+  outcome: HubRunOutcome,
+  result: RunHubFlowResult,
+): string => {
+  switch (outcome) {
+    case "cancelled":
+      return "Run cancelled";
+    case "completed_with_pending_delivery":
+      return "Run completed with pending required delivery";
+    case "completed_with_failures":
+      return "Run completed with failures";
+    case "failed":
+      return "Run failed";
+    case "completed":
+      if (
+        result.stopReason === "no_ready_tasks" &&
+        result.completedBatchCount === 0
+      ) {
+        return "Nothing to run";
+      }
+      if (result.stopReason === "max_batches_reached") {
+        return "Reached configured flow-batch limit";
+      }
+      return "Run completed";
+  }
+};
+
 export const projectHubRunOutcome = (
   result: RunHubFlowResult,
   options: { readonly cancelled?: boolean } = {},
@@ -320,34 +365,16 @@ export const projectHubRunOutcome = (
     result.mergeResult?.results.some(
       (task) => task.outcome === "pending_delivery",
     ) === true;
-  const outcome: HubRunOutcome =
-    options.cancelled === true
-      ? "cancelled"
-      : hasPendingDelivery && result.stopReason !== "batch_failed"
-        ? "completed_with_pending_delivery"
-        : result.stopReason !== "batch_failed"
-          ? "completed"
-          : hasPartialProgress
-            ? "completed_with_failures"
-            : "failed";
+  const outcome = resolveHubRunOutcomeKind(
+    result,
+    options,
+    hasPendingDelivery,
+    hasPartialProgress,
+  );
 
   return {
     outcome,
-    summary:
-      outcome === "cancelled"
-        ? "Run cancelled"
-        : outcome === "completed_with_pending_delivery"
-          ? "Run completed with pending required delivery"
-          : outcome === "completed_with_failures"
-            ? "Run completed with failures"
-            : outcome === "failed"
-              ? "Run failed"
-              : result.stopReason === "no_ready_tasks" &&
-                  result.completedBatchCount === 0
-                ? "Nothing to run"
-                : result.stopReason === "max_batches_reached"
-                  ? "Reached configured flow-batch limit"
-                  : "Run completed",
+    summary: summarizeHubRunOutcome(outcome, result),
     counts,
     taskDetails: [
       ...projectFailedTaskDetails(result),
