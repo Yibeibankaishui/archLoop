@@ -1,5 +1,10 @@
 import { execFile } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  readFileSync,
+  symlinkSync,
+} from "node:fs";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,12 +16,15 @@ import {
   cleanupHubTaskSnapshot,
   createHubTaskSnapshot,
   HUB_TASK_NOTES_TAG,
+  type HubTaskSnapshot,
 } from "./hubTaskSnapshot.js";
 import { initHubTaskStore, runBdTextForHubTaskStore } from "./hubTaskStore.js";
+import { resolveHubTaskStoreRedirectPath } from "./hubTaskStoreResolver.js";
 import {
   addHubTaskDependency,
   appendHubTaskComment,
   createHubTask,
+  loadHubReadyQueue,
   loadHubTask,
 } from "./taskBoard.js";
 import { resolveBundledBdExecutable } from "./resolveBdExecutable.js";
@@ -324,4 +332,81 @@ describe("immutable Hub task snapshots", () => {
       "malicious note",
     );
   }, 90_000);
+
+  it.each([
+    {
+      name: "cleanup A then B",
+      cleanupOrder: ["a", "b"] as const,
+    },
+    {
+      name: "cleanup B then A",
+      cleanupOrder: ["b", "a"] as const,
+    },
+  ])(
+    "keeps the managed redirect byte-stable while two snapshots overlap ($name)",
+    async ({ cleanupOrder }) => {
+      const fixture = await createSnapshotFixture();
+      const redirectPath = resolveHubTaskStoreRedirectPath(fixture.repoDir);
+      const originalRedirect = readFileSync(redirectPath);
+
+      const sibling = createHubTask(
+        fixture.repoDir,
+        {
+          title: "Sibling parallel snapshot task",
+          description: "Second task for overlapping snapshot coverage.",
+        },
+        fixture.env,
+      );
+
+      // Barrier: hold snapshot A after prepare, then create B while A is still
+      // active — the production race window after one attempt starts.
+      const snapshotA = createHubTaskSnapshot({
+        cwd: fixture.repoDir,
+        taskId: fixture.selected.id,
+        runDir: fixture.runDir,
+        role: "implement",
+        attemptId: "attempt-a",
+        env: fixture.env,
+      });
+      expect(readFileSync(redirectPath)).toEqual(originalRedirect);
+      expect(snapshotA.sandboxEnv.BEADS_DIR).toBe(snapshotA.agentBeadsDir);
+      expect(snapshotA.agentBeadsDir).not.toContain(fixture.hubProjectDir);
+      expect(
+        loadHubTask(fixture.repoDir, fixture.selected.id, fixture.env).id,
+      ).toBe(fixture.selected.id);
+
+      const snapshotB = createHubTaskSnapshot({
+        cwd: fixture.repoDir,
+        taskId: sibling.id,
+        runDir: fixture.runDir,
+        role: "implement",
+        attemptId: "attempt-b",
+        env: fixture.env,
+      });
+      expect(readFileSync(redirectPath)).toEqual(originalRedirect);
+      expect(snapshotB.document.task.id).toBe(sibling.id);
+      expect(snapshotB.sandboxEnv.BEADS_DIR).toBe(snapshotB.agentBeadsDir);
+      expect(
+        loadHubReadyQueue(fixture.repoDir, fixture.env).tasks.length,
+      ).toBeGreaterThan(0);
+
+      const snapshots: Record<"a" | "b", HubTaskSnapshot> = {
+        a: snapshotA,
+        b: snapshotB,
+      };
+      for (const key of cleanupOrder) {
+        cleanupHubTaskSnapshot(snapshots[key]);
+        expect(readFileSync(redirectPath)).toEqual(originalRedirect);
+      }
+
+      expect(existsSync(snapshotA.snapshotDir)).toBe(false);
+      expect(existsSync(snapshotB.snapshotDir)).toBe(false);
+      expect(existsSync(snapshotA.agentBeadsDir)).toBe(false);
+      expect(existsSync(snapshotB.agentBeadsDir)).toBe(false);
+      expect(
+        loadHubReadyQueue(fixture.repoDir, fixture.env).tasks.length,
+      ).toBeGreaterThan(0);
+    },
+    90_000,
+  );
 });

@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   closeSync,
@@ -8,16 +9,16 @@ import {
   fsyncSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
-  readFileSync,
   rmSync,
-  writeFileSync,
   writeSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { runBdTextForHubTaskStore } from "./hubTaskStore.js";
-import { resolveHubTaskStoreRedirectPath } from "./hubTaskStoreResolver.js";
+import { resolveBdExecutable } from "./resolveBdExecutable.js";
 import {
   appendHubTaskComment,
   loadHubTask,
@@ -62,11 +63,11 @@ export interface HubTaskSnapshotDocument {
 
 export interface HubTaskSnapshot {
   readonly snapshotDir: string;
+  readonly agentBeadsDir: string;
   readonly taskId: string;
   readonly promptContent: string;
   readonly sandboxEnv: Readonly<Record<string, string>>;
   readonly document: HubTaskSnapshotDocument;
-  readonly restoreRedirect?: () => void;
 }
 
 export interface CreateHubTaskSnapshotInput {
@@ -367,45 +368,85 @@ const resolveSnapshotDir = (input: CreateHubTaskSnapshotInput): string => {
   );
 };
 
-const restoreRedirectState = (
-  redirectPath: string | undefined,
-  previous: string | undefined,
-): void => {
-  if (!redirectPath) {
-    return;
-  }
-  if (previous === undefined) {
-    if (existsSync(redirectPath) && !isSymlink(redirectPath)) {
-      rmSync(redirectPath, { force: true });
-    }
-    return;
-  }
-  writeFileSync(redirectPath, previous, { encoding: "utf8", mode: 0o600 });
+const resolveAgentBeadsDir = (snapshotDir: string): string => {
+  // Keep the isolation store outside the Hub project tree. Nested under the
+  // managed store parent, Beads can still discover/route to the live database
+  // even when BEADS_DIR is set.
+  const digest = createHash("sha256")
+    .update(snapshotDir)
+    .digest("hex")
+    .slice(0, 16);
+  return join(tmpdir(), "archloop-hub-agent-beads", digest);
 };
 
-const fenceTaskStoreRedirect = (
-  cwd: string,
-  snapshotDir: string,
-): (() => void) => {
-  const redirectPath = resolveHubTaskStoreRedirectPath(cwd);
-  let previous: string | undefined;
-  if (existsSync(redirectPath) && !isSymlink(redirectPath)) {
-    previous = readFileSync(redirectPath, "utf8");
+const removeProtectedDirectory = (dir: string | undefined): void => {
+  if (!dir || !existsSync(dir)) {
+    return;
   }
+  try {
+    chmodSync(dir, 0o700);
+  } catch {
+    // Best-effort so create/cleanup cannot leave a 0500 directory behind.
+  }
+  rmSync(dir, { recursive: true, force: true });
+};
 
-  mkdirSync(dirname(redirectPath), { recursive: true, mode: 0o700 });
-  writeFileSync(redirectPath, `${snapshotDir}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
+/**
+ * Create an empty, attempt-private Beads store for Agent `BEADS_DIR`.
+ * Host discovery keeps using the managed `.beads/redirect`; Agents must not.
+ */
+const seedAgentBeadsIsolationStore = (
+  agentBeadsDir: string,
+  env: NodeJS.ProcessEnv | undefined,
+): void => {
+  mkdirSync(dirname(agentBeadsDir), { recursive: true, mode: 0o700 });
+  removeProtectedDirectory(agentBeadsDir);
+  mkdirExclusive(agentBeadsDir, 0o700);
 
-  return () => restoreRedirectState(redirectPath, previous);
+  const bd = resolveBdExecutable(env ?? process.env);
+  // Init from a bare temp cwd so discovery cannot follow a parent Beads store.
+  const bareCwd = mkdtempSync(join(tmpdir(), "hub-agent-beads-"));
+  try {
+    execFileSync(
+      bd,
+      [
+        "init",
+        "--quiet",
+        "--non-interactive",
+        "--skip-agents",
+        "--skip-hooks",
+        "--prefix",
+        "hubsnap",
+      ],
+      {
+        cwd: bareCwd,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+        env: {
+          ...(env ?? process.env),
+          BEADS_DIR: agentBeadsDir,
+          BEADS_ACTOR: env?.BEADS_ACTOR ?? process.env.BEADS_ACTOR ?? "archloop",
+          BD_NON_INTERACTIVE: "1",
+        },
+      },
+    );
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : "unable to initialize agent Beads isolation store";
+    throw new HubTaskSnapshotError(
+      `Failed to prepare isolated agent task store at ${agentBeadsDir}: ${message}`,
+    );
+  } finally {
+    rmSync(bareCwd, { recursive: true, force: true });
+  }
 };
 
 export const createHubAgentSandboxEnv = (
-  snapshotDir: string,
+  agentBeadsDir: string,
 ): Readonly<Record<string, string>> => ({
-  BEADS_DIR: snapshotDir,
+  BEADS_DIR: agentBeadsDir,
 });
 
 export const createHubTaskSnapshot = (
@@ -415,6 +456,7 @@ export const createHubTaskSnapshot = (
   mkdirSync(dirname(snapshotDir), { recursive: true, mode: 0o700 });
   mkdirExclusive(snapshotDir, 0o700);
 
+  let agentBeadsDir: string | undefined;
   try {
     const document = buildSnapshotDocument({
       cwd: input.cwd,
@@ -423,46 +465,33 @@ export const createHubTaskSnapshot = (
     });
     const serialized = `${JSON.stringify(document, null, 2)}\n`;
     writeExclusiveFile(join(snapshotDir, SNAPSHOT_FILE_NAME), serialized);
-    chmodSync(snapshotDir, 0o500);
 
-    const restoreRedirect = fenceTaskStoreRedirect(input.cwd, snapshotDir);
+    // Isolation is per-Agent via BEADS_DIR pointing at an empty private store.
+    // Never rewrite the shared repository `.beads/redirect` — parallel attempts
+    // would race and leave host/lifecycle commands pointed at a snapshot path.
+    agentBeadsDir = resolveAgentBeadsDir(snapshotDir);
+    seedAgentBeadsIsolationStore(agentBeadsDir, input.env);
+    chmodSync(snapshotDir, 0o500);
+    chmodSync(agentBeadsDir, 0o500);
+
     return {
       snapshotDir,
+      agentBeadsDir,
       taskId: input.taskId,
       promptContent: formatHubTaskSnapshotPrompt(document),
-      sandboxEnv: createHubAgentSandboxEnv(snapshotDir),
+      sandboxEnv: createHubAgentSandboxEnv(agentBeadsDir),
       document,
-      restoreRedirect,
     };
   } catch (error) {
-    try {
-      chmodSync(snapshotDir, 0o700);
-    } catch {
-      // Best-effort so a failed create cannot leave a 0500 directory behind.
-    }
-    rmSync(snapshotDir, { recursive: true, force: true });
+    removeProtectedDirectory(snapshotDir);
+    removeProtectedDirectory(agentBeadsDir);
     throw error;
   }
 };
 
 export const cleanupHubTaskSnapshot = (snapshot: HubTaskSnapshot): void => {
-  try {
-    snapshot.restoreRedirect?.();
-  } catch {
-    // Restore is best-effort so crash cleanup remains idempotent.
-  }
-
-  if (!existsSync(snapshot.snapshotDir)) {
-    return;
-  }
-
-  try {
-    chmodSync(snapshot.snapshotDir, 0o700);
-  } catch {
-    // Directory may already be gone.
-  }
-
-  rmSync(snapshot.snapshotDir, { recursive: true, force: true });
+  removeProtectedDirectory(snapshot.agentBeadsDir);
+  removeProtectedDirectory(snapshot.snapshotDir);
 };
 
 const unwrapFences = (value: string): string => {

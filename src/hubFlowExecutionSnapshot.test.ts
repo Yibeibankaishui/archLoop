@@ -36,6 +36,7 @@ const writeMockBd = async (
     bdPath,
     `#!/usr/bin/env node
 const fs = require("node:fs");
+const path = require("node:path");
 const stateFile = process.env.BD_STATE_FILE;
 const commentsFile = process.env.BD_COMMENT_ARGS_FILE;
 const args = process.argv.slice(2);
@@ -48,6 +49,19 @@ if (command === "show" && id) {
   const task = findTask(readState(), id);
   if (!task) process.exit(1);
   process.stdout.write(JSON.stringify([task]));
+  process.exit(0);
+}
+
+if (command === "init") {
+  // Agent isolation seeds an empty BEADS_DIR store via \`bd init\`.
+  const beadsDir = process.env.BEADS_DIR;
+  if (beadsDir) {
+    fs.mkdirSync(beadsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(beadsDir, "metadata.json"),
+      JSON.stringify({ backend: "dolt" }),
+    );
+  }
   process.exit(0);
 }
 

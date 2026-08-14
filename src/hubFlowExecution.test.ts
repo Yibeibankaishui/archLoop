@@ -53,37 +53,36 @@ vi.mock("./hubTaskSnapshot.js", () => ({
     readonly taskId: string;
     readonly runDir: string;
     readonly role: "implement" | "review";
-  }) => ({
-    snapshotDir: join(
+  }) => {
+    const snapshotDir = join(
       input.runDir,
       "task-snapshots",
       input.role,
       input.taskId,
       "stub",
-    ),
-    taskId: input.taskId,
-    promptContent: `stub-snapshot:${input.taskId}`,
-    sandboxEnv: {
-      BEADS_DIR: join(
-        input.runDir,
-        "task-snapshots",
-        input.role,
-        input.taskId,
-        "stub",
-      ),
-    },
-    document: {
-      schemaVersion: 1,
-      task: {
-        id: input.taskId,
-        title: input.taskId,
-        comments: [],
-        remoteRefs: [],
-        labels: [],
+    );
+    const agentBeadsDir = join(snapshotDir, "agent-beads");
+    return {
+      snapshotDir,
+      agentBeadsDir,
+      taskId: input.taskId,
+      promptContent: `stub-snapshot:${input.taskId}`,
+      sandboxEnv: {
+        BEADS_DIR: agentBeadsDir,
       },
-      dependencies: [],
-    },
-  }),
+      document: {
+        schemaVersion: 1,
+        task: {
+          id: input.taskId,
+          title: input.taskId,
+          comments: [],
+          remoteRefs: [],
+          labels: [],
+        },
+        dependencies: [],
+      },
+    };
+  },
   cleanupHubTaskSnapshot: () => undefined,
   applyHubTaskNotes: () => ({ status: "absent" }),
   mergeHubAgentSandboxEnv: (
@@ -3052,7 +3051,14 @@ describe("with-review Hub flow execution", () => {
         "VIEW_TASK_COMMAND",
       );
       expect(runSpy.mock.calls[0]?.[0].sandbox.env).toMatchObject({
-        BEADS_DIR: join(cwd, "task-snapshots", "implement", "bd-1", "stub"),
+        BEADS_DIR: join(
+          cwd,
+          "task-snapshots",
+          "implement",
+          "bd-1",
+          "stub",
+          "agent-beads",
+        ),
       });
       expect(
         runSpy.mock.calls[0]?.[0].promptArgs
@@ -3987,7 +3993,14 @@ describe("with-review Hub flow execution", () => {
         TASK_SNAPSHOT: "stub-snapshot:bd-1",
       });
       expect(runSpy.mock.calls[0]?.[0].sandbox.env).toMatchObject({
-        BEADS_DIR: join(cwd, "task-snapshots", "review", "bd-1", "stub"),
+        BEADS_DIR: join(
+          cwd,
+          "task-snapshots",
+          "review",
+          "bd-1",
+          "stub",
+          "agent-beads",
+        ),
       });
     } finally {
       runSpy.mockRestore();

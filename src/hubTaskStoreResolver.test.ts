@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   formatInvalidHubTaskStoreRedirectMessage,
+  formatStaleHubTaskSnapshotRedirectMessage,
   HUB_TASK_STORE_GIT_EXCLUDE_PATTERN,
   installHubTaskStoreRedirect,
   resolveHubTaskStore,
@@ -112,6 +113,72 @@ describe("resolveHubTaskStore", () => {
         missingTarget,
       ),
     );
+  });
+
+  it("distinguishes a stale task-snapshot redirect from an uninitialized store", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-task-store-snapshot-redirect-"),
+    );
+    await initRepo(repoDir);
+    const snapshotTarget = join(
+      repoDir,
+      "runs",
+      "run-1",
+      "task-snapshots",
+      "implement",
+      "arch-qti",
+      "attempt-1",
+    );
+    await mkdir(snapshotTarget, { recursive: true });
+    await writeFile(join(snapshotTarget, "snapshot.json"), "{}\n");
+    await mkdir(join(repoDir, ".beads"), { recursive: true });
+    await writeFile(join(repoDir, ".beads", "redirect"), `${snapshotTarget}\n`);
+
+    const resolution = resolveHubTaskStore({ repoRoot: repoDir });
+
+    expect(resolution.kind).toBe("redirect");
+    expect(resolution.redirectError).toBe(
+      formatStaleHubTaskSnapshotRedirectMessage(
+        join(repoDir, ".beads", "redirect"),
+        snapshotTarget,
+      ),
+    );
+    expect(resolution.redirectError).toContain("task snapshot directory");
+    expect(resolution.redirectError).toMatch(/Do not run `archloop tasks init`/);
+    expect(resolution.redirectError).not.toMatch(
+      /requires a local task store\. Run `archloop tasks init`/,
+    );
+  });
+
+  it("diagnoses a cleaned-up snapshot redirect path without recommending tasks init", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-task-store-missing-snapshot-"),
+    );
+    await initRepo(repoDir);
+    const missingSnapshot = join(
+      repoDir,
+      "runs",
+      "run-1",
+      "task-snapshots",
+      "implement",
+      "arch-2o3",
+      "attempt-gone",
+    );
+    await mkdir(join(repoDir, ".beads"), { recursive: true });
+    await writeFile(
+      join(repoDir, ".beads", "redirect"),
+      `${missingSnapshot}\n`,
+    );
+
+    const resolution = resolveHubTaskStore({ repoRoot: repoDir });
+
+    expect(resolution.redirectError).toBe(
+      formatStaleHubTaskSnapshotRedirectMessage(
+        join(repoDir, ".beads", "redirect"),
+        missingSnapshot,
+      ),
+    );
+    expect(resolution.redirectError).toMatch(/Do not run/);
   });
 
   it("does not treat a redirect-only .beads directory as a legacy store", async () => {
