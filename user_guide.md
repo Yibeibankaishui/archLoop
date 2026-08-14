@@ -204,7 +204,11 @@ archLoop 会先恢复该批次，再领取新任务。
 任务源提交、在独立 worktree 中构造并验证 merge candidate，再用一次 Git ref
 事务推进 publish target、fence 和 landing receipt，然后关闭任务。用户工作区、
 index 和未提交改动保持不变。远程发布默认 `off`，可用
-`archloop project configure --publish-policy` 显式打开。
+`archloop project configure --publish-policy` 显式打开。每个待合并任务有自己的
+落地事务：一个任务被拦住时，独立兄弟任务继续落地，依赖未落地前置任务的兄弟
+会等待。Git 冲突和验证失败各最多自动修复两次；耗尽后只把该任务标为
+`blocked`（`merge_conflict_unresolved` 或 `verification_failed`），批次在有
+成功也有失败时报告 `partial_failed`。
 
 进程中断后再次执行同一个 `archloop run`，启动阶段会根据已经完成的实现或评审
 事件把任务恢复到下一个安全阶段，并保留已有分支和 worktree 内容。未完成的落地
@@ -306,3 +310,4 @@ API 参数、返回值和生命周期说明见
 | 2026-08-13 | 不安全迁移会延期，split brain 会停止自动写入                |
 | 2026-08-13 | 单任务通过 fenced local landing 落到 Hub publish target     |
 | 2026-08-14 | 中断的落地事务从物理证据自动续跑，doctor 保持只读           |
+| 2026-08-14 | 独立兄弟任务分别落地；有界 Agent 修复隔离坏任务             |

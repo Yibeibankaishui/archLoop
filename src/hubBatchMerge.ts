@@ -30,16 +30,25 @@ import {
   createHubLandingCandidate,
   HubLandingWorktreeError,
   recordHubLandingTaskClosed,
+  snapshotHubLandingCandidateGeneration,
+  type HubLandingCandidate,
 } from "./hubLanding.js";
+import {
+  computeHubLandingMergeInputFingerprint,
+  isTransientHubLandingError,
+  recordHubLandingRepairAttempt,
+  remainingHubLandingRepairAttempts,
+} from "./hubLandingRepair.js";
 import {
   enterMergePhase,
   recordCloseFailure,
   recordMergeFailure,
+  recordRepairExhaustion,
   recordTaskClosure,
   recordTaskMergeStarted,
-  recordVerificationFailure,
   revertTaskToWaitingForMerge,
   type CloseHubTaskInput,
+  type HubLandingRepairExhaustionReason,
   type HubTaskCloser,
   type HubTaskLifecycleContext,
 } from "./hubTaskLifecycle.js";
@@ -91,6 +100,7 @@ export interface HubMergeIntegration {
   readonly baseOid?: string;
   readonly candidateOid?: string;
   readonly bindVerification?: (fingerprint: string) => Promise<void> | void;
+  readonly snapshotCandidate?: () => Promise<HubLandingCandidate>;
 }
 
 export interface HubBranchCleanupResult {
@@ -145,6 +155,19 @@ export interface HubVerifyTaskResult {
 export type HubFlowVerifier = (
   input: HubVerifyTaskInput,
 ) => Promise<HubVerifyTaskResult>;
+
+export interface HubCandidateRepairInput extends HubVerifyTaskInput {
+  readonly diagnosticSummary?: string;
+}
+
+export interface HubCandidateRepairResult {
+  readonly outcome: "success" | "failed";
+  readonly message?: string;
+}
+
+export type HubCandidateRepairer = (
+  input: HubCandidateRepairInput,
+) => Promise<HubCandidateRepairResult>;
 
 export type { CloseHubTaskInput as CloseHubTaskAttemptInput, HubTaskCloser };
 
@@ -212,6 +235,8 @@ export interface RunHubBatchMergeInput {
   readonly branchCleanup?: HubTaskBranchCleanup;
   readonly branchInspector?: HubMergeBranchInspector;
   readonly worktreeInspector?: HubMergeWorktreeInspector;
+  readonly conflictResolver?: HubMergeConflictResolver;
+  readonly candidateRepairer?: HubCandidateRepairer;
   readonly env?: NodeJS.ProcessEnv;
   readonly hubProjectDir?: string;
 }
@@ -226,13 +251,19 @@ export interface HubBatchMergeTaskResult {
     | "merge_failed"
     | "verification_failed"
     | "close_failed"
+    | "pending"
     | "skipped";
   readonly hubStatus: HubTaskStatus;
   readonly failureReason?: HubFailureReason;
+  readonly reason?: HubLandingRepairExhaustionReason | "unshipped_prerequisite";
   readonly diagnosticSummary?: string;
   readonly diagnostics?: HubMergeDiagnostics;
   readonly logPath?: string;
   readonly cleanup?: HubBranchCleanupResult;
+  readonly transactionId?: string;
+  readonly sourceOid?: string;
+  readonly baseOid?: string;
+  readonly candidateOid?: string;
 }
 
 export interface RunHubBatchMergeResult {
@@ -302,35 +333,73 @@ const appendMergeProgressEvent = (
   });
 };
 
+type HubLandingIdentity = {
+  readonly transactionId?: string;
+  readonly sourceOid?: string;
+  readonly baseOid?: string;
+  readonly candidateOid?: string;
+};
+
+type HubBatchMergeTaskResultExtras = {
+  readonly failureReason?: HubFailureReason;
+  readonly diagnosticSummary?: string;
+  readonly diagnostics?: HubMergeDiagnostics;
+  readonly cleanup?: HubBranchCleanupResult;
+  readonly logPath?: string;
+  readonly reason?: HubBatchMergeTaskResult["reason"];
+} & HubLandingIdentity;
+
 const toBatchMergeTaskResult = (
   task: HubTaskProjection,
   branch: string,
   outcome: HubBatchMergeTaskResult["outcome"],
   hubStatus: HubTaskStatus,
-  failureReason?: HubFailureReason,
-  diagnosticSummary?: string,
-  diagnostics?: HubMergeDiagnostics,
-  cleanup?: HubBranchCleanupResult,
-  logPath?: string,
+  extras: HubBatchMergeTaskResultExtras = {},
 ): HubBatchMergeTaskResult => ({
   taskId: task.id,
   title: task.title,
   branch,
   outcome,
   hubStatus,
-  ...(failureReason === undefined ? {} : { failureReason }),
-  ...(diagnosticSummary === undefined ? {} : { diagnosticSummary }),
-  ...(diagnostics === undefined ? {} : { diagnostics }),
-  ...(cleanup === undefined ? {} : { cleanup }),
-  ...(logPath === undefined ? {} : { logPath }),
+  ...(extras.failureReason === undefined ? {} : { failureReason: extras.failureReason }),
+  ...(extras.diagnosticSummary === undefined
+    ? {}
+    : { diagnosticSummary: extras.diagnosticSummary }),
+  ...(extras.diagnostics === undefined ? {} : { diagnostics: extras.diagnostics }),
+  ...(extras.cleanup === undefined ? {} : { cleanup: extras.cleanup }),
+  ...(extras.logPath === undefined ? {} : { logPath: extras.logPath }),
+  ...(extras.reason === undefined ? {} : { reason: extras.reason }),
+  ...(extras.transactionId === undefined
+    ? {}
+    : { transactionId: extras.transactionId }),
+  ...(extras.sourceOid === undefined ? {} : { sourceOid: extras.sourceOid }),
+  ...(extras.baseOid === undefined ? {} : { baseOid: extras.baseOid }),
+  ...(extras.candidateOid === undefined
+    ? {}
+    : { candidateOid: extras.candidateOid }),
+});
+
+const toLandingIdentity = (
+  integration:
+    | Pick<
+        HubMergeIntegration,
+        "transactionId" | "sourceOid" | "baseOid" | "candidateOid"
+      >
+    | undefined,
+): HubLandingIdentity => ({
+  transactionId: integration?.transactionId,
+  sourceOid: integration?.sourceOid,
+  baseOid: integration?.baseOid,
+  candidateOid: integration?.candidateOid,
 });
 
 const recordBatchMergeCompleted = (
   input: RunHubBatchMergeInput,
   selectedTaskIds: readonly string[],
   batchStatus: "done" | "partial_failed",
-  failedResult?: HubBatchMergeTaskResult,
+  results: readonly HubBatchMergeTaskResult[],
 ): void => {
+  const failedResult = results.find((result) => result.outcome !== "merged");
   appendHubBatchEvent(input.runDir, {
     type: "batch_merge_completed",
     runId: input.runId,
@@ -338,12 +407,26 @@ const recordBatchMergeCompleted = (
     createdAt: new Date().toISOString(),
     taskIds: selectedTaskIds,
     batchStatus,
+    taskResults: results.map((result) => ({
+      taskId: result.taskId,
+      outcome: result.outcome,
+      hubStatus: result.hubStatus,
+      ...(result.reason ? { reason: result.reason } : {}),
+      ...(result.failureReason ? { failureReason: result.failureReason } : {}),
+      ...(result.transactionId
+        ? { transactionId: result.transactionId }
+        : {}),
+      ...(result.sourceOid ? { sourceOid: result.sourceOid } : {}),
+      ...(result.baseOid ? { baseOid: result.baseOid } : {}),
+      ...(result.candidateOid ? { candidateOid: result.candidateOid } : {}),
+    })),
     ...(failedResult
       ? {
           failedTaskId: failedResult.taskId,
-          failureReason: failedResult.failureReason,
+          failureReason: failedResult.reason ?? failedResult.failureReason,
           failureSummary: `${failedResult.taskId} ${failedResult.outcome}: ${
             failedResult.diagnosticSummary ??
+            failedResult.reason ??
             failedResult.failureReason ??
             failedResult.outcome
           }`,
@@ -998,87 +1081,241 @@ const evaluateHubBatchMergeSelection = async (input: {
   return { selectedTasks, diagnostics };
 };
 
-const processMergeTask = async (
-  input: RunHubBatchMergeInput,
+const readTaskBlockers = (
   task: HubTaskProjection,
-  claim: HubTaskProjection["claim"],
-): Promise<HubBatchMergeTaskResult> => {
-  const branch = resolveBranch(task);
-  const context = toLifecycleContext(input);
-  const startedAt = new Date().toISOString();
-  const lifecycleBase = {
-    cwd: input.cwd,
-    env: input.env,
-    context,
-    taskId: task.id,
-    branch,
-    metadata: task.metadata,
-    claim,
+): readonly string[] => {
+  const metadata = task.metadata ?? {};
+  for (const key of ["blockers", "blocked_by", "blockedBy"]) {
+    const value = metadata[key];
+    if (Array.isArray(value)) {
+      return value.filter(
+        (entry): entry is string =>
+          typeof entry === "string" && entry.trim().length > 0,
+      );
+    }
+    if (typeof value === "string" && value.trim().length > 0) {
+      return [value.trim()];
+    }
+  }
+  return [];
+};
+
+const orderTasksByDependencies = (
+  tasks: readonly HubTaskProjection[],
+): HubTaskProjection[] => {
+  const selectedIds = new Set(tasks.map((task) => task.id));
+  const remaining = [...tasks];
+  const ordered: HubTaskProjection[] = [];
+  while (remaining.length > 0) {
+    const readyIndex = remaining.findIndex((task) =>
+      readTaskBlockers(task).every(
+        (blockerId) =>
+          !selectedIds.has(blockerId) ||
+          ordered.some((ready) => ready.id === blockerId),
+      ),
+    );
+    if (readyIndex >= 0) {
+      const [next] = remaining.splice(readyIndex, 1);
+      ordered.push(next!);
+    } else {
+      ordered.push(remaining.shift()!);
+    }
+  }
+  return ordered;
+};
+
+const resolveMergeHubProjectDir = (input: RunHubBatchMergeInput): string =>
+  input.hubProjectDir ?? join(input.runDir, "..", "..");
+
+type MergeTaskSession = {
+  readonly input: RunHubBatchMergeInput;
+  readonly task: HubTaskProjection;
+  readonly branch: string;
+  readonly claim: HubTaskProjection["claim"];
+  readonly lifecycleBase: {
+    readonly cwd: string;
+    readonly env?: NodeJS.ProcessEnv;
+    readonly context: HubTaskLifecycleContext;
+    readonly taskId: string;
+    readonly branch: string;
+    readonly metadata: Readonly<Record<string, unknown>>;
+    readonly claim: HubTaskProjection["claim"];
   };
+  readonly hubProjectDir: string;
+};
 
-  recordTaskMergeStarted({
-    context,
-    taskId: task.id,
-    branch,
-    claim,
-    createdAt: startedAt,
+const toPendingMergeTaskResult = (
+  session: MergeTaskSession,
+  diagnosticSummary: string | undefined,
+  diagnostics: HubMergeDiagnostics | undefined,
+  landing: HubLandingIdentity,
+): HubBatchMergeTaskResult => {
+  const pendingTask = revertTaskToWaitingForMerge({
+    cwd: session.input.cwd,
+    env: session.input.env,
+    task: session.task,
   });
+  return toBatchMergeTaskResult(
+    session.task,
+    session.branch,
+    "pending",
+    pendingTask.hubStatus,
+    { diagnosticSummary, diagnostics, ...landing },
+  );
+};
 
-  const mergeResult = await input.merger({
-    flowId: input.flowId,
-    runId: input.runId,
-    batchId: input.batchId,
-    taskId: task.id,
-    title: task.title,
-    branch,
-    cwd: input.cwd,
-    runDir: input.runDir,
-    hubProjectDir: input.hubProjectDir,
-  });
-  const mergeFinishedAt = new Date().toISOString();
-
-  if (mergeResult.outcome !== "success") {
-    const isMergeConflict = mergeResult.outcome === "merge_conflict";
-    const failureReason: HubFailureReason = isMergeConflict
-      ? "merge_conflict"
-      : "merge_failed";
-    const diagnostics = buildMergeDiagnostics(mergeResult);
-    const diagnosticSummary = formatMergeDiagnosticSummary(diagnostics);
-    const lifecycleResult = recordMergeFailure({
-      ...lifecycleBase,
-      failureReason,
-      createdAt: mergeFinishedAt,
+const settleUnsuccessfulMerge = (
+  session: MergeTaskSession,
+  mergeResult: HubMergeTaskResult,
+  createdAt: string,
+): HubBatchMergeTaskResult => {
+  const diagnostics = buildMergeDiagnostics(mergeResult);
+  const diagnosticSummary = formatMergeDiagnosticSummary(diagnostics);
+  const landing = toLandingIdentity(mergeResult.integration);
+  if (
+    isTransientHubLandingError(mergeResult.diagnostics) ||
+    isTransientHubLandingError(mergeResult.message)
+  ) {
+    return toPendingMergeTaskResult(
+      session,
+      diagnosticSummary,
+      diagnostics,
+      landing,
+    );
+  }
+  if (mergeResult.outcome === "merge_conflict") {
+    const lifecycleResult = recordRepairExhaustion({
+      ...session.lifecycleBase,
+      reason: "merge_conflict_unresolved",
+      createdAt,
       diagnosticSummary,
       diagnostics,
     });
-
     return toBatchMergeTaskResult(
-      task,
-      branch,
-      isMergeConflict ? "merge_conflict" : "merge_failed",
+      session.task,
+      session.branch,
+      "merge_conflict",
       lifecycleResult.hubStatus,
-      failureReason,
-      diagnosticSummary,
-      diagnostics,
+      {
+        diagnosticSummary,
+        diagnostics,
+        ...landing,
+        reason: "merge_conflict_unresolved",
+      },
     );
   }
-
-  const mergeIntegration = mergeResult.integration;
-  const landingIdentity = {
-    transactionId: mergeIntegration?.transactionId,
-    sourceOid: mergeIntegration?.sourceOid,
-    baseOid: mergeIntegration?.baseOid,
-    candidateOid: mergeIntegration?.candidateOid,
-  };
-
-  appendMergeProgressEvent(input, {
-    type: "integration_candidate_created",
-    taskId: task.id,
-    branch,
-    claim,
-    createdAt: mergeFinishedAt,
-    ...landingIdentity,
+  const lifecycleResult = recordMergeFailure({
+    ...session.lifecycleBase,
+    failureReason: "merge_failed",
+    createdAt,
+    diagnosticSummary,
+    diagnostics,
   });
+  return toBatchMergeTaskResult(
+    session.task,
+    session.branch,
+    "merge_failed",
+    lifecycleResult.hubStatus,
+    {
+      failureReason: "merge_failed",
+      diagnosticSummary,
+      diagnostics,
+      ...landing,
+    },
+  );
+};
+
+const applyCandidateSnapshot = (
+  mergeIntegration: HubMergeIntegration,
+  snapshot: {
+    readonly transactionId: string;
+    readonly sourceOid: string;
+    readonly baseOid: string;
+    readonly candidateOid: string;
+    readonly worktreeDir: string;
+  },
+): {
+  readonly mergeIntegration: HubMergeIntegration;
+  readonly landingIdentity: HubLandingIdentity;
+} => {
+  const landingIdentity = toLandingIdentity(snapshot);
+  return {
+    mergeIntegration: {
+      ...mergeIntegration,
+      ...landingIdentity,
+      cwd: snapshot.worktreeDir,
+    },
+    landingIdentity,
+  };
+};
+
+const remainingVerificationRepairs = (
+  hubProjectDir: string,
+  taskId: string,
+  sourceOid: string | undefined,
+): number => {
+  if (sourceOid === undefined) {
+    return 0;
+  }
+  return remainingHubLandingRepairAttempts({
+    hubProjectDir,
+    taskId,
+    sourceOid,
+    kind: "verification",
+  });
+};
+
+const exhaustVerificationRepair = async (
+  session: MergeTaskSession,
+  mergeIntegration: HubMergeIntegration | undefined,
+  landingIdentity: HubLandingIdentity,
+  createdAt: string,
+  diagnosticSummary: string | undefined,
+): Promise<HubBatchMergeTaskResult> => {
+  await mergeIntegration?.cleanup().catch(() => undefined);
+  const lifecycleResult = recordRepairExhaustion({
+    ...session.lifecycleBase,
+    reason: "verification_failed",
+    createdAt,
+    diagnosticSummary,
+  });
+  return toBatchMergeTaskResult(
+    session.task,
+    session.branch,
+    "verification_failed",
+    lifecycleResult.hubStatus,
+    {
+      diagnosticSummary,
+      logPath: resolveHubRunEventsPaths(session.input.runDir).taskEventsPath,
+      ...landingIdentity,
+      reason: "verification_failed",
+    },
+  );
+};
+
+const verifyWithBoundedRepair = async (
+  session: MergeTaskSession,
+  mergeIntegration: HubMergeIntegration | undefined,
+  landingIdentity: HubLandingIdentity,
+  mergeFinishedAt: string,
+): Promise<
+  | {
+      readonly outcome: "verified";
+      readonly mergeIntegration: HubMergeIntegration | undefined;
+      readonly landingIdentity: HubLandingIdentity;
+      readonly verifyFinishedAt: string;
+    }
+  | { readonly outcome: "failed"; readonly result: HubBatchMergeTaskResult }
+> => {
+  const { input, task, branch, claim, hubProjectDir } = session;
+  const verifyInput = {
+    flowId: input.flowId,
+    taskId: task.id,
+    title: task.title,
+    branch,
+    cwd: mergeIntegration?.cwd ?? input.cwd,
+    runDir: input.runDir,
+  };
 
   appendMergeProgressEvent(input, {
     type: "verification_started",
@@ -1089,102 +1326,136 @@ const processMergeTask = async (
     ...landingIdentity,
   });
 
-  const verifyResult = await input.verifier({
-    flowId: input.flowId,
-    taskId: task.id,
-    title: task.title,
-    branch,
-    cwd: mergeIntegration?.cwd ?? input.cwd,
-    runDir: input.runDir,
-  });
-  const verifyFinishedAt = new Date().toISOString();
+  let activeIntegration = mergeIntegration;
+  let activeLanding = landingIdentity;
+  let verifyResult = await input.verifier(verifyInput);
+  let verifyFinishedAt = new Date().toISOString();
+  let candidateGeneration = 1;
 
-  if (verifyResult.outcome !== "success") {
-    await mergeIntegration?.cleanup().catch(() => undefined);
-    const diagnosticSummary = verifyResult.message;
-    const logPath = resolveHubRunEventsPaths(input.runDir).taskEventsPath;
-    const lifecycleResult = recordVerificationFailure({
-      ...lifecycleBase,
-      createdAt: verifyFinishedAt,
-      diagnosticSummary,
-    });
-
-    return toBatchMergeTaskResult(
-      task,
-      branch,
-      "verification_failed",
-      lifecycleResult.hubStatus,
-      lifecycleResult.failureReason,
-      diagnosticSummary,
-      undefined,
-      undefined,
-      logPath,
+  while (verifyResult.outcome !== "success") {
+    const sourceOid = activeLanding.sourceOid;
+    const remaining = remainingVerificationRepairs(
+      hubProjectDir,
+      task.id,
+      sourceOid,
     );
+    if (
+      !sourceOid ||
+      remaining <= 0 ||
+      !input.candidateRepairer ||
+      !activeIntegration
+    ) {
+      return {
+        outcome: "failed",
+        result: await exhaustVerificationRepair(
+          session,
+          activeIntegration,
+          activeLanding,
+          verifyFinishedAt,
+          verifyResult.message,
+        ),
+      };
+    }
+
+    candidateGeneration += 1;
+    recordHubLandingRepairAttempt({
+      hubProjectDir,
+      taskId: task.id,
+      sourceOid,
+      kind: "verification",
+      fingerprint: activeLanding.candidateOid ?? sourceOid,
+      candidateOid: activeLanding.candidateOid,
+      candidateGeneration,
+    });
+    const repair = await input.candidateRepairer({
+      ...verifyInput,
+      cwd: activeIntegration.cwd,
+      diagnosticSummary: verifyResult.message,
+    });
+    if (repair.outcome !== "success") {
+      continue;
+    }
+    if (activeIntegration.snapshotCandidate) {
+      const snapshot = await activeIntegration.snapshotCandidate();
+      const applied = applyCandidateSnapshot(activeIntegration, snapshot);
+      activeIntegration = applied.mergeIntegration;
+      activeLanding = applied.landingIdentity;
+    }
+    appendMergeProgressEvent(input, {
+      type: "verification_started",
+      taskId: task.id,
+      branch,
+      claim,
+      createdAt: new Date().toISOString(),
+      ...activeLanding,
+    });
+    verifyResult = await input.verifier({
+      ...verifyInput,
+      cwd: activeIntegration.cwd,
+    });
+    verifyFinishedAt = new Date().toISOString();
   }
 
-  const verifierFingerprint = computeHubVerifierFingerprint(input.cwd);
-  if (mergeIntegration?.bindVerification) {
-    await mergeIntegration.bindVerification(verifierFingerprint);
-  }
+  return {
+    outcome: "verified",
+    mergeIntegration: activeIntegration,
+    landingIdentity: activeLanding,
+    verifyFinishedAt,
+  };
+};
 
-  appendMergeProgressEvent(input, {
-    type: "candidate_verification_passed",
-    taskId: task.id,
-    branch,
-    claim,
-    createdAt: verifyFinishedAt,
-    ...landingIdentity,
-    verifierFingerprint,
-  });
-
-  if (mergeIntegration) {
-    try {
-      await mergeIntegration.finalize();
-    } catch (error) {
-      await mergeIntegration.cleanup().catch(() => undefined);
-      const diagnostics = compactDiagnostics(extractErrorDiagnostics(error));
-      const diagnosticSummary = formatMergeDiagnosticSummary(diagnostics);
-      const lifecycleResult = recordMergeFailure({
-        ...lifecycleBase,
-        failureReason: "merge_failed",
-        createdAt: new Date().toISOString(),
+const finalizeLandedCandidate = async (
+  session: MergeTaskSession,
+  mergeIntegration: HubMergeIntegration,
+  landingIdentity: HubLandingIdentity,
+): Promise<HubBatchMergeTaskResult | undefined> => {
+  try {
+    await mergeIntegration.finalize();
+  } catch (error) {
+    await mergeIntegration.cleanup().catch(() => undefined);
+    const diagnostics = compactDiagnostics(extractErrorDiagnostics(error));
+    const diagnosticSummary = formatMergeDiagnosticSummary(diagnostics);
+    if (
+      isTransientHubLandingError(error) ||
+      isTransientHubLandingError(diagnostics)
+    ) {
+      return toPendingMergeTaskResult(
+        session,
         diagnosticSummary,
         diagnostics,
-      });
-
-      return toBatchMergeTaskResult(
-        task,
-        branch,
-        "merge_failed",
-        lifecycleResult.hubStatus,
-        "merge_failed",
-        diagnosticSummary,
-        diagnostics,
+        landingIdentity,
       );
     }
-    await mergeIntegration.cleanup().catch(() => undefined);
+    const lifecycleResult = recordMergeFailure({
+      ...session.lifecycleBase,
+      failureReason: "merge_failed",
+      createdAt: new Date().toISOString(),
+      diagnosticSummary,
+      diagnostics,
+    });
+    return toBatchMergeTaskResult(
+      session.task,
+      session.branch,
+      "merge_failed",
+      lifecycleResult.hubStatus,
+      {
+        failureReason: "merge_failed",
+        diagnosticSummary,
+        diagnostics,
+        ...landingIdentity,
+      },
+    );
   }
+  await mergeIntegration.cleanup().catch(() => undefined);
+  return undefined;
+};
 
-  appendMergeProgressEvent(input, {
-    type: "target_landing_succeeded",
-    taskId: task.id,
-    branch,
-    claim,
-    createdAt: new Date().toISOString(),
-    ...landingIdentity,
-    publishTargetOid: landingIdentity.candidateOid,
-    verifierFingerprint,
-  });
-
-  appendMergeProgressEvent(input, {
-    type: "task_close_started",
-    taskId: task.id,
-    branch,
-    claim,
-    createdAt: verifyFinishedAt,
-    ...landingIdentity,
-  });
-
+const closeLandedTask = async (
+  session: MergeTaskSession,
+  landingIdentity: HubLandingIdentity,
+  verifyFinishedAt: string,
+): Promise<HubBatchMergeTaskResult> => {
+  const { input, task, branch, claim, lifecycleBase, hubProjectDir } = session;
   try {
     const lifecycleResult = await recordTaskClosure({
       ...lifecycleBase,
@@ -1214,7 +1485,7 @@ const processMergeTask = async (
     });
     if (landingIdentity.transactionId && landingIdentity.candidateOid) {
       recordHubLandingTaskClosed({
-        hubProjectDir: input.hubProjectDir ?? join(input.runDir, "..", ".."),
+        hubProjectDir,
         transactionId: landingIdentity.transactionId,
         taskId: task.id,
         candidateOid: landingIdentity.candidateOid,
@@ -1228,32 +1499,153 @@ const processMergeTask = async (
       cleanupResult,
       new Date().toISOString(),
     );
-
     return toBatchMergeTaskResult(
       task,
       branch,
       "merged",
       lifecycleResult.hubStatus,
-      undefined,
-      undefined,
-      undefined,
-      cleanupResult,
+      { cleanup: cleanupResult, ...landingIdentity },
     );
   } catch {
-    const closeFailedAt = new Date().toISOString();
     const lifecycleResult = recordCloseFailure({
       ...lifecycleBase,
-      createdAt: closeFailedAt,
+      createdAt: new Date().toISOString(),
     });
-
     return toBatchMergeTaskResult(
       task,
       branch,
       "close_failed",
       lifecycleResult.hubStatus,
-      lifecycleResult.failureReason,
+      {
+        failureReason: lifecycleResult.failureReason,
+        ...landingIdentity,
+      },
     );
   }
+};
+
+const processMergeTask = async (
+  input: RunHubBatchMergeInput,
+  task: HubTaskProjection,
+  claim: HubTaskProjection["claim"],
+): Promise<HubBatchMergeTaskResult> => {
+  const branch = resolveBranch(task);
+  const context = toLifecycleContext(input);
+  const startedAt = new Date().toISOString();
+  const session: MergeTaskSession = {
+    input,
+    task,
+    branch,
+    claim,
+    hubProjectDir: resolveMergeHubProjectDir(input),
+    lifecycleBase: {
+      cwd: input.cwd,
+      env: input.env,
+      context,
+      taskId: task.id,
+      branch,
+      metadata: task.metadata,
+      claim,
+    },
+  };
+
+  recordTaskMergeStarted({
+    context,
+    taskId: task.id,
+    branch,
+    claim,
+    createdAt: startedAt,
+  });
+
+  const mergeResult = await input.merger({
+    flowId: input.flowId,
+    runId: input.runId,
+    batchId: input.batchId,
+    taskId: task.id,
+    title: task.title,
+    branch,
+    cwd: input.cwd,
+    runDir: input.runDir,
+    hubProjectDir: session.hubProjectDir,
+  });
+  const mergeFinishedAt = new Date().toISOString();
+  if (mergeResult.outcome !== "success") {
+    return settleUnsuccessfulMerge(session, mergeResult, mergeFinishedAt);
+  }
+
+  const mergeIntegration = mergeResult.integration;
+  const landingIdentity = toLandingIdentity(mergeIntegration);
+
+  appendMergeProgressEvent(input, {
+    type: "integration_candidate_created",
+    taskId: task.id,
+    branch,
+    claim,
+    createdAt: mergeFinishedAt,
+    ...landingIdentity,
+  });
+
+  const verified = await verifyWithBoundedRepair(
+    session,
+    mergeIntegration,
+    landingIdentity,
+    mergeFinishedAt,
+  );
+  if (verified.outcome === "failed") {
+    return verified.result;
+  }
+
+  const verifierFingerprint = computeHubVerifierFingerprint(input.cwd);
+  if (verified.mergeIntegration?.bindVerification) {
+    await verified.mergeIntegration.bindVerification(verifierFingerprint);
+  }
+
+  appendMergeProgressEvent(input, {
+    type: "candidate_verification_passed",
+    taskId: task.id,
+    branch,
+    claim,
+    createdAt: verified.verifyFinishedAt,
+    ...verified.landingIdentity,
+    verifierFingerprint,
+  });
+
+  if (verified.mergeIntegration) {
+    const finalizeFailure = await finalizeLandedCandidate(
+      session,
+      verified.mergeIntegration,
+      verified.landingIdentity,
+    );
+    if (finalizeFailure) {
+      return finalizeFailure;
+    }
+  }
+
+  appendMergeProgressEvent(input, {
+    type: "target_landing_succeeded",
+    taskId: task.id,
+    branch,
+    claim,
+    createdAt: new Date().toISOString(),
+    ...verified.landingIdentity,
+    publishTargetOid: verified.landingIdentity.candidateOid,
+    verifierFingerprint,
+  });
+
+  appendMergeProgressEvent(input, {
+    type: "task_close_started",
+    taskId: task.id,
+    branch,
+    claim,
+    createdAt: verified.verifyFinishedAt,
+    ...verified.landingIdentity,
+  });
+
+  return closeLandedTask(
+    session,
+    verified.landingIdentity,
+    verified.verifyFinishedAt,
+  );
 };
 
 export const runHubBatchMerge = async (
@@ -1311,58 +1703,57 @@ export const runHubBatchMerge = async (
   });
 
   const results: HubBatchMergeTaskResult[] = [];
-  for (let index = 0; index < selectedTasks.length; index += 1) {
-    const task = selectedTasks[index]!;
+  const shippedIds = new Set(
+    board.tasks
+      .filter((entry) => isCompletedHubStatus(entry.hubStatus))
+      .map((entry) => entry.id),
+  );
+  const orderedTasks = orderTasksByDependencies(selectedTasks);
+  for (const task of orderedTasks) {
     const claim = task.claim;
+    const unshippedBlockers = readTaskBlockers(task).filter(
+      (blockerId) => !shippedIds.has(blockerId),
+    );
+    if (unshippedBlockers.length > 0) {
+      revertTaskToWaitingForMerge({
+        cwd: input.cwd,
+        env: input.env,
+        task,
+      });
+      results.push(
+        toBatchMergeTaskResult(
+          task,
+          resolveBranch(task),
+          "skipped",
+          "waiting_for_merge",
+          {
+            diagnosticSummary: `Waiting for unshipped prerequisite ${unshippedBlockers.join(", ")}.`,
+            reason: "unshipped_prerequisite",
+          },
+        ),
+      );
+      continue;
+    }
 
     const result = await processMergeTask(input, task, claim);
     results.push(result);
-
-    if (result.outcome !== "merged") {
-      const remainingTasks = selectedTasks.slice(index + 1);
-      for (const skippedTask of remainingTasks) {
-        revertTaskToWaitingForMerge({
-          cwd: input.cwd,
-          env: input.env,
-          task: skippedTask,
-        });
-        results.push(
-          toBatchMergeTaskResult(
-            skippedTask,
-            resolveBranch(skippedTask),
-            "skipped",
-            "waiting_for_merge",
-          ),
-        );
-      }
-
-      recordBatchMergeCompleted(
-        input,
-        selectedTaskIds,
-        "partial_failed",
-        result,
-      );
-
-      return {
-        runId: input.runId,
-        batchId: input.batchId,
-        selectedTaskIds,
-        batchStatus: "partial_failed",
-        results,
-        selectionDiagnostics: selection.diagnostics,
-      };
+    if (result.outcome === "merged") {
+      shippedIds.add(task.id);
     }
   }
 
-  recordBatchMergeCompleted(input, selectedTaskIds, "done");
+  const batchStatus = results.every((result) => result.outcome === "merged")
+    ? "done"
+    : "partial_failed";
+  recordBatchMergeCompleted(input, selectedTaskIds, batchStatus, results);
 
   return {
     runId: input.runId,
     batchId: input.batchId,
     selectedTaskIds,
-    selectionDiagnostics: selection.diagnostics,
-    batchStatus: "done",
+    batchStatus,
     results,
+    selectionDiagnostics: selection.diagnostics,
   };
 };
 
@@ -1543,10 +1934,28 @@ export const createHubMergeConflictResolver = (options: {
   };
 };
 
+const mergeConflictGuardMessage = (
+  resolution: HubMergeConflictResolutionResult,
+  remainingConflicts: readonly string[],
+  mergeStillInProgress: boolean,
+): string | undefined => {
+  if (resolution.outcome !== "success") {
+    return resolution.message;
+  }
+  if (remainingConflicts.length > 0) {
+    return `Merge agent left unresolved conflicts: ${remainingConflicts.join(", ")}`;
+  }
+  if (mergeStillInProgress) {
+    return "Merge agent resolved files but left the merge commit unfinished.";
+  }
+  return resolution.message;
+};
+
 const runGitMergeInCwd = async (options: {
   readonly input: HubMergeTaskInput;
   readonly cwd: string;
   readonly env?: NodeJS.ProcessEnv;
+  readonly hubProjectDir?: string;
   readonly conflictResolver?: HubMergeConflictResolver;
 }): Promise<HubMergeTaskResult> => {
   const { input } = options;
@@ -1559,105 +1968,150 @@ const runGitMergeInCwd = async (options: {
     return { outcome: "success" };
   } catch (error) {
     const diagnostics = compactDiagnostics(extractErrorDiagnostics(error));
+    if (
+      isTransientHubLandingError(error) ||
+      isTransientHubLandingError(diagnostics)
+    ) {
+      return {
+        outcome: "failed",
+        message: error instanceof Error ? error.message : String(error),
+        diagnostics,
+      };
+    }
     if (isMergeConflict(error, diagnostics)) {
       const conflictedFiles = await listUnmergedFiles(options.cwd);
       const gitStatus = await readGitStatusShort(options.cwd);
       const baseBranch = await readCurrentBranch(options.cwd);
-      const conflictStartedAt = new Date().toISOString();
-      appendHubTaskEvent(input.runDir, {
-        type: "merge_conflict_resolution_started",
-        runId: input.runId,
-        batchId: input.batchId,
-        taskId: input.taskId,
-        branch: input.branch,
-        createdAt: conflictStartedAt,
-        status: "merging",
-        diagnostics: {
-          ...diagnostics,
-          details: {
-            ...diagnostics?.details,
-            conflictedFiles,
-            gitStatus,
-            baseBranch,
-          },
-        },
+      const sourceOid = (
+        await readGitStdout(options.cwd, [
+          "rev-parse",
+          `${input.branch}^{commit}`,
+        ])
+      ).trim();
+      const baseOid = (
+        await readGitStdout(options.cwd, ["rev-parse", "HEAD"])
+      ).trim();
+      const fingerprint = computeHubLandingMergeInputFingerprint({
+        sourceOid,
+        baseOid,
       });
-
+      const hubProjectDir =
+        options.hubProjectDir ??
+        input.hubProjectDir ??
+        join(input.runDir, "..", "..");
       const resolver =
         options.conflictResolver ??
         createHubMergeConflictResolver({
           cwd: options.cwd,
           env: options.env,
         });
-      const resolution = await resolver({
-        ...input,
-        cwd: options.cwd,
-        diagnostics,
-        conflictedFiles,
-        gitStatus,
-        baseBranch,
-      });
-      const conflictFinishedAt = new Date().toISOString();
 
-      const remainingConflicts = await listUnmergedFiles(options.cwd);
-      const mergeStillInProgress = await isMergeInProgress(options.cwd);
-
-      if (
-        resolution.outcome === "success" &&
-        remainingConflicts.length === 0 &&
-        !mergeStillInProgress
+      let lastMessage =
+        error instanceof Error ? error.message : String(error);
+      let lastDiagnostics = diagnostics;
+      while (
+        remainingHubLandingRepairAttempts({
+          hubProjectDir,
+          taskId: input.taskId,
+          sourceOid,
+          kind: "merge_conflict",
+          fingerprint,
+        }) > 0
       ) {
+        recordHubLandingRepairAttempt({
+          hubProjectDir,
+          taskId: input.taskId,
+          sourceOid,
+          kind: "merge_conflict",
+          fingerprint,
+        });
+        const conflictStartedAt = new Date().toISOString();
         appendHubTaskEvent(input.runDir, {
-          type: "merge_conflict_resolution_succeeded",
+          type: "merge_conflict_resolution_started",
+          runId: input.runId,
+          batchId: input.batchId,
+          taskId: input.taskId,
+          branch: input.branch,
+          createdAt: conflictStartedAt,
+          status: "merging",
+          diagnostics: {
+            ...lastDiagnostics,
+            details: {
+              ...lastDiagnostics?.details,
+              conflictedFiles,
+              gitStatus,
+              baseBranch,
+            },
+          },
+        });
+
+        const resolution = await resolver({
+          ...input,
+          cwd: options.cwd,
+          diagnostics: lastDiagnostics,
+          conflictedFiles: await listUnmergedFiles(options.cwd),
+          gitStatus: await readGitStatusShort(options.cwd),
+          baseBranch,
+        });
+        const conflictFinishedAt = new Date().toISOString();
+        const remainingConflicts = await listUnmergedFiles(options.cwd);
+        const mergeStillInProgress = await isMergeInProgress(options.cwd);
+
+        if (
+          resolution.outcome === "success" &&
+          remainingConflicts.length === 0 &&
+          !mergeStillInProgress
+        ) {
+          appendHubTaskEvent(input.runDir, {
+            type: "merge_conflict_resolution_succeeded",
+            runId: input.runId,
+            batchId: input.batchId,
+            taskId: input.taskId,
+            branch: input.branch,
+            createdAt: conflictFinishedAt,
+            status: "merging",
+          });
+          return { outcome: "success" };
+        }
+
+        const guardMessage = mergeConflictGuardMessage(
+          resolution,
+          remainingConflicts,
+          mergeStillInProgress,
+        );
+        lastMessage = guardMessage ?? lastMessage;
+        lastDiagnostics = compactDiagnostics({
+          ...diagnostics,
+          ...resolution.diagnostics,
+          message: guardMessage ?? resolution.diagnostics?.message,
+          details: {
+            ...diagnostics?.details,
+            ...resolution.diagnostics?.details,
+            conflictedFiles,
+            gitStatus,
+            baseBranch,
+            ...(remainingConflicts.length > 0 ? { remainingConflicts } : {}),
+            ...(mergeStillInProgress ? { mergeStillInProgress } : {}),
+          },
+        });
+        appendHubTaskEvent(input.runDir, {
+          type: "merge_conflict_resolution_failed",
           runId: input.runId,
           batchId: input.batchId,
           taskId: input.taskId,
           branch: input.branch,
           createdAt: conflictFinishedAt,
           status: "merging",
+          failureReason: "merge_conflict",
+          diagnostics: lastDiagnostics,
+          diagnosticSummary: formatMergeDiagnosticSummary(lastDiagnostics),
         });
-        return { outcome: "success" };
       }
-
-      const guardMessage =
-        resolution.outcome === "success" && remainingConflicts.length > 0
-          ? `Merge agent left unresolved conflicts: ${remainingConflicts.join(", ")}`
-          : resolution.outcome === "success" && mergeStillInProgress
-            ? "Merge agent resolved files but left the merge commit unfinished."
-            : resolution.message;
-      const resolutionDiagnostics = compactDiagnostics({
-        ...diagnostics,
-        ...resolution.diagnostics,
-        message: guardMessage ?? resolution.diagnostics?.message,
-        details: {
-          ...diagnostics?.details,
-          ...resolution.diagnostics?.details,
-          conflictedFiles,
-          gitStatus,
-          baseBranch,
-          ...(remainingConflicts.length > 0 ? { remainingConflicts } : {}),
-          ...(mergeStillInProgress ? { mergeStillInProgress } : {}),
-        },
-      });
-      appendHubTaskEvent(input.runDir, {
-        type: "merge_conflict_resolution_failed",
-        runId: input.runId,
-        batchId: input.batchId,
-        taskId: input.taskId,
-        branch: input.branch,
-        createdAt: conflictFinishedAt,
-        status: "failed",
-        failureReason: "merge_conflict",
-        diagnostics: resolutionDiagnostics,
-        diagnosticSummary: formatMergeDiagnosticSummary(resolutionDiagnostics),
-      });
 
       return {
         outcome: "merge_conflict",
-        message:
-          guardMessage ??
-          (error instanceof Error ? error.message : String(error)),
-        diagnostics: resolutionDiagnostics,
+        message: lastMessage,
+        diagnostics: lastDiagnostics,
       };
     }
 
@@ -1667,6 +2121,75 @@ const runGitMergeInCwd = async (options: {
       diagnostics,
     };
   }
+};
+
+export const createHubCandidateRepairer = (options: {
+  readonly cwd: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly homeDir?: string;
+}): HubCandidateRepairer => {
+  return async (input) => {
+    const config = readHubAgentConfig({
+      env: options.env,
+      homeDir: options.homeDir,
+    });
+    const roleEntry = config.roles.implementation ?? config.roles.merge;
+    if (!roleEntry) {
+      return {
+        outcome: "failed",
+        message:
+          "Missing Hub agent role config: implementation. Run `archloop agent-config set-role implementation --provider <provider> --model <model>`.",
+      };
+    }
+
+    const agent = resolveHubAgentProvider(roleEntry);
+    try {
+      await assertAgentCredentialsConfigured({
+        providerName: agent.name,
+        cwd: options.cwd,
+        env: options.env,
+      });
+      const logDir = join(input.runDir, "logs");
+      mkdirSync(logDir, { recursive: true });
+      const result = await run({
+        agent,
+        sandbox: noSandbox(),
+        cwd: input.cwd,
+        prompt: `Repair the Hub landing candidate so full verification succeeds.
+
+Task: ${input.taskId} (${input.title})
+Branch: ${input.branch}
+
+Verification failure:
+${input.diagnosticSummary ?? "verification failed"}
+
+Required behavior:
+1. Inspect the current worktree and fix the verification regression.
+2. Do not close tasks, update Beads, or change unrelated files.
+3. Leave a new commit on HEAD if files change.
+4. Output <promise>COMPLETE</promise> only after the candidate is ready for full verification.
+`,
+        branchStrategy: { type: "head" },
+        name: `candidate-repair-${input.taskId}`,
+        logging: {
+          type: "file",
+          path: join(logDir, `${input.taskId}-candidate-repair.log`),
+        },
+      });
+      if (!result.completionSignal) {
+        return {
+          outcome: "failed",
+          message: "Candidate repair agent finished without completion signal",
+        };
+      }
+      return { outcome: "success" };
+    } catch (error) {
+      return {
+        outcome: "failed",
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
 };
 
 export const createHubFlowRunMerger = (options: {
@@ -1691,6 +2214,7 @@ export const createHubFlowRunMerger = (options: {
             input,
             cwd: worktreeDir,
             env: options.env,
+            hubProjectDir,
             conflictResolver:
               options.conflictResolver ??
               createHubMergeConflictResolver({
@@ -1707,29 +2231,38 @@ export const createHubFlowRunMerger = (options: {
           }
         },
       });
+      let activeCandidate = candidate;
       return {
         outcome: "success",
         integration: {
-          cwd: candidate.worktreeDir,
-          transactionId: candidate.transactionId,
-          sourceOid: candidate.sourceOid,
-          baseOid: candidate.baseOid,
-          candidateOid: candidate.candidateOid,
+          cwd: activeCandidate.worktreeDir,
+          transactionId: activeCandidate.transactionId,
+          sourceOid: activeCandidate.sourceOid,
+          baseOid: activeCandidate.baseOid,
+          candidateOid: activeCandidate.candidateOid,
           bindVerification: (fingerprint) => {
             bindHubLandingVerification({
               hubProjectDir,
-              transactionId: candidate.transactionId,
-              taskId: candidate.taskId,
-              candidateOid: candidate.candidateOid,
+              transactionId: activeCandidate.transactionId,
+              taskId: activeCandidate.taskId,
+              candidateOid: activeCandidate.candidateOid,
               verifierFingerprint: fingerprint,
               repoRoot: options.cwd,
             });
+          },
+          snapshotCandidate: async () => {
+            activeCandidate = await snapshotHubLandingCandidateGeneration({
+              repoRoot: options.cwd,
+              hubProjectDir,
+              candidate: activeCandidate,
+            });
+            return activeCandidate;
           },
           finalize: async () => {
             await commitHubLandingTarget({
               repoRoot: options.cwd,
               hubProjectDir,
-              candidate,
+              candidate: activeCandidate,
               verifierFingerprint: computeHubVerifierFingerprint(options.cwd),
             });
           },
@@ -1737,7 +2270,7 @@ export const createHubFlowRunMerger = (options: {
             await cleanupHubLandingCandidate({
               repoRoot: options.cwd,
               hubProjectDir,
-              candidate,
+              candidate: activeCandidate,
             });
           },
         },
@@ -1846,9 +2379,21 @@ export const formatHubBatchMergeResultLines = (
     const diagnosticSuffix = taskResult.diagnosticSummary
       ? `; ${taskResult.diagnosticSummary}`
       : "";
+    const reasonSuffix = taskResult.reason ? `; reason=${taskResult.reason}` : "";
+    const transactionSuffix = taskResult.transactionId
+      ? `; transaction=${taskResult.transactionId}`
+      : "";
+    const oidSuffix = [
+      taskResult.sourceOid ? `source=${taskResult.sourceOid}` : undefined,
+      taskResult.baseOid ? `base=${taskResult.baseOid}` : undefined,
+      taskResult.candidateOid ? `candidate=${taskResult.candidateOid}` : undefined,
+    ]
+      .filter((value): value is string => value !== undefined)
+      .join(" ");
+    const identitySuffix = oidSuffix.length > 0 ? `; ${oidSuffix}` : "";
     const cleanupSuffix = formatCleanupResultSuffix(taskResult.cleanup);
     lines.push(
-      `  ${taskResult.taskId}: ${taskResult.outcome} -> ${taskResult.hubStatus}${diagnosticSuffix}${cleanupSuffix}`,
+      `  ${taskResult.taskId}: ${taskResult.outcome} -> ${taskResult.hubStatus}${diagnosticSuffix}${cleanupSuffix}${reasonSuffix}${transactionSuffix}${identitySuffix}`,
     );
   }
 

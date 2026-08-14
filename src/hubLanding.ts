@@ -590,6 +590,56 @@ export class HubLandingWorktreeError extends Error {
   }
 }
 
+type PersistCandidateOidInput = {
+  readonly repoRoot: string;
+  readonly hubProjectDir: string;
+  readonly transactionId: string;
+  readonly taskId: string;
+  readonly sourceOid: string;
+  readonly baseOid: string;
+  readonly candidateOid: string;
+  readonly candidateRef: string;
+  readonly createdAt: string;
+};
+
+const writeCandidateManifestAndRef = async (
+  input: PersistCandidateOidInput,
+): Promise<void> => {
+  writeAtomicJson(
+    resolveHubLandingCandidateManifestPath(
+      input.hubProjectDir,
+      input.transactionId,
+    ),
+    {
+      transactionId: input.transactionId,
+      taskId: input.taskId,
+      sourceOid: input.sourceOid,
+      baseOid: input.baseOid,
+      candidateOid: input.candidateOid,
+      candidateRef: input.candidateRef,
+      createdAt: input.createdAt,
+    } satisfies HubLandingCandidateManifest,
+  );
+  await execFileAsync("git", ["update-ref", input.candidateRef, input.candidateOid], {
+    cwd: input.repoRoot,
+  });
+};
+
+const recordCandidateCreatedCheckpoint = (
+  input: Omit<PersistCandidateOidInput, "repoRoot">,
+): HubLandingTransactionState =>
+  appendHubLandingCheckpoint(input.hubProjectDir, {
+    type: "checkpoint",
+    checkpoint: "candidate_created",
+    transactionId: input.transactionId,
+    taskId: input.taskId,
+    createdAt: input.createdAt,
+    sourceOid: input.sourceOid,
+    baseOid: input.baseOid,
+    candidateOid: input.candidateOid,
+    candidateRef: input.candidateRef,
+  });
+
 export const createHubLandingCandidate = async (input: {
   readonly repoRoot: string;
   readonly hubProjectDir: string;
@@ -730,34 +780,21 @@ export const createHubLandingCandidate = async (input: {
 
   const candidateOid = await gitText(worktreeDir, ["rev-parse", "HEAD"]);
   const candidateRef = resolveCandidateRef(transactionId);
-  maybeCrash(input.faultInjection, "candidate_ref", "before");
-  writeAtomicJson(
-    resolveHubLandingCandidateManifestPath(input.hubProjectDir, transactionId),
-    {
-      transactionId,
-      taskId: input.taskId,
-      sourceOid,
-      baseOid,
-      candidateOid,
-      candidateRef,
-      createdAt: now,
-    } satisfies HubLandingCandidateManifest,
-  );
-  await execFileAsync("git", ["update-ref", candidateRef, candidateOid], {
-    cwd: input.repoRoot,
-  });
-  maybeCrash(input.faultInjection, "candidate_ref", "after");
-  const state = appendHubLandingCheckpoint(input.hubProjectDir, {
-    type: "checkpoint",
-    checkpoint: "candidate_created",
+  const persistedCandidate = {
+    repoRoot: input.repoRoot,
+    hubProjectDir: input.hubProjectDir,
     transactionId,
     taskId: input.taskId,
-    createdAt: now,
     sourceOid,
     baseOid,
     candidateOid,
     candidateRef,
-  });
+    createdAt: now,
+  };
+  maybeCrash(input.faultInjection, "candidate_ref", "before");
+  await writeCandidateManifestAndRef(persistedCandidate);
+  maybeCrash(input.faultInjection, "candidate_ref", "after");
+  const state = recordCandidateCreatedCheckpoint(persistedCandidate);
 
   return {
     transactionId,
@@ -770,6 +807,40 @@ export const createHubLandingCandidate = async (input: {
     worktreeDir,
     policy,
     state,
+  };
+};
+
+export const snapshotHubLandingCandidateGeneration = async (input: {
+  readonly repoRoot: string;
+  readonly hubProjectDir: string;
+  readonly candidate: HubLandingCandidate;
+  readonly now?: Date;
+}): Promise<HubLandingCandidate> => {
+  const candidateOid = await gitText(input.candidate.worktreeDir, [
+    "rev-parse",
+    "HEAD",
+  ]);
+  if (candidateOid === input.candidate.candidateOid) {
+    return input.candidate;
+  }
+  const candidateRef = resolveCandidateRef(input.candidate.transactionId);
+  const persistedCandidate = {
+    repoRoot: input.repoRoot,
+    hubProjectDir: input.hubProjectDir,
+    transactionId: input.candidate.transactionId,
+    taskId: input.candidate.taskId,
+    sourceOid: input.candidate.sourceOid,
+    baseOid: input.candidate.baseOid,
+    candidateOid,
+    candidateRef,
+    createdAt: (input.now ?? new Date()).toISOString(),
+  };
+  await writeCandidateManifestAndRef(persistedCandidate);
+  return {
+    ...input.candidate,
+    candidateOid,
+    candidateRef,
+    state: recordCandidateCreatedCheckpoint(persistedCandidate),
   };
 };
 

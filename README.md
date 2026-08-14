@@ -34,7 +34,8 @@ TypeScript API to build your own orchestration.
 - Local-first landing onto a Hub publish target: a verified candidate ships
   without a remote and without mutating the user's checkout. Publication stays
   off until `archloop project configure --publish-policy` sets it. Interrupted
-  landings resume from durable evidence on the next run.
+  landings resume from durable evidence on the next run. Independent siblings
+  keep landing when one task is blocked; repair is bounded.
 - Plain terminal and JSONL output for automation
 - Reusable TypeScript primitives such as `run()`, `createSandbox()`, and
   `createWorktree()`

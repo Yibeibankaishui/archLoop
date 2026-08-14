@@ -71,6 +71,12 @@ ref/manifest, verification artifact, atomic receipt, Beads close metadata, and
 missing worktrees. `tasks doctor` and `project status` can show that pending
 state without changing it. Do not run `archloop tasks recover` for this.
 
+A semantic merge conflict or verification failure is repaired automatically up
+to two times. If that budget is exhausted, only that task becomes `blocked`
+with `merge_conflict_unresolved` or `verification_failed`. Independent siblings
+in the same batch still land. Transient Git lock and I/O errors stay pending
+and retry on the next run.
+
 ## Active worktree lease
 
 Wait for the active process or use the task recovery path. Do not remove lock

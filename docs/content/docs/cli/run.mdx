@@ -35,7 +35,7 @@ real failed task points to `archloop tasks recover --stale`; a run interrupted
 without failed tasks points back to `archloop run`, which performs automatic
 startup recovery.
 
-Eligible merge-ready tasks land through a durable per-task transaction onto a
+Eligible merge-ready tasks each own a durable landing transaction onto a
 Hub-managed local Git ref. archLoop freezes source and base OIDs, builds and
 verifies the exact candidate in a Hub-owned detached worktree, then advances
 the publish target, fence, and landing receipt in one Git ref transaction
@@ -47,6 +47,17 @@ reconstructs missing checkpoints from those durable refs, artifacts, and
 receipts, then finishes close and cleanup without landing or closing twice.
 Pending reconciliation is not a task failure and does not require
 `archloop tasks recover`.
+
+One task's failure does not roll back a shipped sibling or skip an independent
+waiting sibling. Semantic Git conflicts get at most two merge-role Agent
+repairs for the same merge input; verification failures get at most two
+candidate-repair attempts, each producing a new candidate generation and a
+full re-verification. Repair budgets survive target drift and process restart.
+Exhaustion blocks only that task as `merge_conflict_unresolved` or
+`verification_failed`. Mixed shipped and blocked outcomes report
+`partial_failed`, with each selected task's outcome, reason, transaction id,
+and candidate OIDs in plain and JSON output. Transient lock and I/O errors
+stay pending for automatic retry.
 
 Task-board implementation and review agents receive an immutable snapshot of
 the selected task, its parent PRD, required dependencies, comments, and remote

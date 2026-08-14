@@ -299,6 +299,31 @@ export const createHubRunJsonRenderer = (input: {
                 },
               }
             : {}),
+          ...(result.mergeResult
+            ? {
+                merge: {
+                  batchStatus: result.mergeResult.batchStatus,
+                  selectedTaskIds: result.mergeResult.selectedTaskIds,
+                  results: result.mergeResult.results.map((task) => ({
+                    taskId: task.taskId,
+                    outcome: task.outcome,
+                    hubStatus: task.hubStatus,
+                    ...(task.reason ? { reason: task.reason } : {}),
+                    ...(task.failureReason
+                      ? { failureReason: task.failureReason }
+                      : {}),
+                    ...(task.transactionId
+                      ? { transactionId: task.transactionId }
+                      : {}),
+                    ...(task.sourceOid ? { sourceOid: task.sourceOid } : {}),
+                    ...(task.baseOid ? { baseOid: task.baseOid } : {}),
+                    ...(task.candidateOid
+                      ? { candidateOid: task.candidateOid }
+                      : {}),
+                  })),
+                },
+              }
+            : {}),
         }),
       ];
     },
