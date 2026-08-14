@@ -141,6 +141,28 @@ export const readHubLandingRepairAttempts = (
     });
 };
 
+const countRepairAttempts = (
+  attempts: readonly HubLandingRepairAttempt[],
+  kind: HubLandingRepairKind,
+  fingerprint?: string,
+): number =>
+  attempts.filter(
+    (attempt) =>
+      attempt.kind === kind &&
+      (fingerprint === undefined || attempt.fingerprint === fingerprint),
+  ).length;
+
+const usedAttemptsForKind = (
+  budget: HubLandingRepairBudgetState,
+  kind: HubLandingRepairKind,
+): number =>
+  kind === "merge_conflict"
+    ? budget.mergeConflictAttempts
+    : budget.verificationAttempts;
+
+const remainingFromUsed = (used: number): number =>
+  Math.max(0, HUB_LANDING_REPAIR_BUDGET - used);
+
 export const loadHubLandingRepairBudget = (input: {
   readonly hubProjectDir: string;
   readonly taskId: string;
@@ -155,12 +177,8 @@ export const loadHubLandingRepairBudget = (input: {
     taskId: input.taskId,
     sourceOid: input.sourceOid,
     attempts,
-    mergeConflictAttempts: attempts.filter(
-      (attempt) => attempt.kind === "merge_conflict",
-    ).length,
-    verificationAttempts: attempts.filter(
-      (attempt) => attempt.kind === "verification",
-    ).length,
+    mergeConflictAttempts: countRepairAttempts(attempts, "merge_conflict"),
+    verificationAttempts: countRepairAttempts(attempts, "verification"),
   };
 };
 
@@ -172,21 +190,15 @@ export const remainingHubLandingRepairAttempts = (input: {
   readonly fingerprint?: string;
 }): number => {
   const budget = loadHubLandingRepairBudget(input);
-  const used =
-    input.kind === "merge_conflict"
-      ? budget.mergeConflictAttempts
-      : budget.verificationAttempts;
-  const remaining = Math.max(0, HUB_LANDING_REPAIR_BUDGET - used);
+  const remaining = remainingFromUsed(usedAttemptsForKind(budget, input.kind));
   if (!input.fingerprint) {
     return remaining;
   }
-  const sameFingerprint = budget.attempts.filter(
-    (attempt) =>
-      attempt.kind === input.kind && attempt.fingerprint === input.fingerprint,
-  ).length;
   return Math.min(
     remaining,
-    Math.max(0, HUB_LANDING_REPAIR_BUDGET - sameFingerprint),
+    remainingFromUsed(
+      countRepairAttempts(budget.attempts, input.kind, input.fingerprint),
+    ),
   );
 };
 
@@ -207,10 +219,7 @@ export const recordHubLandingRepairAttempt = (input: {
     taskId: input.taskId,
     sourceOid: input.sourceOid,
     fingerprint: input.fingerprint,
-    attempt:
-      (input.kind === "merge_conflict"
-        ? current.mergeConflictAttempts
-        : current.verificationAttempts) + 1,
+    attempt: usedAttemptsForKind(current, input.kind) + 1,
     createdAt: (input.now ?? new Date()).toISOString(),
     candidateOid: input.candidateOid,
     candidateGeneration: input.candidateGeneration,
