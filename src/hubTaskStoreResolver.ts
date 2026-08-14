@@ -83,6 +83,37 @@ export const formatInvalidHubTaskStoreRedirectMessage = (
 ): string =>
   `Hub Beads redirect at ${redirectPath} is invalid or inaccessible (${redirectTarget}). Fix the redirect path, or run \`${HUB_TASK_STORE_INIT_COMMAND}\` to recreate the Hub-owned task store.`;
 
+export const formatStaleHubTaskSnapshotRedirectMessage = (
+  redirectPath: string,
+  redirectTarget: string,
+): string =>
+  `Hub Beads redirect at ${redirectPath} points at a task snapshot directory (${redirectTarget}) instead of the managed task store. Restore the redirect to the Hub-owned store under the project directory. Do not run \`${HUB_TASK_STORE_INIT_COMMAND}\` for this recovery.`;
+
+const HUB_TASK_SNAPSHOT_FILE_NAME = "snapshot.json";
+
+export const looksLikeHubTaskSnapshotPath = (path: string): boolean =>
+  /(?:^|[/\\])task-snapshots[/\\]/.test(path);
+
+export const isHubTaskSnapshotDirectory = (dir: string): boolean =>
+  existsSync(join(dir, HUB_TASK_SNAPSHOT_FILE_NAME)) &&
+  !isBeadsStoreMarkerPresent(dir);
+
+const formatRedirectTargetError = (
+  redirectPath: string,
+  redirectTarget: string,
+): string => {
+  if (
+    looksLikeHubTaskSnapshotPath(redirectTarget) ||
+    (existsSync(redirectTarget) && isHubTaskSnapshotDirectory(redirectTarget))
+  ) {
+    return formatStaleHubTaskSnapshotRedirectMessage(
+      redirectPath,
+      redirectTarget,
+    );
+  }
+  return formatInvalidHubTaskStoreRedirectMessage(redirectPath, redirectTarget);
+};
+
 const readRedirectTarget = (
   repoRoot: string,
   redirectPath: string,
@@ -117,10 +148,22 @@ export const resolveHubTaskStore = (
         managedBeadsDir,
         redirectPath,
         redirectTarget,
-        redirectError: formatInvalidHubTaskStoreRedirectMessage(
+        redirectError: formatRedirectTargetError(
           redirectPath,
           redirectTarget ?? "(empty redirect)",
         ),
+      };
+    }
+
+    if (!isBeadsStoreMarkerPresent(redirectTarget)) {
+      return {
+        kind: "redirect",
+        beadsDir: repoBeadsDir,
+        repoBeadsDir,
+        managedBeadsDir,
+        redirectPath,
+        redirectTarget,
+        redirectError: formatRedirectTargetError(redirectPath, redirectTarget),
       };
     }
 

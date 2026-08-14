@@ -181,8 +181,9 @@ land eligible branches serially onto a Hub-managed local publish target.
 is recovered before new tasks are claimed. Interrupted `reviewing` work whose
 implementation already succeeded resumes the reviewer only (same preserved
 branch/claim), then continues through merge. Implementation and review agents
-receive an immutable task snapshot instead of live `bd` access; Hub applies
-schema-validated `<task-notes>` after the attempt. Landing freezes source and
+receive an immutable task snapshot (prompt + per-attempt `BEADS_DIR`) instead of
+live `bd` access; Hub never rewrites the shared repository `.beads/redirect` for
+snapshots and applies schema-validated `<task-notes>` after the attempt. Landing freezes source and
 base OIDs, verifies the exact candidate in a Hub-owned worktree, then advances
 the publish target with a fenced Git ref transaction. The user's checkout and
 WIP are not modified, and no remote is required.

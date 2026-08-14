@@ -1419,7 +1419,7 @@ const resumeClaimedReviewingTasksInBatch = async (input: {
     return [];
   }
 
-  return Promise.all(
+  return Promise.allSettled(
     reviewingTasks.map((task) =>
       resumeReviewSelectedTask(
         { ...input.flowInput, cwd: input.repoRoot },
@@ -1432,6 +1432,28 @@ const resumeClaimedReviewingTasksInBatch = async (input: {
         input.mutateLifecycle,
       ),
     ),
+  ).then((settled) =>
+    settled.map((entry, index) => {
+      if (entry.status === "fulfilled") {
+        return entry.value;
+      }
+      const task = reviewingTasks[index]!;
+      const message =
+        entry.reason instanceof Error
+          ? entry.reason.message
+          : String(entry.reason);
+      return {
+        taskId: task.id,
+        title: task.title,
+        branch: resolveHubTaskBranch(task.id, task.title),
+        outcome: "agent_failed" as const,
+        hubStatus: task.hubStatus,
+        failureReason: "agent_failed" as const,
+        failureStage: "review" as const,
+        diagnosticSummary: message,
+        commitCount: 0,
+      };
+    }),
   );
 };
 
@@ -2056,7 +2078,7 @@ const runObservedHubFlow = async (
       };
     }
 
-    const taskResults = await Promise.all(
+    const taskResults = await Promise.allSettled(
       selectedTasks.map((task) =>
         implementSelectedTask(
           { ...resolvedInput, cwd: repoRoot },
@@ -2072,8 +2094,29 @@ const runObservedHubFlow = async (
         ),
       ),
     );
+    const taskResultsResolved = taskResults.map((settled, index) => {
+      if (settled.status === "fulfilled") {
+        return settled.value;
+      }
+      const task = selectedTasks[index]!;
+      const message =
+        settled.reason instanceof Error
+          ? settled.reason.message
+          : String(settled.reason);
+      return {
+        taskId: task.id,
+        title: task.title,
+        branch: resolveHubTaskBranch(task.id, task.title),
+        outcome: "agent_failed" as const,
+        hubStatus: task.hubStatus,
+        failureReason: "agent_failed" as const,
+        failureStage: "implementation" as const,
+        diagnosticSummary: message,
+        commitCount: 0,
+      };
+    });
 
-    const allSelectedTasksSucceeded = taskResults.every(
+    const allSelectedTasksSucceeded = taskResultsResolved.every(
       isSuccessfulHubTaskResult,
     );
     const batchMergeResult = allSelectedTasksSucceeded
@@ -2082,13 +2125,13 @@ const runObservedHubFlow = async (
     const executedBatchResult = resolveHubFlowBatchResult({
       batchId,
       selectedTaskIds: selectedIds,
-      taskResults,
+      taskResults: taskResultsResolved,
       mergeResult: batchMergeResult,
     });
 
     return {
       selectedTaskIds: selectedIds,
-      results: taskResults,
+      results: taskResultsResolved,
       ...(batchSelectionResult ? { batchSelection: batchSelectionResult } : {}),
       ...(batchFallbackReason ? { fallbackReason: batchFallbackReason } : {}),
       ...(batchMergeResult ? { mergeResult: batchMergeResult } : {}),
