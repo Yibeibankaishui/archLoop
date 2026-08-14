@@ -49,6 +49,8 @@ import {
 } from "./hubLandingReconciliation.js";
 import {
   inspectHubCheckoutOutbox,
+  hubCheckoutSyncEventReason,
+  hubCheckoutSyncEventType,
   syncHubCheckoutProjections,
   type HubCheckoutOutboxInspection,
 } from "./hubCheckoutProjection.js";
@@ -1624,10 +1626,7 @@ const runObservedHubFlow = async (
     });
     for (const attempt of synced.deltas) {
       appendHubTaskEvent(context.runDir, {
-        type:
-          attempt.status === "succeeded"
-            ? "checkout_sync_succeeded"
-            : "checkout_sync_pending",
+        type: hubCheckoutSyncEventType(attempt.status),
         runId: context.runId,
         batchId: resumedBatchId ?? context.batchId,
         taskId: attempt.item.taskId,
@@ -1636,10 +1635,7 @@ const runObservedHubFlow = async (
         status: "done",
         transactionId: attempt.item.transactionId,
         candidateOid: attempt.item.candidateOid,
-        reason:
-          attempt.status === "pending"
-            ? attempt.pendingReason ?? "checkout_sync_pending"
-            : undefined,
+        reason: hubCheckoutSyncEventReason(attempt),
         message: attempt.message,
       });
     }

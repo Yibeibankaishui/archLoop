@@ -265,6 +265,8 @@ const parseOutboxItem = (value: unknown): HubCheckoutOutboxItem | undefined => {
   if (projectedOid !== undefined && !isGitOid(projectedOid)) {
     return undefined;
   }
+  const message = readString(record, "message");
+  const worktreePath = readString(record, "worktreePath");
   return {
     version: 1,
     id,
@@ -279,13 +281,9 @@ const parseOutboxItem = (value: unknown): HubCheckoutOutboxItem | undefined => {
     createdAt,
     updatedAt,
     ...(isPendingReason(pendingReason) ? { pendingReason } : {}),
-    ...(readString(record, "message")
-      ? { message: readString(record, "message") }
-      : {}),
+    ...(message ? { message } : {}),
     ...(projectedOid ? { projectedOid } : {}),
-    ...(readString(record, "worktreePath")
-      ? { worktreePath: readString(record, "worktreePath") }
-      : {}),
+    ...(worktreePath ? { worktreePath } : {}),
   };
 };
 
@@ -322,7 +320,8 @@ export const listHubCheckoutOutboxItems = (
   return readdirSync(dir)
     .filter((name) => name.endsWith(".json") && !name.includes(".tmp"))
     .flatMap((name) => {
-      const parsed = readOutboxItem(hubProjectDir, name.slice(0, -".json".length));
+      const id = name.slice(0, -".json".length);
+      const parsed = readOutboxItem(hubProjectDir, id);
       return parsed ? [parsed] : [];
     })
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
@@ -442,7 +441,12 @@ const listUserWorktrees = (
 ): readonly GitWorktree[] => {
   const output = tryGitTextSync(repoRoot, ["worktree", "list", "--porcelain"]);
   if (!output) {
-    return [{ path: repoRoot, branch: tryGitTextSync(repoRoot, ["branch", "--show-current"]) }];
+    return [
+      {
+        path: repoRoot,
+        branch: tryGitTextSync(repoRoot, ["branch", "--show-current"]),
+      },
+    ];
   }
   return parseWorktreeList(output).filter(
     (entry) => !isHubOwnedPath(hubProjectDir, entry.path),
@@ -463,15 +467,24 @@ const gitPathExists = (cwd: string, gitPath: string): boolean => {
   return existsSync(isAbsolute(resolved) ? resolved : join(cwd, resolved));
 };
 
+const OPERATION_HEAD_REFS = [
+  "MERGE_HEAD",
+  "REBASE_HEAD",
+  "CHERRY_PICK_HEAD",
+  "REVERT_HEAD",
+] as const;
+
+const OPERATION_GIT_PATHS = [
+  "rebase-merge",
+  "rebase-apply",
+  "BISECT_LOG",
+  "BISECT_START",
+] as const;
+
 const hasOperationInProgress = (cwd: string): boolean =>
-  gitOkSync(cwd, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]) ||
-  gitOkSync(cwd, ["rev-parse", "-q", "--verify", "REBASE_HEAD"]) ||
-  gitOkSync(cwd, ["rev-parse", "-q", "--verify", "CHERRY_PICK_HEAD"]) ||
-  gitOkSync(cwd, ["rev-parse", "-q", "--verify", "REVERT_HEAD"]) ||
-  gitPathExists(cwd, "rebase-merge") ||
-  gitPathExists(cwd, "rebase-apply") ||
-  gitPathExists(cwd, "BISECT_LOG") ||
-  gitPathExists(cwd, "BISECT_START");
+  OPERATION_HEAD_REFS.some((ref) =>
+    gitOkSync(cwd, ["rev-parse", "-q", "--verify", ref]),
+  ) || OPERATION_GIT_PATHS.some((gitPath) => gitPathExists(cwd, gitPath));
 
 const hasSparseCheckout = (cwd: string): boolean =>
   tryGitTextSync(cwd, ["config", "--bool", "core.sparseCheckout"]) === "true";
@@ -485,6 +498,9 @@ const treeHasGitlink = (cwd: string, treeish: string): boolean => {
   return tree.split("\n").some((line) => line.startsWith("160000 "));
 };
 
+const isRenameCopyOrDeleteCode = (code: string): boolean =>
+  code === "R" || code === "C" || code === "D";
+
 const classifyPorcelain = (
   status: string,
 ): HubCheckoutPendingReason | undefined => {
@@ -495,14 +511,19 @@ const classifyPorcelain = (
   for (const line of lines) {
     const x = line[0] ?? " ";
     const y = line[1] ?? " ";
-    if (x === "R" || y === "R" || x === "C" || y === "C" || x === "D" || y === "D") {
+    if (isRenameCopyOrDeleteCode(x) || isRenameCopyOrDeleteCode(y)) {
       return "rename_or_delete";
     }
   }
   if (lines.some((line) => line.startsWith("??") || line.startsWith("!!"))) {
     return "untracked_paths";
   }
-  if (lines.some((line) => (line[0] ?? " ") !== " " && (line[0] ?? "") !== "?")) {
+  if (
+    lines.some((line) => {
+      const x = line[0] ?? " ";
+      return x !== " " && x !== "?";
+    })
+  ) {
     return "staged_changes";
   }
   return "unstaged_changes";
@@ -583,10 +604,9 @@ const maybeCrash = (
   fault: HubLandingFaultInjection | undefined,
   timing: "before" | "after",
 ): void => {
-  if (timing === "before" && fault?.crashBefore === "checkout_projection") {
-    throw new HubLandingCrash("checkout_projection", timing);
-  }
-  if (timing === "after" && fault?.crashAfter === "checkout_projection") {
+  const injected =
+    timing === "before" ? fault?.crashBefore : fault?.crashAfter;
+  if (injected === "checkout_projection") {
     throw new HubLandingCrash("checkout_projection", timing);
   }
 };
@@ -595,6 +615,36 @@ const currentBranchOid = (
   repoRoot: string,
   branchRef: string,
 ): string | undefined => tryGitTextSync(repoRoot, ["rev-parse", branchRef]);
+
+const hostBranchAlreadyContainsCandidate = (
+  repoRoot: string,
+  candidateOid: string,
+  currentOid: string | undefined,
+): currentOid is string =>
+  currentOid !== undefined &&
+  isAncestor(repoRoot, candidateOid, currentOid);
+
+const candidateIsFastForwardOf = (
+  repoRoot: string,
+  candidateOid: string,
+  currentOid: string | undefined,
+): currentOid is string =>
+  currentOid !== undefined &&
+  isAncestor(repoRoot, currentOid, candidateOid);
+
+const casFailureReason = (
+  repoRoot: string,
+  candidateOid: string,
+  observedOid: string | undefined,
+): HubCheckoutPendingReason => {
+  if (
+    observedOid !== undefined &&
+    !isAncestor(repoRoot, observedOid, candidateOid)
+  ) {
+    return "branch_diverged";
+  }
+  return "operation_in_progress";
+};
 
 const attemptCas = async (
   repoRoot: string,
@@ -631,6 +681,50 @@ const attemptFastForward = async (
   );
 };
 
+const advanceHostBranchWithCrashWindows = async (input: {
+  readonly projection: ProjectHubCheckoutOutboxInput;
+  readonly item: HubCheckoutOutboxItem;
+  readonly now: string;
+  readonly mutate: () => Promise<void>;
+  readonly pendingReasonAfterFailure: (
+    observedOid: string | undefined,
+  ) => HubCheckoutPendingReason;
+  readonly worktreePath?: string;
+}): Promise<HubCheckoutOutboxItem> => {
+  const { projection, item, now } = input;
+  const succeeded = (projectedOid: string): HubCheckoutOutboxItem =>
+    markSucceeded(projection.hubProjectDir, item, {
+      projectedOid,
+      now,
+      ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
+    });
+
+  maybeCrash(projection.faultInjection, "before");
+  try {
+    await input.mutate();
+  } catch {
+    const observedOid = currentBranchOid(projection.repoRoot, item.branchRef);
+    if (
+      hostBranchAlreadyContainsCandidate(
+        projection.repoRoot,
+        item.candidateOid,
+        observedOid,
+      )
+    ) {
+      maybeCrash(projection.faultInjection, "after");
+      return succeeded(observedOid);
+    }
+    return markPending(
+      projection.hubProjectDir,
+      item,
+      input.pendingReasonAfterFailure(observedOid),
+      now,
+    );
+  }
+  maybeCrash(projection.faultInjection, "after");
+  return succeeded(item.candidateOid);
+};
+
 const projectOneItem = async (
   input: ProjectHubCheckoutOutboxInput,
   item: HubCheckoutOutboxItem,
@@ -640,13 +734,21 @@ const projectOneItem = async (
     return item;
   }
   const currentOid = currentBranchOid(input.repoRoot, item.branchRef);
-  if (currentOid && isAncestor(input.repoRoot, item.candidateOid, currentOid)) {
+  if (
+    hostBranchAlreadyContainsCandidate(
+      input.repoRoot,
+      item.candidateOid,
+      currentOid,
+    )
+  ) {
     return markSucceeded(input.hubProjectDir, item, {
       projectedOid: currentOid,
       now,
     });
   }
-  if (!currentOid || !isAncestor(input.repoRoot, currentOid, item.candidateOid)) {
+  if (
+    !candidateIsFastForwardOf(input.repoRoot, item.candidateOid, currentOid)
+  ) {
     return markPending(input.hubProjectDir, item, "branch_diverged", now);
   }
 
@@ -655,38 +757,15 @@ const projectOneItem = async (
   if (owners.length > 1) {
     return markPending(input.hubProjectDir, item, "multiple_worktrees", now);
   }
-
   if (owners.length === 0) {
-    maybeCrash(input.faultInjection, "before");
-    try {
-      await attemptCas(
-        input.repoRoot,
-        input.hubProjectDir,
-        item,
-        currentOid,
-      );
-    } catch {
-      const observed = currentBranchOid(input.repoRoot, item.branchRef);
-      if (observed && isAncestor(input.repoRoot, item.candidateOid, observed)) {
-        maybeCrash(input.faultInjection, "after");
-        return markSucceeded(input.hubProjectDir, item, {
-          projectedOid: observed,
-          now,
-        });
-      }
-      return markPending(
-        input.hubProjectDir,
-        item,
-        observed && !isAncestor(input.repoRoot, observed, item.candidateOid)
-          ? "branch_diverged"
-          : "operation_in_progress",
-        now,
-      );
-    }
-    maybeCrash(input.faultInjection, "after");
-    return markSucceeded(input.hubProjectDir, item, {
-      projectedOid: item.candidateOid,
+    return advanceHostBranchWithCrashWindows({
+      projection: input,
+      item,
       now,
+      mutate: () =>
+        attemptCas(input.repoRoot, input.hubProjectDir, item, currentOid),
+      pendingReasonAfterFailure: (observedOid) =>
+        casFailureReason(input.repoRoot, item.candidateOid, observedOid),
     });
   }
 
@@ -695,45 +774,33 @@ const projectOneItem = async (
   if (unsafe) {
     return markPending(input.hubProjectDir, item, unsafe, now);
   }
-
-  maybeCrash(input.faultInjection, "before");
-  try {
-    await attemptFastForward(owner.path, input.hubProjectDir, item.candidateOid);
-  } catch {
-    const observed = currentBranchOid(input.repoRoot, item.branchRef);
-    if (observed && isAncestor(input.repoRoot, item.candidateOid, observed)) {
-      maybeCrash(input.faultInjection, "after");
-      return markSucceeded(input.hubProjectDir, item, {
-        projectedOid: observed,
-        worktreePath: owner.path,
-        now,
-      });
-    }
-    const afterUnsafe = inspectOwningWorktreeSafety(
-      owner.path,
-      item.candidateOid,
-    );
-    return markPending(
-      input.hubProjectDir,
-      item,
-      afterUnsafe ?? "operation_in_progress",
-      now,
-    );
-  }
-  maybeCrash(input.faultInjection, "after");
-  return markSucceeded(input.hubProjectDir, item, {
-    projectedOid: item.candidateOid,
-    worktreePath: owner.path,
+  return advanceHostBranchWithCrashWindows({
+    projection: input,
+    item,
     now,
+    mutate: () =>
+      attemptFastForward(owner.path, input.hubProjectDir, item.candidateOid),
+    pendingReasonAfterFailure: () =>
+      inspectOwningWorktreeSafety(owner.path, item.candidateOid) ??
+      "operation_in_progress",
+    worktreePath: owner.path,
   });
 };
 
-const toAttempt = (item: HubCheckoutOutboxItem): HubCheckoutProjectionAttempt => ({
+const attemptMessage = (item: HubCheckoutOutboxItem): string => {
+  if (item.status === "succeeded") {
+    return succeededMessage(item);
+  }
+  return pendingMessage(item);
+};
+
+const toAttempt = (
+  item: HubCheckoutOutboxItem,
+): HubCheckoutProjectionAttempt => ({
   item,
   status: item.status,
   ...(item.pendingReason ? { pendingReason: item.pendingReason } : {}),
-  message:
-    item.status === "succeeded" ? succeededMessage(item) : pendingMessage(item),
+  message: attemptMessage(item),
 });
 
 export const projectHubCheckoutOutbox = async (
@@ -763,17 +830,42 @@ export const projectHubCheckoutOutbox = async (
   };
 };
 
+export const hubCheckoutSyncEventType = (
+  status: HubCheckoutProjectionStatus,
+): "checkout_sync_pending" | "checkout_sync_succeeded" => {
+  if (status === "succeeded") {
+    return "checkout_sync_succeeded";
+  }
+  return HUB_CHECKOUT_SYNC_PENDING;
+};
+
+export const hubCheckoutSyncEventReason = (
+  attempt: Pick<HubCheckoutProjectionAttempt, "status" | "pendingReason">,
+): string | undefined => {
+  if (attempt.status !== "pending") {
+    return undefined;
+  }
+  return attempt.pendingReason ?? HUB_CHECKOUT_SYNC_PENDING;
+};
+
+const shouldEmitCheckoutProjectionEvent = (
+  before: HubCheckoutOutboxInspection,
+  attempt: HubCheckoutProjectionAttempt,
+): boolean => {
+  if (attempt.status === "pending") {
+    return true;
+  }
+  const prior = before.items.find((item) => item.id === attempt.item.id);
+  return prior?.status !== "succeeded";
+};
+
 export const selectHubCheckoutProjectionEventDeltas = (
   before: HubCheckoutOutboxInspection,
   outcome: HubCheckoutProjectionOutcome,
 ): readonly HubCheckoutProjectionAttempt[] =>
-  outcome.attempts.filter((attempt) => {
-    if (attempt.status === "pending") {
-      return true;
-    }
-    const prior = before.items.find((item) => item.id === attempt.item.id);
-    return prior?.status !== "succeeded";
-  });
+  outcome.attempts.filter((attempt) =>
+    shouldEmitCheckoutProjectionEvent(before, attempt),
+  );
 
 export const syncHubCheckoutProjections = async (
   input: ProjectHubCheckoutOutboxInput,

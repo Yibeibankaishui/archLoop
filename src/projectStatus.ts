@@ -21,10 +21,7 @@ import {
   inspectHubLandingTransactions,
 } from "./hubLandingReconciliation.js";
 import { formatHubLegacyLandingHistoryLines } from "./hubLandingLegacyHistory.js";
-import {
-  formatHubCheckoutSyncMessage,
-  inspectHubCheckoutOutbox,
-} from "./hubCheckoutProjection.js";
+import { inspectHubCheckoutOutbox } from "./hubCheckoutProjection.js";
 import {
   formatHubTaskStoreMigrationMessage,
   inspectHubTaskStoreMigration,
@@ -1028,7 +1025,7 @@ export const resolveHubProjectStatus = (
       landingReconciliation.legacyHistory,
     ),
     checkoutSyncPendingCount: checkoutSync.pendingCount,
-    checkoutSyncMessage: formatHubCheckoutSyncMessage(checkoutSync),
+    checkoutSyncMessage: checkoutSync.message,
   };
 };
 

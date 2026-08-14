@@ -47,6 +47,8 @@ import {
   type HubLandingOidEvidence,
 } from "./hubLandingCoordinator.js";
 import {
+  hubCheckoutSyncEventReason,
+  hubCheckoutSyncEventType,
   syncHubCheckoutProjections,
 } from "./hubCheckoutProjection.js";
 import {
@@ -1572,18 +1574,12 @@ const emitCheckoutProjectionEvents = async (
       continue;
     }
     emitMergeLandingEvent(session, {
-      type:
-        attempt.status === "succeeded"
-          ? "checkout_sync_succeeded"
-          : "checkout_sync_pending",
+      type: hubCheckoutSyncEventType(attempt.status),
       createdAt: new Date().toISOString(),
       status: "done",
       ...landingIdentity,
       candidateOid: attempt.item.candidateOid,
-      reason:
-        attempt.status === "pending"
-          ? attempt.pendingReason ?? "checkout_sync_pending"
-          : undefined,
+      reason: hubCheckoutSyncEventReason(attempt),
       message: attempt.message,
     });
   }
