@@ -155,6 +155,16 @@ export interface HubBatchMergeCompletedEvent {
   readonly failureReason?: string;
   readonly failureSummary?: string;
   readonly diagnostics?: Readonly<Record<string, unknown>>;
+  readonly taskResults?: readonly {
+    readonly taskId: string;
+    readonly outcome: string;
+    readonly hubStatus: string;
+    readonly reason?: string;
+    readonly transactionId?: string;
+    readonly sourceOid?: string;
+    readonly baseOid?: string;
+    readonly candidateOid?: string;
+  }[];
 }
 
 export interface HubTaskEvent {

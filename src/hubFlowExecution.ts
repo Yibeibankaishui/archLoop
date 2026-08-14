@@ -22,6 +22,7 @@ import {
   type HubTaskStoreMigrationEvent,
 } from "./hubExecution.js";
 import {
+  createHubCandidateRepairer,
   createHubFlowRunMerger,
   createHubFlowRunVerifier,
   formatHubBatchMergeResultLines,
@@ -1655,6 +1656,10 @@ const runObservedHubFlow = async (
       hubProjectDir,
       merger,
       verifier,
+      candidateRepairer: createHubCandidateRepairer({
+        cwd: repoRoot,
+        env: input.env,
+      }),
     });
   };
 

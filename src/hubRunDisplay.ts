@@ -94,6 +94,10 @@ const classifyHubRunTasks = (
       } else {
         skipped.add(task.taskId);
       }
+    } else if (task.outcome === "pending") {
+      readyToMerge.add(task.taskId);
+    } else if (task.hubStatus === "blocked" || task.reason) {
+      blocked.add(task.taskId);
     } else {
       failed.add(task.taskId);
     }

@@ -773,6 +773,58 @@ export const createHubLandingCandidate = async (input: {
   };
 };
 
+export const snapshotHubLandingCandidateGeneration = async (input: {
+  readonly repoRoot: string;
+  readonly hubProjectDir: string;
+  readonly candidate: HubLandingCandidate;
+  readonly now?: Date;
+}): Promise<HubLandingCandidate> => {
+  const candidateOid = await gitText(input.candidate.worktreeDir, [
+    "rev-parse",
+    "HEAD",
+  ]);
+  const now = (input.now ?? new Date()).toISOString();
+  const candidateRef = resolveCandidateRef(input.candidate.transactionId);
+  if (candidateOid === input.candidate.candidateOid) {
+    return input.candidate;
+  }
+  writeAtomicJson(
+    resolveHubLandingCandidateManifestPath(
+      input.hubProjectDir,
+      input.candidate.transactionId,
+    ),
+    {
+      transactionId: input.candidate.transactionId,
+      taskId: input.candidate.taskId,
+      sourceOid: input.candidate.sourceOid,
+      baseOid: input.candidate.baseOid,
+      candidateOid,
+      candidateRef,
+      createdAt: now,
+    } satisfies HubLandingCandidateManifest,
+  );
+  await execFileAsync("git", ["update-ref", candidateRef, candidateOid], {
+    cwd: input.repoRoot,
+  });
+  const state = appendHubLandingCheckpoint(input.hubProjectDir, {
+    type: "checkpoint",
+    checkpoint: "candidate_created",
+    transactionId: input.candidate.transactionId,
+    taskId: input.candidate.taskId,
+    createdAt: now,
+    sourceOid: input.candidate.sourceOid,
+    baseOid: input.candidate.baseOid,
+    candidateOid,
+    candidateRef,
+  });
+  return {
+    ...input.candidate,
+    candidateOid,
+    candidateRef,
+    state,
+  };
+};
+
 const recordCandidateVerifiedCheckpoint = (input: {
   readonly hubProjectDir: string;
   readonly transactionId: string;

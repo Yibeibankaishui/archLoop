@@ -203,6 +203,15 @@ npx archloop tasks cleanup --dry-run
 - Landing does not mutate the user's checkout, index, HEAD, or WIP. Dirty
   source files and staged Beads runtime/export files do not block a local
   landing. Checkout projection of the landed commit is a later, separate step.
+- Each merge-ready task owns its own landing transaction. Independent siblings
+  continue after one task is blocked; dependents wait for an unshipped
+  prerequisite. Mixed shipped and blocked batches report `partial_failed`.
+- Semantic Git conflicts get at most two merge-role Agent repairs; verification
+  failures get at most two candidate-repair attempts with a new candidate
+  generation and full re-verification each time. Repair budgets do not reset
+  on target drift or process restart. Exhaustion blocks only that task as
+  `merge_conflict_unresolved` or `verification_failed`. Transient lock/I/O
+  errors stay pending. Unverified or stale candidates cannot land.
 - Interrupted landing transactions resume automatically on the next
   `archloop run` from candidate refs, verification artifacts, atomic receipts,
   Beads close metadata, and resource absence. Do not run `tasks recover` for

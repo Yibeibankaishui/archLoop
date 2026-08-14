@@ -181,6 +181,14 @@ export interface RecordMergeFailureInput extends RecordMergePhaseFailureInput {
   readonly diagnostics?: Readonly<Record<string, unknown>>;
 }
 
+export type HubLandingRepairExhaustionReason =
+  | "merge_conflict_unresolved"
+  | "verification_failed";
+
+export interface RecordRepairExhaustionInput extends RecordMergePhaseFailureInput {
+  readonly reason: HubLandingRepairExhaustionReason;
+}
+
 export interface CloseHubTaskInput {
   readonly cwd: string;
   readonly taskId: string;
@@ -540,6 +548,55 @@ export const recordVerificationFailure = (
       diagnostics: input.diagnostics,
     },
   );
+
+export const recordRepairExhaustion = (
+  input: RecordRepairExhaustionInput,
+): HubTaskLifecycleResult => {
+  const eventType =
+    input.reason === "merge_conflict_unresolved"
+      ? "merge_failed"
+      : "verification_failed";
+  appendHubTaskEvent(input.context.runDir, {
+    type: eventType,
+    runId: input.context.runId,
+    batchId: input.context.batchId,
+    taskId: input.taskId,
+    branch: input.branch,
+    createdAt: input.createdAt,
+    status: "blocked",
+    reason: input.reason,
+    diagnosticSummary: input.diagnosticSummary,
+    diagnostics: input.diagnostics,
+    claim: input.claim,
+  });
+
+  const updatedTask = updateHubTaskStatus({
+    cwd: input.cwd,
+    taskId: input.taskId,
+    hubStatus: "blocked",
+    metadata: {
+      ...input.metadata,
+      blocked: true,
+      blocked_reason: input.reason,
+      blockedReason: input.reason,
+    },
+    env: input.env,
+  });
+
+  recordHubTaskStatusAdvanced(input.context.runDir, {
+    runId: input.context.runId,
+    batchId: input.context.batchId,
+    taskId: input.taskId,
+    branch: input.branch,
+    createdAt: input.createdAt,
+    status: updatedTask.hubStatus,
+  });
+
+  return {
+    task: updatedTask,
+    hubStatus: updatedTask.hubStatus,
+  };
+};
 
 export const recordCloseFailure = (
   input: RecordMergePhaseFailureInput,
