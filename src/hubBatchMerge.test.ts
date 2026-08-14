@@ -1512,6 +1512,12 @@ test ! -f notes.txt
       new Set(landingEvents.map((event) => event.transactionId)).size,
     ).toBe(1);
     expect(landingEvents.every((event) => event.candidateOid)).toBe(true);
+    expect(
+      taskEvents.some(
+        (event) =>
+          (event as { type?: string }).type === "checkout_sync_pending",
+      ),
+    ).toBe(true);
   });
 
   it("selects task branches that include allowlisted Beads runtime/export files so landing can strip them", async () => {

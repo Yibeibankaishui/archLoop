@@ -30,6 +30,7 @@ import {
   inspectHubLandingTransactions,
 } from "./hubLandingReconciliation.js";
 import { formatHubLegacyLandingHistoryLines } from "./hubLandingLegacyHistory.js";
+import { inspectHubCheckoutOutbox } from "./hubCheckoutProjection.js";
 import {
   formatHubTaskStoreMigrationMessage,
   inspectHubTaskStoreMigration,
@@ -694,6 +695,11 @@ export const doctorHubTaskState = async (
     if (!landingDiagnostics.includes(line)) {
       landingDiagnostics.push(line);
     }
+  }
+  const checkoutSync = inspectHubCheckoutOutbox({ hubProjectDir });
+  if (checkoutSync.pendingCount > 0) {
+    landingDiagnostics.push(checkoutSync.message);
+    landingDiagnostics.push(`Next action: ${checkoutSync.nextAction}`);
   }
 
   return {

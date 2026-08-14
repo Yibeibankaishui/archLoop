@@ -429,6 +429,10 @@ const resolveTaskStage = (event: Extract<HubRunEvent, { taskId: string }>) => {
       return "Landing pending";
     case "target_landing_stale_owner_rejected":
       return "Stale landing owner rejected";
+    case "checkout_sync_pending":
+      return "Checkout sync pending";
+    case "checkout_sync_succeeded":
+      return "Checkout synced";
     case "task_close_succeeded":
     case "task_closed":
       return "Completed";
@@ -790,7 +794,10 @@ export const formatPlainHubRunEvent = (
         ["observed_target_oid", event.observedTargetOid],
         ["expected_fence_oid", event.expectedFenceOid],
         ["observed_fence_oid", event.observedFenceOid],
+        ["transaction_id", event.transactionId],
+        ["candidate_oid", event.candidateOid],
         ["reason", event.reason],
+        ["message", event.message],
       ]),
     ].join(" ");
   }

@@ -200,9 +200,16 @@ npx archloop tasks recover --stale
 npx archloop tasks cleanup --dry-run
 ```
 
-- Landing does not mutate the user's checkout, index, HEAD, or WIP. Dirty
-  source files and staged Beads runtime/export files do not block a local
-  landing. Checkout projection of the landed commit is a later, separate step.
+- Landing does not mutate the user's checkout, index, HEAD, or WIP during the
+  landing transaction. Dirty source files and staged Beads runtime/export
+  files do not block a local landing. After landing, Hub enqueues a durable
+  checkout projection: an un-checked-out host branch advances with OID CAS,
+  and a checked-out branch fast-forwards only in its owning worktree when Git
+  can prove the update safe. Unsafe WIP, operation state, sparse checkout,
+  submodules, divergence, or extra worktrees stay `checkout_sync_pending`,
+  leave user state unchanged, and retry on a later run. Projection never
+  stashes, switches branches, force-resets, or runs user hooks. Pending
+  checkout sync does not change `shipped`.
 - Legacy task branches that committed allowlisted Beads runtime/export files
   (`.beads/issues.jsonl`, `.beads/interactions.jsonl`, `.beads/events.jsonl`,
   and known Dolt/backup/lock paths) still land their source changes. Hub
@@ -236,8 +243,8 @@ npx archloop tasks cleanup --dry-run
   not silently close or reimplement preserved work.
 - `tasks doctor` is read-only. It groups diagnostics by severity, reports
   interrupted execution when no lease diagnostic already explains it, and can
-  display landing reconciliation state and legacy history without advancing
-  the transaction.
+  display landing reconciliation state, checkout sync pending, and legacy
+  history without advancing the transaction or updating the checkout.
 - `tasks repair-state` previews changes before confirmation and rewrites only
   archLoop-managed status fields; it does not mutate GitHub Issues.
 - `tasks recover --stale` previews all interrupted-task routes by default; use

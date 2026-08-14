@@ -1628,6 +1628,21 @@ describe("hubTaskStateDoctorModelToBlocks / formatHubTaskStateDoctorLines (prese
     }
   });
 
+  it("appends checkout sync pending diagnostics without recover guidance", () => {
+    const lines = formatHubTaskStateDoctorLines({
+      diagnostics: [],
+      managedBranchCleanupDiagnostics: [],
+      landingDiagnostics: [
+        "Checkout sync pending for bd-land (unstaged_changes): host branch main was not updated. Landed candidate cccccccccccccccccccccccccccccccccccccccc remains on the Hub publish target and the task can stay shipped. This is not a task failure and does not require a recovery command.",
+        "Next action: Wait for the automatic retry; Hub will fast-forward the host branch when Git can prove the checkout safe.",
+      ],
+    });
+    const text = lines.join("\n");
+    expect(text).toContain("Checkout sync pending");
+    expect(text).toContain("Wait for the automatic retry");
+    expect(text).not.toMatch(/tasks recover/);
+  });
+
   it("color render distinguishes severities (error red, warn yellow, info cyan)", () => {
     const palette = createPalette(true);
     const blocks = hubTaskStateDoctorModelToBlocks(

@@ -49,10 +49,11 @@ cleanup, and deletion with `--dry-run` before applying them in automation.
 timeline. Selectors are full Beads IDs or exact titles, never list ordinals.
 
 `tasks doctor` is read-only and groups state, branch, event, and lease findings
-by severity. It can display pending landing reconciliation, a landing
-integrity incident, or legacy landing history (accepted closed/ancestry
-evidence versus rejected `merge_succeeded` or missing/diverged branches)
-without writing checkpoints or advancing the transaction.
+by severity. It can display pending landing reconciliation, pending checkout
+sync, a landing integrity incident, or legacy landing history (accepted
+closed/ancestry evidence versus rejected `merge_succeeded` or missing/diverged
+branches) without writing checkpoints, advancing the transaction, or updating
+the checkout.
 `tasks repair-state` previews local Beads projection changes and
 rewrites only archLoop-managed fields after confirmation. It never updates a
 remote GitHub Issue.

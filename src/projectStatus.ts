@@ -21,6 +21,7 @@ import {
   inspectHubLandingTransactions,
 } from "./hubLandingReconciliation.js";
 import { formatHubLegacyLandingHistoryLines } from "./hubLandingLegacyHistory.js";
+import { inspectHubCheckoutOutbox } from "./hubCheckoutProjection.js";
 import {
   formatHubTaskStoreMigrationMessage,
   inspectHubTaskStoreMigration,
@@ -131,6 +132,8 @@ export interface HubProjectStatus {
   readonly landingReconciliationPendingCount?: number;
   readonly landingIntegrityIncident?: string;
   readonly landingLegacyHistory?: readonly string[];
+  readonly checkoutSyncPendingCount?: number;
+  readonly checkoutSyncMessage?: string;
 }
 
 export interface HubProjectStatusOptions {
@@ -711,6 +714,15 @@ export const formatHubProjectStatusLines = (
     }
     lines.push("");
   }
+  if (
+    status.checkoutSyncPendingCount &&
+    status.checkoutSyncPendingCount > 0 &&
+    status.checkoutSyncMessage
+  ) {
+    lines.push("Checkout sync");
+    lines.push(`  ${status.checkoutSyncMessage}`);
+    lines.push("");
+  }
   lines.push("");
   appendActiveBatchLines(lines, status.activeBatches);
   lines.push("");
@@ -972,6 +984,7 @@ export const resolveHubProjectStatus = (
     readTaskClose: hubLandingTaskCloseReaderFromTasks(board?.tasks ?? []),
     tasks: board?.tasks,
   });
+  const checkoutSync = inspectHubCheckoutOutbox({ hubProjectDir });
 
   return {
     repoRoot,
@@ -1011,6 +1024,8 @@ export const resolveHubProjectStatus = (
     landingLegacyHistory: formatHubLegacyLandingHistoryLines(
       landingReconciliation.legacyHistory,
     ),
+    checkoutSyncPendingCount: checkoutSync.pendingCount,
+    checkoutSyncMessage: checkoutSync.message,
   };
 };
 
@@ -1105,6 +1120,14 @@ const projectStatusIdentityRows = (
         {
           key: "Legacy landing history",
           value: `${status.landingLegacyHistory.length} finding(s)`,
+        },
+      ]
+    : []),
+  ...(status.checkoutSyncPendingCount && status.checkoutSyncPendingCount > 0
+    ? [
+        {
+          key: "Checkout sync",
+          value: `pending (${status.checkoutSyncPendingCount})`,
         },
       ]
     : []),
