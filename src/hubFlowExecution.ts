@@ -43,6 +43,7 @@ import { ensureHubLandingPolicy } from "./hubLandingPolicy.js";
 import {
   beadsCloseEvidenceFromHubTask,
   formatHubLandingReconciliationMessage,
+  hubLandingReconciliationHasVisibleOutput,
   reconcileHubLandingTransactions,
   type HubLandingReconciliationOutcome,
 } from "./hubLandingReconciliation.js";
@@ -1516,11 +1517,19 @@ const runObservedHubFlow = async (
     env: input.env,
   });
   throwIfHubTaskStoreSplitBrain(taskStoreMigration);
+  let landingTasks: ReturnType<typeof loadHubTaskBoard>["tasks"] = [];
+  try {
+    landingTasks = loadHubTaskBoard(repoRoot, input.env).tasks;
+  } catch {
+    // Board may be unavailable before `tasks init`; adopt nothing.
+  }
   const landingReconciliationInput = {
     repoRoot,
     hubProjectDir,
     readTaskClose: createHubLandingTaskCloseReader(repoRoot, input.env),
     closeTask: createHubLandingTaskCloser(repoRoot, input.env),
+    tasks: landingTasks,
+    events: readTaskEvents(hubProjectDir),
   };
   const landingReconciliation = await reconcileHubLandingTransactions(
     landingReconciliationInput,
@@ -1591,7 +1600,7 @@ const runObservedHubFlow = async (
   const appendLandingReconciliationEvent = (
     outcome: HubLandingReconciliationOutcome,
   ): void => {
-    if (outcome.kind === "clean") {
+    if (!hubLandingReconciliationHasVisibleOutput(outcome)) {
       return;
     }
     appendHubRunEvent(context.runDir, {
@@ -1918,7 +1927,7 @@ export const formatHubFlowResultLines = (
   }
   if (
     result.landingReconciliation &&
-    result.landingReconciliation.kind !== "clean"
+    hubLandingReconciliationHasVisibleOutput(result.landingReconciliation)
   ) {
     lines.push(
       formatHubLandingReconciliationMessage(result.landingReconciliation),
@@ -2011,8 +2020,10 @@ export const formatHubFlowResultLines = (
 /**
  * Pure selector over the Hub run event log: has this task previously reached
  * a merged/done milestone? A prior `target_landing_succeeded`,
- * `merge_succeeded`, `task_close_succeeded`, or `task_closed` proves the
- * task's described work already landed. Used by the implementer to distinguish
+ * `task_close_succeeded`, or `task_closed` proves the
+ * task's described work already landed. A historical `merge_succeeded`
+ * event is not enough: earlier Hub versions emitted it before verification
+ * and final landing. Used by the implementer to distinguish
  * a faithful zero-new-commit re-run on already-landed work from a genuine
  * no-work failure (arch-d0c).
  *
@@ -2032,7 +2043,6 @@ const hasPriorMergedCompletion = (
       event.taskId === taskId &&
       (event.type === "target_landing_succeeded" ||
         event.type === "task_close_succeeded" ||
-        event.type === "merge_succeeded" ||
         event.type === "task_closed"),
   );
 

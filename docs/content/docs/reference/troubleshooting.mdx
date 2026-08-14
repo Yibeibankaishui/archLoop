@@ -79,6 +79,26 @@ retries cleanup without undoing `shipped`. `tasks doctor` is read-only.
 Pending reconciliation is not a task failure; do not run
 `archloop tasks recover` for this.
 
+## Legacy Hub landing history
+
+**Cause:** The project has pre-transaction merge history from before durable
+landing transactions.
+
+```bash
+npx archloop run --flow with-review
+npx archloop tasks doctor
+npx archloop project status
+```
+
+Already closed tasks stay completed and do not get manufactured landing
+receipts. If Git ancestry proves the task branch is contained in the configured
+target, the next mutating `archloop run` adopts that work into a new verified
+transaction. A historical `merge_succeeded` event is never enough to mark a
+task landed, closed, or shipped. Missing or diverged branches become
+`legacy_landing_integrity` for inspection; Hub does not silently close or
+reimplement preserved work. `tasks doctor` and `project status` stay
+read-only. Do not run `archloop tasks recover` for this.
+
 ## Task-store split brain after redirect
 
 **Cause:** After `.beads/redirect` was installed, both the leftover

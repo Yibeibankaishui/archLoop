@@ -228,9 +228,16 @@ npx archloop tasks cleanup --dry-run
   `archloop run` from candidate refs, verification artifacts, atomic receipts,
   Beads close metadata, and resource absence. Do not run `tasks recover` for
   this pending reconciliation.
+- On upgrade, already closed historical tasks stay completed and do not need
+  new landing receipts. In-flight work whose source branch is contained in the
+  configured target is adopted into a new verified transaction automatically.
+  A historical `merge_succeeded` event is never landing proof. Missing or
+  diverged branches become `legacy_landing_integrity` for inspection; Hub does
+  not silently close or reimplement preserved work.
 - `tasks doctor` is read-only. It groups diagnostics by severity, reports
   interrupted execution when no lease diagnostic already explains it, and can
-  display landing reconciliation state without advancing the transaction.
+  display landing reconciliation state and legacy history without advancing
+  the transaction.
 - `tasks repair-state` previews changes before confirmation and rewrites only
   archLoop-managed status fields; it does not mutate GitHub Issues.
 - `tasks recover --stale` previews all interrupted-task routes by default; use

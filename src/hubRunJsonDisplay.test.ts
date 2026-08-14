@@ -732,4 +732,73 @@ describe("JSONL Hub run lifecycle output", () => {
     });
     expect(JSON.stringify(incident)).not.toMatch(/tasks recover/);
   });
+
+  it("explains accepted and rejected legacy landing history in JSON", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+      now: () => new Date("2026-08-14T12:00:00.000Z"),
+    });
+    const record = parseRecord(
+      renderer
+        .outcome(
+          makeRunResult({
+            landingReconciliation: {
+              kind: "integrity_incident",
+              transactions: [],
+              pendingCount: 0,
+              reconstructedCount: 0,
+              integrityIncident: "legacy_landing_integrity: event_without_ancestry",
+              message:
+                "Rejected historical evidence for bd-1: a historical merge_succeeded event is not landing proof. The task is not landed, closed, or shipped. This is not a task failure and does not require a recovery command.",
+              nextAction:
+                "Inspect the task branch, configured target, and historical events. Do not close or reimplement the task automatically.",
+              legacyHistory: [
+                {
+                  taskId: "bd-closed",
+                  decision: "grandfathered_closed",
+                  accepted: true,
+                  hadMergeSucceededEvent: true,
+                  message:
+                    "Accepted historical evidence for bd-closed: already closed Beads status. Grandfathered as completed; no landing receipt required.",
+                  nextAction:
+                    "Inspect the task branch, configured target, and historical events. Do not close or reimplement the task automatically.",
+                },
+                {
+                  taskId: "bd-1",
+                  decision: "event_without_ancestry",
+                  accepted: false,
+                  hadMergeSucceededEvent: true,
+                  message:
+                    "Rejected historical evidence for bd-1: a historical merge_succeeded event is not landing proof.",
+                  nextAction:
+                    "Inspect the task branch, configured target, and historical events. Do not close or reimplement the task automatically.",
+                  integrityIncident:
+                    "legacy_landing_integrity: event_without_ancestry",
+                },
+              ],
+            },
+          }),
+          projectHubRunOutcome(makeRunResult({})),
+        )
+        .at(-1)!,
+    );
+    expect(record.landingReconciliation).toMatchObject({
+      kind: "integrity_incident",
+      integrityIncident: "legacy_landing_integrity: event_without_ancestry",
+      legacyHistory: [
+        expect.objectContaining({
+          taskId: "bd-closed",
+          decision: "grandfathered_closed",
+          accepted: true,
+        }),
+        expect.objectContaining({
+          taskId: "bd-1",
+          decision: "event_without_ancestry",
+          accepted: false,
+        }),
+      ],
+    });
+    expect(JSON.stringify(record)).not.toMatch(/tasks recover/);
+  });
 });

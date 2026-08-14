@@ -219,7 +219,11 @@ lease 和 fenced CAS；publish target 在落地前变化时会作废旧 candidat
 进程中断后再次执行同一个 `archloop run`，启动阶段会根据已经完成的实现或评审
 事件把任务恢复到下一个安全阶段，并保留已有分支和 worktree 内容。未完成的落地
 事务会从 candidate ref、verification artifact、atomic receipt 和 Beads close
-元数据自动续跑，不需要 `tasks recover`。失败任务的 `fix` 指引使用
+元数据自动续跑，不需要 `tasks recover`。升级时，已经关闭的历史任务保持完成，
+不会补造 landing receipt；若 Git 祖先关系证明任务分支已包含在配置目标中，
+下一次变更型 `archloop run` 会把它纳入新的 verified transaction。历史
+`merge_succeeded` 事件不能单独证明落地。缺失或分叉的分支会报告
+`legacy_landing_integrity`，不会被静默关闭或重新实现。失败任务的 `fix` 指引使用
 `tasks recover --stale`；只有运行中断但没有失败任务时，指引会让用户直接重新
 执行 `archloop run`。
 
@@ -319,3 +323,4 @@ API 参数、返回值和生命周期说明见
 | 2026-08-14 | 独立兄弟任务分别落地；有界 Agent 修复隔离坏任务             |
 | 2026-08-14 | 旧任务分支上的 allowlist Beads runtime 文件会从 candidate 剥离 |
 | 2026-08-14 | 并发落地用 lease 与 fence CAS 互斥；target drift 会重建并重验 |
+| 2026-08-14 | 升级时接纳旧落地历史：已关闭保持完成，无祖先证明不视为落地 |

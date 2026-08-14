@@ -10,6 +10,7 @@ import {
 import type { HubProjectRegistryEntry } from "./hubProjectRegistry.js";
 import { HUB_TASK_STORE_SPLIT_BRAIN_INCIDENT } from "./hubTaskStoreMigration.js";
 import { isHubOwnedTaskStoreKind } from "./hubTaskStoreResolver.js";
+import { HUB_LEGACY_LANDING_INTEGRITY } from "./hubLandingLegacyHistory.js";
 import {
   formatReadinessCheckLines,
   type HubReadinessCheckReport,
@@ -46,6 +47,15 @@ const createSection = (
   title,
   findings,
 });
+
+const createLandingSection = (
+  severity: HubReadinessFinding["severity"],
+  title: string,
+  message: string,
+): HubReadinessSection =>
+  createSection("Checking Hub landing", [
+    createFinding(severity, title, message),
+  ]);
 
 const repoPathSection = (
   project: HubProjectRegistryEntry,
@@ -246,32 +256,41 @@ const buildTaskStoreSection = (
 
 const buildLandingSection = (status: HubProjectStatus): HubReadinessSection => {
   if (status.landingIntegrityIncident) {
-    return createSection("Checking Hub landing", [
-      createFinding(
+    if (
+      status.landingIntegrityIncident.startsWith(HUB_LEGACY_LANDING_INTEGRITY)
+    ) {
+      return createLandingSection(
         "error",
-        "Landing integrity incident",
-        status.landingReconciliationMessage ??
-          status.landingIntegrityIncident,
-      ),
-    ]);
+        "Legacy landing integrity",
+        status.landingReconciliationMessage ?? status.landingIntegrityIncident,
+      );
+    }
+    return createLandingSection(
+      "error",
+      "Landing integrity incident",
+      status.landingReconciliationMessage ?? status.landingIntegrityIncident,
+    );
   }
   if (status.landingReconciliationKind === "pending") {
-    return createSection("Checking Hub landing", [
-      createFinding(
-        "warn",
-        "Landing reconciliation pending",
-        status.landingReconciliationMessage ??
-          "An incomplete Hub landing transaction will resume automatically from durable evidence. This is not a task failure.",
-      ),
-    ]);
+    return createLandingSection(
+      "warn",
+      "Landing reconciliation pending",
+      status.landingReconciliationMessage ??
+        "An incomplete Hub landing transaction will resume automatically from durable evidence. This is not a task failure.",
+    );
   }
-  return createSection("Checking Hub landing", [
-    createFinding(
+  if (status.landingLegacyHistory && status.landingLegacyHistory.length > 0) {
+    return createLandingSection(
       "success",
-      "Landing transactions are idle",
-      "No incomplete Hub landing transactions need reconciliation.",
-    ),
-  ]);
+      "Legacy landing history reviewed",
+      status.landingLegacyHistory.join(" "),
+    );
+  }
+  return createLandingSection(
+    "success",
+    "Landing transactions are idle",
+    "No incomplete Hub landing transactions need reconciliation.",
+  );
 };
 
 const buildTaskSummarySection = (

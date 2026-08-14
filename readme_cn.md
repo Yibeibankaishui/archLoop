@@ -21,7 +21,7 @@ repo-local 自定义工作流。
 - 配置规划、实现、评审、合并、Triage 和 Recovery 等 agent role
 - 使用保存在 Hub 项目目录中的本地 Beads 任务表（仓库内旧库会自动迁移；有活跃 writer 时延期，redirect 后 split brain 会停止自动写入），并可与 GitHub Issues 同步。Hub flow 执行 agent 只拿到不可变任务快照，结构化 notes 由 Hub 在 attempt 之后写回
 - 在 Docker、Podman、Vercel、Daytona 或 no-sandbox 环境中执行代理
-- 管理分支和 git worktree，把已验证的候选提交落到 Hub 本地 publish target，不改用户工作区；远程发布默认关闭。并发运行用 landing lease 与 fenced CAS 互斥，target drift 会重建并重验。进程中断后再次运行会从 durable evidence 自动续跑落地事务。独立任务失败不会拖住同批兄弟任务，冲突与验证修复有次数上限。已提交 allowlist Beads runtime 文件的旧任务分支仍可落地源码变更
+- 管理分支和 git worktree，把已验证的候选提交落到 Hub 本地 publish target，不改用户工作区；远程发布默认关闭。并发运行用 landing lease 与 fenced CAS 互斥，target drift 会重建并重验。进程中断后再次运行会从 durable evidence 自动续跑落地事务。升级时已关闭任务保持完成；只有 Git 祖先证明才接纳进行中的旧落地，历史 `merge_succeeded` 不能单独证明交付。独立任务失败不会拖住同批兄弟任务，冲突与验证修复有次数上限。已提交 allowlist Beads runtime 文件的旧任务分支仍可落地源码变更
 - 从中断的运行和待合并批次继续执行
 - 为终端提供可读输出，为自动化提供 JSONL 输出
 - 通过 TypeScript API 构建自定义编排
