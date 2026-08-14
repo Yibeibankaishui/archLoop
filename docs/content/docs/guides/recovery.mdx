@@ -23,8 +23,10 @@ npx archloop run --flow <flow-id>
 
 Startup detects tasks left in implementation, review, or merge without a live
 worktree lease. Completed implementation or review events route the task to the
-next stage, while preserved branch and worktree changes remain available. The
-CLI reports each route; JSONL includes the structured `autoRecover` result.
+next stage, while preserved branch and worktree changes remain available. For
+`with-review`, a recovered `reviewing` task resumes the reviewer only and then
+continues through merge — it does not re-run implementation. The CLI reports
+each route; JSONL includes the structured `autoRecover` result.
 
 To preview all interrupted tasks without starting a flow:
 

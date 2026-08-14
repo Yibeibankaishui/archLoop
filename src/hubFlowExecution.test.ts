@@ -4328,7 +4328,7 @@ describe("run startup auto-recover of interrupted tasks", () => {
     );
   }, 20000);
 
-  it("auto-recovers a reviewing task whose implementation already succeeded to reviewing and does not re-implement it", async () => {
+  it("resumes reviewer-only for a recovered reviewing task after implementation succeeded", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-autorecover-review-"));
     await initRepo(repoDir);
     await commitFile(repoDir, "hello.txt", "hello", "initial commit");
@@ -4339,10 +4339,9 @@ describe("run startup auto-recover of interrupted tasks", () => {
     const title = "Auto recover review";
     const branch = resolveHubTaskBranch(taskId, title);
     const stateFile = join(repoDir, "bd-state.json");
-    // A reviewing task whose run was interrupted mid-review. Its implementation
-    // already completed (the reviewer-flow task_implementation_succeeded event
-    // with status=reviewing fired), so the router must recover it to reviewing
-    // and preserve the claim — never re-implementing the finished work (story 3).
+    // Interrupted mid-review after task_implementation_succeeded (status=reviewing).
+    // Recovery keeps reviewing + claim; the with-review flow must resume the
+    // reviewer only, then continue through merge — never re-implement.
     const { env, commentsFile } = await writeMockBd(repoDir, stateFile, [
       {
         id: taskId,
@@ -4375,6 +4374,14 @@ describe("run startup auto-recover of interrupted tasks", () => {
       runId: oldRunId,
       batchId: oldBatchId,
     });
+    appendHubBatchEvent(oldContext.runDir, {
+      type: "batch_planned",
+      runId: oldRunId,
+      batchId: oldBatchId,
+      flowId: "with-review",
+      createdAt: "2026-07-23T00:00:00Z",
+      taskIds: [taskId],
+    });
     appendHubTaskEvent(oldContext.runDir, {
       type: "task_implementation_succeeded",
       runId: oldRunId,
@@ -4383,48 +4390,200 @@ describe("run startup auto-recover of interrupted tasks", () => {
       branch,
       createdAt: "2026-07-23T00:01:00Z",
       status: "reviewing",
+      commitCount: 1,
     });
 
-    const implementer = vi.fn<HubFlowImplementer>(async () => ({
-      outcome: "success",
-      commits: [{ sha: "abc" }],
-      completionSignal: "<promise>COMPLETE</promise>",
-    }));
+    await execAsync(`git checkout -b ${branch}`, { cwd: repoDir });
+    await commitFile(repoDir, "work.txt", "work", "implemented work");
+    await execAsync("git checkout main", { cwd: repoDir });
+
+    const implementer = vi.fn<HubFlowImplementer>(async () => {
+      throw new Error("implementer should not run for reviewer-only resume");
+    });
+    const reviewer = vi.fn<HubFlowReviewer>(async (input) => {
+      expect(input.taskId).toBe(taskId);
+      expect(input.branch).toBe(branch);
+      return {
+        outcome: "success",
+        commits: [],
+        completionSignal: "<promise>COMPLETE</promise>",
+      };
+    });
+    const mergedTaskIds: string[] = [];
     const result = await runHubFlow({
       flowId: "with-review",
       cwd: repoDir,
       hubProjectDir,
       env,
       implementer,
+      reviewer,
+      merger: async (input) => {
+        mergedTaskIds.push(input.taskId);
+        return { outcome: "success" };
+      },
+      verifier: async () => ({ outcome: "success" }),
+    });
+
+    expect(implementer).not.toHaveBeenCalled();
+    expect(reviewer).toHaveBeenCalledTimes(1);
+    expect(result.mode).toBe("resumed_batch");
+    expect(result.resumedBatchId).toBe(oldBatchId);
+    expect(result.selectedTaskIds).toEqual([taskId]);
+    expect(result.results[0]).toMatchObject({
+      taskId,
+      outcome: "reviewed",
+      hubStatus: "waiting_for_merge",
+    });
+    expect(mergedTaskIds).toEqual([taskId]);
+    expect(result.completedTaskCount).toBe(1);
+
+    const finalState = JSON.parse(
+      await readFile(stateFile, "utf-8"),
+    ) as MockBeadsTask[];
+    expect(finalState[0]?.metadata.hubStatus).not.toBe("reviewing");
+    expect(finalState[0]?.labels).not.toContain("reviewing");
+    // Merge completes the task; claim metadata is cleared after close/ship.
+    expect(finalState[0]?.metadata.hubStatus).not.toBe("waiting_for_merge");
+
+    // Already at reviewing with a preserved claim: recovery is a no-op and must
+    // not append reviewing -> reviewing comments on the resume path.
+    const comments = await readFile(commentsFile, "utf-8");
+    expect(comments).not.toMatch(/reviewing -> reviewing/);
+    expect(comments).not.toContain(
+      "preserved claim metadata to resume the remaining phase",
+    );
+
+    // A second with-review run must not append a no-op recovery comment either.
+    const commentsBeforeRerun = comments;
+    await runHubFlow({
+      flowId: "with-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      implementer: async () => {
+        throw new Error("implementer should not run on rerun");
+      },
       reviewer: async () => {
-        throw new Error("reviewer should not run for an auto-recovered review");
+        throw new Error("reviewer should not run after merge completed");
       },
       runMergePhase: false,
     });
+    expect(await readFile(commentsFile, "utf-8")).toBe(commentsBeforeRerun);
+  }, 30000);
 
-    expect(result.autoRecoverSummary?.recoveredCount).toBe(1);
-    expect(result.autoRecoverSummary?.recoveries[0]).toMatchObject({
+  it("does not take over a reviewing resume when a live worktree lease is held", async () => {
+    const repoDir = await mkdtemp(
+      join(tmpdir(), "hub-flow-autorecover-review-lease-"),
+    );
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const oldRunId = "run-review-lease";
+    const oldBatchId = "batch-review-lease";
+    const taskId = "bd-review-lease";
+    const title = "Review lease guard";
+    const branch = resolveHubTaskBranch(taskId, title);
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: taskId,
+        title,
+        status: "in_progress",
+        labels: ["reviewing"],
+        metadata: {
+          hubStatus: "reviewing",
+          claim: {
+            runId: oldRunId,
+            batchId: oldBatchId,
+            branch,
+            claimedAt: "2026-07-23T00:00:00Z",
+          },
+        },
+      },
+    ]);
+    await execAsync("git add bin bd-state.json bd-args.txt", { cwd: repoDir });
+    await execAsync('git commit -m "add mock task store"', { cwd: repoDir });
+
+    const hubProjectDir = await mkdtemp(
+      join(tmpdir(), "hub-flow-autorecover-review-lease-data-"),
+    );
+    const oldContext = createHubRunContext({
+      cwd: repoDir,
+      hubProjectDir,
+      branch: "flow/with-review",
+      runId: oldRunId,
+      batchId: oldBatchId,
+    });
+    appendHubBatchEvent(oldContext.runDir, {
+      type: "batch_planned",
+      runId: oldRunId,
+      batchId: oldBatchId,
+      flowId: "with-review",
+      createdAt: "2026-07-23T00:00:00Z",
+      taskIds: [taskId],
+    });
+    appendHubTaskEvent(oldContext.runDir, {
+      type: "task_implementation_succeeded",
+      runId: oldRunId,
+      batchId: oldBatchId,
       taskId,
-      priorStatus: "reviewing",
-      hubStatus: "reviewing",
+      branch,
+      createdAt: "2026-07-23T00:01:00Z",
+      status: "reviewing",
+      commitCount: 1,
     });
 
-    // The finished implementation was never re-implemented: the planner does not
-    // select reviewing tasks, so nothing ran.
+    await execAsync(`git checkout -b ${branch}`, { cwd: repoDir });
+    await commitFile(repoDir, "work.txt", "work", "implemented work");
+    await execAsync("git checkout main", { cwd: repoDir });
+
+    await runLeaseEffect(WorktreeManager.create(repoDir, { branch }));
+    await writeLeaseFile(
+      repoDir,
+      branch,
+      JSON.stringify({
+        owner: "hub",
+        taskId,
+        flowId: "with-review",
+        batchId: oldBatchId,
+        branch,
+        pid: process.pid,
+        acquiredAt: "2026-07-23T00:02:00.000Z",
+      }),
+    );
+
+    const implementer = vi.fn<HubFlowImplementer>(async () => {
+      throw new Error("implementer should not run");
+    });
+    const reviewer = vi.fn<HubFlowReviewer>(async () => {
+      throw new Error("reviewer should not take over a live lease");
+    });
+
+    const result = await runHubFlow({
+      flowId: "with-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      implementer,
+      reviewer,
+      runMergePhase: false,
+    });
+
     expect(implementer).not.toHaveBeenCalled();
-    expect(result.selectedTaskIds).toEqual([]);
-    expect(result.stopReason).toBe("no_ready_tasks");
+    expect(reviewer).not.toHaveBeenCalled();
+    // Live lease means the detector does not treat the task as interrupted, so
+    // resume finds the claimed reviewing batch but refuses takeover.
+    expect(result.mode).toBe("resumed_batch");
+    expect(result.results[0]).toMatchObject({
+      taskId,
+      outcome: "active_execution",
+      hubStatus: "reviewing",
+    });
 
     const finalState = JSON.parse(
       await readFile(stateFile, "utf-8"),
     ) as MockBeadsTask[];
     expect(finalState[0]?.metadata.hubStatus).toBe("reviewing");
-    expect(
-      (finalState[0]?.metadata.claim as { runId?: string } | undefined)?.runId,
-    ).toBe(oldRunId);
-    expect(await readFile(commentsFile, "utf-8")).toContain(
-      "task_implementation_succeeded",
-    );
   }, 20000);
 
   it("auto-recovers an interrupted implementing task with no success event to ready_for_agent and the planner re-implements it", async () => {
