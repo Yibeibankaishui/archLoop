@@ -576,6 +576,36 @@ describe("Hub host-contribution landing reconciliation", () => {
     };
   };
 
+  const expectNoBeadsContact = (adapters: {
+    readonly reads: readonly string[];
+    readonly closes: readonly string[];
+  }) => {
+    expect(adapters.reads).toEqual([]);
+    expect(adapters.closes).toEqual([]);
+  };
+
+  const expectHostContributionCleaned = async (input: {
+    readonly repoDir: string;
+    readonly hubProjectDir: string;
+    readonly publishTargetRef: string;
+    readonly candidate: {
+      readonly transactionId: string;
+      readonly candidateOid: string;
+      readonly worktreeDir: string;
+    };
+  }) => {
+    expect(
+      loadHubLandingTransaction(
+        input.hubProjectDir,
+        input.candidate.transactionId,
+      )?.checkpoint,
+    ).toBe("cleaned");
+    expect(existsSync(input.candidate.worktreeDir)).toBe(false);
+    expect(
+      await gitText(input.repoDir, ["rev-parse", input.publishTargetRef]),
+    ).toBe(input.candidate.candidateOid);
+  };
+
   const importHostContribution = async (label: string) => {
     const root = await mkdtemp(join(tmpdir(), `hub-host-contrib-${label}-`));
     const repoDir = join(root, "repo");
@@ -621,8 +651,7 @@ describe("Hub host-contribution landing reconciliation", () => {
       closeTask: adapters.closeTask,
     });
 
-    expect(adapters.reads).toEqual([]);
-    expect(adapters.closes).toEqual([]);
+    expectNoBeadsContact(adapters);
     expect(outcome.kind === "integrity_incident").toBe(false);
     expect(outcome.message).not.toMatch(/tasks recover/);
     expect(outcome.message).not.toMatch(HUB_HOST_CONTRIBUTION_TASK_ID);
@@ -635,14 +664,12 @@ describe("Hub host-contribution landing reconciliation", () => {
     expect(evidence?.closed).toBe(true);
     expect(evidence?.cleaned).toBe(true);
     expect(evidence?.pending).toBe(false);
-    expect(
-      loadHubLandingTransaction(hubProjectDir, candidate.transactionId)
-        ?.checkpoint,
-    ).toBe("cleaned");
-    expect(existsSync(candidate.worktreeDir)).toBe(false);
-    expect(await gitText(repoDir, ["rev-parse", policy.publishTargetRef])).toBe(
-      candidate.candidateOid,
-    );
+    await expectHostContributionCleaned({
+      repoDir,
+      hubProjectDir,
+      publishTargetRef: policy.publishTargetRef,
+      candidate,
+    });
   });
 
   it("idempotently re-reconciles a landed host contribution on restart without Beads or re-import", async () => {
@@ -676,8 +703,7 @@ describe("Hub host-contribution landing reconciliation", () => {
       readTaskClose: adapters.readTaskClose,
     });
 
-    expect(adapters.reads).toEqual([]);
-    expect(adapters.closes).toEqual([]);
+    expectNoBeadsContact(adapters);
     expect(first.kind === "integrity_incident").toBe(false);
     expect(second.kind === "integrity_incident").toBe(false);
     expect(second.message).not.toMatch(/tasks recover/);
@@ -784,21 +810,18 @@ describe("Hub host-contribution landing reconciliation", () => {
         }),
       );
 
-      expect(adapters.reads).toEqual([]);
-      expect(adapters.closes).toEqual([]);
+      expectNoBeadsContact(adapters);
       expect(outcome.kind === "integrity_incident").toBe(false);
       expect(outcome.message).not.toMatch(/tasks recover/);
       expect(outcome.message).not.toMatch(
         /did not match a Beads id or an exact task title/,
       );
-      expect(
-        loadHubLandingTransaction(hubProjectDir, candidate.transactionId)
-          ?.checkpoint,
-      ).toBe("cleaned");
-      expect(existsSync(candidate.worktreeDir)).toBe(false);
-      expect(
-        await gitText(repoDir, ["rev-parse", policy.publishTargetRef]),
-      ).toBe(candidate.candidateOid);
+      await expectHostContributionCleaned({
+        repoDir,
+        hubProjectDir,
+        publishTargetRef: policy.publishTargetRef,
+        candidate,
+      });
 
       const again = await reconcileHubLandingTransactions({
         repoRoot: repoDir,
@@ -806,8 +829,7 @@ describe("Hub host-contribution landing reconciliation", () => {
         readTaskClose: adapters.readTaskClose,
         closeTask: adapters.closeTask,
       });
-      expect(adapters.reads).toEqual([]);
-      expect(adapters.closes).toEqual([]);
+      expectNoBeadsContact(adapters);
       expect(again.transactions[0]?.taskBacked).toBe(false);
       expect(again.transactions[0]?.cleaned).toBe(true);
       expect(again.pendingCount).toBe(0);

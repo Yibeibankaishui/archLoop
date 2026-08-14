@@ -137,6 +137,11 @@ export const isHubHostContributionTaskId = (
   taskId: string | undefined,
 ): boolean => taskId === HUB_HOST_CONTRIBUTION_TASK_ID;
 
+/** True when a landing transaction maps to a real Beads/task-board item. */
+export const isHubLandingTaskBacked = (
+  taskId: string | undefined,
+): boolean => !isHubHostContributionTaskId(taskId);
+
 export type HubLandingSideEffect = (typeof HUB_LANDING_SIDE_EFFECTS)[number];
 
 export interface HubLandingFaultInjection {
@@ -1537,25 +1542,23 @@ export const closeHubLandingTask = async (input: {
   readonly now?: Date;
   readonly faultInjection?: HubLandingFaultInjection;
 }): Promise<HubLandingTransactionState> => {
-  // Synthetic host contributions complete in the journal only; never Beads.
-  const skipBeadsClose = isHubHostContributionTaskId(input.taskId);
-  const existing = skipBeadsClose
-    ? undefined
-    : input.readTaskClose?.(input.taskId);
-  if (
-    !skipBeadsClose &&
-    !isMatchingHubLandingBeadsClose(existing, {
-      transactionId: input.transactionId,
-      candidateOid: input.candidateOid,
-    })
-  ) {
-    maybeCrash(input.faultInjection, "task_close", "before");
-    await input.closeTask?.({
-      taskId: input.taskId,
-      transactionId: input.transactionId,
-      candidateOid: input.candidateOid,
-    });
-    maybeCrash(input.faultInjection, "task_close", "after");
+  // Host contributions finish in the journal only; never call Beads close.
+  if (isHubLandingTaskBacked(input.taskId)) {
+    const existing = input.readTaskClose?.(input.taskId);
+    if (
+      !isMatchingHubLandingBeadsClose(existing, {
+        transactionId: input.transactionId,
+        candidateOid: input.candidateOid,
+      })
+    ) {
+      maybeCrash(input.faultInjection, "task_close", "before");
+      await input.closeTask?.({
+        taskId: input.taskId,
+        transactionId: input.transactionId,
+        candidateOid: input.candidateOid,
+      });
+      maybeCrash(input.faultInjection, "task_close", "after");
+    }
   }
   const state = recordHubLandingTaskClosed({
     hubProjectDir: input.hubProjectDir,

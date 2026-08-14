@@ -6,7 +6,7 @@ import {
   cleanupHubLandingCandidate,
   closeHubLandingTask,
   computeHubVerifierParts,
-  isHubHostContributionTaskId,
+  isHubLandingTaskBacked,
   isMatchingHubLandingBeadsClose,
   isReusableHubLandingVerificationArtifact,
   readHubLandingCandidateManifest,
@@ -391,6 +391,42 @@ const isPendingReconciliation = (input: {
   return input.worktreePresent && (input.landed || input.closed);
 };
 
+const readTaskBackedBeadsClose = (input: {
+  readonly taskId: string | undefined;
+  readonly taskBacked: boolean;
+  readonly readTaskClose?: HubLandingTaskCloseReader;
+}): HubLandingBeadsCloseEvidence | undefined => {
+  if (!input.taskId || !input.taskBacked) {
+    return undefined;
+  }
+  return input.readTaskClose?.(input.taskId);
+};
+
+const isInternallyClosedHostContribution = (input: {
+  readonly taskBacked: boolean;
+  readonly landed: boolean;
+  readonly journalCheckpoint?: HubLandingCheckpoint;
+}): boolean =>
+  !input.taskBacked &&
+  (input.landed || rankOf(input.journalCheckpoint) >= rankOf("task_closed"));
+
+const beadsCloseAdaptersForEvidence = (input: {
+  readonly taskBacked: boolean;
+  readonly readTaskClose?: HubLandingTaskCloseReader;
+  readonly closeTask?: HubLandingTaskCloser;
+}): {
+  readonly readTaskClose?: HubLandingTaskCloseReader;
+  readonly closeTask?: HubLandingTaskCloser;
+} => {
+  if (!input.taskBacked) {
+    return {};
+  }
+  return {
+    readTaskClose: input.readTaskClose,
+    closeTask: input.closeTask,
+  };
+};
+
 const collectEvidence = (input: {
   readonly repoRoot: string;
   readonly hubProjectDir: string;
@@ -475,10 +511,12 @@ const collectEvidence = (input: {
     integrityIncident === undefined;
 
   const taskId = journal?.taskId ?? manifest?.taskId ?? storedReceipt?.receipt.taskId;
-  const taskBacked = !isHubHostContributionTaskId(taskId);
-  // Host contributions are internal landing inputs, not Beads task-board items.
-  const beadsClose =
-    taskId && taskBacked ? input.readTaskClose?.(taskId) : undefined;
+  const taskBacked = isHubLandingTaskBacked(taskId);
+  const beadsClose = readTaskBackedBeadsClose({
+    taskId,
+    taskBacked,
+    readTaskClose: input.readTaskClose,
+  });
   const closedFromBeads = isMatchingHubLandingBeadsClose(beadsClose, {
     transactionId: input.transactionId,
     candidateOid: candidateOid ?? storedReceipt?.receipt.candidateOid,
@@ -486,9 +524,11 @@ const collectEvidence = (input: {
   const closedFromJournal =
     input.readTaskClose === undefined &&
     rankOf(journal?.checkpoint) >= rankOf("task_closed");
-  const closedFromHostContribution =
-    !taskBacked &&
-    (landed || rankOf(journal?.checkpoint) >= rankOf("task_closed"));
+  const closedFromHostContribution = isInternallyClosedHostContribution({
+    taskBacked,
+    landed,
+    journalCheckpoint: journal?.checkpoint,
+  });
   const closed =
     closedFromBeads || closedFromJournal || closedFromHostContribution;
   const worktreePresent = existsSync(
@@ -757,9 +797,11 @@ export const reconcileHubLandingTransactions = async (
         taskId: before.taskId,
         candidateOid: before.candidateOid,
         repoRoot: input.repoRoot,
-        // Host contributions never consult Beads close adapters.
-        readTaskClose: before.taskBacked ? input.readTaskClose : undefined,
-        closeTask: before.taskBacked ? input.closeTask : undefined,
+        ...beadsCloseAdaptersForEvidence({
+          taskBacked: before.taskBacked,
+          readTaskClose: input.readTaskClose,
+          closeTask: input.closeTask,
+        }),
         now: input.now,
         faultInjection: input.faultInjection,
       });

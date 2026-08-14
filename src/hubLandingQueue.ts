@@ -34,6 +34,7 @@ import { isGitOid } from "./hubLandingTransaction.js";
 export {
   HUB_HOST_CONTRIBUTION_TASK_ID,
   isHubHostContributionTaskId,
+  isHubLandingTaskBacked,
 } from "./hubLanding.js";
 
 const execFileAsync = promisify(execFile);
