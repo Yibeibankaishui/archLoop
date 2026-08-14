@@ -64,6 +64,8 @@ npx archloop project select <name>
 npx archloop project status
 npx archloop project configure --project-profile <profile>
 npx archloop project configure --project-profile <profile> --publish-policy off
+npx archloop project configure --project-profile <profile> \
+  --publish-policy best_effort --remote-target origin/main
 npx archloop project rename <project> <new-name>
 npx archloop project relink <project> --path <repo-path>
 ```
@@ -75,7 +77,10 @@ Project profiles include `generic`, `node`, `python`, and `cpp`. Reconfiguring
 with the same profile refreshes detected facts while preserving user-edited
 development contract sections. `--publish-policy off|best_effort|required` and
 `--remote-target` write Hub-owned landing policy without dirtying the
-repository. Publication stays `off` until configured.
+repository. Publication stays `off` until configured; discovering `origin`
+never enables pushes. `best_effort` enqueues a durable code-publication outbox
+after local shipped proof and retries as `target_publish_pending` without
+undoing shipped or mixing with GitHub task sync.
 
 ## Agent roles and credentials
 
@@ -210,6 +215,15 @@ npx archloop tasks cleanup --dry-run
   leave user state unchanged, and retry on a later run. Projection never
   stashes, switches branches, force-resets, or runs user hooks. Pending
   checkout sync does not change `shipped`.
+- With `--publish-policy best_effort` and an explicit `--remote-target`, local
+  shipped proof enqueues a durable publication outbox keyed by transaction,
+  remote, ref, candidate OID, and expected remote OID. Publication uses
+  observation plus exact force-with-lease semantics (never unqualified force
+  push). Network, credential, protected-branch, and unknown push outcomes stay
+  `target_publish_pending`, keep local delivery successful, and retry on a
+  later mutating entry point. Remote divergence that changes the deliverable
+  stays pending for fresh reconciliation instead of overwriting. Code
+  publication state is separate from GitHub task sync.
 - Legacy task branches that committed allowlisted Beads runtime/export files
   (`.beads/issues.jsonl`, `.beads/interactions.jsonl`, `.beads/events.jsonl`,
   and known Dolt/backup/lock paths) still land their source changes. Hub
@@ -243,7 +257,8 @@ npx archloop tasks cleanup --dry-run
   not silently close or reimplement preserved work.
 - `tasks doctor` is read-only. It groups diagnostics by severity, reports
   interrupted execution when no lease diagnostic already explains it, and can
-  display landing reconciliation state, checkout sync pending, and legacy
+  display landing reconciliation state, checkout sync pending, code
+  publication pending, and legacy
   history without advancing the transaction or updating the checkout.
 - `tasks repair-state` previews changes before confirmation and rewrites only
   archLoop-managed status fields; it does not mutate GitHub Issues.

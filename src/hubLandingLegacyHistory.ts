@@ -490,6 +490,7 @@ const adoptContainedTask = async (input: {
     transactionId,
     taskId: input.task.id,
     candidateOid: sourceOid,
+    repoRoot: input.repoRoot,
     readTaskClose: input.readTaskClose,
     closeTask: input.closeTask,
     now: input.now,

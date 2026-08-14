@@ -76,7 +76,13 @@ and CAS contention stay pending for automatic retry. Plain and JSON output
 include the expected and observed target/fence OIDs and distinguish rebuild,
 pending contention, stale-owner rejection, and successful landing. Checkout
 pending and checkout success are distinct events (`checkout_sync_pending`,
-`checkout_sync_succeeded`) in plain and JSON output.
+`checkout_sync_succeeded`) in plain and JSON output. With an explicit
+`--publish-policy best_effort` and `--remote-target`, local shipped proof also
+enqueues a durable code-publication outbox. Network, credential,
+protected-branch, and unknown push outcomes stay `target_publish_pending`
+without undoing shipped; code publication is separate from GitHub task sync
+(`target_publish_pending`, `target_publish_succeeded`). Discovering `origin`
+alone never enables publication.
 
 If a legacy task branch committed known Beads runtime/export files
 (`.beads/issues.jsonl`, `.beads/interactions.jsonl`, `.beads/events.jsonl`,

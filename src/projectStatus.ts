@@ -22,6 +22,7 @@ import {
 } from "./hubLandingReconciliation.js";
 import { formatHubLegacyLandingHistoryLines } from "./hubLandingLegacyHistory.js";
 import { inspectHubCheckoutOutbox } from "./hubCheckoutProjection.js";
+import { inspectHubPublicationOutbox } from "./hubPublication.js";
 import {
   formatHubTaskStoreMigrationMessage,
   inspectHubTaskStoreMigration,
@@ -134,6 +135,8 @@ export interface HubProjectStatus {
   readonly landingLegacyHistory?: readonly string[];
   readonly checkoutSyncPendingCount?: number;
   readonly checkoutSyncMessage?: string;
+  readonly codePublicationPendingCount?: number;
+  readonly codePublicationMessage?: string;
 }
 
 export interface HubProjectStatusOptions {
@@ -684,6 +687,22 @@ const appendWorktreeLeaseLines = (
   }
 };
 
+const hasCodePublicationPendingCount = (
+  status: Pick<HubProjectStatus, "codePublicationPendingCount">,
+): boolean => (status.codePublicationPendingCount ?? 0) > 0;
+
+const hasPendingCodePublication = (
+  status: Pick<
+    HubProjectStatus,
+    "codePublicationPendingCount" | "codePublicationMessage"
+  >,
+): status is HubProjectStatus & {
+  readonly codePublicationPendingCount: number;
+  readonly codePublicationMessage: string;
+} =>
+  hasCodePublicationPendingCount(status) &&
+  Boolean(status.codePublicationMessage);
+
 export const formatHubProjectStatusLines = (
   status: HubProjectStatus,
   cleanupDiagnosticsLines?: readonly string[],
@@ -721,6 +740,11 @@ export const formatHubProjectStatusLines = (
   ) {
     lines.push("Checkout sync");
     lines.push(`  ${status.checkoutSyncMessage}`);
+    lines.push("");
+  }
+  if (hasPendingCodePublication(status)) {
+    lines.push("Code publication");
+    lines.push(`  ${status.codePublicationMessage}`);
     lines.push("");
   }
   lines.push("");
@@ -985,6 +1009,7 @@ export const resolveHubProjectStatus = (
     tasks: board?.tasks,
   });
   const checkoutSync = inspectHubCheckoutOutbox({ hubProjectDir });
+  const codePublication = inspectHubPublicationOutbox({ hubProjectDir });
 
   return {
     repoRoot,
@@ -1026,6 +1051,8 @@ export const resolveHubProjectStatus = (
     ),
     checkoutSyncPendingCount: checkoutSync.pendingCount,
     checkoutSyncMessage: checkoutSync.message,
+    codePublicationPendingCount: codePublication.pendingCount,
+    codePublicationMessage: codePublication.message,
   };
 };
 
@@ -1128,6 +1155,14 @@ const projectStatusIdentityRows = (
         {
           key: "Checkout sync",
           value: `pending (${status.checkoutSyncPendingCount})`,
+        },
+      ]
+    : []),
+  ...(hasCodePublicationPendingCount(status)
+    ? [
+        {
+          key: "Code publication",
+          value: `pending (${status.codePublicationPendingCount})`,
         },
       ]
     : []),

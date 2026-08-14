@@ -32,13 +32,16 @@ transaction or adopt legacy history.
 ```bash
 npx archloop project configure --project-profile node
 npx archloop project configure --project-profile node --publish-policy off
+npx archloop project configure --project-profile node \
+  --publish-policy best_effort --remote-target origin/main
 ```
 
 Running the command again with the same profile refreshes detected project facts
 while preserving user-edited setup, verification, and context sections.
 `--publish-policy` and `--remote-target` update Hub-owned landing policy and do
 not dirty the code repository. Publication stays off until you set it, even if
-a Git remote exists.
+a Git remote exists. `best_effort` retries remote pushes as
+`target_publish_pending` without undoing local shipped proof.
 
 ## Rename or move
 

@@ -37,6 +37,9 @@ import {
   enqueueHubCheckoutProjection,
 } from "./hubCheckoutProjection.js";
 import {
+  enqueueHubPublicationAfterShipped,
+} from "./hubPublication.js";
+import {
   isCompletedHubStatus,
   type HubTaskProjection,
 } from "./taskBoard.js";
@@ -742,6 +745,7 @@ export const reconcileHubLandingTransactions = async (
         transactionId,
         taskId: before.taskId,
         candidateOid: before.candidateOid,
+        repoRoot: input.repoRoot,
         readTaskClose: input.readTaskClose,
         closeTask: input.closeTask,
         now: input.now,
@@ -774,6 +778,16 @@ export const reconcileHubLandingTransactions = async (
           policy,
         },
         candidateOid: before.candidateOid,
+        now: input.now,
+      });
+      // Publication stays decoupled from GitHub task sync and does not affect shipped.
+      enqueueHubPublicationAfterShipped({
+        repoRoot: input.repoRoot,
+        hubProjectDir: input.hubProjectDir,
+        transactionId,
+        taskId: before.taskId,
+        candidateOid: before.candidateOid,
+        policy,
         now: input.now,
       });
     }

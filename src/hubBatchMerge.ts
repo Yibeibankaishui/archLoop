@@ -52,6 +52,12 @@ import {
   syncHubCheckoutProjections,
 } from "./hubCheckoutProjection.js";
 import {
+  enqueueHubPublicationAfterShipped,
+  hubPublicationEventReason,
+  hubPublicationEventType,
+  syncHubPublications,
+} from "./hubPublication.js";
+import {
   computeHubLandingMergeInputFingerprint,
   isTransientHubLandingError,
   recordHubLandingRepairAttempt,
@@ -323,6 +329,8 @@ type MergeProgressEventType =
   | "target_landing_stale_owner_rejected"
   | "checkout_sync_pending"
   | "checkout_sync_succeeded"
+  | "target_publish_pending"
+  | "target_publish_succeeded"
   | "task_close_started"
   | "task_close_succeeded";
 
@@ -341,6 +349,8 @@ type MergeProgressEventFields = {
   readonly fenceOid?: string;
   readonly verifierFingerprint?: string;
   readonly filteredBeadsRuntimePaths?: readonly string[];
+  readonly remoteRef?: string;
+  readonly expectedRemoteOid?: string;
   readonly status?: string;
   readonly reason?: string;
   readonly message?: string;
@@ -1585,6 +1595,35 @@ const emitCheckoutProjectionEvents = async (
   }
 };
 
+const emitPublicationEvents = async (
+  session: MergeTaskSession,
+  landingIdentity: HubLandingIdentity,
+): Promise<void> => {
+  const synced = await syncHubPublications({
+    repoRoot: session.input.cwd,
+    hubProjectDir: session.hubProjectDir,
+  });
+  for (const attempt of synced.deltas) {
+    if (
+      landingIdentity.transactionId &&
+      attempt.item.transactionId !== landingIdentity.transactionId
+    ) {
+      continue;
+    }
+    emitMergeLandingEvent(session, {
+      type: hubPublicationEventType(attempt.status),
+      createdAt: new Date().toISOString(),
+      status: "done",
+      ...landingIdentity,
+      candidateOid: attempt.item.candidateOid,
+      remoteRef: attempt.item.remoteRef,
+      expectedRemoteOid: attempt.item.expectedRemoteOid,
+      reason: hubPublicationEventReason(attempt),
+      message: attempt.message,
+    });
+  }
+};
+
 const failLandedCandidate = async (
   session: MergeTaskSession,
   mergeIntegration: HubMergeIntegration,
@@ -1904,6 +1943,14 @@ const closeLandedTask = async (
         taskId: task.id,
         candidateOid: landingIdentity.candidateOid,
       });
+      enqueueHubPublicationAfterShipped({
+        repoRoot: input.cwd,
+        hubProjectDir,
+        transactionId: landingIdentity.transactionId,
+        taskId: task.id,
+        candidateOid: landingIdentity.candidateOid,
+      });
+      await emitPublicationEvents(session, landingIdentity);
     }
     const cleanupResult = await runTaskBranchCleanup(input, branch);
     recordTaskBranchCleanup(

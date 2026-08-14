@@ -198,6 +198,8 @@ export interface HubTaskEvent {
     | "target_landing_stale_owner_rejected"
     | "checkout_sync_pending"
     | "checkout_sync_succeeded"
+    | "target_publish_pending"
+    | "target_publish_succeeded"
     | "task_close_started"
     | "task_closed"
     | "task_close_succeeded"
@@ -238,6 +240,8 @@ export interface HubTaskEvent {
   readonly fenceOid?: string;
   readonly verifierFingerprint?: string;
   readonly filteredBeadsRuntimePaths?: readonly string[];
+  readonly remoteRef?: string;
+  readonly expectedRemoteOid?: string;
 }
 
 type HubRunEventData =

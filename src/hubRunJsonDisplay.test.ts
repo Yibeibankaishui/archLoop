@@ -194,6 +194,56 @@ describe("JSONL Hub run lifecycle output", () => {
     });
   });
 
+  it("emits distinct code publication pending and success JSON events", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+    });
+    const pending: HubRunEvent = {
+      type: "target_publish_pending",
+      eventId: "run-land:50",
+      sequence: 50,
+      runId: "run-land",
+      batchId: "batch-land",
+      taskId: "bd-land",
+      branch: "origin/main",
+      createdAt: "2026-08-14T18:30:00.000Z",
+      status: "done",
+      transactionId: "ltx-bd-land-abc123",
+      candidateOid: "cccccccccccccccccccccccccccccccccccccccc",
+      remoteRef: "refs/heads/main",
+      expectedRemoteOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      reason: "network_error",
+      message: "Code publication pending for bd-land (network_error).",
+    };
+    expect(parseRecord(renderer.event(pending)!)).toMatchObject({
+      type: "target_publish_pending",
+      taskId: "bd-land",
+      stage: "Target publish pending",
+      status: "done",
+      data: {
+        transactionId: "ltx-bd-land-abc123",
+        candidateOid: "cccccccccccccccccccccccccccccccccccccccc",
+        remoteRef: "refs/heads/main",
+        expectedRemoteOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        reason: "network_error",
+      },
+    });
+
+    const succeeded: HubRunEvent = {
+      ...pending,
+      type: "target_publish_succeeded",
+      eventId: "run-land:51",
+      sequence: 51,
+      reason: undefined,
+      message: "Code published origin/main to cccccccccccccccccccccccccccccccccccccccc.",
+    };
+    expect(parseRecord(renderer.event(succeeded)!)).toMatchObject({
+      type: "target_publish_succeeded",
+      stage: "Target publish succeeded",
+    });
+  });
+
   it("carries expected and observed target/fence OIDs for rebuild and contention", () => {
     const renderer = createHubRunJsonRenderer({
       hubProjectName: "alpha",

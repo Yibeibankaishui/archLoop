@@ -23,6 +23,9 @@ import {
   enqueueHubCheckoutProjection,
 } from "./hubCheckoutProjection.js";
 import {
+  enqueueHubPublicationAfterShipped,
+} from "./hubPublication.js";
+import {
   appendHubLandingCheckpoint,
   loadHubLandingTransaction,
   resolveHubLandingTransactionDir,
@@ -124,6 +127,7 @@ export const HUB_LANDING_SIDE_EFFECTS = [
   "task_close",
   "cleanup",
   "checkout_projection",
+  "publication",
 ] as const;
 
 export type HubLandingSideEffect = (typeof HUB_LANDING_SIDE_EFFECTS)[number];
@@ -1518,6 +1522,7 @@ export const closeHubLandingTask = async (input: {
   readonly transactionId: string;
   readonly taskId: string;
   readonly candidateOid: string;
+  readonly repoRoot?: string;
   readonly readTaskClose?: HubLandingTaskCloseReader;
   readonly closeTask?: HubLandingTaskCloser;
   readonly now?: Date;
@@ -1538,11 +1543,22 @@ export const closeHubLandingTask = async (input: {
     });
     maybeCrash(input.faultInjection, "task_close", "after");
   }
-  return recordHubLandingTaskClosed({
+  const state = recordHubLandingTaskClosed({
     hubProjectDir: input.hubProjectDir,
     transactionId: input.transactionId,
     taskId: input.taskId,
     candidateOid: input.candidateOid,
     now: input.now,
   });
+  if (input.repoRoot) {
+    enqueueHubPublicationAfterShipped({
+      repoRoot: input.repoRoot,
+      hubProjectDir: input.hubProjectDir,
+      transactionId: input.transactionId,
+      taskId: input.taskId,
+      candidateOid: input.candidateOid,
+      now: input.now,
+    });
+  }
+  return state;
 };
