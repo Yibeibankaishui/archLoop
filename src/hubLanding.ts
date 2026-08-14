@@ -130,6 +130,13 @@ export const HUB_LANDING_SIDE_EFFECTS = [
   "publication",
 ] as const;
 
+/** Synthetic landing id for committed host-target import; not a Beads task. */
+export const HUB_HOST_CONTRIBUTION_TASK_ID = "hub-host-contribution";
+
+export const isHubHostContributionTaskId = (
+  taskId: string | undefined,
+): boolean => taskId === HUB_HOST_CONTRIBUTION_TASK_ID;
+
 export type HubLandingSideEffect = (typeof HUB_LANDING_SIDE_EFFECTS)[number];
 
 export interface HubLandingFaultInjection {
@@ -1530,8 +1537,13 @@ export const closeHubLandingTask = async (input: {
   readonly now?: Date;
   readonly faultInjection?: HubLandingFaultInjection;
 }): Promise<HubLandingTransactionState> => {
-  const existing = input.readTaskClose?.(input.taskId);
+  // Synthetic host contributions complete in the journal only; never Beads.
+  const skipBeadsClose = isHubHostContributionTaskId(input.taskId);
+  const existing = skipBeadsClose
+    ? undefined
+    : input.readTaskClose?.(input.taskId);
   if (
+    !skipBeadsClose &&
     !isMatchingHubLandingBeadsClose(existing, {
       transactionId: input.transactionId,
       candidateOid: input.candidateOid,

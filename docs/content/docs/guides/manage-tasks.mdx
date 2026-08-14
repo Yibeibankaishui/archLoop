@@ -70,8 +70,9 @@ Use `doctor` first because it is read-only. It can explain which historical
 landing evidence was accepted or rejected. `repair-state` fixes the local state
 projection when run events and task metadata disagree. `recover` handles failed
 or interrupted execution while preserving recoverable branch work. Do not use
-`tasks recover` for managed landing transactions or for legacy history that
-startup already classified.
+`tasks recover` for managed landing transactions, synthetic host-contribution
+landings (`hub-host-contribution`), or for legacy history that startup already
+classified.
 
 ## Delete or clean branches
 

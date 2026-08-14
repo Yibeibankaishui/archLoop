@@ -252,7 +252,9 @@ npx archloop tasks cleanup --dry-run
   with fenced CAS. Predecessor repair, failure, committed host contribution, or
   target drift invalidates the affected speculative suffix. Committed host
   tips (behind/descendant/diverged) reconcile into the canonical chain before
-  task candidates continue; uncommitted host WIP is never imported. After three
+  task candidates continue; uncommitted host WIP is never imported. Landed host
+  contributions complete as synthetic (non-Beads) transactions during
+  reconciliation — never via Beads close or `tasks recover`. After three
   immediate drift rebuilds the head retains `target_quiet_wait` until a stable
   window resumes automatically without resetting repair budgets or requiring
   `tasks recover`.
@@ -269,8 +271,9 @@ npx archloop tasks cleanup --dry-run
   Contention and stale-owner rejection stay pending, not task failures.
 - Interrupted landing transactions resume automatically on the next
   `archloop run` from candidate refs, verification artifacts, atomic receipts,
-  Beads close metadata, and resource absence. Do not run `tasks recover` for
-  this pending reconciliation.
+  Beads close metadata (task-backed only), and resource absence. Do not run
+  `tasks recover` for this pending reconciliation, including synthetic
+  `hub-host-contribution` landings.
 - On upgrade, already closed historical tasks stay completed and do not need
   new landing receipts. In-flight work whose source branch is contained in the
   configured target is adopted into a new verified transaction automatically.

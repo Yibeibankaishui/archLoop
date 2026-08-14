@@ -85,8 +85,12 @@ Unknown `.beads/**` files are never dropped silently.
 Interrupted landing transactions resume automatically on the next mutating
 `archloop run`. Hub reconstructs progress from the journal, candidate
 ref/manifest, verification artifact, atomic receipt, Beads close metadata, and
-missing worktrees. `tasks doctor` and `project status` can show that pending
-state without changing it. Do not run `archloop tasks recover` for this.
+missing worktrees. Committed host-target contributions use a synthetic
+`hub-host-contribution` transaction that is not a Beads task: after the
+candidate lands, reconciliation records internal completion and cleanup without
+calling Beads close APIs, and never recommends `tasks recover` for that id.
+`tasks doctor` and `project status` can show that pending state without
+changing it. Do not run `archloop tasks recover` for this.
 
 Pre-transaction history is classified the same way. Already closed tasks remain
 completed. Ancestry-proven in-flight branches are adopted into a new

@@ -6,6 +6,7 @@ import {
   cleanupHubLandingCandidate,
   closeHubLandingTask,
   computeHubVerifierParts,
+  isHubHostContributionTaskId,
   isMatchingHubLandingBeadsClose,
   isReusableHubLandingVerificationArtifact,
   readHubLandingCandidateManifest,
@@ -107,6 +108,8 @@ export type HubLandingReconciliationKind =
 export interface HubLandingTransactionEvidence {
   readonly transactionId: string;
   readonly taskId?: string;
+  /** False for synthetic host-contribution landings; they are not Beads tasks. */
+  readonly taskBacked: boolean;
   readonly journalCheckpoint?: HubLandingCheckpoint;
   readonly evidenceCheckpoint?: HubLandingCheckpoint;
   readonly sourceOid?: string;
@@ -472,7 +475,10 @@ const collectEvidence = (input: {
     integrityIncident === undefined;
 
   const taskId = journal?.taskId ?? manifest?.taskId ?? storedReceipt?.receipt.taskId;
-  const beadsClose = taskId ? input.readTaskClose?.(taskId) : undefined;
+  const taskBacked = !isHubHostContributionTaskId(taskId);
+  // Host contributions are internal landing inputs, not Beads task-board items.
+  const beadsClose =
+    taskId && taskBacked ? input.readTaskClose?.(taskId) : undefined;
   const closedFromBeads = isMatchingHubLandingBeadsClose(beadsClose, {
     transactionId: input.transactionId,
     candidateOid: candidateOid ?? storedReceipt?.receipt.candidateOid,
@@ -480,7 +486,11 @@ const collectEvidence = (input: {
   const closedFromJournal =
     input.readTaskClose === undefined &&
     rankOf(journal?.checkpoint) >= rankOf("task_closed");
-  const closed = closedFromBeads || closedFromJournal;
+  const closedFromHostContribution =
+    !taskBacked &&
+    (landed || rankOf(journal?.checkpoint) >= rankOf("task_closed"));
+  const closed =
+    closedFromBeads || closedFromJournal || closedFromHostContribution;
   const worktreePresent = existsSync(
     resolveHubLandingWorktreeDir(input.hubProjectDir, input.transactionId),
   );
@@ -508,6 +518,7 @@ const collectEvidence = (input: {
   return {
     transactionId: input.transactionId,
     taskId,
+    taskBacked,
     journalCheckpoint: journal?.checkpoint,
     evidenceCheckpoint,
     sourceOid: journal?.sourceOid ?? manifest?.sourceOid,
@@ -746,8 +757,9 @@ export const reconcileHubLandingTransactions = async (
         taskId: before.taskId,
         candidateOid: before.candidateOid,
         repoRoot: input.repoRoot,
-        readTaskClose: input.readTaskClose,
-        closeTask: input.closeTask,
+        // Host contributions never consult Beads close adapters.
+        readTaskClose: before.taskBacked ? input.readTaskClose : undefined,
+        closeTask: before.taskBacked ? input.closeTask : undefined,
         now: input.now,
         faultInjection: input.faultInjection,
       });
