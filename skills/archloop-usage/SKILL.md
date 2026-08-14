@@ -178,7 +178,9 @@ npx archloop run --flow with-review
 Task-board flows select a batch, run task implementations concurrently, and
 land eligible branches serially onto a Hub-managed local publish target.
 `with-review` adds a reviewer stage. An unfinished same-flow merge-ready batch
-is recovered before new tasks are claimed. Implementation and review agents
+is recovered before new tasks are claimed. Interrupted `reviewing` work whose
+implementation already succeeded resumes the reviewer only (same preserved
+branch/claim), then continues through merge. Implementation and review agents
 receive an immutable task snapshot instead of live `bd` access; Hub applies
 schema-validated `<task-notes>` after the attempt. Landing freezes source and
 base OIDs, verifies the exact candidate in a Hub-owned worktree, then advances

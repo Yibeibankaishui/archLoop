@@ -12,6 +12,7 @@ import {
   appendHubTaskEvent,
   createHubRunContext,
   createHubRunIdentifiers,
+  createHubTaskClaimMetadata,
   observeHubRunEvents,
   type HubLandingReconciliationEvent,
   type HubRunCompletedBatchResult,
@@ -100,6 +101,7 @@ import {
 import {
   formatHubRetryPromptContext,
   prepareHubTaskRetry,
+  type HubTaskRetryPreparationReady,
 } from "./hubTaskRetry.js";
 import { readTaskEvents } from "./hubRunEventLog.js";
 import {
@@ -130,6 +132,7 @@ import {
   loadHubTaskBoard,
   resolveHubTaskBranch,
   loadHubReadyQueue,
+  updateHubTaskStatus,
   type HubFailureReason,
   type HubTaskProjection,
 } from "./taskBoard.js";
@@ -383,10 +386,10 @@ const countSuccessfulMergeResults = (
 };
 
 const resolveHubFlowMode = (input: {
-  readonly isResumingMergeBatch: boolean;
+  readonly isResumingBatch: boolean;
   readonly selectedTaskCount: number;
 }): RunHubFlowResult["mode"] => {
-  if (input.isResumingMergeBatch) {
+  if (input.isResumingBatch) {
     return "resumed_batch";
   }
   if (input.selectedTaskCount > 0) {
@@ -567,6 +570,28 @@ const resolveMergeOnlyHubFlowBatchResult = (input: {
   });
 };
 
+/** Batch result after resuming review-only work and/or merge for an unfinished batch. */
+const resolveResumedHubFlowBatchResult = (input: {
+  readonly batchId: string;
+  readonly taskResults: readonly HubFlowTaskResult[];
+  readonly mergeResult?: RunHubBatchMergeResult;
+}): HubFlowBatchResult | undefined => {
+  if (input.taskResults.length > 0) {
+    return resolveHubFlowBatchResult({
+      batchId: input.batchId,
+      selectedTaskIds: input.taskResults.map((result) => result.taskId),
+      taskResults: input.taskResults,
+      mergeResult: input.mergeResult,
+    });
+  }
+
+  return resolveMergeOnlyHubFlowBatchResult({
+    batchId: input.batchId,
+    mergeResult: input.mergeResult,
+    treatSkippedAsFailed: true,
+  });
+};
+
 const buildHubFlowBatchPlannedMetadata = (input: {
   readonly batchSelection?: HubBatchPlannerResult;
   readonly fallbackReason?: string;
@@ -635,15 +660,28 @@ const readJsonlRecords = (path: string): readonly Record<string, unknown>[] => {
     });
 };
 
+const isResumableHubFlowTaskStatus = (
+  hubStatus: HubTaskProjection["hubStatus"],
+  includeReviewResume: boolean,
+): boolean =>
+  hubStatus === "waiting_for_merge" ||
+  (includeReviewResume && hubStatus === "reviewing");
+
 const findResumableHubFlowBatches = (input: {
   readonly hubProjectDir: string;
   readonly flowId: string;
   readonly tasks: readonly HubTaskProjection[];
+  /**
+   * When true (with-review flows), claimed `reviewing` tasks are treated as
+   * unfinished batches so the run can resume the reviewer without re-implementing.
+   */
+  readonly includeReviewResume?: boolean;
 }): readonly ResumableHubFlowBatch[] => {
   const batches = new Map<string, ResumableHubFlowBatch>();
+  const includeReviewResume = input.includeReviewResume === true;
 
   for (const task of input.tasks) {
-    if (task.hubStatus !== "waiting_for_merge") {
+    if (!isResumableHubFlowTaskStatus(task.hubStatus, includeReviewResume)) {
       continue;
     }
     const runId = task.claim?.runId;
@@ -684,6 +722,135 @@ const findResumableHubFlowBatches = (input: {
     return left.batchId.localeCompare(right.batchId);
   });
 };
+
+const resolveImplementCommitCountForReviewResume = (
+  hubProjectDir: string,
+  task: HubTaskProjection,
+): number => {
+  const runId = task.claim?.runId;
+  if (!runId) {
+    return 0;
+  }
+
+  const taskEventsPath = join(
+    hubProjectDir,
+    "runs",
+    runId,
+    "events",
+    "task.jsonl",
+  );
+  // Last matching success event wins when a task was re-implemented earlier.
+  let commitCount = 0;
+  for (const event of readJsonlRecords(taskEventsPath)) {
+    if (
+      event.type !== "task_implementation_succeeded" ||
+      event.taskId !== task.id ||
+      typeof event.commitCount !== "number"
+    ) {
+      continue;
+    }
+    commitCount = event.commitCount;
+  }
+  return commitCount;
+};
+
+/**
+ * Shared lease gate for implement and reviewer-only resume paths. Records
+ * `task_retry_blocked` when another run still holds a live worktree lease.
+ */
+const resolveHubTaskRetryGate = async (input: {
+  readonly cwd: string;
+  readonly branch: string;
+  readonly task: HubTaskProjection;
+  readonly context: ReturnType<typeof createHubRunContext>;
+}): Promise<
+  | { readonly kind: "blocked"; readonly result: HubFlowTaskResult }
+  | {
+      readonly kind: "ready";
+      readonly preparation: HubTaskRetryPreparationReady;
+    }
+> => {
+  const retryPreparation = await prepareHubTaskRetry({
+    repoDir: input.cwd,
+    branch: input.branch,
+    taskId: input.task.id,
+  });
+
+  if (retryPreparation.status === "active_execution") {
+    appendHubTaskEvent(input.context.runDir, {
+      type: "task_retry_blocked",
+      runId: input.context.runId,
+      batchId: input.context.batchId,
+      taskId: input.task.id,
+      branch: input.branch,
+      createdAt: new Date().toISOString(),
+      status: input.task.hubStatus,
+      reason: "active_worktree_lease",
+      message: retryPreparation.message,
+    });
+
+    return {
+      kind: "blocked",
+      result: {
+        taskId: input.task.id,
+        title: input.task.title,
+        branch: input.branch,
+        outcome: "active_execution",
+        hubStatus: input.task.hubStatus,
+        commitCount: 0,
+      },
+    };
+  }
+
+  if (retryPreparation.status === "lease_malformed") {
+    return {
+      kind: "blocked",
+      result: {
+        taskId: input.task.id,
+        title: input.task.title,
+        branch: input.branch,
+        outcome: "sandbox_failed",
+        hubStatus: input.task.hubStatus,
+        failureReason: "sandbox_failed",
+        diagnosticSummary: retryPreparation.message,
+        commitCount: 0,
+      },
+    };
+  }
+
+  return { kind: "ready", preparation: retryPreparation };
+};
+
+/**
+ * Point a preserved claim at the current run while keeping batchId/branch.
+ * Review success events use context.runId; leaving the interrupted runId would
+ * look like claim drift and skip the task after reviewer-only resume.
+ */
+const rehomeHubTaskClaimOntoCurrentRun = (input: {
+  readonly claim: HubTaskClaimMetadata;
+  readonly context: ReturnType<typeof createHubRunContext>;
+  readonly task: HubTaskProjection;
+  readonly branch: string;
+}): HubTaskClaimMetadata =>
+  createHubTaskClaimMetadata({
+    runId: input.context.runId,
+    batchId: input.claim.batchId,
+    branch: input.branch,
+    taskId: input.task.id,
+    claimedAt: input.claim.claimedAt,
+    baseHead: input.claim.baseHead,
+    branchExistedBeforeClaim: input.claim.branchExistedBeforeClaim,
+  });
+
+const loadClaimedReviewingTasksForBatch = (
+  repoRoot: string,
+  env: NodeJS.ProcessEnv | undefined,
+  batchId: string,
+): HubTaskProjection[] =>
+  loadHubTaskBoard(repoRoot, env).tasks.filter(
+    (task) =>
+      task.hubStatus === "reviewing" && task.claim?.batchId === batchId,
+  );
 
 const SANDBOX_FAILURE_TAGS = new Set([
   "DockerError",
@@ -1157,6 +1324,117 @@ const reviewSelectedTask = async (
   };
 };
 
+/**
+ * Resume only the reviewer stage for a claimed `reviewing` task whose
+ * implementation already completed. Preserves the existing claim/branch and
+ * refuses to take over when another run still holds a live worktree lease.
+ */
+const resumeReviewSelectedTask = async (
+  input: RunHubFlowInput,
+  context: ReturnType<typeof createHubRunContext>,
+  task: HubTaskProjection,
+  reviewPromptFile: string,
+  mutateLifecycle: HubFlowLifecycleMutation,
+): Promise<HubFlowTaskResult> => {
+  const cwd = input.cwd ?? process.cwd();
+  const claim = task.claim;
+  const branch = claim?.branch ?? resolveHubTaskBranch(task.id, task.title);
+
+  if (!claim?.runId || !claim.batchId) {
+    return {
+      taskId: task.id,
+      title: task.title,
+      branch,
+      outcome: "sandbox_failed",
+      hubStatus: task.hubStatus,
+      failureReason: "sandbox_failed",
+      diagnosticSummary: `Task ${task.id} is reviewing without claim metadata required to resume review.`,
+      commitCount: 0,
+    };
+  }
+
+  const retryGate = await resolveHubTaskRetryGate({
+    cwd,
+    branch,
+    task,
+    context,
+  });
+  if (retryGate.kind === "blocked") {
+    return retryGate.result;
+  }
+
+  const implementCommitCount = resolveImplementCommitCountForReviewResume(
+    context.hubProjectDir,
+    task,
+  );
+  const resumedClaim = rehomeHubTaskClaimOntoCurrentRun({
+    claim,
+    context,
+    task,
+    branch,
+  });
+  const resumedMetadata = {
+    ...task.metadata,
+    claim: resumedClaim.raw,
+  };
+
+  await mutateLifecycle(() =>
+    updateHubTaskStatus({
+      cwd,
+      taskId: task.id,
+      hubStatus: "reviewing",
+      metadata: resumedMetadata,
+      replaceClaimMetadata: true,
+      env: input.env,
+    }),
+  );
+
+  return reviewSelectedTask(
+    input,
+    context,
+    task,
+    branch,
+    resumedClaim,
+    resumedMetadata,
+    reviewPromptFile,
+    implementCommitCount,
+    mutateLifecycle,
+  );
+};
+
+const resumeClaimedReviewingTasksInBatch = async (input: {
+  readonly flowInput: RunHubFlowInput;
+  readonly context: ReturnType<typeof createHubRunContext>;
+  readonly repoRoot: string;
+  readonly batchId: string;
+  readonly reviewPromptFile: string;
+  readonly mutateLifecycle: HubFlowLifecycleMutation;
+}): Promise<readonly HubFlowTaskResult[]> => {
+  const reviewingTasks = loadClaimedReviewingTasksForBatch(
+    input.repoRoot,
+    input.flowInput.env,
+    input.batchId,
+  );
+  if (reviewingTasks.length === 0) {
+    return [];
+  }
+
+  return Promise.all(
+    reviewingTasks.map((task) =>
+      resumeReviewSelectedTask(
+        { ...input.flowInput, cwd: input.repoRoot },
+        {
+          ...input.context,
+          batchId: input.batchId,
+        },
+        task,
+        input.reviewPromptFile,
+        input.mutateLifecycle,
+      ),
+    ),
+  );
+};
+
 const implementSelectedTask = async (
   input: RunHubFlowInput,
   context: ReturnType<typeof createHubRunContext>,
@@ -1168,52 +1446,20 @@ const implementSelectedTask = async (
 ): Promise<HubFlowTaskResult> => {
   const cwd = input.cwd ?? process.cwd();
   const branch = resolveHubTaskBranch(task.id, task.title);
-  const retryPreparation = await prepareHubTaskRetry({
-    repoDir: cwd,
+  const retryGate = await resolveHubTaskRetryGate({
+    cwd,
     branch,
-    taskId: task.id,
+    task,
+    context,
   });
-
-  if (retryPreparation.status === "active_execution") {
-    appendHubTaskEvent(context.runDir, {
-      type: "task_retry_blocked",
-      runId: context.runId,
-      batchId: context.batchId,
-      taskId: task.id,
-      branch,
-      createdAt: new Date().toISOString(),
-      status: task.hubStatus,
-      reason: "active_worktree_lease",
-      message: retryPreparation.message,
-    });
-
-    return {
-      taskId: task.id,
-      title: task.title,
-      branch,
-      outcome: "active_execution",
-      hubStatus: task.hubStatus,
-      commitCount: 0,
-    };
-  }
-
-  if (retryPreparation.status === "lease_malformed") {
-    return {
-      taskId: task.id,
-      title: task.title,
-      branch,
-      outcome: "sandbox_failed",
-      hubStatus: task.hubStatus,
-      failureReason: "sandbox_failed",
-      diagnosticSummary: retryPreparation.message,
-      commitCount: 0,
-    };
+  if (retryGate.kind === "blocked") {
+    return retryGate.result;
   }
 
   const retryContext = formatHubRetryPromptContext({
     branch,
-    preservedWorktreePath: retryPreparation.preservedWorktreePath,
-    hasDirtyWork: retryPreparation.hasDirtyWork,
+    preservedWorktreePath: retryGate.preparation.preservedWorktreePath,
+    hasDirtyWork: retryGate.preparation.hasDirtyWork,
   });
 
   const claimResult = await mutateLifecycle(() =>
@@ -1278,7 +1524,7 @@ const implementSelectedTask = async (
       hubProjectDir: context.hubProjectDir,
       projectDevelopmentContract: input.projectDevelopmentContract!,
       retryContext,
-      preservedWorktreePath: retryPreparation.preservedWorktreePath,
+      preservedWorktreePath: retryGate.preparation.preservedWorktreePath,
       signal: input.signal,
     });
   } catch (error) {
@@ -1560,7 +1806,8 @@ const runObservedHubFlow = async (
   // recovery wiring before the run loads the board for the resumed-batch scan.
   // This must precede findResumableHubFlowBatches so a `merging` task recovered
   // to `waiting_for_merge` (claim preserved) is picked up by the resumed-batch
-  // merge path, and a `ready_for_agent` recovery is selected by the planner.
+  // merge path, a `reviewing` recovery is picked up by reviewer-only resume, and
+  // a `ready_for_agent` recovery is selected by the planner.
   const autoRecoverSummary =
     input.autoRecover === false
       ? undefined
@@ -1597,10 +1844,11 @@ const runObservedHubFlow = async (
     hubProjectDir,
     flowId: input.flowId,
     tasks: loadHubTaskBoard(repoRoot, input.env).tasks,
+    includeReviewResume: flowDefinition.hasReviewer === true,
   });
   const unfinishedBatchIds = unfinishedBatches.map((batch) => batch.batchId);
   const resumedBatchId = unfinishedBatches[0]?.batchId;
-  const isResumingMergeBatch = resumedBatchId !== undefined;
+  const isResumingBatch = resumedBatchId !== undefined;
   const context = createHubRunContext({
     cwd: repoRoot,
     hubProjectDir,
@@ -1848,24 +2096,53 @@ const runObservedHubFlow = async (
     };
   };
 
-  if (isResumingMergeBatch && resumedBatchId) {
-    const resumedMergeResult = await runBatchMergePhase(resumedBatchId);
+  if (isResumingBatch && resumedBatchId) {
+    const reviewResults =
+      flowDefinition.hasReviewer === true && reviewPromptFile
+        ? await resumeClaimedReviewingTasksInBatch({
+            flowInput: resolvedInput,
+            context,
+            repoRoot,
+            batchId: resumedBatchId,
+            reviewPromptFile,
+            mutateLifecycle,
+          })
+        : [];
+    selectedTaskIds.push(...reviewResults.map((result) => result.taskId));
+    results.push(...reviewResults);
 
-    mergeResult = resumedMergeResult;
-    const resumedBatchResult = resolveMergeOnlyHubFlowBatchResult({
-      batchId: resumedBatchId,
-      mergeResult: resumedMergeResult,
-      treatSkippedAsFailed: true,
-    });
-    if (resumedBatchResult) {
-      batchResults.push(resumedBatchResult);
-    }
-    if (resumedBatchResult?.batchStatus === "failed") {
+    const resumedReviewFailed =
+      reviewResults.length > 0 &&
+      !reviewResults.every(isSuccessfulHubTaskResult);
+
+    if (resumedReviewFailed) {
+      const reviewBatchResult = resolveHubFlowBatchResult({
+        batchId: resumedBatchId,
+        selectedTaskIds: results.map((result) => result.taskId),
+        taskResults: results,
+      });
+      if (reviewBatchResult) {
+        batchResults.push(reviewBatchResult);
+      }
       stopReason = "batch_failed";
-    } else if (batchResults.length >= maxBatches) {
-      stopReason = "max_batches_reached";
     } else {
-      startNextBatch();
+      const resumedMergeResult = await runBatchMergePhase(resumedBatchId);
+      mergeResult = resumedMergeResult;
+      const resumedBatchResult = resolveResumedHubFlowBatchResult({
+        batchId: resumedBatchId,
+        taskResults: results,
+        mergeResult: resumedMergeResult,
+      });
+      if (resumedBatchResult) {
+        batchResults.push(resumedBatchResult);
+      }
+      if (resumedBatchResult?.batchStatus === "failed") {
+        stopReason = "batch_failed";
+      } else if (batchResults.length >= maxBatches) {
+        stopReason = "max_batches_reached";
+      } else {
+        startNextBatch();
+      }
     }
   }
 
@@ -1918,7 +2195,7 @@ const runObservedHubFlow = async (
     0,
   );
   const mode = resolveHubFlowMode({
-    isResumingMergeBatch,
+    isResumingBatch,
     selectedTaskCount: selectedTaskIds.length,
   });
   const effectiveBatchId = resumedBatchId ?? context.batchId;

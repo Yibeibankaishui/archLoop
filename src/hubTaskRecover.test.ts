@@ -669,6 +669,55 @@ describe("recoverHubTask event-aware stale execution", () => {
     );
   });
 
+  it("leaves an already-reviewing implementation-succeeded task unchanged without appending a recovery comment", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-recover-review-noop-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const taskId = "bd-stale-review-noop";
+    const title = "Already reviewing task";
+    const branch = `archloop/${taskId}-already-reviewing-task`;
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env, commentArgsFile } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: taskId,
+        title,
+        status: "in_progress",
+        labels: ["reviewing"],
+        metadata: {
+          hubStatus: "reviewing",
+          claim: {
+            runId: "run-stale",
+            batchId: "batch-stale",
+            branch,
+            claimedAt: "2026-07-23T00:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const result = await recoverHubTask({
+      cwd: repoDir,
+      taskId,
+      env,
+      resolveLatestPhaseCompletionEvent: async () =>
+        phaseCompletionEvent({
+          type: "task_implementation_succeeded",
+          status: "reviewing",
+          taskId,
+          branch,
+        }),
+      branchHasUnmergedWork: async () => true,
+    });
+
+    expect(result.outcome).toBe("unchanged");
+    expect(result.priorStatus).toBe("reviewing");
+    expect(result.hubStatus).toBe("reviewing");
+    const task = loadHubTask(repoDir, taskId, env);
+    expect(task.claim?.runId).toBe("run-stale");
+    expect(await readFile(commentArgsFile, "utf-8")).toBe("");
+  });
+
   it("routes an interrupted implementing task with no success event and branch commits to ready_for_agent and drops the claim (reuses preserved worktree)", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "hub-recover-retry-work-"));
     await initRepo(repoDir);
