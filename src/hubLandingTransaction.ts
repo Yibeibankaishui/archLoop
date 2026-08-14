@@ -38,6 +38,7 @@ export interface HubLandingTransactionRecord {
   readonly fenceOid?: string;
   readonly receiptRef?: string;
   readonly receiptOid?: string;
+  readonly filteredBeadsRuntimePaths?: readonly string[];
 }
 
 export interface HubLandingTransactionState {
@@ -55,6 +56,7 @@ export interface HubLandingTransactionState {
   readonly fenceOid?: string;
   readonly receiptRef?: string;
   readonly receiptOid?: string;
+  readonly filteredBeadsRuntimePaths?: readonly string[];
   readonly openedAt: string;
   readonly updatedAt: string;
 }
@@ -93,6 +95,20 @@ const readString = (
   return typeof value === "string" && value.trim().length > 0
     ? value.trim()
     : undefined;
+};
+
+const readStringArray = (
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+): readonly string[] | undefined => {
+  const value = record[key];
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const items = value.filter(
+    (item): item is string => typeof item === "string" && item.trim().length > 0,
+  );
+  return items.length > 0 ? items : undefined;
 };
 
 const fsyncFd = (fd: number): void => {
@@ -175,6 +191,10 @@ export const parseHubLandingTransactionRecord = (
     fenceOid,
     receiptRef: readString(record, "receiptRef"),
     receiptOid,
+    filteredBeadsRuntimePaths: readStringArray(
+      record,
+      "filteredBeadsRuntimePaths",
+    ),
   };
 };
 
@@ -205,6 +225,7 @@ export const reduceHubLandingTransaction = (
     fenceOid: valid[0]!.fenceOid,
     receiptRef: valid[0]!.receiptRef,
     receiptOid: valid[0]!.receiptOid,
+    filteredBeadsRuntimePaths: valid[0]!.filteredBeadsRuntimePaths,
     openedAt: valid[0]!.createdAt,
     updatedAt: valid[0]!.createdAt,
   };
@@ -226,6 +247,8 @@ export const reduceHubLandingTransaction = (
       fenceOid: record.fenceOid ?? state.fenceOid,
       receiptRef: record.receiptRef ?? state.receiptRef,
       receiptOid: record.receiptOid ?? state.receiptOid,
+      filteredBeadsRuntimePaths:
+        record.filteredBeadsRuntimePaths ?? state.filteredBeadsRuntimePaths,
       updatedAt: record.createdAt,
     };
   }

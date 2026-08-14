@@ -105,6 +105,29 @@ describe("Hub landing transaction store", () => {
     ).toBeUndefined();
   });
 
+  it("preserves filtered Beads runtime paths on candidate checkpoints", () => {
+    const parsed = parseHubLandingTransactionRecord({
+      type: "checkpoint",
+      checkpoint: "candidate_created",
+      transactionId: "ltx-task-1",
+      taskId: "task-1",
+      createdAt: "2026-08-13T00:00:00.000Z",
+      candidateOid: oid(3),
+      filteredBeadsRuntimePaths: [".beads/issues.jsonl", ""],
+    });
+    expect(parsed?.filteredBeadsRuntimePaths).toEqual([".beads/issues.jsonl"]);
+    expect(
+      reduceHubLandingTransaction([
+        record({ checkpoint: "opened" }),
+        record({
+          checkpoint: "candidate_created",
+          candidateOid: oid(3),
+          filteredBeadsRuntimePaths: [".beads/issues.jsonl"],
+        }),
+      ])?.filteredBeadsRuntimePaths,
+    ).toEqual([".beads/issues.jsonl"]);
+  });
+
   it("keeps duplicate later records stable when reducing", () => {
     const reduced = reduceHubLandingTransaction([
       record({ checkpoint: "opened" }),

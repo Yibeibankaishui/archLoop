@@ -23,6 +23,11 @@ retries later. Split brain after redirect stops automatic writes; inspect both
 stores with `project status` or `tasks doctor` and do not delete either one
 automatically.
 
+A legacy task branch that committed allowlisted Beads runtime/export files can
+still land. Hub strips only those paths from the merge candidate and records
+them; Beads configuration, documentation, hooks, and unknown `.beads/**`
+changes stay in the candidate.
+
 ## List and inspect
 
 ```bash

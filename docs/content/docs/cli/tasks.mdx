@@ -35,6 +35,10 @@ after redirect, Hub reports split brain, stops automatic task-store writes, and
 does not merge or delete either database. None of these cases is a task failure
 or requires `tasks recover`.
 
+Landing strips only allowlisted Beads runtime/export files from a legacy task
+branch candidate. Configuration, documentation, hooks, and unknown `.beads/**`
+paths remain ordinary source changes.
+
 Use `--json` where offered for machine-readable output. Preview synchronization,
 cleanup, and deletion with `--dry-run` before applying them in automation.
 

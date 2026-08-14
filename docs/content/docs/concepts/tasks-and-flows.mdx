@@ -31,6 +31,14 @@ outcomes report `partial_failed`. Landing does not merge into the user's
 checkout. A crashed landing resumes from durable evidence on the next run
 without `tasks recover`.
 
+Legacy task branches that committed known Beads runtime/export files such as
+`.beads/issues.jsonl` still land their source changes. Candidate construction
+strips only that documented allowlist, records the filtered paths on the
+transaction and `integration_candidate_created` event, and leaves the task
+branch and checkout untouched. Beads configuration, documentation, hooks,
+redirect, and unknown `.beads/**` paths stay in the candidate for normal
+review.
+
 Implementer iterations continue past a provider startup abort that produced no
 agent output, as long as iterations remain. A turn that only explored (no
 commits, no completion signal) nudges the next iteration to start writing

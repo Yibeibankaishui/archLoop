@@ -352,4 +352,369 @@ describe("Hub fenced local landing", () => {
       first.candidateOid,
     );
   });
+
+  it("strips allowlisted Beads runtime files from the candidate without rewriting the source branch or checkout", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hub-landing-beads-runtime-"));
+    const repoDir = join(root, "repo");
+    const hubProjectDir = join(root, "hub-project");
+    await mkdir(repoDir, { recursive: true });
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello\n", "init");
+
+    const branch = "archloop/bd-runtime";
+    await execFileAsync("git", ["checkout", "-b", branch], { cwd: repoDir });
+    await commitFile(repoDir, "feature.txt", "feature\n", "feature");
+    await mkdir(join(repoDir, ".beads"), { recursive: true });
+    await commitFile(
+      repoDir,
+      ".beads/issues.jsonl",
+      '{"id":"branch-export"}\n',
+      "legacy beads export",
+    );
+    const sourceOid = await gitText(repoDir, ["rev-parse", "HEAD"]);
+    await execFileAsync("git", ["checkout", "main"], { cwd: repoDir });
+    await mkdir(join(repoDir, ".beads"), { recursive: true });
+    await writeFile(join(repoDir, ".beads", "redirect"), "/tmp/managed-beads\n");
+    await writeFile(join(repoDir, "wip.txt"), "uncommitted wip\n");
+    const before = await captureCheckout(repoDir);
+
+    const candidate = await createHubLandingCandidate({
+      repoRoot: repoDir,
+      hubProjectDir,
+      taskId: "bd-runtime",
+      branch,
+    });
+    const candidateTree = await gitText(repoDir, [
+      "ls-tree",
+      "-r",
+      "--name-only",
+      candidate.candidateOid,
+    ]);
+
+    expect(candidateTree.split("\n")).toEqual(
+      expect.arrayContaining(["feature.txt", "hello.txt"]),
+    );
+    expect(candidateTree.split("\n")).not.toContain(".beads/issues.jsonl");
+    expect(candidate.filteredBeadsRuntimePaths).toEqual([
+      ".beads/issues.jsonl",
+    ]);
+    expect(await gitText(repoDir, ["rev-parse", `${branch}^{commit}`])).toBe(
+      sourceOid,
+    );
+    expect(
+      await gitText(repoDir, ["show", `${branch}:.beads/issues.jsonl`]),
+    ).toBe('{"id":"branch-export"}');
+    expect(await captureCheckout(repoDir)).toEqual(before);
+    await expect(
+      readFile(join(repoDir, ".beads", "redirect"), "utf8"),
+    ).resolves.toBe("/tmp/managed-beads\n");
+  });
+
+  it("keeps Beads config, docs, hooks, and unknown .beads paths in the candidate", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hub-landing-beads-keep-"));
+    const repoDir = join(root, "repo");
+    const hubProjectDir = join(root, "hub-project");
+    await mkdir(repoDir, { recursive: true });
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello\n", "init");
+
+    const branch = "archloop/bd-keep-beads";
+    await execFileAsync("git", ["checkout", "-b", branch], { cwd: repoDir });
+    await commitFile(repoDir, "feature.txt", "feature\n", "feature");
+    await mkdir(join(repoDir, ".beads", "hooks"), { recursive: true });
+    await commitFile(
+      repoDir,
+      ".beads/config.yaml",
+      "prefix: demo\n",
+      "beads config",
+    );
+    await commitFile(repoDir, ".beads/README.md", "# Beads\n", "beads docs");
+    await commitFile(
+      repoDir,
+      ".beads/hooks/pre-commit",
+      "#!/bin/sh\nexit 0\n",
+      "beads hook",
+    );
+    await commitFile(
+      repoDir,
+      ".beads/mystery.jsonl",
+      '{"id":"unknown"}\n',
+      "unknown beads path",
+    );
+    await commitFile(
+      repoDir,
+      ".beads/issues.jsonl",
+      '{"id":"runtime"}\n',
+      "runtime export",
+    );
+    await execFileAsync("git", ["checkout", "main"], { cwd: repoDir });
+
+    const candidate = await createHubLandingCandidate({
+      repoRoot: repoDir,
+      hubProjectDir,
+      taskId: "bd-keep-beads",
+      branch,
+    });
+    const candidateTree = (
+      await gitText(repoDir, [
+        "ls-tree",
+        "-r",
+        "--name-only",
+        candidate.candidateOid,
+      ])
+    ).split("\n");
+
+    expect(candidateTree).toEqual(
+      expect.arrayContaining([
+        "feature.txt",
+        ".beads/config.yaml",
+        ".beads/README.md",
+        ".beads/hooks/pre-commit",
+        ".beads/mystery.jsonl",
+      ]),
+    );
+    expect(candidateTree).not.toContain(".beads/issues.jsonl");
+    expect(candidate.filteredBeadsRuntimePaths).toEqual([
+      ".beads/issues.jsonl",
+    ]);
+    expect(
+      await gitText(repoDir, ["show", `${candidate.candidateOid}:.beads/mystery.jsonl`]),
+    ).toBe('{"id":"unknown"}');
+  });
+
+  it("restores allowlisted Beads runtime files from the base instead of taking branch edits or deletes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hub-landing-beads-restore-"));
+    const repoDir = join(root, "repo");
+    const hubProjectDir = join(root, "hub-project");
+    await mkdir(repoDir, { recursive: true });
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello\n", "init");
+    await mkdir(join(repoDir, ".beads"), { recursive: true });
+    await commitFile(
+      repoDir,
+      ".beads/issues.jsonl",
+      '{"id":"base-export"}\n',
+      "base beads export",
+    );
+    await commitFile(
+      repoDir,
+      ".beads/interactions.jsonl",
+      '{"id":"base-interactions"}\n',
+      "base interactions",
+    );
+
+    const branch = "archloop/bd-restore";
+    await execFileAsync("git", ["checkout", "-b", branch], { cwd: repoDir });
+    await commitFile(repoDir, "feature.txt", "feature\n", "feature");
+    await commitFile(
+      repoDir,
+      ".beads/issues.jsonl",
+      '{"id":"branch-export"}\n',
+      "edit beads export",
+    );
+    await execFileAsync(
+      "git",
+      ["rm", ".beads/interactions.jsonl"],
+      { cwd: repoDir },
+    );
+    await execFileAsync("git", ["commit", "-m", "drop interactions"], {
+      cwd: repoDir,
+    });
+    await execFileAsync("git", ["checkout", "main"], { cwd: repoDir });
+
+    const candidate = await createHubLandingCandidate({
+      repoRoot: repoDir,
+      hubProjectDir,
+      taskId: "bd-restore",
+      branch,
+    });
+
+    expect(
+      await gitText(repoDir, [
+        "show",
+        `${candidate.candidateOid}:.beads/issues.jsonl`,
+      ]),
+    ).toBe('{"id":"base-export"}');
+    expect(
+      await gitText(repoDir, [
+        "show",
+        `${candidate.candidateOid}:.beads/interactions.jsonl`,
+      ]),
+    ).toBe('{"id":"base-interactions"}');
+    expect(
+      await gitText(repoDir, [
+        "show",
+        `${candidate.candidateOid}:feature.txt`,
+      ]),
+    ).toBe("feature");
+    expect(candidate.filteredBeadsRuntimePaths).toEqual([
+      ".beads/interactions.jsonl",
+      ".beads/issues.jsonl",
+    ]);
+  });
+
+  it("does not silently discard a renamed unknown Beads path", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hub-landing-beads-rename-"));
+    const repoDir = join(root, "repo");
+    const hubProjectDir = join(root, "hub-project");
+    await mkdir(repoDir, { recursive: true });
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello\n", "init");
+    await mkdir(join(repoDir, ".beads"), { recursive: true });
+    await commitFile(
+      repoDir,
+      ".beads/issues.jsonl",
+      '{"id":"base-export"}\n',
+      "base beads export",
+    );
+
+    const branch = "archloop/bd-rename";
+    await execFileAsync("git", ["checkout", "-b", branch], { cwd: repoDir });
+    await commitFile(repoDir, "feature.txt", "feature\n", "feature");
+    await execFileAsync(
+      "git",
+      ["mv", ".beads/issues.jsonl", ".beads/mystery.jsonl"],
+      { cwd: repoDir },
+    );
+    await execFileAsync("git", ["commit", "-m", "rename export"], {
+      cwd: repoDir,
+    });
+    const sourceOid = await gitText(repoDir, ["rev-parse", "HEAD"]);
+    await execFileAsync("git", ["checkout", "main"], { cwd: repoDir });
+
+    const candidate = await createHubLandingCandidate({
+      repoRoot: repoDir,
+      hubProjectDir,
+      taskId: "bd-rename",
+      branch,
+    });
+    const candidateTree = (
+      await gitText(repoDir, [
+        "ls-tree",
+        "-r",
+        "--name-only",
+        candidate.candidateOid,
+      ])
+    ).split("\n");
+
+    expect(candidateTree).toEqual(
+      expect.arrayContaining([
+        "feature.txt",
+        ".beads/issues.jsonl",
+        ".beads/mystery.jsonl",
+      ]),
+    );
+    expect(
+      await gitText(repoDir, [
+        "show",
+        `${candidate.candidateOid}:.beads/issues.jsonl`,
+      ]),
+    ).toBe('{"id":"base-export"}');
+    expect(
+      await gitText(repoDir, [
+        "show",
+        `${candidate.candidateOid}:.beads/mystery.jsonl`,
+      ]),
+    ).toBe('{"id":"base-export"}');
+    expect(await gitText(repoDir, ["rev-parse", `${branch}^{commit}`])).toBe(
+      sourceOid,
+    );
+  });
+
+  it("restores allowlisted Beads runtime file mode from the base", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hub-landing-beads-mode-"));
+    const repoDir = join(root, "repo");
+    const hubProjectDir = join(root, "hub-project");
+    await mkdir(repoDir, { recursive: true });
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello\n", "init");
+    await mkdir(join(repoDir, ".beads"), { recursive: true });
+    await commitFile(
+      repoDir,
+      ".beads/issues.jsonl",
+      '{"id":"base-export"}\n',
+      "base beads export",
+    );
+    const baseMode = (
+      await gitText(repoDir, ["ls-tree", "HEAD", ".beads/issues.jsonl"])
+    ).split(" ")[0];
+
+    const branch = "archloop/bd-mode";
+    await execFileAsync("git", ["checkout", "-b", branch], { cwd: repoDir });
+    await commitFile(repoDir, "feature.txt", "feature\n", "feature");
+    await chmod(join(repoDir, ".beads", "issues.jsonl"), 0o755);
+    await execFileAsync("git", ["add", ".beads/issues.jsonl"], { cwd: repoDir });
+    await execFileAsync("git", ["commit", "-m", "chmod export"], {
+      cwd: repoDir,
+    });
+    await execFileAsync("git", ["checkout", "main"], { cwd: repoDir });
+
+    const candidate = await createHubLandingCandidate({
+      repoRoot: repoDir,
+      hubProjectDir,
+      taskId: "bd-mode",
+      branch,
+    });
+    const candidateMode = (
+      await gitText(repoDir, [
+        "ls-tree",
+        candidate.candidateOid,
+        ".beads/issues.jsonl",
+      ])
+    ).split(" ")[0];
+    expect(candidateMode).toBe(baseMode);
+    expect(candidate.filteredBeadsRuntimePaths).toEqual([
+      ".beads/issues.jsonl",
+    ]);
+  });
+
+  it("records filtered Beads runtime paths in the candidate manifest and transaction journal", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hub-landing-beads-diag-"));
+    const repoDir = join(root, "repo");
+    const hubProjectDir = join(root, "hub-project");
+    await mkdir(repoDir, { recursive: true });
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello\n", "init");
+    const branch = "archloop/bd-diag";
+    await execFileAsync("git", ["checkout", "-b", branch], { cwd: repoDir });
+    await commitFile(repoDir, "feature.txt", "feature\n", "feature");
+    await mkdir(join(repoDir, ".beads"), { recursive: true });
+    await commitFile(
+      repoDir,
+      ".beads/issues.jsonl",
+      '{"id":"branch-export"}\n',
+      "legacy beads export",
+    );
+    await execFileAsync("git", ["checkout", "main"], { cwd: repoDir });
+
+    const candidate = await createHubLandingCandidate({
+      repoRoot: repoDir,
+      hubProjectDir,
+      taskId: "bd-diag",
+      branch,
+    });
+    const manifest = JSON.parse(
+      await readFile(
+        join(
+          hubProjectDir,
+          "landing",
+          "transactions",
+          candidate.transactionId,
+          "candidate.json",
+        ),
+        "utf8",
+      ),
+    ) as { filteredBeadsRuntimePaths?: string[]; candidateOid: string };
+    const state = loadHubLandingTransaction(
+      hubProjectDir,
+      candidate.transactionId,
+    );
+
+    expect(manifest.candidateOid).toBe(candidate.candidateOid);
+    expect(manifest.filteredBeadsRuntimePaths).toEqual([
+      ".beads/issues.jsonl",
+    ]);
+    expect(state?.filteredBeadsRuntimePaths).toEqual([".beads/issues.jsonl"]);
+    expect(state?.candidateOid).toBe(candidate.candidateOid);
+  });
 });

@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { isAllowlistedBeadsRuntimePath } from "./hubBeadsRuntimePaths.js";
 import type { HubTaskEvent } from "./hubExecution.js";
 import { readTaskEvents } from "./hubRunEventLog.js";
 import {
@@ -275,10 +276,8 @@ const defaultBranchInspector: HubTaskStateBranchInspector = async (
 
 const normalizeGitPath = (path: string): string => path.replace(/\\/g, "/");
 
-const isTaskStoreRuntimePath = (path: string): boolean => {
-  const normalized = normalizeGitPath(path);
-  return normalized === ".beads" || normalized.startsWith(".beads/");
-};
+const isTaskStoreRuntimePath = (path: string): boolean =>
+  isAllowlistedBeadsRuntimePath(normalizeGitPath(path));
 
 const parseGitStatusPorcelain = (stdout: string): string[] => {
   const entries = stdout.split("\0").filter((entry) => entry.length > 0);

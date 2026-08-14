@@ -14,6 +14,7 @@ import {
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 
+import { isAllowlistedBeadsRuntimePath } from "./hubBeadsRuntimePaths.js";
 import {
   ensureHubLandingPolicy,
   type HubLandingPolicy,
@@ -76,6 +77,7 @@ export interface HubLandingCandidate {
   readonly worktreeDir: string;
   readonly policy: HubLandingPolicy;
   readonly state: HubLandingTransactionState;
+  readonly filteredBeadsRuntimePaths?: readonly string[];
 }
 
 export interface HubLandingVerificationArtifact {
@@ -145,6 +147,7 @@ export interface HubLandingCandidateManifest {
   readonly candidateOid: string;
   readonly candidateRef: string;
   readonly createdAt: string;
+  readonly filteredBeadsRuntimePaths?: readonly string[];
 }
 
 export interface HubVerifierFingerprintParts {
@@ -454,7 +457,7 @@ export const readHubLandingCandidateManifest = (
   if (!value) {
     return undefined;
   }
-  return requiredStrings(value, [
+  const required = requiredStrings(value, [
     "transactionId",
     "taskId",
     "sourceOid",
@@ -463,6 +466,21 @@ export const readHubLandingCandidateManifest = (
     "candidateRef",
     "createdAt",
   ]);
+  if (!required) {
+    return undefined;
+  }
+  const filtered = Array.isArray(value.filteredBeadsRuntimePaths)
+    ? value.filteredBeadsRuntimePaths.filter(
+        (item): item is string =>
+          typeof item === "string" && item.trim().length > 0,
+      )
+    : undefined;
+  return {
+    ...required,
+    ...(filtered && filtered.length > 0
+      ? { filteredBeadsRuntimePaths: filtered }
+      : {}),
+  };
 };
 
 export const readHubLandingReceipt = (
@@ -600,6 +618,7 @@ type PersistCandidateOidInput = {
   readonly candidateOid: string;
   readonly candidateRef: string;
   readonly createdAt: string;
+  readonly filteredBeadsRuntimePaths?: readonly string[];
 };
 
 const writeCandidateManifestAndRef = async (
@@ -618,6 +637,10 @@ const writeCandidateManifestAndRef = async (
       candidateOid: input.candidateOid,
       candidateRef: input.candidateRef,
       createdAt: input.createdAt,
+      ...(input.filteredBeadsRuntimePaths &&
+      input.filteredBeadsRuntimePaths.length > 0
+        ? { filteredBeadsRuntimePaths: input.filteredBeadsRuntimePaths }
+        : {}),
     } satisfies HubLandingCandidateManifest,
   );
   await execFileAsync("git", ["update-ref", input.candidateRef, input.candidateOid], {
@@ -638,7 +661,69 @@ const recordCandidateCreatedCheckpoint = (
     baseOid: input.baseOid,
     candidateOid: input.candidateOid,
     candidateRef: input.candidateRef,
+    filteredBeadsRuntimePaths: input.filteredBeadsRuntimePaths,
   });
+
+const stripAllowlistedBeadsRuntimeFromCandidate = async (input: {
+  readonly worktreeDir: string;
+  readonly baseOid: string;
+}): Promise<readonly string[]> => {
+  const diff = await gitText(input.worktreeDir, [
+    "diff",
+    "--name-only",
+    "--no-renames",
+    "-z",
+    input.baseOid,
+    "HEAD",
+  ]);
+  const filtered = [
+    ...new Set(
+      diff
+        .split("\0")
+        .filter((path) => path.length > 0 && isAllowlistedBeadsRuntimePath(path)),
+    ),
+  ].sort();
+  if (filtered.length === 0) {
+    return [];
+  }
+
+  for (const path of filtered) {
+    const existsOnBase = await gitOk(input.worktreeDir, [
+      "cat-file",
+      "-e",
+      `${input.baseOid}:${path}`,
+    ]);
+    if (existsOnBase) {
+      await execFileAsync("git", ["checkout", input.baseOid, "--", path], {
+        cwd: input.worktreeDir,
+        env: gitEnv(),
+      });
+    } else {
+      await execFileAsync(
+        "git",
+        ["rm", "-f", "--ignore-unmatch", "--", path],
+        { cwd: input.worktreeDir, env: gitEnv() },
+      );
+    }
+  }
+
+  const status = await gitText(input.worktreeDir, ["status", "--porcelain=v1"]);
+  if (status.length === 0) {
+    return [];
+  }
+
+  await execFileAsync(
+    "git",
+    [
+      "commit",
+      "--no-verify",
+      "-m",
+      "Strip allowlisted Beads runtime/export files from landing candidate",
+    ],
+    { cwd: input.worktreeDir, env: gitEnv() },
+  );
+  return filtered;
+};
 
 export const createHubLandingCandidate = async (input: {
   readonly repoRoot: string;
@@ -698,6 +783,12 @@ export const createHubLandingCandidate = async (input: {
       transactionId,
       candidateOid: restored.candidateOid,
     });
+    const manifest = readHubLandingCandidateManifest(
+      input.hubProjectDir,
+      transactionId,
+    );
+    const filteredBeadsRuntimePaths =
+      existing?.filteredBeadsRuntimePaths ?? manifest?.filteredBeadsRuntimePaths;
     const state =
       existing?.candidateOid === restored.candidateOid
         ? existing
@@ -711,6 +802,7 @@ export const createHubLandingCandidate = async (input: {
             baseOid,
             candidateOid: restored.candidateOid,
             candidateRef: restored.candidateRef,
+            filteredBeadsRuntimePaths,
           });
     return {
       transactionId,
@@ -723,6 +815,7 @@ export const createHubLandingCandidate = async (input: {
       worktreeDir,
       policy,
       state,
+      filteredBeadsRuntimePaths,
     };
   }
 
@@ -778,6 +871,15 @@ export const createHubLandingCandidate = async (input: {
     throw error;
   }
 
+  const filteredBeadsRuntimePaths =
+    await stripAllowlistedBeadsRuntimeFromCandidate({
+      worktreeDir,
+      baseOid,
+    });
+  const recordedFilters =
+    filteredBeadsRuntimePaths.length > 0
+      ? filteredBeadsRuntimePaths
+      : undefined;
   const candidateOid = await gitText(worktreeDir, ["rev-parse", "HEAD"]);
   const candidateRef = resolveCandidateRef(transactionId);
   const persistedCandidate = {
@@ -790,6 +892,7 @@ export const createHubLandingCandidate = async (input: {
     candidateOid,
     candidateRef,
     createdAt: now,
+    filteredBeadsRuntimePaths: recordedFilters,
   };
   maybeCrash(input.faultInjection, "candidate_ref", "before");
   await writeCandidateManifestAndRef(persistedCandidate);
@@ -807,6 +910,7 @@ export const createHubLandingCandidate = async (input: {
     worktreeDir,
     policy,
     state,
+    filteredBeadsRuntimePaths: recordedFilters,
   };
 };
 
@@ -816,6 +920,11 @@ export const snapshotHubLandingCandidateGeneration = async (input: {
   readonly candidate: HubLandingCandidate;
   readonly now?: Date;
 }): Promise<HubLandingCandidate> => {
+  const filteredBeadsRuntimePaths =
+    await stripAllowlistedBeadsRuntimeFromCandidate({
+      worktreeDir: input.candidate.worktreeDir,
+      baseOid: input.candidate.baseOid,
+    });
   const candidateOid = await gitText(input.candidate.worktreeDir, [
     "rev-parse",
     "HEAD",
@@ -834,12 +943,17 @@ export const snapshotHubLandingCandidateGeneration = async (input: {
     candidateOid,
     candidateRef,
     createdAt: (input.now ?? new Date()).toISOString(),
+    filteredBeadsRuntimePaths:
+      filteredBeadsRuntimePaths.length > 0
+        ? filteredBeadsRuntimePaths
+        : input.candidate.filteredBeadsRuntimePaths,
   };
   await writeCandidateManifestAndRef(persistedCandidate);
   return {
     ...input.candidate,
     candidateOid,
     candidateRef,
+    filteredBeadsRuntimePaths: persistedCandidate.filteredBeadsRuntimePaths,
     state: recordCandidateCreatedCheckpoint(persistedCandidate),
   };
 };
