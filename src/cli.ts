@@ -1783,6 +1783,15 @@ const projectConfigureRemoteTargetOption = Options.text("remote-target").pipe(
   Options.optional,
 );
 
+const projectConfigureDeliveryTimeoutOption = Options.integer(
+  "delivery-timeout-ms",
+).pipe(
+  Options.withDescription(
+    "Required-publication delivery wait in milliseconds during a Hub run (default 300000).",
+  ),
+  Options.optional,
+);
+
 const describeProjectConfigureEditOutcome = (contract: {
   readonly preservedUserEdits: boolean;
   readonly projectProfileChanged: boolean;
@@ -4014,8 +4023,9 @@ const projectConfigureCommand = Command.make(
     projectProfile: projectConfigureProjectProfileOption,
     publishPolicy: projectConfigurePublishPolicyOption,
     remoteTarget: projectConfigureRemoteTargetOption,
+    deliveryTimeoutMs: projectConfigureDeliveryTimeoutOption,
   },
-  ({ project, projectProfile, publishPolicy, remoteTarget }) =>
+  ({ project, projectProfile, publishPolicy, remoteTarget, deliveryTimeoutMs }) =>
     Effect.gen(function* () {
       const d = yield* Display;
       const status = yield* resolveProjectTargetStatus(project);
@@ -4063,6 +4073,9 @@ const projectConfigureCommand = Command.make(
               : {}),
             ...(remoteTarget._tag === "Some"
               ? { remoteTarget: remoteTarget.value }
+              : {}),
+            ...(deliveryTimeoutMs._tag === "Some"
+              ? { deliveryTimeoutMs: deliveryTimeoutMs.value }
               : {}),
           }),
         catch: toProjectStatusError,

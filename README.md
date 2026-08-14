@@ -43,7 +43,11 @@ TypeScript API to build your own orchestration.
   changing `shipped`. With an explicit `--publish-policy best_effort` and
   `--remote-target`, Hub publishes through a durable outbox; network or remote
   rejection leaves `target_publish_pending` without undoing local shipped
-  proof. Publication stays off until configured—discovering `origin` alone
+  proof. With `--publish-policy required`, the task stays `publishing` until
+  remote ancestry proves delivery; FIFO successors may build and verify but
+  cannot advance past an unacknowledged predecessor. A delivery timeout returns
+  `completed_with_pending_delivery` (non-zero exit) without semantic task
+  failure. Publication stays off until configured—discovering `origin` alone
   never enables it. Interrupted
   landings resume from durable evidence on the next run. Independent siblings
   keep landing when one task is blocked; repair is bounded. Legacy task
@@ -143,10 +147,12 @@ WIP. A later safe fast-forward may update the host branch; unsafe WIP stays
 `checkout_sync_pending` and does not change `shipped`. With
 `--publish-policy best_effort --remote-target <remote/ref>`, code publication
 retries as `target_publish_pending` separately from GitHub task sync and does
-not undo local shipped proof. Publication remains off unless configured—
-discovering `origin` alone never enables it. Use `archloop project status`,
-`archloop tasks doctor`, and `archloop tasks recover <task-id>` when a run
-needs attention.
+not undo local shipped proof. With `--publish-policy required`, tasks stay
+`publishing` until remote proof; a delivery timeout exits
+`completed_with_pending_delivery` without marking the task failed. Publication
+remains off unless configured—discovering `origin` alone never enables it. Use
+`archloop project status`, `archloop tasks doctor`, and
+`archloop tasks recover <task-id>` when a run needs attention.
 
 ## TypeScript API
 

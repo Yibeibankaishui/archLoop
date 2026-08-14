@@ -66,6 +66,9 @@ npx archloop project configure --project-profile <profile>
 npx archloop project configure --project-profile <profile> --publish-policy off
 npx archloop project configure --project-profile <profile> \
   --publish-policy best_effort --remote-target origin/main
+npx archloop project configure --project-profile <profile> \
+  --publish-policy required --remote-target origin/main \
+  --delivery-timeout-ms 300000
 npx archloop project rename <project> <new-name>
 npx archloop project relink <project> --path <repo-path>
 ```
@@ -80,7 +83,13 @@ development contract sections. `--publish-policy off|best_effort|required` and
 repository. Publication stays `off` until configured; discovering `origin`
 never enables pushes. `best_effort` enqueues a durable code-publication outbox
 after local shipped proof and retries as `target_publish_pending` without
-undoing shipped or mixing with GitHub task sync.
+undoing shipped or mixing with GitHub task sync. `required` keeps the task
+`publishing` until remote ancestry proves delivery; successors may build and
+verify but cannot advance the ordered local delivery sequence past an
+unacknowledged predecessor. Optional `--delivery-timeout-ms` bounds the wait;
+timeout returns `completed_with_pending_delivery` (non-zero exit) without
+semantic task failure. Force rewrite after an ambiguous successful push is an
+integrity incident, not ordinary drift.
 
 ## Agent roles and credentials
 

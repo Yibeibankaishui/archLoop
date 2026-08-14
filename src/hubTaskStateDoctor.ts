@@ -149,6 +149,7 @@ const HUB_STATUS_LABELS: Readonly<Record<HubTaskStatus, string>> = {
   reviewing: "reviewing",
   waiting_for_merge: "waiting-for-merge",
   merging: "merging",
+  publishing: "publishing",
   failed: "failed",
   done: "done",
   wontfix: "wontfix",
@@ -169,6 +170,7 @@ const CLAIM_REQUIRED_STATUSES = new Set<HubTaskStatus>([
   "reviewing",
   "waiting_for_merge",
   "merging",
+  "publishing",
 ]);
 
 const HUB_STATUS_VALUES = new Set<string>([
@@ -181,6 +183,7 @@ const HUB_STATUS_VALUES = new Set<string>([
   "reviewing",
   "waiting_for_merge",
   "merging",
+  "publishing",
   "done",
   "wontfix",
   "failed",

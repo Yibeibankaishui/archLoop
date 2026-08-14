@@ -35,6 +35,8 @@ export interface HubLandingPolicy {
   readonly fenceRef: string;
   readonly publishPolicy: HubLandingPublishPolicy;
   readonly remoteTarget?: string;
+  /** Max wait for required remote proof during a run; ms. */
+  readonly deliveryTimeoutMs?: number;
   readonly checkoutSyncPolicy: HubLandingCheckoutSyncPolicy;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -57,6 +59,7 @@ export interface ConfigureHubLandingPolicyInput {
   readonly hubProjectDir: string;
   readonly publishPolicy?: HubLandingPublishPolicy;
   readonly remoteTarget?: string | null;
+  readonly deliveryTimeoutMs?: number | null;
   readonly now?: Date;
 }
 
@@ -194,6 +197,12 @@ const parseHubLandingPolicy = (value: unknown): HubLandingPolicy | undefined => 
     return undefined;
   }
   const remoteTarget = readString(record, "remoteTarget");
+  const deliveryTimeoutMs =
+    typeof record.deliveryTimeoutMs === "number" &&
+    Number.isFinite(record.deliveryTimeoutMs) &&
+    record.deliveryTimeoutMs > 0
+      ? Math.floor(record.deliveryTimeoutMs)
+      : undefined;
   return {
     version: 1,
     hostTargetBranch,
@@ -201,6 +210,7 @@ const parseHubLandingPolicy = (value: unknown): HubLandingPolicy | undefined => 
     fenceRef,
     publishPolicy,
     ...(remoteTarget ? { remoteTarget } : {}),
+    ...(deliveryTimeoutMs !== undefined ? { deliveryTimeoutMs } : {}),
     checkoutSyncPolicy,
     createdAt,
     updatedAt,
@@ -299,7 +309,8 @@ export const configureHubLandingPolicy = (
   const ensured = ensureHubLandingPolicy(input);
   if (
     input.publishPolicy === undefined &&
-    input.remoteTarget === undefined
+    input.remoteTarget === undefined &&
+    input.deliveryTimeoutMs === undefined
   ) {
     return { policy: ensured.policy, path: ensured.path };
   }
@@ -311,12 +322,32 @@ export const configureHubLandingPolicy = (
       : input.remoteTarget === null || input.remoteTarget.trim().length === 0
         ? undefined
         : input.remoteTarget.trim();
+  const deliveryTimeoutMs =
+    input.deliveryTimeoutMs === undefined
+      ? ensured.policy.deliveryTimeoutMs
+      : input.deliveryTimeoutMs === null || input.deliveryTimeoutMs <= 0
+        ? undefined
+        : Math.floor(input.deliveryTimeoutMs);
   const policy: HubLandingPolicy = {
     ...ensured.policy,
     publishPolicy: input.publishPolicy ?? ensured.policy.publishPolicy,
     ...(remoteTarget ? { remoteTarget } : {}),
+    ...(deliveryTimeoutMs !== undefined ? { deliveryTimeoutMs } : {}),
     updatedAt: now,
   };
-  writeAtomicJson(ensured.path, policy);
-  return { policy, path: ensured.path };
+  // Drop cleared optional fields when explicitly nulled.
+  const cleared: HubLandingPolicy = {
+    version: 1,
+    hostTargetBranch: policy.hostTargetBranch,
+    publishTargetRef: policy.publishTargetRef,
+    fenceRef: policy.fenceRef,
+    publishPolicy: policy.publishPolicy,
+    ...(remoteTarget ? { remoteTarget } : {}),
+    ...(deliveryTimeoutMs !== undefined ? { deliveryTimeoutMs } : {}),
+    checkoutSyncPolicy: policy.checkoutSyncPolicy,
+    createdAt: policy.createdAt,
+    updatedAt: now,
+  };
+  writeAtomicJson(ensured.path, cleared);
+  return { policy: cleared, path: ensured.path };
 };

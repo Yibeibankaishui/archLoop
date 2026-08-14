@@ -207,5 +207,35 @@ describe("Hub landing transaction store", () => {
       shipped: true,
       reason: "legacy_closed_grandfathered",
     });
+    expect(
+      deriveHubLandingShipped({
+        publishPolicy: "required",
+        taskClosed: true,
+        transactionId: "ltx-1",
+        closedTransactionId: "ltx-1",
+        candidateOid,
+        closedCandidateOid: candidateOid,
+        publishTargetOid: candidateOid,
+        remotePublicationProven: false,
+      }),
+    ).toMatchObject({
+      shipped: false,
+      reason: "remote_publication_pending",
+    });
+    expect(
+      deriveHubLandingShipped({
+        publishPolicy: "required",
+        taskClosed: true,
+        transactionId: "ltx-1",
+        closedTransactionId: "ltx-1",
+        candidateOid,
+        closedCandidateOid: candidateOid,
+        publishTargetOid: candidateOid,
+        remotePublicationProven: true,
+      }),
+    ).toMatchObject({
+      shipped: true,
+      reason: "verified_landing_matching_closure_and_remote_publication",
+    });
   });
 });

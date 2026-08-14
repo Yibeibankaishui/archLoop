@@ -127,6 +127,7 @@ export type HubLandingTicketStatus =
   | "speculating"
   | "verified"
   | "landed"
+  | "publishing"
   | "invalidated"
   | "blocked_unshipped_prerequisite"
   | "failed"
@@ -209,6 +210,7 @@ const HUB_LANDING_TICKET_STATUSES = [
   "speculating",
   "verified",
   "landed",
+  "publishing",
   "invalidated",
   "blocked_unshipped_prerequisite",
   "failed",
@@ -227,6 +229,9 @@ const TERMINAL_STATUSES = new Set<HubLandingTicketStatus>([
   "landed",
   "failed",
 ]);
+
+/** Locally landed under required publication; blocks successor delivery. */
+const DELIVERY_HOLD_STATUSES = new Set<HubLandingTicketStatus>(["publishing"]);
 
 const isHubLandingTicketStatus = (
   value: string,
@@ -424,18 +429,50 @@ export const resolveHubLandingQueueHead = (
     )
     .sort((left, right) => left.sequence - right.sequence)[0];
 
+const hasEarlierRequiredDeliveryHold = (
+  queue: HubLandingQueueState | undefined,
+  taskId: string,
+): HubLandingQueueTicket | undefined => {
+  if (!queue) {
+    return undefined;
+  }
+  const mine = queue.tickets.find((ticket) => ticket.taskId === taskId);
+  if (!mine) {
+    return undefined;
+  }
+  return queue.tickets
+    .filter(
+      (ticket) =>
+        ticket.sequence < mine.sequence &&
+        DELIVERY_HOLD_STATUSES.has(ticket.status),
+    )
+    .sort((left, right) => left.sequence - right.sequence)[0];
+};
+
 export const canLandHubLandingTicket = (input: {
   readonly hubProjectDir: string;
   readonly taskId: string;
   readonly shippedTaskIds?: ReadonlySet<string>;
 }): boolean => {
   const queue = readHubLandingQueue(input.hubProjectDir);
+  if (hasEarlierRequiredDeliveryHold(queue, input.taskId)) {
+    return false;
+  }
   const head = resolveHubLandingQueueHead(
     queue,
     input.shippedTaskIds ?? new Set(),
   );
   return head?.taskId === input.taskId;
 };
+
+export const resolveRequiredDeliveryPredecessor = (input: {
+  readonly hubProjectDir: string;
+  readonly taskId: string;
+}): HubLandingQueueTicket | undefined =>
+  hasEarlierRequiredDeliveryHold(
+    readHubLandingQueue(input.hubProjectDir),
+    input.taskId,
+  );
 
 export const fifoPositionForTicket = (
   ticket: HubLandingQueueTicket,
@@ -521,6 +558,16 @@ export const markHubLandingQueueLanded = (
 ): HubLandingQueueTicket | undefined =>
   updateTicket(hubProjectDir, taskId, {
     status: "landed",
+    activationDriftRebuilds: 0,
+    quietWaitEnteredAt: undefined,
+  });
+
+export const markHubLandingQueuePublishing = (
+  hubProjectDir: string,
+  taskId: string,
+): HubLandingQueueTicket | undefined =>
+  updateTicket(hubProjectDir, taskId, {
+    status: "publishing",
     activationDriftRebuilds: 0,
     quietWaitEnteredAt: undefined,
   });
@@ -964,6 +1011,7 @@ export const selectHubSpeculativeChain = (
       (ticket) =>
         !TERMINAL_STATUSES.has(ticket.status) &&
         ticket.status !== "blocked_unshipped_prerequisite" &&
+        ticket.status !== "publishing" &&
         blockersShipped(ticket, shippedTaskIds),
     )
     .sort((left, right) => left.sequence - right.sequence)
