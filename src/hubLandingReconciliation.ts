@@ -780,8 +780,7 @@ export const reconcileHubLandingTransactions = async (
         candidateOid: before.candidateOid,
         now: input.now,
       });
-      // Shipped proof: landed + closed (close above is idempotent). Publication
-      // stays decoupled from GitHub task sync and does not affect shipped.
+      // Publication stays decoupled from GitHub task sync and does not affect shipped.
       enqueueHubPublicationAfterShipped({
         repoRoot: input.repoRoot,
         hubProjectDir: input.hubProjectDir,

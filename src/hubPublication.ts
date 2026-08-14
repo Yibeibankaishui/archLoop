@@ -44,6 +44,9 @@ export type HubPublicationStatus = "pending" | "succeeded";
 
 export const GIT_ZERO_OID = "0".repeat(40);
 
+/** Sentinel remote fields when best_effort is set without an explicit remoteTarget. */
+const UNSET_REMOTE_MARKER = "(unset)";
+
 export interface HubPublicationRemoteTarget {
   readonly remoteName: string;
   readonly branchName: string;
@@ -380,9 +383,10 @@ export const formatHubPublicationMessage = (
     return "";
   }
   const pending = inspection.items.find((item) => item.status === "pending");
-  return pending
-    ? pendingMessage(pending)
-    : `Code publication pending for ${inspection.pendingCount} shipped candidate(s). ${NO_RECOVER_SUFFIX}`;
+  if (pending) {
+    return pendingMessage(pending);
+  }
+  return `Code publication pending for ${inspection.pendingCount} shipped candidate(s). ${NO_RECOVER_SUFFIX}`;
 };
 
 export const inspectHubPublicationOutbox = (input: {
@@ -400,6 +404,22 @@ export const inspectHubPublicationOutbox = (input: {
     message: formatHubPublicationMessage({ items, pendingCount }),
     nextAction: pendingCount > 0 ? pendingAction : "",
   };
+};
+
+const parseLsRemoteTipOid = (
+  stdout: string,
+):
+  | { readonly kind: "ok"; readonly tip: string | undefined }
+  | { readonly kind: "invalid" } => {
+  const line = stdout.split("\n").find((entry) => entry.trim());
+  if (!line) {
+    return { kind: "ok", tip: undefined };
+  }
+  const oid = line.split(/[\s\t]/)[0]?.trim();
+  if (!isGitOid(oid)) {
+    return { kind: "invalid" };
+  }
+  return { kind: "ok", tip: oid };
 };
 
 const observeRemoteTip = async (
@@ -421,15 +441,11 @@ const observeRemoteTip = async (
       reason: classifyRemoteFailure(observed.stderr),
     };
   }
-  const line = observed.stdout.split("\n").find((entry) => entry.trim());
-  if (!line) {
-    return { kind: "ok", tip: undefined };
-  }
-  const oid = line.split(/[\s\t]/)[0]?.trim();
-  if (!isGitOid(oid)) {
+  const parsed = parseLsRemoteTipOid(observed.stdout);
+  if (parsed.kind === "invalid") {
     return { kind: "error", reason: "observe_failed" };
   }
-  return { kind: "ok", tip: oid };
+  return { kind: "ok", tip: parsed.tip };
 };
 
 const observeRemoteTipSync = (
@@ -445,12 +461,8 @@ const observeRemoteTipSync = (
   if (output === undefined) {
     return undefined;
   }
-  const line = output.split("\n").find((entry) => entry.trim());
-  if (!line) {
-    return undefined;
-  }
-  const oid = line.split(/[\s\t]/)[0]?.trim();
-  return isGitOid(oid) ? oid : undefined;
+  const parsed = parseLsRemoteTipOid(output);
+  return parsed.kind === "ok" ? parsed.tip : undefined;
 };
 
 export const classifyRemoteFailure = (
@@ -527,6 +539,19 @@ const candidateIsFastForwardOf = (
   tip: string | undefined,
 ): tip is string =>
   tip !== undefined && isAncestor(repoRoot, tip, candidateOid);
+
+const remoteTipDivergedFromExpectation = (
+  repoRoot: string,
+  item: HubPublicationOutboxItem,
+  tip: string | undefined,
+): boolean =>
+  tip !== undefined &&
+  tip !== item.expectedRemoteOid &&
+  !candidateIsFastForwardOf(repoRoot, item.candidateOid, tip);
+
+const isUnsetRemoteItem = (item: HubPublicationOutboxItem): boolean =>
+  item.pendingReason === "no_remote_configured" ||
+  item.remoteName === UNSET_REMOTE_MARKER;
 
 const markSucceeded = (
   hubProjectDir: string,
@@ -619,37 +644,7 @@ export const enqueueHubPublication = (
   const remoteTargetValue = input.candidate.policy.remoteTarget;
   const now = (input.now ?? new Date()).toISOString();
   if (!remoteTargetValue) {
-    const id = resolveHubPublicationId({
-      transactionId: input.candidate.transactionId,
-      remoteName: "(unset)",
-      remoteRef: "(unset)",
-      candidateOid: input.candidateOid,
-      expectedRemoteOid: GIT_ZERO_OID,
-    });
-    const existing = readOutboxItem(input.hubProjectDir, id);
-    if (existing) {
-      return existing;
-    }
-    const draft: HubPublicationOutboxItem = {
-      version: 1,
-      id,
-      transactionId: input.candidate.transactionId,
-      taskId: input.candidate.taskId,
-      remoteName: "(unset)",
-      remoteRef: "(unset)",
-      remoteTarget: "(unset)",
-      candidateOid: input.candidateOid,
-      expectedRemoteOid: GIT_ZERO_OID,
-      publishTargetRef: input.candidate.policy.publishTargetRef,
-      status: "pending",
-      pendingReason: "no_remote_configured",
-      createdAt: now,
-      updatedAt: now,
-    };
-    return writeOutboxItem(input.hubProjectDir, {
-      ...draft,
-      message: pendingMessage(draft),
-    });
+    return enqueueUnsetRemotePending(input, now);
   }
 
   const parsed = parseHubPublicationRemoteTarget(remoteTargetValue);
@@ -676,13 +671,7 @@ export const enqueueHubPublication = (
   }
   // Prefer an already-pending item for the same transaction/remote/ref/candidate
   // so restart does not create a second key when the remote tip moved.
-  const sibling = listHubPublicationOutboxItems(input.hubProjectDir).find(
-    (item) =>
-      item.transactionId === input.candidate.transactionId &&
-      item.remoteName === parsed.remoteName &&
-      item.remoteRef === parsed.remoteRef &&
-      item.candidateOid === input.candidateOid,
-  );
+  const sibling = findSiblingOutboxItem(input, parsed);
   if (sibling) {
     return sibling;
   }
@@ -704,25 +693,80 @@ export const enqueueHubPublication = (
   });
 };
 
+const enqueueUnsetRemotePending = (
+  input: EnqueueHubPublicationInput,
+  now: string,
+): HubPublicationOutboxItem => {
+  const id = resolveHubPublicationId({
+    transactionId: input.candidate.transactionId,
+    remoteName: UNSET_REMOTE_MARKER,
+    remoteRef: UNSET_REMOTE_MARKER,
+    candidateOid: input.candidateOid,
+    expectedRemoteOid: GIT_ZERO_OID,
+  });
+  const existing = readOutboxItem(input.hubProjectDir, id);
+  if (existing) {
+    return existing;
+  }
+  const draft: HubPublicationOutboxItem = {
+    version: 1,
+    id,
+    transactionId: input.candidate.transactionId,
+    taskId: input.candidate.taskId,
+    remoteName: UNSET_REMOTE_MARKER,
+    remoteRef: UNSET_REMOTE_MARKER,
+    remoteTarget: UNSET_REMOTE_MARKER,
+    candidateOid: input.candidateOid,
+    expectedRemoteOid: GIT_ZERO_OID,
+    publishTargetRef: input.candidate.policy.publishTargetRef,
+    status: "pending",
+    pendingReason: "no_remote_configured",
+    createdAt: now,
+    updatedAt: now,
+  };
+  return writeOutboxItem(input.hubProjectDir, {
+    ...draft,
+    message: pendingMessage(draft),
+  });
+};
+
+const findSiblingOutboxItem = (
+  input: EnqueueHubPublicationInput,
+  parsed: HubPublicationRemoteTarget,
+): HubPublicationOutboxItem | undefined =>
+  listHubPublicationOutboxItems(input.hubProjectDir).find(
+    (item) =>
+      item.transactionId === input.candidate.transactionId &&
+      item.remoteName === parsed.remoteName &&
+      item.remoteRef === parsed.remoteRef &&
+      item.candidateOid === input.candidateOid,
+  );
+
+const buildPushArgs = (
+  item: HubPublicationOutboxItem,
+  expectedRemoteOid: string,
+): readonly string[] => {
+  const refspec = `${item.candidateOid}:${item.remoteRef}`;
+  if (expectedRemoteOid === GIT_ZERO_OID) {
+    return ["push", item.remoteName, refspec];
+  }
+  return [
+    "push",
+    `--force-with-lease=${item.remoteRef}:${expectedRemoteOid}`,
+    item.remoteName,
+    refspec,
+  ];
+};
+
 const pushCandidate = async (
   repoRoot: string,
   item: HubPublicationOutboxItem,
   expectedRemoteOid: string,
 ): Promise<{ readonly ok: boolean; readonly stderr: string }> => {
-  const args =
-    expectedRemoteOid === GIT_ZERO_OID
-      ? [
-          "push",
-          item.remoteName,
-          `${item.candidateOid}:${item.remoteRef}`,
-        ]
-      : [
-          "push",
-          `--force-with-lease=${item.remoteRef}:${expectedRemoteOid}`,
-          item.remoteName,
-          `${item.candidateOid}:${item.remoteRef}`,
-        ];
-  const result = await gitExecCapture(repoRoot, args);
+  const result = await gitExecCapture(
+    repoRoot,
+    buildPushArgs(item, expectedRemoteOid),
+  );
   return { ok: result.ok, stderr: result.stderr };
 };
 
@@ -742,6 +786,91 @@ const ensureCandidateObjectFetched = async (
   ]);
 };
 
+/**
+ * After a push attempt, observe the remote and succeed if ancestry proves the
+ * candidate is already present (covers unknown/crash outcomes without retrying
+ * a push that already landed).
+ */
+const trySucceedFromRemoteObservation = async (
+  input: ProjectHubPublicationOutboxInput,
+  item: HubPublicationOutboxItem,
+  now: string,
+  options: { readonly crashAfterOnSuccess: boolean },
+): Promise<HubPublicationOutboxItem | undefined> => {
+  const observed = await observeRemoteTip(
+    input.repoRoot,
+    item.remoteName,
+    item.remoteRef,
+  );
+  if (
+    observed.kind !== "ok" ||
+    !remoteContainsCandidate(input.repoRoot, item.candidateOid, observed.tip)
+  ) {
+    return undefined;
+  }
+  if (options.crashAfterOnSuccess) {
+    maybeCrash(input.faultInjection, "after");
+  }
+  return markSucceeded(input.hubProjectDir, item, {
+    publishedOid: observed.tip,
+    now,
+  });
+};
+
+const pushCandidateWithCrashWindows = async (
+  input: ProjectHubPublicationOutboxInput,
+  item: HubPublicationOutboxItem,
+  leaseOid: string,
+  now: string,
+): Promise<HubPublicationOutboxItem> => {
+  maybeCrash(input.faultInjection, "before");
+  try {
+    const pushed = await pushCandidate(input.repoRoot, item, leaseOid);
+    if (!pushed.ok) {
+      const recovered = await trySucceedFromRemoteObservation(input, item, now, {
+        crashAfterOnSuccess: true,
+      });
+      if (recovered) {
+        return recovered;
+      }
+      return markPending(
+        input.hubProjectDir,
+        item,
+        classifyRemoteFailure(pushed.stderr),
+        now,
+      );
+    }
+  } catch (error) {
+    if (error instanceof HubLandingCrash) {
+      throw error;
+    }
+    const recovered = await trySucceedFromRemoteObservation(input, item, now, {
+      crashAfterOnSuccess: true,
+    });
+    if (recovered) {
+      return recovered;
+    }
+    return markPending(
+      input.hubProjectDir,
+      item,
+      classifyRemoteFailure(String(error)),
+      now,
+    );
+  }
+
+  maybeCrash(input.faultInjection, "after");
+  const confirmed = await trySucceedFromRemoteObservation(input, item, now, {
+    crashAfterOnSuccess: false,
+  });
+  if (confirmed) {
+    return confirmed;
+  }
+  return markSucceeded(input.hubProjectDir, item, {
+    publishedOid: item.candidateOid,
+    now,
+  });
+};
+
 const projectOneItem = async (
   input: ProjectHubPublicationOutboxInput,
   item: HubPublicationOutboxItem,
@@ -750,10 +879,7 @@ const projectOneItem = async (
   if (item.status === "succeeded") {
     return item;
   }
-  if (
-    item.pendingReason === "no_remote_configured" ||
-    item.remoteName === "(unset)"
-  ) {
+  if (isUnsetRemoteItem(item)) {
     return markPending(
       input.hubProjectDir,
       item,
@@ -783,92 +909,16 @@ const projectOneItem = async (
     });
   }
 
-  const leaseOid = tip ?? GIT_ZERO_OID;
-  if (
-    tip !== undefined &&
-    tip !== item.expectedRemoteOid &&
-    !candidateIsFastForwardOf(input.repoRoot, item.candidateOid, tip)
-  ) {
+  if (remoteTipDivergedFromExpectation(input.repoRoot, item, tip)) {
     return markPending(input.hubProjectDir, item, "remote_diverged", now);
   }
 
-  maybeCrash(input.faultInjection, "before");
-  try {
-    const pushed = await pushCandidate(input.repoRoot, item, leaseOid);
-    if (!pushed.ok) {
-      const afterFail = await observeRemoteTip(
-        input.repoRoot,
-        item.remoteName,
-        item.remoteRef,
-      );
-      if (
-        afterFail.kind === "ok" &&
-        remoteContainsCandidate(
-          input.repoRoot,
-          item.candidateOid,
-          afterFail.tip,
-        )
-      ) {
-        maybeCrash(input.faultInjection, "after");
-        return markSucceeded(input.hubProjectDir, item, {
-          publishedOid: afterFail.tip!,
-          now,
-        });
-      }
-      return markPending(
-        input.hubProjectDir,
-        item,
-        classifyRemoteFailure(pushed.stderr),
-        now,
-      );
-    }
-  } catch (error) {
-    if (error instanceof HubLandingCrash) {
-      throw error;
-    }
-    const afterFail = await observeRemoteTip(
-      input.repoRoot,
-      item.remoteName,
-      item.remoteRef,
-    );
-    if (
-      afterFail.kind === "ok" &&
-      remoteContainsCandidate(input.repoRoot, item.candidateOid, afterFail.tip)
-    ) {
-      maybeCrash(input.faultInjection, "after");
-      return markSucceeded(input.hubProjectDir, item, {
-        publishedOid: afterFail.tip!,
-        now,
-      });
-    }
-    return markPending(
-      input.hubProjectDir,
-      item,
-      classifyRemoteFailure(String(error)),
-      now,
-    );
-  }
-
-  maybeCrash(input.faultInjection, "after");
-
-  const afterPush = await observeRemoteTip(
-    input.repoRoot,
-    item.remoteName,
-    item.remoteRef,
-  );
-  if (
-    afterPush.kind === "ok" &&
-    remoteContainsCandidate(input.repoRoot, item.candidateOid, afterPush.tip)
-  ) {
-    return markSucceeded(input.hubProjectDir, item, {
-      publishedOid: afterPush.tip!,
-      now,
-    });
-  }
-  return markSucceeded(input.hubProjectDir, item, {
-    publishedOid: item.candidateOid,
+  return pushCandidateWithCrashWindows(
+    input,
+    item,
+    tip ?? GIT_ZERO_OID,
     now,
-  });
+  );
 };
 
 const attemptMessage = (item: HubPublicationOutboxItem): string => {

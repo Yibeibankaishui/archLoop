@@ -76,6 +76,31 @@ const landingLegacyHistoryJson = (
   };
 };
 
+const codePublicationJson = (
+  publication: RunHubFlowResult["publication"],
+): Readonly<Record<string, unknown>> => {
+  if (!publication || publication.pendingCount <= 0) {
+    return {};
+  }
+  return {
+    codePublication: {
+      pendingCount: publication.pendingCount,
+      succeededCount: publication.succeededCount,
+      message: publication.message,
+      nextAction: publication.nextAction,
+      items: publication.items
+        .filter((item) => item.status === "pending")
+        .map((item) => ({
+          transactionId: item.transactionId,
+          candidateOid: item.candidateOid,
+          remoteRef: item.remoteRef,
+          expectedRemoteOid: item.expectedRemoteOid,
+          pendingReason: item.pendingReason,
+        })),
+    },
+  };
+};
+
 const eventData = (event: HubRunEvent): Readonly<Record<string, unknown>> => {
   const data = { ...event } as Record<string, unknown>;
   for (const key of [
@@ -336,25 +361,7 @@ export const createHubRunJsonRenderer = (input: {
                 },
               }
             : {}),
-          ...(result.publication && result.publication.pendingCount > 0
-            ? {
-                codePublication: {
-                  pendingCount: result.publication.pendingCount,
-                  succeededCount: result.publication.succeededCount,
-                  message: result.publication.message,
-                  nextAction: result.publication.nextAction,
-                  items: result.publication.items
-                    .filter((item) => item.status === "pending")
-                    .map((item) => ({
-                      transactionId: item.transactionId,
-                      candidateOid: item.candidateOid,
-                      remoteRef: item.remoteRef,
-                      expectedRemoteOid: item.expectedRemoteOid,
-                      pendingReason: item.pendingReason,
-                    })),
-                },
-              }
-            : {}),
+          ...codePublicationJson(result.publication),
           ...(result.mergeResult
             ? {
                 merge: {

@@ -687,6 +687,22 @@ const appendWorktreeLeaseLines = (
   }
 };
 
+const hasCodePublicationPendingCount = (
+  status: Pick<HubProjectStatus, "codePublicationPendingCount">,
+): boolean => (status.codePublicationPendingCount ?? 0) > 0;
+
+const hasPendingCodePublication = (
+  status: Pick<
+    HubProjectStatus,
+    "codePublicationPendingCount" | "codePublicationMessage"
+  >,
+): status is HubProjectStatus & {
+  readonly codePublicationPendingCount: number;
+  readonly codePublicationMessage: string;
+} =>
+  hasCodePublicationPendingCount(status) &&
+  Boolean(status.codePublicationMessage);
+
 export const formatHubProjectStatusLines = (
   status: HubProjectStatus,
   cleanupDiagnosticsLines?: readonly string[],
@@ -726,11 +742,7 @@ export const formatHubProjectStatusLines = (
     lines.push(`  ${status.checkoutSyncMessage}`);
     lines.push("");
   }
-  if (
-    status.codePublicationPendingCount &&
-    status.codePublicationPendingCount > 0 &&
-    status.codePublicationMessage
-  ) {
+  if (hasPendingCodePublication(status)) {
     lines.push("Code publication");
     lines.push(`  ${status.codePublicationMessage}`);
     lines.push("");
@@ -1146,8 +1158,7 @@ const projectStatusIdentityRows = (
         },
       ]
     : []),
-  ...(status.codePublicationPendingCount &&
-  status.codePublicationPendingCount > 0
+  ...(hasCodePublicationPendingCount(status)
     ? [
         {
           key: "Code publication",
