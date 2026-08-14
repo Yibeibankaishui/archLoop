@@ -32,6 +32,7 @@ import {
 import { formatHubLegacyLandingHistoryLines } from "./hubLandingLegacyHistory.js";
 import { inspectHubCheckoutOutbox } from "./hubCheckoutProjection.js";
 import { inspectHubPublicationOutbox } from "./hubPublication.js";
+import { inspectHubLandingQueue } from "./hubLandingQueue.js";
 import {
   formatHubTaskStoreMigrationMessage,
   inspectHubTaskStoreMigration,
@@ -706,6 +707,13 @@ export const doctorHubTaskState = async (
   if (codePublication.pendingCount > 0) {
     landingDiagnostics.push(codePublication.message);
     landingDiagnostics.push(`Next action: ${codePublication.nextAction}`);
+  }
+  const landingQueue = inspectHubLandingQueue(hubProjectDir);
+  if (landingQueue.pendingQuietWaitCount > 0 && landingQueue.message) {
+    landingDiagnostics.push(landingQueue.message);
+    if (landingQueue.nextAction) {
+      landingDiagnostics.push(`Next action: ${landingQueue.nextAction}`);
+    }
   }
 
   return {

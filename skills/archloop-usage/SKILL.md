@@ -234,10 +234,20 @@ npx archloop tasks cleanup --dry-run
 - Each merge-ready task owns its own landing transaction. Independent siblings
   continue after one task is blocked; dependents wait for an unshipped
   prerequisite. Mixed shipped and blocked batches report `partial_failed`.
+- Merge-ready tasks for one publish target receive durable FIFO and dependency
+  tickets. Speculative candidates build on the predecessor OID, verify exact
+  OIDs concurrently where dependencies permit, and land only at the queue head
+  with fenced CAS. Predecessor repair, failure, committed host contribution, or
+  target drift invalidates the affected speculative suffix. Committed host
+  tips (behind/descendant/diverged) reconcile into the canonical chain before
+  task candidates continue; uncommitted host WIP is never imported. After three
+  immediate drift rebuilds the head retains `target_quiet_wait` until a stable
+  window resumes automatically without resetting repair budgets or requiring
+  `tasks recover`.
 - Semantic Git conflicts get at most two merge-role Agent repairs; verification
   failures get at most two candidate-repair attempts with a new candidate
   generation and full re-verification each time. Repair budgets do not reset
-  on target drift or process restart. Exhaustion blocks only that task as
+  on target drift, quiet-wait resume, or process restart. Exhaustion blocks only that task as
   `merge_conflict_unresolved` or `verification_failed`. Transient lock/I/O
   errors stay pending. Unverified or stale candidates cannot land.
 - Concurrent `archloop run` processes share a landing lease (owner nonce,
@@ -258,7 +268,7 @@ npx archloop tasks cleanup --dry-run
 - `tasks doctor` is read-only. It groups diagnostics by severity, reports
   interrupted execution when no lease diagnostic already explains it, and can
   display landing reconciliation state, checkout sync pending, code
-  publication pending, and legacy
+  publication pending, FIFO quiet wait, and legacy
   history without advancing the transaction or updating the checkout.
 - `tasks repair-state` previews changes before confirmation and rewrites only
   archLoop-managed status fields; it does not mutate GitHub Issues.

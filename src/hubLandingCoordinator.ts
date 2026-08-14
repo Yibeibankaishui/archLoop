@@ -28,6 +28,25 @@ import {
   type HubLandingFaultInjection,
 } from "./hubLanding.js";
 import type { HubLandingPolicy } from "./hubLandingPolicy.js";
+import {
+  HUB_LANDING_TARGET_DRIFT_REBUILD_LIMIT,
+  HUB_TARGET_QUIET_WAIT,
+  canLandHubLandingTicket,
+  ensureHubLandingQueueTicket,
+  enterHubLandingQuietWait,
+  findHubLandingQueueTicket,
+  invalidateHubLandingSpeculativeSuffix,
+  markHubLandingQueueLanded,
+  readHubLandingQueue,
+  recordHubLandingDriftRebuild,
+  recordHubLandingQueueCandidate,
+  resolveHubLandingQueueHead,
+  resumeHubLandingQuietWaitIfStable,
+  shouldEnterHubLandingQuietWait,
+  waitHubLandingDriftBackoff,
+  type HubLandingQueueClock,
+  type HubLandingQueueTicket,
+} from "./hubLandingQueue.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -372,6 +391,17 @@ export type HubLandingCoordinatorResult = HubLandingOidEvidence &
         readonly candidate: HubLandingCandidate;
         readonly message: string;
       }
+    | {
+        readonly kind: "target_quiet_wait";
+        readonly candidate: HubLandingCandidate;
+        readonly message: string;
+        readonly ticket?: HubLandingQueueTicket;
+      }
+    | {
+        readonly kind: "not_queue_head";
+        readonly candidate: HubLandingCandidate;
+        readonly message: string;
+      }
   );
 
 export type HubLandingAttemptResult =
@@ -575,6 +605,8 @@ export const coordinateHubQueueHeadLanding = async (input: {
   readonly probe?: HubLandingLeaseProbe;
   readonly faultInjection?: HubLandingFaultInjection;
   readonly merge?: (worktreeDir: string) => Promise<void>;
+  readonly clock?: HubLandingQueueClock;
+  readonly shippedTaskIds?: ReadonlySet<string>;
 }): Promise<HubLandingCoordinatorResult> => {
   let candidate =
     input.candidate ??
@@ -614,6 +646,103 @@ export const coordinateHubQueueHeadLanding = async (input: {
         faultInjection: input.faultInjection,
       }));
 
+  const syncQueueCandidate = (next: HubLandingCandidate): void => {
+    recordHubLandingQueueCandidate({
+      hubProjectDir: input.hubProjectDir,
+      taskId: input.taskId,
+      sourceOid: next.sourceOid,
+      predecessorOid: next.baseOid,
+      candidateOid: next.candidateOid,
+      transactionId: next.transactionId,
+    });
+  };
+
+  const ticketForTask = (): HubLandingQueueTicket | undefined =>
+    findHubLandingQueueTicket(input.hubProjectDir, input.taskId);
+
+  const activationDriftRebuilds = (): number =>
+    ticketForTask()?.activationDriftRebuilds ?? 0;
+
+  const withFenceEvidence = <T extends Record<string, unknown>>(
+    fields: T,
+    expectedOid: string,
+    observedOid: string,
+  ): T & HubLandingOidEvidence => ({
+    ...fields,
+    expectedTargetOid: expectedOid,
+    observedTargetOid: observedOid,
+    expectedFenceOid: expectedOid,
+    observedFenceOid: observedOid,
+  });
+
+  const rebuildVerifiedCandidate = async (): Promise<HubLandingCandidate> => {
+    const next = await rebuild();
+    await verify(next);
+    syncQueueCandidate(next);
+    return next;
+  };
+
+  ensureHubLandingQueueTicket({
+    hubProjectDir: input.hubProjectDir,
+    publishTargetRef: candidate.policy.publishTargetRef,
+    taskId: input.taskId,
+    sourceOid: candidate.sourceOid,
+    clock: input.clock,
+  });
+  syncQueueCandidate(candidate);
+
+  const observedTarget = await gitText(input.repoRoot, [
+    "rev-parse",
+    candidate.policy.publishTargetRef,
+  ]);
+  const resume = resumeHubLandingQuietWaitIfStable({
+    hubProjectDir: input.hubProjectDir,
+    taskId: input.taskId,
+    observedTargetOid: observedTarget,
+    clock: input.clock,
+  });
+  if (resume === "waiting") {
+    return withFenceEvidence(
+      {
+        kind: "target_quiet_wait" as const,
+        candidate,
+        ticket: ticketForTask(),
+        message: `Retaining FIFO ticket for ${input.taskId} in ${HUB_TARGET_QUIET_WAIT} until the Hub publish target is stable. This is not a task failure and does not require a recovery command.`,
+      },
+      candidate.baseOid,
+      observedTarget,
+    );
+  }
+  if (resume === "resumed") {
+    invalidateHubLandingCandidate({
+      hubProjectDir: input.hubProjectDir,
+      transactionId: candidate.transactionId,
+    });
+    candidate = await rebuildVerifiedCandidate();
+  }
+
+  if (
+    !canLandHubLandingTicket({
+      hubProjectDir: input.hubProjectDir,
+      taskId: input.taskId,
+      shippedTaskIds: input.shippedTaskIds,
+    })
+  ) {
+    const head = resolveHubLandingQueueHead(
+      readHubLandingQueue(input.hubProjectDir),
+      input.shippedTaskIds ?? new Set(),
+    );
+    return withFenceEvidence(
+      {
+        kind: "not_queue_head" as const,
+        candidate,
+        message: `Task ${input.taskId} cannot overtake FIFO queue head ${head?.taskId ?? "(unknown)"}. This is not a task failure and does not require a recovery command.`,
+      },
+      candidate.baseOid,
+      observedTarget,
+    );
+  }
+
   for (;;) {
     const outcome = await landHubCandidateWithLease({
       repoRoot: input.repoRoot,
@@ -625,13 +754,51 @@ export const coordinateHubQueueHeadLanding = async (input: {
       faultInjection: input.faultInjection,
     });
     if (outcome.kind !== "target_drift") {
+      if (outcome.kind === "landed") {
+        markHubLandingQueueLanded(input.hubProjectDir, input.taskId);
+      }
       return outcome;
     }
+    if (
+      shouldEnterHubLandingQuietWait({
+        hubProjectDir: input.hubProjectDir,
+        taskId: input.taskId,
+      })
+    ) {
+      const ticket = enterHubLandingQuietWait({
+        hubProjectDir: input.hubProjectDir,
+        taskId: input.taskId,
+        observedTargetOid: outcome.observedTargetOid,
+        clock: input.clock,
+      });
+      return {
+        kind: "target_quiet_wait",
+        candidate,
+        ticket,
+        message: `Queue head ${input.taskId} entered ${HUB_TARGET_QUIET_WAIT} after ${HUB_LANDING_TARGET_DRIFT_REBUILD_LIMIT} immediate target-drift rebuilds. Later transactions cannot overtake this ticket. This is not a task failure and does not require a recovery command.`,
+        expectedTargetOid: outcome.expectedTargetOid,
+        observedTargetOid: outcome.observedTargetOid,
+        expectedFenceOid: outcome.expectedFenceOid,
+        observedFenceOid: outcome.observedFenceOid,
+      };
+    }
+    await waitHubLandingDriftBackoff(input.clock, activationDriftRebuilds());
+    recordHubLandingDriftRebuild({
+      hubProjectDir: input.hubProjectDir,
+      taskId: input.taskId,
+      observedTargetOid: outcome.observedTargetOid,
+      clock: input.clock,
+    });
     invalidateHubLandingCandidate({
       hubProjectDir: input.hubProjectDir,
       transactionId: candidate.transactionId,
     });
-    candidate = await rebuild();
-    await verify(candidate);
+    invalidateHubLandingSpeculativeSuffix({
+      hubProjectDir: input.hubProjectDir,
+      fromTaskId: input.taskId,
+      reason: "target_drift",
+      clock: input.clock,
+    });
+    candidate = await rebuildVerifiedCandidate();
   }
 };

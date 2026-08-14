@@ -429,6 +429,12 @@ const resolveTaskStage = (event: Extract<HubRunEvent, { taskId: string }>) => {
       return "Landing pending";
     case "target_landing_stale_owner_rejected":
       return "Stale landing owner rejected";
+    case "target_quiet_wait":
+      return "Target quiet wait";
+    case "speculative_suffix_invalidated":
+      return "Speculative suffix invalidated";
+    case "host_contribution_reconciled":
+      return "Host contribution reconciled";
     case "checkout_sync_pending":
       return "Checkout sync pending";
     case "checkout_sync_succeeded":
@@ -800,11 +806,25 @@ export const formatPlainHubRunEvent = (
         ["observed_fence_oid", event.observedFenceOid],
         ["transaction_id", event.transactionId],
         ["candidate_oid", event.candidateOid],
+        ["predecessor_oid", event.predecessorOid],
         ["remote_ref", event.remoteRef],
         ["expected_remote_oid", event.expectedRemoteOid],
         ["reason", event.reason],
         ["message", event.message],
+        ["host_contribution", event.hostContributionRelation],
       ]),
+      ...(typeof event.fifoPosition === "number"
+        ? [numberField("fifo_position", event.fifoPosition)]
+        : []),
+      ...(typeof event.verificationConcurrency === "number"
+        ? [numberField("verification_concurrency", event.verificationConcurrency)]
+        : []),
+      ...(event.suffixInvalidatedTaskIds &&
+      event.suffixInvalidatedTaskIds.length > 0
+        ? [
+            `suffix_invalidated_task_ids=${JSON.stringify(event.suffixInvalidatedTaskIds)}`,
+          ]
+        : []),
     ].join(" ");
   }
 

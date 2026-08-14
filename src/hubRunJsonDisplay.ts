@@ -101,6 +101,27 @@ const codePublicationJson = (
   };
 };
 
+const landingQueueJson = (
+  landingQueue: RunHubFlowResult["landingQueue"],
+): Readonly<Record<string, unknown>> => {
+  if (!landingQueue || landingQueue.pendingQuietWaitCount <= 0) {
+    return {};
+  }
+  return {
+    landingQueue: {
+      pendingQuietWaitCount: landingQueue.pendingQuietWaitCount,
+      ...(landingQueue.fifoHeadTaskId
+        ? { fifoHeadTaskId: landingQueue.fifoHeadTaskId }
+        : {}),
+      ...(landingQueue.fifoHeadPosition === undefined
+        ? {}
+        : { fifoHeadPosition: landingQueue.fifoHeadPosition }),
+      message: landingQueue.message,
+      nextAction: landingQueue.nextAction,
+    },
+  };
+};
+
 const eventData = (event: HubRunEvent): Readonly<Record<string, unknown>> => {
   const data = { ...event } as Record<string, unknown>;
   for (const key of [
@@ -362,6 +383,7 @@ export const createHubRunJsonRenderer = (input: {
               }
             : {}),
           ...codePublicationJson(result.publication),
+          ...landingQueueJson(result.landingQueue),
           ...(result.mergeResult
             ? {
                 merge: {
@@ -383,6 +405,18 @@ export const createHubRunJsonRenderer = (input: {
                     ...(task.candidateOid
                       ? { candidateOid: task.candidateOid }
                       : {}),
+                    ...(task.predecessorOid
+                      ? { predecessorOid: task.predecessorOid }
+                      : {}),
+                    ...(task.fifoPosition === undefined
+                      ? {}
+                      : { fifoPosition: task.fifoPosition }),
+                    ...(task.verificationConcurrency === undefined
+                      ? {}
+                      : {
+                          verificationConcurrency:
+                            task.verificationConcurrency,
+                        }),
                   })),
                 },
               }

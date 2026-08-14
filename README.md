@@ -33,7 +33,12 @@ TypeScript API to build your own orchestration.
 - Review and merge flows with recovery after interrupted runs
 - Local-first landing onto a Hub publish target: a verified candidate ships
   without a remote and without mutating the user's checkout during landing.
-  After landing, Hub fast-forwards the host branch only when Git can prove it
+  Merge-ready tasks share durable FIFO tickets and a speculative candidate
+  chain; exact OIDs verify concurrently where safe, and only the queue head
+  lands with fenced CAS. After three target-drift rebuilds the head waits in
+  `target_quiet_wait` until the target is stable, without later-task overtaking.
+  Committed host tips reconcile into the chain; uncommitted WIP is never
+  imported. After landing, Hub fast-forwards the host branch only when Git can prove it
   safe; otherwise `checkout_sync_pending` retries automatically without
   changing `shipped`. With an explicit `--publish-policy best_effort` and
   `--remote-target`, Hub publishes through a durable outbox; network or remote

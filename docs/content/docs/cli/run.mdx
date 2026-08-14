@@ -36,13 +36,32 @@ without failed tasks points back to `archloop run`, which performs automatic
 startup recovery.
 
 Eligible merge-ready tasks each own a durable landing transaction onto a
-Hub-managed local Git ref. archLoop freezes source and base OIDs, builds and
-verifies the exact candidate in a Hub-owned detached worktree, then advances
-the publish target, fence, and landing receipt in one Git ref transaction
-before closing the task. The user's checkout, index, HEAD, and WIP are not
-modified during that landing transaction. After landing, Hub enqueues a
-durable checkout projection. A local host branch that is not checked out
-anywhere advances with OID compare-and-swap. A checked-out branch
+Hub-managed local Git ref. Merge-ready tasks for one publish target receive
+durable FIFO and dependency tickets; later transactions cannot overtake an
+older eligible queue head. Hub builds a bounded speculative candidate chain
+where each candidate is based on its predecessor OID, schedules full
+verification of exact candidate OIDs concurrently where dependencies permit,
+and still serializes landing at the queue head with fenced compare-and-swap
+evidence. Speculative verification alone never advances the publish target.
+Predecessor repair, failure, committed host contribution, or target drift
+invalidates only the affected speculative suffix; independent successors
+rebuild and reverify while dependents stay blocked until their prerequisite
+ships. Committed behind, descendant, and diverged host-target tips are
+reconciled into the canonical chain and fully verified before task candidates
+continue; uncommitted host state is neither imported nor modified. A
+queue-head activation performs at most three immediate target-drift rebuilds
+with jittered backoff, then retains its ticket in `target_quiet_wait` without
+a busy loop or later-task overtaking. A subsequent stable target window starts
+a new activation automatically without resetting semantic repair budgets or
+requiring `tasks recover`. Plain and JSON output show FIFO position,
+predecessor and candidate OIDs, suffix invalidation, host contribution,
+verification concurrency, and quiet-wait state. archLoop freezes source and
+base OIDs, builds and verifies the exact candidate in a Hub-owned detached
+worktree, then advances the publish target, fence, and landing receipt in one
+Git ref transaction before closing the task. The user's checkout, index, HEAD,
+and WIP are not modified during that landing transaction. After landing, Hub
+enqueues a durable checkout projection. A local host branch that is not
+checked out anywhere advances with OID compare-and-swap. A checked-out branch
 fast-forwards only in its owning worktree when Git can prove the index,
 working tree, operation state, untracked paths, sparse checkout, submodules,
 and other worktrees safe. Otherwise Hub records `checkout_sync_pending`,
