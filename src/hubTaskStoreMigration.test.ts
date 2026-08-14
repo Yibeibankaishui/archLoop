@@ -838,3 +838,111 @@ describe("unsafe Hub Beads migration deferral and split brain", () => {
     ).toContain(created.id);
   }, 90_000);
 });
+
+describe("fresh managed Hub Beads store (no legacy migration)", () => {
+  const createFreshManagedProject = async (projectName: string) => {
+    const bundledBd = resolveBundledBdExecutable();
+    expect(bundledBd).toBeDefined();
+
+    const root = await mkdtemp(join(tmpdir(), "hub-fresh-managed-"));
+    const repoDir = join(root, "repo");
+    await mkdir(repoDir);
+    await initRepo(repoDir);
+    const env: NodeJS.ProcessEnv = {
+      ...process.env,
+      XDG_DATA_HOME: join(root, "xdg-data"),
+      ARCHLOOP_BD_PATH: bundledBd!,
+      BEADS_ACTOR: "archloop-test",
+    };
+    delete env.BEADS_DIR;
+
+    const registered = registerHubProject({
+      repoPath: repoDir,
+      projectName,
+      env,
+      initializeTaskStore: true,
+    });
+    return {
+      env,
+      registered,
+      input: {
+        repoRoot: registered.project.repoRoot,
+        hubProjectDir: registered.project.hubProjectDir,
+        env,
+      },
+    };
+  };
+
+  it("treats project-add immediate init as steady state and allows the first mutating command", async () => {
+    const { registered, env, input } =
+      await createFreshManagedProject("fresh-alpha");
+
+    const inspection = inspectHubTaskStoreMigration(input);
+    expect(inspection.phase).not.toBe("redirect_installed");
+    expect(inspection.phase === undefined || inspection.phase === "verified").toBe(
+      true,
+    );
+
+    const outcome = ensureHubTaskStoreMigrated(input);
+    expect(outcome.kind).toBe("not_needed");
+    if (outcome.kind !== "not_needed") {
+      return;
+    }
+    expect(outcome.reason === "redirect" || outcome.reason === "verified").toBe(
+      true,
+    );
+
+    const created = createHubTask(
+      registered.project.repoRoot,
+      { title: "First mutation on fresh managed store" },
+      env,
+    );
+    expect(
+      loadHubTaskBoard(registered.project.repoRoot, env).tasks.map(
+        (task) => task.id,
+      ),
+    ).toContain(created.id);
+
+    const status = resolveHubProjectStatus({
+      cwd: registered.project.repoRoot,
+      hubProjectDir: registered.project.hubProjectDir,
+      archloopUserDataDir: resolveArchloopUserDataDir(env),
+      detectBeadsAvailable: () => true,
+      ensureHubProjectDir: () => true,
+    });
+    expect(status.taskStoreMigrationPhase).not.toBe("redirect_installed");
+    expect(formatHubProjectStatusLines(status).join("\n")).not.toMatch(
+      /redirect_installed/,
+    );
+    expect(
+      existsSync(join(registered.project.hubProjectDir, "task-store-migration", "lease.json")),
+    ).toBe(false);
+  }, 90_000);
+
+  it("releases the migration lease when a source snapshot is missing", async () => {
+    const { registered, input } = await createFreshManagedProject("lease-alpha");
+    const migrationDir = join(
+      registered.project.hubProjectDir,
+      "task-store-migration",
+    );
+    await mkdir(migrationDir, { recursive: true });
+    // Durable journal evidence without a snapshot forces the terminal error
+    // path that previously stranded lease.json after the throw.
+    await writeFile(
+      join(migrationDir, "journal.jsonl"),
+      `${JSON.stringify({ phase: "redirect_installed", at: new Date().toISOString() })}\n`,
+    );
+
+    let thrown: unknown;
+    try {
+      ensureHubTaskStoreMigrated(input);
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBeInstanceOf(TaskBoardError);
+    expect(String(thrown)).toMatch(/could not prepare a source snapshot/i);
+    expect(String(thrown)).toMatch(/does not require `archloop tasks recover`/i);
+    expect(String(thrown)).not.toMatch(/Retry the same/);
+    expect(existsSync(join(migrationDir, "lease.json"))).toBe(false);
+  }, 90_000);
+});

@@ -799,12 +799,47 @@ const highestPhase = (
   return highest;
 };
 
-const derivePhase = (input: {
-  readonly resolution: HubTaskStoreResolution;
+type DurableMigrationEvidence = {
   readonly quarantineDir: string;
   readonly snapshot?: StoreIdentity;
   readonly journalPhases: readonly HubTaskStoreMigrationPhase[];
-}): HubTaskStoreMigrationPhase | undefined => {
+};
+
+/**
+ * Physical `managed store + redirect` is both the normal steady state for a
+ * fresh Hub project and a late phase of real legacy migration. Only durable
+ * migration artifacts distinguish those cases; layout alone must not invent
+ * an interrupted `redirect_installed` / `managed_copied` phase.
+ */
+const hasDurableMigrationEvidence = (
+  input: DurableMigrationEvidence,
+): boolean =>
+  input.journalPhases.length > 0 ||
+  input.snapshot !== undefined ||
+  isBeadsStoreDatabasePresent(input.quarantineDir);
+
+/**
+ * Map a late managed layout onto a migration phase only when durable evidence
+ * proves legacy migration actually started; otherwise report steady state.
+ */
+const phaseForManagedLayout = (
+  layoutPhase: "managed_copied" | "redirect_installed",
+  migrationEvidence: boolean,
+): HubTaskStoreMigrationPhase | undefined => {
+  if (!migrationEvidence) {
+    return undefined;
+  }
+  return layoutPhase;
+};
+
+const MISSING_SOURCE_SNAPSHOT_MESSAGE =
+  "Hub Beads migration could not prepare a source snapshot. Inspect the Hub project task-store migration journal and snapshot under task-store-migration/; this is not a task failure and does not require `archloop tasks recover`.";
+
+const derivePhase = (
+  input: {
+    readonly resolution: HubTaskStoreResolution;
+  } & DurableMigrationEvidence,
+): HubTaskStoreMigrationPhase | undefined => {
   const managedBeadsDir = input.resolution.managedBeadsDir;
   const managedReady =
     managedBeadsDir !== undefined &&
@@ -815,15 +850,16 @@ const derivePhase = (input: {
     managedReady;
   const quarantined = isBeadsStoreDatabasePresent(input.quarantineDir);
   const legacyLive = input.resolution.kind === "legacy";
+  const migrationEvidence = hasDurableMigrationEvidence(input);
 
   if (redirectReady && input.journalPhases.includes("verified")) {
     return "verified";
   }
   if (redirectReady) {
-    return "redirect_installed";
+    return phaseForManagedLayout("redirect_installed", migrationEvidence);
   }
   if (managedReady) {
-    return "managed_copied";
+    return phaseForManagedLayout("managed_copied", migrationEvidence);
   }
   if (quarantined) {
     return "legacy_quarantined";
@@ -1288,10 +1324,7 @@ export const ensureHubTaskStoreMigrated = (
 
     const sourceSnapshot = snapshot ?? readSnapshot(snapshotPath);
     if (!sourceSnapshot) {
-      throw new TaskBoardError({
-        message:
-          "Hub Beads migration could not prepare a source snapshot. Retry the same mutating command. This is not a task failure and does not require `archloop tasks recover`.",
-      });
+      throw new TaskBoardError({ message: MISSING_SOURCE_SNAPSHOT_MESSAGE });
     }
     snapshot = sourceSnapshot;
 
@@ -1395,13 +1428,9 @@ export const ensureHubTaskStoreMigrated = (
       journalPath,
     };
   } finally {
-    const finished = inspectHubTaskStoreMigration(input);
-    if (
-      finished.phase === "verified" ||
-      finished.pendingReason !== undefined ||
-      finished.integrityIncident === HUB_TASK_STORE_SPLIT_BRAIN_INCIDENT
-    ) {
-      releaseMigrationLease(input.hubProjectDir);
-    }
+    // Always release: success, deferral, split-brain, and terminal errors
+    // (including missing source snapshot). Hard kills still leave lease.json;
+    // resume uses durable journal/snapshot/quarantine plus PID supersession.
+    releaseMigrationLease(input.hubProjectDir);
   }
 };
