@@ -199,7 +199,7 @@ export interface LedgerEntry {
   readonly kind: "task" | "batch";
   readonly id: string;
   readonly title: string;
-  readonly outcome: "done" | "failed";
+  readonly outcome: "done" | "failed" | "pending";
   readonly durationMs: number;
   readonly atMs: number;
 }
@@ -213,9 +213,14 @@ const cancellationOutcome = (
     exitCode: 130,
   });
 
+const isTerminalBatchStatus = (
+  status: HubRunDisplayState["batches"][string]["status"],
+): boolean =>
+  status === "done" || status === "partial_failed" || status === "pending";
+
 const findActiveTaskId = (state: HubRunDisplayState): string | undefined => {
   const activeBatch = Object.values(state.batches).find(
-    (batch) => batch.status !== "done" && batch.status !== "partial_failed",
+    (batch) => !isTerminalBatchStatus(batch.status),
   );
   if (!activeBatch) {
     return undefined;
@@ -309,8 +314,15 @@ const ledgerRowLine = (
   palette: Palette,
   columns: number,
 ): string => {
-  const symbolColor = entry.outcome === "failed" ? palette.red : palette.green;
-  const sym = symbolColor(entry.outcome === "failed" ? "✗" : "✓");
+  const symbolColor =
+    entry.outcome === "failed"
+      ? palette.red
+      : entry.outcome === "pending"
+        ? palette.yellow
+        : palette.green;
+  const sym = symbolColor(
+    entry.outcome === "failed" ? "✗" : entry.outcome === "pending" ? "◐" : "✓",
+  );
   const kindTag = entry.kind === "batch" ? palette.dim("batch ") : "";
   const idCol = palette.cyan(entry.id);
   const dur = palette.dim(formatClockElapsed(entry.durationMs));
@@ -368,7 +380,7 @@ const renderLedgerRegion = (
 const renderActiveRegion = (input: AltScreenFrameInput): readonly string[] => {
   const { state, palette, columns, nowMs, phaseStartedByTaskId } = input;
   const activeBatches = Object.values(state.batches).filter(
-    (batch) => batch.status !== "done" && batch.status !== "partial_failed",
+    (batch) => !isTerminalBatchStatus(batch.status),
   );
   const activeTasks = Object.values(state.tasks).filter(
     (task) =>
@@ -864,20 +876,46 @@ const createAltScreenPath = (
       if (st.recordedBatches.has(batch.batchId)) {
         continue;
       }
-      if (batch.status === "done" || batch.status === "partial_failed") {
-        st.recordedBatches.add(batch.batchId);
-        const started =
-          st.batchStartedAt.get(batch.batchId) ?? options.startedAt;
-        const count = batch.selectedTaskIds.length;
-        st.ledger.push({
-          kind: "batch",
-          id: shortHubId(batch.batchId),
-          title: `${count} task${count === 1 ? "" : "s"} shipped`,
-          outcome: batch.status === "done" ? "done" : "failed",
-          durationMs: now - started,
-          atMs: now,
-        });
+      if (!isTerminalBatchStatus(batch.status)) {
+        continue;
       }
+      st.recordedBatches.add(batch.batchId);
+      const started =
+        st.batchStartedAt.get(batch.batchId) ?? options.startedAt;
+      const shippedCount = batch.selectedTaskIds.filter(
+        (taskId) => state.tasks[taskId]?.status === "done",
+      ).length;
+      const pendingCount = batch.selectedTaskIds.filter((taskId) => {
+        const task = state.tasks[taskId];
+        return (
+          task !== undefined &&
+          task.status !== "done" &&
+          task.status !== "failed" &&
+          !task.skipped
+        );
+      }).length;
+      const title =
+        batch.status === "pending" ||
+        (shippedCount === 0 && pendingCount > 0)
+          ? `${pendingCount || batch.selectedTaskIds.length} task${
+              (pendingCount || batch.selectedTaskIds.length) === 1 ? "" : "s"
+            } pending`
+          : `${shippedCount} task${shippedCount === 1 ? "" : "s"} shipped`;
+      st.ledger.push({
+        kind: "batch",
+        id: shortHubId(batch.batchId),
+        title,
+        outcome:
+          batch.status === "done"
+            ? "done"
+            : batch.status === "pending"
+              ? "pending"
+              : shippedCount > 0
+                ? "failed"
+                : "pending",
+        durationMs: now - started,
+        atMs: now,
+      });
     }
 
     st.latestState = state;
@@ -1033,7 +1071,7 @@ const createFallbackPath = (
         batchStartedAt.set(batch.batchId, now);
       }
       if (
-        (batch.status === "done" || batch.status === "partial_failed") &&
+        isTerminalBatchStatus(batch.status) &&
         batchDurationsMs[batch.batchId] === undefined
       ) {
         const started = batchStartedAt.get(batch.batchId) ?? options.startedAt;

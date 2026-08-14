@@ -200,6 +200,13 @@ export interface HubHostTargetClassification {
   readonly targetOid: string;
 }
 
+export const HUB_HOST_CONTRIBUTION_CONFLICT = "host_contribution_conflict" as const;
+export const HUB_HOST_CONTRIBUTION_PENDING = "host_contribution_pending" as const;
+
+export type HubHostContributionPendingReason =
+  | typeof HUB_HOST_CONTRIBUTION_CONFLICT
+  | typeof HUB_HOST_CONTRIBUTION_PENDING;
+
 export interface HubHostContributionResult {
   readonly relation: HubHostTargetRelation;
   readonly hostOid: string;
@@ -212,6 +219,7 @@ export interface HubHostContributionResult {
   readonly commit?: HubLandingCommitResult;
   readonly message: string;
   readonly pending?: boolean;
+  readonly pendingReason?: HubHostContributionPendingReason;
 }
 
 const HUB_LANDING_TICKET_STATUSES = [
@@ -888,6 +896,45 @@ const isLandedHostContribution = (
   readonly commit: HubLandingCommitResult;
 } => landed.kind === "landed" && "commit" in landed && Boolean(landed.commit);
 
+const isHostContributionMergeConflict = (error: unknown): boolean => {
+  const message =
+    error instanceof Error
+      ? `${error.message}\n${error.stack ?? ""}`
+      : String(error);
+  const nested =
+    error instanceof Error &&
+    error.cause !== undefined &&
+    error.cause !== null
+      ? isHostContributionMergeConflict(error.cause)
+      : false;
+  if (nested) {
+    return true;
+  }
+  // Node execFile errors often carry stdout/stderr on the error object.
+  const withOutput = error as {
+    readonly stdout?: unknown;
+    readonly stderr?: unknown;
+  };
+  const combined = [
+    message,
+    typeof withOutput.stdout === "string" ? withOutput.stdout : "",
+    typeof withOutput.stderr === "string" ? withOutput.stderr : "",
+  ].join("\n");
+  return /CONFLICT|conflicts?/i.test(combined);
+};
+
+const hostContributionConflictMessage = (
+  hostTargetBranch: string,
+  detail: string,
+): string =>
+  `Host contribution for ${hostTargetBranch} has a deterministic merge conflict into the Hub publish target: ${detail}. Resolve the conflict on the host target or publish target, then rerun the same flow (archloop run). Uncommitted host state was not imported. ${NO_RECOVER_SUFFIX}`;
+
+const hostContributionPendingMessage = (
+  hostTargetBranch: string,
+  detail: string,
+): string =>
+  `Host contribution for ${hostTargetBranch} could not be merged into the canonical chain: ${detail}. Uncommitted host state was not imported. ${NO_RECOVER_SUFFIX}`;
+
 export const reconcileHubHostTargetContribution = async (input: {
   readonly repoRoot: string;
   readonly hubProjectDir: string;
@@ -969,6 +1016,7 @@ export const reconcileHubHostTargetContribution = async (input: {
         imported: false,
         candidate,
         pending: true,
+        pendingReason: HUB_HOST_CONTRIBUTION_PENDING,
         message: `Host contribution for ${policy.hostTargetBranch} is pending (${landed.kind}). Task candidates wait until committed host work is in the canonical chain. ${NO_RECOVER_SUFFIX}`,
       });
     }
@@ -980,13 +1028,26 @@ export const reconcileHubHostTargetContribution = async (input: {
       message: `Imported committed host-target ${classified.relation} tip ${classified.hostOid} into the Hub publish target as ${landed.commit.candidateOid}.`,
     });
   } catch (error) {
+    const detail =
+      error instanceof Error ? error.message : String(error);
+    if (isHostContributionMergeConflict(error)) {
+      return finish({
+        relation: classified.relation,
+        imported: false,
+        pending: true,
+        pendingReason: HUB_HOST_CONTRIBUTION_CONFLICT,
+        message: hostContributionConflictMessage(
+          policy.hostTargetBranch,
+          detail,
+        ),
+      });
+    }
     return finish({
       relation: classified.relation,
       imported: false,
       pending: true,
-      message: `Host contribution for ${policy.hostTargetBranch} could not be merged into the canonical chain: ${
-        error instanceof Error ? error.message : String(error)
-      }. Uncommitted host state was not imported. ${NO_RECOVER_SUFFIX}`,
+      pendingReason: HUB_HOST_CONTRIBUTION_PENDING,
+      message: hostContributionPendingMessage(policy.hostTargetBranch, detail),
     });
   }
 };

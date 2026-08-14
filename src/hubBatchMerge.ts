@@ -9,6 +9,7 @@ import { isAllowlistedBeadsRuntimePath } from "./hubBeadsRuntimePaths.js";
 import {
   appendHubBatchEvent,
   appendHubTaskEvent,
+  recordHubTaskStatusAdvanced,
   resolveHubRunEventsPaths,
   type HubTaskEvent,
   type HubTaskClaimMetadata,
@@ -47,6 +48,8 @@ import {
   type HubLandingOidEvidence,
 } from "./hubLandingCoordinator.js";
 import {
+  HUB_HOST_CONTRIBUTION_CONFLICT,
+  HUB_HOST_CONTRIBUTION_PENDING,
   HUB_TARGET_QUIET_WAIT,
   assignHubLandingQueueTickets,
   canLandHubLandingTicket,
@@ -325,6 +328,8 @@ export interface HubBatchMergeTaskResult {
     | "unshipped_prerequisite"
     | "target_quiet_wait"
     | "queue_head_blocked"
+    | typeof HUB_HOST_CONTRIBUTION_CONFLICT
+    | typeof HUB_HOST_CONTRIBUTION_PENDING
     | typeof HUB_COMPLETED_WITH_PENDING_DELIVERY;
   readonly diagnosticSummary?: string;
   readonly diagnostics?: HubMergeDiagnostics;
@@ -345,7 +350,7 @@ export interface RunHubBatchMergeResult {
   readonly batchId: string;
   readonly selectedTaskIds: readonly string[];
   readonly selectionDiagnostics: readonly HubBatchMergeSelectionDiagnostic[];
-  readonly batchStatus: "done" | "partial_failed" | "skipped";
+  readonly batchStatus: "done" | "partial_failed" | "pending" | "skipped";
   readonly results: readonly HubBatchMergeTaskResult[];
 }
 
@@ -573,10 +578,23 @@ const toLandingIdentity = (
 const recordBatchMergeCompleted = (
   input: RunHubBatchMergeInput,
   selectedTaskIds: readonly string[],
-  batchStatus: "done" | "partial_failed",
+  batchStatus: "done" | "partial_failed" | "pending",
   results: readonly HubBatchMergeTaskResult[],
 ): void => {
-  const failedResult = results.find((result) => result.outcome !== "merged");
+  const failedResult =
+    batchStatus === "pending"
+      ? undefined
+      : results.find(
+          (result) =>
+            result.outcome !== "merged" &&
+            result.outcome !== "pending" &&
+            result.outcome !== "pending_delivery" &&
+            result.outcome !== "skipped",
+        );
+  const pendingResult =
+    batchStatus === "pending"
+      ? results.find((result) => result.outcome === "pending")
+      : undefined;
   appendHubBatchEvent(input.runDir, {
     type: "batch_merge_completed",
     runId: input.runId,
@@ -609,7 +627,16 @@ const recordBatchMergeCompleted = (
           }`,
           diagnostics: failedResult.diagnostics,
         }
-      : {}),
+      : pendingResult
+        ? {
+            failureReason: pendingResult.reason,
+            failureSummary: `${pendingResult.taskId} ${pendingResult.outcome}: ${
+              pendingResult.diagnosticSummary ??
+              pendingResult.reason ??
+              pendingResult.outcome
+            }`,
+          }
+        : {}),
   });
 };
 
@@ -1737,7 +1764,14 @@ const emitPublicationEvents = async (
 
 const resolveBatchMergeStatus = (
   results: readonly HubBatchMergeTaskResult[],
-): "done" | "partial_failed" => {
+): "done" | "partial_failed" | "pending" => {
+  if (results.length === 0) {
+    return "done";
+  }
+  const allPending = results.every((result) => result.outcome === "pending");
+  if (allPending) {
+    return "pending";
+  }
   const allAccepted = results.every(
     (result) =>
       result.outcome === "merged" || result.outcome === "pending_delivery",
@@ -2694,26 +2728,33 @@ export const runHubBatchMerge = async (
     });
   }
   if (hostContribution?.pending) {
+    const pendingReason =
+      hostContribution.pendingReason ?? HUB_HOST_CONTRIBUTION_PENDING;
+    const createdAt = new Date().toISOString();
     for (const task of orderedTasks) {
+      const branch = resolveBranch(task);
       revertTaskToWaitingForMerge({
         cwd: input.cwd,
         env: input.env,
         task,
       });
+      recordHubTaskStatusAdvanced(input.runDir, {
+        runId: input.runId,
+        batchId: input.batchId,
+        taskId: task.id,
+        branch,
+        createdAt,
+        status: "waiting_for_merge",
+        reason: pendingReason,
+      });
       results.push(
-        toBatchMergeTaskResult(
-          task,
-          resolveBranch(task),
-          "pending",
-          "waiting_for_merge",
-          {
-            diagnosticSummary: hostContribution.message,
-            reason: "target_quiet_wait",
-          },
-        ),
+        toBatchMergeTaskResult(task, branch, "pending", "waiting_for_merge", {
+          diagnosticSummary: hostContribution.message,
+          reason: pendingReason,
+        }),
       );
     }
-    const batchStatus = "partial_failed";
+    const batchStatus = resolveBatchMergeStatus(results);
     recordBatchMergeCompleted(input, selectedTaskIds, batchStatus, results);
     return {
       runId: input.runId,

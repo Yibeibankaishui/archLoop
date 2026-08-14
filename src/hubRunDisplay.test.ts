@@ -197,6 +197,75 @@ describe("plain Hub run lifecycle output", () => {
     });
   });
 
+  it("keeps host-contribution pending distinct from failed and shipped", () => {
+    const result = makeRunResult({
+      stopReason: "batch_pending",
+      completedBatchCount: 0,
+      completedTaskCount: 0,
+      batchResults: [
+        {
+          batchId: "batch-1",
+          selectedTaskIds: ["bd-host"],
+          completedTaskCount: 0,
+          batchStatus: "pending",
+        },
+      ],
+      results: [
+        {
+          taskId: "bd-host",
+          title: "Host pending",
+          branch: "archloop/bd-host",
+          outcome: "reviewed",
+          hubStatus: "waiting_for_merge",
+          commitCount: 1,
+        },
+      ],
+      mergeResult: {
+        runId: "run-1",
+        batchId: "batch-1",
+        selectedTaskIds: ["bd-host"],
+        selectionDiagnostics: [],
+        batchStatus: "pending",
+        results: [
+          {
+            taskId: "bd-host",
+            title: "Host pending",
+            branch: "archloop/bd-host",
+            outcome: "pending",
+            hubStatus: "waiting_for_merge",
+            reason: "host_contribution_conflict",
+            diagnosticSummary:
+              "Host contribution for main has a deterministic merge conflict. Resolve the conflict, then rerun the same flow. This is not a task failure and does not require a recovery command.",
+          },
+        ],
+      },
+    });
+
+    const projection = projectHubRunOutcome(result);
+    expect(projection).toMatchObject({
+      outcome: "completed_with_pending_merge",
+      summary: "Run completed with pending merge",
+      exitCode: 1,
+      counts: {
+        completed: 0,
+        failed: 0,
+        blocked: 0,
+        skipped: 0,
+        readyToMerge: 1,
+      },
+    });
+    expect(projection.taskDetails).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-host",
+        stage: "Host contribution pending",
+      }),
+    );
+    expect(JSON.stringify(projection)).not.toMatch(/tasks recover/);
+    expect(formatPlainHubRunOutcome(result, projection).join("\n")).toContain(
+      'outcome="completed_with_pending_merge"',
+    );
+  });
+
   it("treats the configured flow-batch limit as successful completion", () => {
     const result: RunHubFlowResult = {
       flowId: "with-review",

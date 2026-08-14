@@ -86,7 +86,8 @@ export interface HubProjectBatchSummary {
     | "planned"
     | "merging"
     | "done"
-    | "partial_failed";
+    | "partial_failed"
+    | "pending";
   readonly flowId?: string;
   readonly taskCount?: number;
   readonly active: boolean;
@@ -381,7 +382,11 @@ const resolveBatchStatus = (
         break;
       case "batch_merge_completed":
         status =
-          record.batchStatus === "partial_failed" ? "partial_failed" : "done";
+          record.batchStatus === "partial_failed"
+            ? "partial_failed"
+            : record.batchStatus === "pending"
+              ? "pending"
+              : "done";
         break;
       default:
         break;

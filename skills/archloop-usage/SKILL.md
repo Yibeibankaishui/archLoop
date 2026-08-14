@@ -256,10 +256,14 @@ npx archloop tasks cleanup --dry-run
   tips (behind/descendant/diverged) reconcile into the canonical chain before
   task candidates continue; uncommitted host WIP is never imported. Landed host
   contributions complete as synthetic (non-Beads) transactions during
-  reconciliation — never via Beads close or `tasks recover`. After three
+  reconciliation — never via Beads close or `tasks recover`. A deterministic
+  host-target merge conflict is `host_contribution_conflict` (pending, not
+  shipped or failed): resolve the conflict, then rerun the same flow — do not
+  run `tasks recover`. After three
   immediate drift rebuilds the head retains `target_quiet_wait` until a stable
   window resumes automatically without resetting repair budgets or requiring
-  `tasks recover`.
+  `tasks recover`. All-pending batches report `pending` /
+  `completed_with_pending_merge` instead of counting as shipped or failed.
 - Semantic Git conflicts get at most two merge-role Agent repairs; verification
   failures get at most two candidate-repair attempts with a new candidate
   generation and full re-verification each time. Repair budgets do not reset

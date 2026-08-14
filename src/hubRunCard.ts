@@ -174,11 +174,16 @@ const phaseLabel = (statusOrStage: string): string => {
   }
 };
 
+const isTerminalBatchStatus = (
+  status: HubRunDisplayState["batches"][string]["status"],
+): boolean =>
+  status === "done" || status === "partial_failed" || status === "pending";
+
 const currentBatch = (
   state: HubRunDisplayState,
 ): HubRunDisplayState["batches"][string] | undefined =>
   Object.values(state.batches).find(
-    (batch) => batch.status !== "done" && batch.status !== "partial_failed",
+    (batch) => !isTerminalBatchStatus(batch.status),
   );
 
 const sortedBatches = (
@@ -229,6 +234,9 @@ const collapsedSummary = (
   if (batch.status === "done") {
     return `✓ batch ${short}   ${count}   done${duration}`;
   }
+  if (batch.status === "pending") {
+    return `◐ batch ${short}   ${count}   pending${duration}`;
+  }
   return `✗ batch ${short}   ${count}   failed${duration}`;
 };
 
@@ -254,7 +262,9 @@ const currentBatchGroup = (
         ? "merging"
         : batch.status === "done"
           ? "done"
-          : "failed";
+          : batch.status === "pending"
+            ? "pending"
+            : "failed";
   return {
     kind: "group",
     symbol,
@@ -324,8 +334,7 @@ const buildBatchViews = (
   const active = currentBatch(state);
 
   for (const batch of sortedBatches(state)) {
-    const isTerminalBatch =
-      batch.status === "done" || batch.status === "partial_failed";
+    const isTerminalBatch = isTerminalBatchStatus(batch.status);
     const collapseThis =
       isTerminalBatch ||
       kind === "batch.completed" ||
@@ -681,9 +690,8 @@ export const detectRunCardTransition = (
       const before = prev.batches[batch.batchId];
       if (
         before &&
-        before.status !== "done" &&
-        before.status !== "partial_failed" &&
-        (batch.status === "done" || batch.status === "partial_failed")
+        !isTerminalBatchStatus(before.status) &&
+        isTerminalBatchStatus(batch.status)
       ) {
         return { kind: "batch.completed" };
       }
