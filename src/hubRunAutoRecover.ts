@@ -137,9 +137,8 @@ export const autoRecoverInterruptedHubTasks = async (
           input.resolveLatestPhaseCompletionEvent,
         branchHasUnmergedWork: input.branchHasUnmergedWork,
       });
-      // Idempotent reviewing → reviewing (and similar) recoveries are already at
-      // the resume destination; omit them from the summary so repeated runs do
-      // not look like they re-recovered the same task without progress.
+      // Idempotent recoveries (already at the resume destination) are omitted so
+      // repeated runs do not look like they re-recovered without progress.
       if (result.outcome === "unchanged") {
         continue;
       }

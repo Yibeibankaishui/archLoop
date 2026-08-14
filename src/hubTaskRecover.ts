@@ -607,11 +607,10 @@ const recoverStaleExecutionStatus = async (
     // the resumed-batch merge/review path (claim.runId / claim.batchId) can
     // find it. updateHubTaskStatus preserves the claim; recoverFailedHubTask
     // would strip it.
-    //
-    // When the task is already at the resume destination (e.g. reviewing →
-    // reviewing after implementation succeeded), skip the board mutation and
-    // recovery comment so repeated runs do not append no-op notes.
-    if (plan.priorStatus === plan.targetStatus) {
+    const alreadyAtResumeDestination = plan.priorStatus === plan.targetStatus;
+    if (alreadyAtResumeDestination) {
+      // e.g. reviewing → reviewing after implementation succeeded: skip the
+      // board mutation and recovery comment so repeated runs stay quiet.
       return {
         outcome: "unchanged",
         priorStatus: task.hubStatus,
