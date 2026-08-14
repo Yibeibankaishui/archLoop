@@ -54,12 +54,13 @@ describe("managed Hub Beads task store", () => {
     const repoDir = join(root, "repo");
     await mkdir(repoDir);
     await initRepo(repoDir);
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       ...process.env,
       XDG_DATA_HOME: join(root, "xdg-data"),
       ARCHLOOP_BD_PATH: bundledBd!,
       BEADS_ACTOR: "archloop-test",
     };
+    delete env.BEADS_DIR;
 
     const registered = registerHubProject({
       repoPath: repoDir,
@@ -154,6 +155,7 @@ describe("managed Hub Beads task store", () => {
     expect(status.taskStoreKind).toBe("redirect");
     expect(status.taskStoreDir).toBe(managedBeadsDir);
     expect(status.taskStoreInitialized).toBe(true);
+    expect(status.taskStoreMigrationPhase).not.toBe("redirect_installed");
   }, 60_000);
 
   it("relinks a registered project onto the same managed store", async () => {
@@ -167,12 +169,13 @@ describe("managed Hub Beads task store", () => {
     await mkdir(repoB);
     await initRepo(repoA);
     await initRepo(repoB);
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       ...process.env,
       XDG_DATA_HOME: join(root, "xdg-data"),
       ARCHLOOP_BD_PATH: bundledBd!,
       BEADS_ACTOR: "archloop-test",
     };
+    delete env.BEADS_DIR;
 
     const registered = registerHubProject({
       repoPath: repoA,
@@ -218,11 +221,12 @@ describe("managed Hub Beads task store", () => {
     const repoDir = join(root, "repo");
     await mkdir(repoDir);
     await initRepo(repoDir);
-    const env = {
+    const env: NodeJS.ProcessEnv = {
       ...process.env,
       XDG_DATA_HOME: join(root, "xdg-data"),
       ARCHLOOP_BD_PATH: bundledBd!,
     };
+    delete env.BEADS_DIR;
     const registered = registerHubProject({
       repoPath: repoDir,
       projectName: "alpha",

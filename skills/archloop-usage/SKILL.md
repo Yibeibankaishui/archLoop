@@ -49,7 +49,9 @@ repositories.
 `--project-profile`. Registration selects the project. Selection persists across
 directories. Optional task-store initialization creates a Hub-owned Beads
 database under the Hub project directory and a Git-ignored `.beads/redirect`
-so host `bd` commands resolve the same store. An existing writer-free
+so host `bd` commands resolve the same store. That fresh managed layout is
+already steady state: mutating task commands work immediately and must not be
+treated as an interrupted legacy migration. An existing writer-free
 repository-local Beads store migrates automatically on the first mutating
 `archloop run` or task command; crashes resume from the journal without
 `tasks recover`. An active writer, fingerprint change, unsafe snapshot, or

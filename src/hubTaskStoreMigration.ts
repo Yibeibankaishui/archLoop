@@ -799,6 +799,21 @@ const highestPhase = (
   return highest;
 };
 
+/**
+ * Physical `managed store + redirect` is both the normal steady state for a
+ * fresh Hub project and a late phase of real legacy migration. Only durable
+ * migration artifacts distinguish those cases; layout alone must not invent
+ * an interrupted `redirect_installed` / `managed_copied` phase.
+ */
+const hasDurableMigrationEvidence = (input: {
+  readonly quarantineDir: string;
+  readonly snapshot?: StoreIdentity;
+  readonly journalPhases: readonly HubTaskStoreMigrationPhase[];
+}): boolean =>
+  input.journalPhases.length > 0 ||
+  input.snapshot !== undefined ||
+  isBeadsStoreDatabasePresent(input.quarantineDir);
+
 const derivePhase = (input: {
   readonly resolution: HubTaskStoreResolution;
   readonly quarantineDir: string;
@@ -815,15 +830,16 @@ const derivePhase = (input: {
     managedReady;
   const quarantined = isBeadsStoreDatabasePresent(input.quarantineDir);
   const legacyLive = input.resolution.kind === "legacy";
+  const migrationEvidence = hasDurableMigrationEvidence(input);
 
   if (redirectReady && input.journalPhases.includes("verified")) {
     return "verified";
   }
   if (redirectReady) {
-    return "redirect_installed";
+    return migrationEvidence ? "redirect_installed" : undefined;
   }
   if (managedReady) {
-    return "managed_copied";
+    return migrationEvidence ? "managed_copied" : undefined;
   }
   if (quarantined) {
     return "legacy_quarantined";
@@ -1290,7 +1306,7 @@ export const ensureHubTaskStoreMigrated = (
     if (!sourceSnapshot) {
       throw new TaskBoardError({
         message:
-          "Hub Beads migration could not prepare a source snapshot. Retry the same mutating command. This is not a task failure and does not require `archloop tasks recover`.",
+          "Hub Beads migration could not prepare a source snapshot. Inspect the Hub project task-store migration journal and snapshot under task-store-migration/; this is not a task failure and does not require `archloop tasks recover`.",
       });
     }
     snapshot = sourceSnapshot;
@@ -1395,13 +1411,11 @@ export const ensureHubTaskStoreMigrated = (
       journalPath,
     };
   } finally {
-    const finished = inspectHubTaskStoreMigration(input);
-    if (
-      finished.phase === "verified" ||
-      finished.pendingReason !== undefined ||
-      finished.integrityIncident === HUB_TASK_STORE_SPLIT_BRAIN_INCIDENT
-    ) {
-      releaseMigrationLease(input.hubProjectDir);
-    }
+    // Release on every exit path (success, deferral, split-brain, and terminal
+    // errors such as a missing source snapshot). Interrupted mid-migration
+    // recovery relies on durable journal/snapshot/quarantine evidence plus
+    // lease supersession when the previous owner PID is gone — not on leaving
+    // a stale lease behind after the mutating command already failed.
+    releaseMigrationLease(input.hubProjectDir);
   }
 };
