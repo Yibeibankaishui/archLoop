@@ -115,14 +115,34 @@ const isAncestor = (
   gitOk(repoRoot, ["merge-base", "--is-ancestor", ancestorOid, descendantOid]);
 
 const LEGACY_MERGE_EVENT_TYPES = new Set(["merge_succeeded", "merge_started"]);
+const ADOPTED_OPENING_CHECKPOINTS = [
+  "opened",
+  "base_pinned",
+  "candidate_created",
+] as const;
 
-const latestMergeEventForTask = (
+type HubLegacyLandingRejection = Exclude<
+  HubLegacyLandingDecision,
+  "grandfathered_closed" | "ancestry_contained"
+>;
+
+const collectLegacyMergeEvidence = (
   events: readonly HubTaskEvent[],
   taskId: string,
-): HubTaskEvent | undefined => {
+): {
+  readonly latest: HubTaskEvent | undefined;
+  readonly mergeSucceeded: boolean;
+} => {
   let latest: HubTaskEvent | undefined;
+  let mergeSucceeded = false;
   for (const event of events) {
-    if (event.taskId !== taskId || !LEGACY_MERGE_EVENT_TYPES.has(event.type)) {
+    if (event.taskId !== taskId) {
+      continue;
+    }
+    if (event.type === "merge_succeeded") {
+      mergeSucceeded = true;
+    }
+    if (!LEGACY_MERGE_EVENT_TYPES.has(event.type)) {
       continue;
     }
     if (
@@ -133,16 +153,14 @@ const latestMergeEventForTask = (
       latest = event;
     }
   }
-  return latest;
+  return { latest, mergeSucceeded };
 };
 
-const hadMergeSucceededEvent = (
-  events: readonly HubTaskEvent[],
-  taskId: string,
-): boolean =>
-  events.some(
-    (event) => event.taskId === taskId && event.type === "merge_succeeded",
-  );
+const resolveCommitOid = (
+  repoRoot: string,
+  rev: string,
+): string | undefined =>
+  tryGitText(repoRoot, ["rev-parse", `${rev}^{commit}`]);
 
 const resolveTargetOids = (
   repoRoot: string,
@@ -150,14 +168,8 @@ const resolveTargetOids = (
 ): readonly string[] => {
   const oids: string[] = [];
   if (policy) {
-    const hostOid = tryGitText(repoRoot, [
-      "rev-parse",
-      `${policy.hostTargetBranch}^{commit}`,
-    ]);
-    const publishOid = tryGitText(repoRoot, [
-      "rev-parse",
-      `${policy.publishTargetRef}^{commit}`,
-    ]);
+    const hostOid = resolveCommitOid(repoRoot, policy.hostTargetBranch);
+    const publishOid = resolveCommitOid(repoRoot, policy.publishTargetRef);
     if (hostOid) {
       oids.push(hostOid);
     }
@@ -174,21 +186,39 @@ const resolveTargetOids = (
   return oids;
 };
 
-const branchExists = (repoRoot: string, branch: string): boolean =>
-  tryGitText(repoRoot, ["rev-parse", "--verify", "--quiet", `${branch}^{commit}`]) !==
-  undefined;
+type HubLegacyLandingEvidenceDraft = Omit<
+  HubLegacyLandingEvidence,
+  "nextAction"
+> & {
+  readonly nextAction?: string;
+};
 
 const evidence = (
-  partial: Omit<HubLegacyLandingEvidence, "message" | "nextAction" | "accepted"> & {
-    readonly message: string;
-    readonly accepted: boolean;
-    readonly nextAction?: string;
-  },
+  partial: HubLegacyLandingEvidenceDraft,
 ): HubLegacyLandingEvidence => ({
   ...partial,
   nextAction: partial.nextAction ?? inspectAction,
   message: `${partial.message} ${NO_RECOVER_SUFFIX}`,
 });
+
+const acceptLegacy = (
+  input: Omit<HubLegacyLandingEvidenceDraft, "accepted" | "integrityIncident">,
+): HubLegacyLandingEvidence =>
+  evidence({
+    ...input,
+    accepted: true,
+  });
+
+const rejectLegacy = (
+  input: Omit<HubLegacyLandingEvidenceDraft, "accepted" | "integrityIncident"> & {
+    readonly decision: HubLegacyLandingRejection;
+  },
+): HubLegacyLandingEvidence =>
+  evidence({
+    ...input,
+    accepted: false,
+    integrityIncident: `${HUB_LEGACY_LANDING_INTEGRITY}: ${input.decision}`,
+  });
 
 const classifyTask = (input: {
   readonly repoRoot: string;
@@ -197,18 +227,20 @@ const classifyTask = (input: {
   readonly targetOids: readonly string[];
 }): HubLegacyLandingEvidence | undefined => {
   const { repoRoot, task, events, targetOids } = input;
-  const mergeEvent = latestMergeEventForTask(events, task.id);
-  const mergeSucceeded = hadMergeSucceededEvent(events, task.id);
-  const closed = isCompletedHubStatus(task.hubStatus) || task.metadata.done === true;
+  const { latest: mergeEvent, mergeSucceeded } = collectLegacyMergeEvidence(
+    events,
+    task.id,
+  );
+  const closed =
+    isCompletedHubStatus(task.hubStatus) || task.metadata.done === true;
 
   if (closed) {
     if (!mergeSucceeded) {
       return undefined;
     }
-    return evidence({
+    return acceptLegacy({
       taskId: task.id,
       decision: "grandfathered_closed",
-      accepted: true,
       hadMergeSucceededEvent: mergeSucceeded,
       message: `Accepted historical evidence for ${task.id}: already closed Beads status. Grandfathered as completed; no landing receipt required.`,
     });
@@ -220,34 +252,27 @@ const classifyTask = (input: {
 
   const branch =
     mergeEvent.branch || resolveHubTaskBranch(task.id, task.title);
-  const sourceOid = tryGitText(repoRoot, [
-    "rev-parse",
-    `${branch}^{commit}`,
-  ]);
+  const sourceOid = resolveCommitOid(repoRoot, branch);
   const targetOid = targetOids[0];
 
-  if (!branchExists(repoRoot, branch) || sourceOid === undefined) {
-    return evidence({
+  if (sourceOid === undefined) {
+    return rejectLegacy({
       taskId: task.id,
       decision: "missing_branch",
-      accepted: false,
       hadMergeSucceededEvent: mergeSucceeded,
       branch,
       targetOid,
-      integrityIncident: `${HUB_LEGACY_LANDING_INTEGRITY}: missing_branch`,
       message: `Rejected historical evidence for ${task.id}: task branch ${branch} is missing. Ambiguous in-flight work is not closed or reimplemented.`,
     });
   }
 
-  if (targetOids.length === 0 || targetOid === undefined) {
-    return evidence({
+  if (targetOid === undefined) {
+    return rejectLegacy({
       taskId: task.id,
       decision: "insufficient_evidence",
-      accepted: false,
       hadMergeSucceededEvent: mergeSucceeded,
       branch,
       sourceOid,
-      integrityIncident: `${HUB_LEGACY_LANDING_INTEGRITY}: insufficient_evidence`,
       message: `Rejected historical evidence for ${task.id}: configured target is unavailable. Ambiguous in-flight work is not closed or reimplemented.`,
     });
   }
@@ -256,10 +281,9 @@ const classifyTask = (input: {
     isAncestor(repoRoot, sourceOid, oid),
   );
   if (containedIn) {
-    return evidence({
+    return acceptLegacy({
       taskId: task.id,
       decision: "ancestry_contained",
-      accepted: true,
       hadMergeSucceededEvent: mergeSucceeded,
       branch,
       sourceOid,
@@ -268,34 +292,25 @@ const classifyTask = (input: {
     });
   }
 
-  const primaryTarget = targetOid;
-  const diverged =
-    primaryTarget !== undefined &&
-    !isAncestor(repoRoot, sourceOid, primaryTarget) &&
-    !isAncestor(repoRoot, primaryTarget, sourceOid);
-  if (diverged) {
-    return evidence({
+  if (!isAncestor(repoRoot, targetOid, sourceOid)) {
+    return rejectLegacy({
       taskId: task.id,
       decision: "diverged_target",
-      accepted: false,
       hadMergeSucceededEvent: mergeSucceeded,
       branch,
       sourceOid,
-      targetOid: primaryTarget,
-      integrityIncident: `${HUB_LEGACY_LANDING_INTEGRITY}: diverged_target`,
+      targetOid,
       message: `Rejected historical evidence for ${task.id}: task branch and configured target have diverged. Ambiguous in-flight work is not closed or reimplemented.`,
     });
   }
 
-  return evidence({
+  return rejectLegacy({
     taskId: task.id,
     decision: "event_without_ancestry",
-    accepted: false,
     hadMergeSucceededEvent: mergeSucceeded,
     branch,
     sourceOid,
     targetOid,
-    integrityIncident: `${HUB_LEGACY_LANDING_INTEGRITY}: event_without_ancestry`,
     message: `Rejected historical evidence for ${task.id}: a historical merge_succeeded event is not landing proof. The task is not landed, closed, or shipped.`,
   });
 };
@@ -321,20 +336,25 @@ export const classifyHubLegacyLandingHistory = (
   });
 };
 
+export const hasHubLegacyLandingHistory = (
+  history: readonly HubLegacyLandingEvidence[] | undefined,
+): history is readonly HubLegacyLandingEvidence[] =>
+  history !== undefined && history.length > 0;
+
 export const formatHubLegacyLandingHistoryLines = (
   history: readonly HubLegacyLandingEvidence[] | undefined,
 ): readonly string[] =>
   (history ?? []).flatMap((entry) => {
-    const lines = [entry.message];
     if (entry.integrityIncident) {
-      lines.push(`Next action: ${entry.nextAction}`);
+      return [entry.message, `Next action: ${entry.nextAction}`];
     }
-    return lines;
+    return [entry.message];
   });
 
 export const isHubLegacyLandingIntegrity = (
-  evidence: HubLegacyLandingEvidence | undefined,
-): boolean => evidence?.integrityIncident !== undefined;
+  entry: HubLegacyLandingEvidence | undefined,
+): entry is HubLegacyLandingEvidence & { readonly integrityIncident: string } =>
+  entry?.integrityIncident !== undefined;
 
 const writeAtomicJson = (path: string, value: unknown): void => {
   mkdirSync(dirname(path), { recursive: true });
@@ -380,6 +400,23 @@ const persistAdoptedCandidate = (input: {
   });
 };
 
+const adoptedCheckpointFields = (input: {
+  readonly transactionId: string;
+  readonly taskId: string;
+  readonly createdAt: string;
+  readonly sourceOid: string;
+  readonly targetOid: string;
+}) => ({
+  type: "checkpoint" as const,
+  transactionId: input.transactionId,
+  taskId: input.taskId,
+  createdAt: input.createdAt,
+  sourceOid: input.sourceOid,
+  baseOid: input.targetOid,
+  candidateOid: input.sourceOid,
+  candidateRef: resolveHubLandingCandidateRef(input.transactionId),
+});
+
 const adoptContainedTask = async (input: {
   readonly repoRoot: string;
   readonly hubProjectDir: string;
@@ -392,7 +429,8 @@ const adoptContainedTask = async (input: {
 }): Promise<HubLegacyLandingEvidence> => {
   const sourceOid = input.classified.sourceOid;
   const targetOid = input.classified.targetOid;
-  if (!sourceOid || !targetOid || !input.classified.branch) {
+  const branch = input.classified.branch;
+  if (!sourceOid || !targetOid || !branch) {
     return input.classified;
   }
   const transactionId = resolveHubLandingTransactionId({
@@ -401,22 +439,22 @@ const adoptContainedTask = async (input: {
     baseOid: targetOid,
   });
   const createdAt = input.now.toISOString();
+  const checkpointFields = adoptedCheckpointFields({
+    transactionId,
+    taskId: input.task.id,
+    createdAt,
+    sourceOid,
+    targetOid,
+  });
   const existing = loadHubLandingTransaction(
     input.hubProjectDir,
     transactionId,
   );
   if (!existing) {
-    for (const checkpoint of ["opened", "base_pinned", "candidate_created"] as const) {
+    for (const checkpoint of ADOPTED_OPENING_CHECKPOINTS) {
       appendHubLandingCheckpoint(input.hubProjectDir, {
-        type: "checkpoint",
+        ...checkpointFields,
         checkpoint,
-        transactionId,
-        taskId: input.task.id,
-        createdAt,
-        sourceOid,
-        baseOid: targetOid,
-        candidateOid: sourceOid,
-        candidateRef: resolveHubLandingCandidateRef(transactionId),
       });
     }
     persistAdoptedCandidate({
@@ -442,15 +480,8 @@ const adoptContainedTask = async (input: {
     faultInjection: input.faultInjection,
   });
   appendHubLandingCheckpoint(input.hubProjectDir, {
-    type: "checkpoint",
+    ...checkpointFields,
     checkpoint: "target_landed",
-    transactionId,
-    taskId: input.task.id,
-    createdAt,
-    sourceOid,
-    baseOid: targetOid,
-    candidateOid: sourceOid,
-    candidateRef: resolveHubLandingCandidateRef(transactionId),
     verifierFingerprint,
     publishTargetOid: targetOid,
   });
@@ -465,13 +496,16 @@ const adoptContainedTask = async (input: {
     faultInjection: input.faultInjection,
   });
 
-  return {
-    ...input.classified,
+  return acceptLegacy({
+    taskId: input.task.id,
     decision: "ancestry_contained",
-    accepted: true,
+    hadMergeSucceededEvent: input.classified.hadMergeSucceededEvent,
+    branch,
+    sourceOid,
+    targetOid,
     transactionId,
-    message: `Accepted historical evidence for ${input.task.id}: source ${sourceOid} is contained in the configured target and was adopted into landing transaction ${transactionId}. ${NO_RECOVER_SUFFIX}`,
-  };
+    message: `Accepted historical evidence for ${input.task.id}: source ${sourceOid} is contained in the configured target and was adopted into landing transaction ${transactionId}.`,
+  });
 };
 
 export const adoptHubLegacyLandingHistory = async (input: {
@@ -488,13 +522,14 @@ export const adoptHubLegacyLandingHistory = async (input: {
 }): Promise<readonly HubLegacyLandingEvidence[]> => {
   const classified = classifyHubLegacyLandingHistory(input);
   const now = input.now ?? new Date();
+  const tasksById = new Map(input.tasks.map((task) => [task.id, task]));
   const adopted: HubLegacyLandingEvidence[] = [];
   for (const entry of classified) {
     if (entry.decision !== "ancestry_contained") {
       adopted.push(entry);
       continue;
     }
-    const task = input.tasks.find((item) => item.id === entry.taskId);
+    const task = tasksById.get(entry.taskId);
     if (!task) {
       adopted.push(entry);
       continue;

@@ -6,6 +6,11 @@ import {
   type HubRunOutcomeProjection,
 } from "./hubRunDisplay.js";
 import type { RunHubFlowResult } from "./hubFlowExecution.js";
+import { hubLandingReconciliationHasVisibleOutput } from "./hubLandingReconciliation.js";
+import {
+  hasHubLegacyLandingHistory,
+  type HubLegacyLandingEvidence,
+} from "./hubLandingLegacyHistory.js";
 
 export const HUB_RUN_JSON_SCHEMA_VERSION = 1 as const;
 
@@ -50,6 +55,25 @@ const taskStoreMigrationJsonFields = (
         reason: migration.reason,
       };
   }
+};
+
+const landingLegacyHistoryJson = (
+  history: readonly HubLegacyLandingEvidence[] | undefined,
+): Readonly<Record<string, unknown>> => {
+  if (!hasHubLegacyLandingHistory(history)) {
+    return {};
+  }
+  return {
+    legacyHistory: history.map((entry) => ({
+      taskId: entry.taskId,
+      decision: entry.decision,
+      accepted: entry.accepted,
+      message: entry.message,
+      ...(entry.integrityIncident
+        ? { integrityIncident: entry.integrityIncident }
+        : {}),
+    })),
+  };
 };
 
 const eventData = (event: HubRunEvent): Readonly<Record<string, unknown>> => {
@@ -282,9 +306,7 @@ export const createHubRunJsonRenderer = (input: {
               }
             : {}),
           ...(result.landingReconciliation &&
-          (result.landingReconciliation.kind !== "clean" ||
-            (result.landingReconciliation.legacyHistory &&
-              result.landingReconciliation.legacyHistory.length > 0))
+          hubLandingReconciliationHasVisibleOutput(result.landingReconciliation)
             ? {
                 landingReconciliation: {
                   kind: result.landingReconciliation.kind,
@@ -298,25 +320,9 @@ export const createHubRunJsonRenderer = (input: {
                           result.landingReconciliation.integrityIncident,
                       }
                     : {}),
-                  ...(result.landingReconciliation.legacyHistory &&
-                  result.landingReconciliation.legacyHistory.length > 0
-                    ? {
-                        legacyHistory:
-                          result.landingReconciliation.legacyHistory.map(
-                            (entry) => ({
-                              taskId: entry.taskId,
-                              decision: entry.decision,
-                              accepted: entry.accepted,
-                              message: entry.message,
-                              ...(entry.integrityIncident
-                                ? {
-                                    integrityIncident: entry.integrityIncident,
-                                  }
-                                : {}),
-                            }),
-                          ),
-                      }
-                    : {}),
+                  ...landingLegacyHistoryJson(
+                    result.landingReconciliation.legacyHistory,
+                  ),
                 },
               }
             : {}),

@@ -692,18 +692,16 @@ export const formatHubProjectStatusLines = (
     lines.push(`  ${status.taskStoreMigrationMessage}`);
     lines.push("");
   }
-  if (
-    (status.landingReconciliationMessage &&
-      status.landingReconciliationKind &&
-      status.landingReconciliationKind !== "clean") ||
-    (status.landingLegacyHistory && status.landingLegacyHistory.length > 0)
-  ) {
+  const hasNonCleanReconciliation =
+    Boolean(status.landingReconciliationMessage) &&
+    Boolean(status.landingReconciliationKind) &&
+    status.landingReconciliationKind !== "clean";
+  const hasLegacyHistoryLines =
+    status.landingLegacyHistory !== undefined &&
+    status.landingLegacyHistory.length > 0;
+  if (hasNonCleanReconciliation || hasLegacyHistoryLines) {
     lines.push("Landing reconciliation");
-    if (
-      status.landingReconciliationMessage &&
-      status.landingReconciliationKind &&
-      status.landingReconciliationKind !== "clean"
-    ) {
+    if (hasNonCleanReconciliation) {
       lines.push(`  ${status.landingReconciliationMessage}`);
     }
     for (const line of status.landingLegacyHistory ?? []) {

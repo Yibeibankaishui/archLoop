@@ -25,6 +25,7 @@ import { readTaskEvents } from "./hubRunEventLog.js";
 import {
   classifyHubLegacyLandingHistory,
   isHubLegacyLandingIntegrity,
+  type HubLegacyLandingEvidence,
 } from "./hubLandingLegacyHistory.js";
 import { run } from "./run.js";
 import { noSandbox } from "./sandboxes/no-sandbox.js";
@@ -991,6 +992,24 @@ const maybeBuildStateInconsistentDiagnostic = async (input: {
   });
 };
 
+const classifyLegacyLandingByTask = (input: {
+  readonly cwd: string;
+  readonly hubProjectDir?: string;
+  readonly tasks: readonly HubTaskProjection[];
+}): Map<string, HubLegacyLandingEvidence> => {
+  if (!input.hubProjectDir) {
+    return new Map();
+  }
+  return new Map(
+    classifyHubLegacyLandingHistory({
+      repoRoot: input.cwd,
+      hubProjectDir: input.hubProjectDir,
+      tasks: input.tasks,
+      events: readTaskEvents(input.hubProjectDir),
+    }).map((entry) => [entry.taskId, entry]),
+  );
+};
+
 const evaluateHubBatchMergeSelection = async (input: {
   readonly cwd: string;
   readonly runDir: string;
@@ -1009,17 +1028,7 @@ const evaluateHubBatchMergeSelection = async (input: {
     input.runDir,
     input.batchId,
   );
-  const legacyByTask = new Map(
-    (input.hubProjectDir
-      ? classifyHubLegacyLandingHistory({
-          repoRoot: input.cwd,
-          hubProjectDir: input.hubProjectDir,
-          tasks: input.tasks,
-          events: readTaskEvents(input.hubProjectDir),
-        })
-      : []
-    ).map((entry) => [entry.taskId, entry]),
-  );
+  const legacyByTask = classifyLegacyLandingByTask(input);
 
   for (const task of input.tasks) {
     const mergeReadyEvent = mergeReadyEvents.get(task.id);
@@ -1029,8 +1038,8 @@ const evaluateHubBatchMergeSelection = async (input: {
         buildSelectionDiagnostic(task, {
           decision: "skipped",
           reason: "legacy_landing_integrity",
-          branch: resolveClaimBranch(task) ?? legacy?.branch,
-          message: legacy?.message,
+          branch: resolveClaimBranch(task) ?? legacy.branch,
+          message: legacy.message,
         }),
       );
       continue;

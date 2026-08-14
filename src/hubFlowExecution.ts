@@ -43,6 +43,7 @@ import { ensureHubLandingPolicy } from "./hubLandingPolicy.js";
 import {
   beadsCloseEvidenceFromHubTask,
   formatHubLandingReconciliationMessage,
+  hubLandingReconciliationHasVisibleOutput,
   reconcileHubLandingTransactions,
   type HubLandingReconciliationOutcome,
 } from "./hubLandingReconciliation.js";
@@ -1520,7 +1521,7 @@ const runObservedHubFlow = async (
   try {
     landingTasks = loadHubTaskBoard(repoRoot, input.env).tasks;
   } catch {
-    landingTasks = [];
+    // Board may be unavailable before `tasks init`; adopt nothing.
   }
   const landingReconciliationInput = {
     repoRoot,
@@ -1599,11 +1600,7 @@ const runObservedHubFlow = async (
   const appendLandingReconciliationEvent = (
     outcome: HubLandingReconciliationOutcome,
   ): void => {
-    if (
-      outcome.kind === "clean" &&
-      (outcome.legacyHistory === undefined ||
-        outcome.legacyHistory.length === 0)
-    ) {
+    if (!hubLandingReconciliationHasVisibleOutput(outcome)) {
       return;
     }
     appendHubRunEvent(context.runDir, {
@@ -1930,9 +1927,7 @@ export const formatHubFlowResultLines = (
   }
   if (
     result.landingReconciliation &&
-    (result.landingReconciliation.kind !== "clean" ||
-      (result.landingReconciliation.legacyHistory &&
-        result.landingReconciliation.legacyHistory.length > 0))
+    hubLandingReconciliationHasVisibleOutput(result.landingReconciliation)
   ) {
     lines.push(
       formatHubLandingReconciliationMessage(result.landingReconciliation),
