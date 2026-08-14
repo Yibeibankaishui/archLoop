@@ -48,6 +48,14 @@ receipts, then finishes close and cleanup without landing or closing twice.
 Pending reconciliation is not a task failure and does not require
 `archloop tasks recover`.
 
+If a legacy task branch committed known Beads runtime/export files
+(`.beads/issues.jsonl`, `.beads/interactions.jsonl`, `.beads/events.jsonl`,
+and other allowlisted Dolt/backup/lock paths), Hub strips only those paths
+from the landing candidate and records them on the transaction and
+OID-bearing events. The task branch, user checkout, and `.beads/redirect`
+are not rewritten. Beads configuration, documentation, hooks, and unknown
+`.beads/**` paths remain ordinary source changes.
+
 One task's failure does not roll back a shipped sibling or skip an independent
 waiting sibling. Semantic Git conflicts get at most two merge-role Agent
 repairs for the same merge input; verification failures get at most two

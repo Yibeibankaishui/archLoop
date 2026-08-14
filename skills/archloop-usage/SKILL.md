@@ -203,6 +203,13 @@ npx archloop tasks cleanup --dry-run
 - Landing does not mutate the user's checkout, index, HEAD, or WIP. Dirty
   source files and staged Beads runtime/export files do not block a local
   landing. Checkout projection of the landed commit is a later, separate step.
+- Legacy task branches that committed allowlisted Beads runtime/export files
+  (`.beads/issues.jsonl`, `.beads/interactions.jsonl`, `.beads/events.jsonl`,
+  and known Dolt/backup/lock paths) still land their source changes. Hub
+  strips only that allowlist from the candidate, records the filtered paths
+  on the landing transaction and events, and does not rewrite the task branch
+  or checkout. Beads configuration, documentation, hooks, and unknown
+  `.beads/**` paths remain ordinary source changes.
 - Each merge-ready task owns its own landing transaction. Independent siblings
   continue after one task is blocked; dependents wait for an unshipped
   prerequisite. Mixed shipped and blocked batches report `partial_failed`.
@@ -228,8 +235,10 @@ npx archloop tasks cleanup --dry-run
   branches; unowned deletion requires `--include-unowned` explicitly.
 - Do not manually delete worktrees, branches, or lock files while an active
   worktree lease exists.
-- Keep `.beads/issues.jsonl` and `.beads/interactions.jsonl` out of code changes;
-  use task sync commands for remote exchange.
+- Keep `.beads/issues.jsonl` and `.beads/interactions.jsonl` out of new code
+  changes; use task sync commands for remote exchange. If a legacy branch
+  already committed those allowlisted runtime/export files, Hub strips them
+  from the landing candidate instead of blocking the merge.
 - A later iteration that aborts during provider startup with no agent output
   (for example a SessionStart hook error and `stop_reason: abort`) does not
   fail the whole Hub run while iterations remain. The next iteration continues

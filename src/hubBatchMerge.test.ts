@@ -1514,7 +1514,7 @@ test ! -f notes.txt
     expect(landingEvents.every((event) => event.candidateOid)).toBe(true);
   });
 
-  it("blocks task branches that include Beads runtime/export files in their diff", async () => {
+  it("selects task branches that include allowlisted Beads runtime/export files so landing can strip them", async () => {
     const repoDir = await mkdtemp(
       join(tmpdir(), "hub-batch-merge-beads-diff-"),
     );
@@ -1568,20 +1568,162 @@ test ! -f notes.txt
       worktreeInspector: cleanWorktreeInspector,
     });
 
-    expect(mergeCalls).toBe(0);
-    expect(result.batchStatus).toBe("skipped");
-    expect(result.selectedTaskIds).toEqual([]);
+    expect(mergeCalls).toBe(1);
+    expect(result.batchStatus).toBe("done");
+    expect(result.selectedTaskIds).toEqual(["bd-beads-diff"]);
     expect(result.selectionDiagnostics).toContainEqual(
       expect.objectContaining({
         taskId: "bd-beads-diff",
-        decision: "blocked",
-        reason: "task_store_dirty",
+        decision: "selected",
+        reason: "selected",
         branch: "branch-beads-diff",
         taskStoreBranchFiles: [".beads/issues.jsonl"],
       }),
     );
     expect(formatHubBatchMergeResultLines(result).join("\n")).toContain(
-      "bd-beads-diff: blocked task_store_dirty branch-beads-diff",
+      "Allowlisted Beads runtime/export files will be stripped from the landing candidate: .beads/issues.jsonl.",
+    );
+  });
+
+  it("lands committed source changes from a runtime-polluted task branch without rewriting checkout or the branch", async () => {
+    const root = await mkdtemp(join(tmpdir(), "hub-batch-merge-legacy-beads-"));
+    const repoDir = join(root, "repo");
+    const hubProjectDir = join(root, "hub-project");
+    await mkdir(repoDir, { recursive: true });
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello\n", "initial commit");
+
+    const branch = "archloop/bd-legacy-beads";
+    await execAsync(`git checkout -b "${branch}"`, { cwd: repoDir });
+    await commitFile(repoDir, "feature.txt", "feature\n", "feature commit");
+    await mkdir(join(repoDir, ".beads"), { recursive: true });
+    await commitFile(
+      repoDir,
+      ".beads/issues.jsonl",
+      '{"id":"branch-export"}\n',
+      "legacy beads export",
+    );
+    await commitFile(
+      repoDir,
+      ".beads/config.yaml",
+      "prefix: demo\n",
+      "intentional beads config",
+    );
+    const sourceOid = (await execAsync(`git rev-parse HEAD`, { cwd: repoDir }))
+      .stdout.trim();
+    await execAsync("git checkout main", { cwd: repoDir });
+    await mkdir(join(repoDir, ".beads"), { recursive: true });
+    await writeFile(
+      join(repoDir, ".beads", "issues.jsonl"),
+      '{"id":"staged-host"}\n',
+    );
+    await execAsync("git add .beads/issues.jsonl", { cwd: repoDir });
+    await writeFile(join(repoDir, "wip.txt"), "uncommitted wip\n");
+    await writeFile(join(repoDir, "hello.txt"), "dirty hello\n");
+    await mkdir(join(repoDir, ".archloop"), { recursive: true });
+    await writeFile(
+      join(repoDir, ".archloop", "verify.sh"),
+      `#!/bin/sh
+test -f feature.txt
+test -f .beads/config.yaml
+test ! -f .beads/issues.jsonl
+`,
+    );
+    await chmod(join(repoDir, ".archloop", "verify.sh"), 0o755);
+
+    const batchId = "batch-legacy-beads";
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-legacy-beads",
+        title: "Legacy beads branch",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch,
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+    const beforeStatus = (
+      await execAsync("git status --porcelain=v1", { cwd: repoDir })
+    ).stdout;
+    const beforeHead = (
+      await execAsync("git rev-parse HEAD", { cwd: repoDir })
+    ).stdout.trim();
+    const beforeIndex = (
+      await execAsync("git ls-files -s", { cwd: repoDir })
+    ).stdout;
+
+    const context = createMergeContext(repoDir, batchId, hubProjectDir);
+    const result = await runHubBatchMerge({
+      flowId: "no-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      hubProjectDir: context.hubProjectDir,
+      merger: createHubFlowRunMerger({
+        cwd: repoDir,
+        hubProjectDir: context.hubProjectDir,
+      }),
+      verifier: createHubFlowRunVerifier({ cwd: repoDir }),
+    });
+
+    expect(result.batchStatus).toBe("done");
+    expect(result.selectedTaskIds).toEqual(["bd-legacy-beads"]);
+    const policy = JSON.parse(
+      await readFile(join(context.hubProjectDir, "landing-policy.json"), "utf-8"),
+    ) as { publishTargetRef: string };
+    const { stdout: publishTree } = await execAsync(
+      `git ls-tree -r --name-only ${policy.publishTargetRef}`,
+      { cwd: repoDir },
+    );
+    expect(publishTree).toContain("feature.txt");
+    expect(publishTree).toContain(".beads/config.yaml");
+    expect(publishTree).not.toContain(".beads/issues.jsonl");
+    const taskEvents = (await readJsonl(
+      join(context.runDir, "events", "task.jsonl"),
+    )) as Array<{
+      type?: string;
+      transactionId?: string;
+      candidateOid?: string;
+      filteredBeadsRuntimePaths?: string[];
+    }>;
+    const created = taskEvents.find(
+      (event) => event.type === "integration_candidate_created",
+    );
+    expect(created?.transactionId).toMatch(/^ltx-/);
+    expect(created?.candidateOid).toMatch(/^[0-9a-f]{40}$/i);
+    expect(created?.filteredBeadsRuntimePaths).toEqual([
+      ".beads/issues.jsonl",
+    ]);
+    expect(
+      (await execAsync(`git rev-parse ${branch}`, { cwd: repoDir })).stdout.trim(),
+    ).toBe(sourceOid);
+    expect(
+      (await execAsync("git rev-parse HEAD", { cwd: repoDir })).stdout.trim(),
+    ).toBe(beforeHead);
+    expect((await execAsync("git status --porcelain=v1", { cwd: repoDir })).stdout).toBe(
+      beforeStatus,
+    );
+    expect((await execAsync("git ls-files -s", { cwd: repoDir })).stdout).toBe(
+      beforeIndex,
+    );
+    await expect(
+      readFile(join(repoDir, ".beads", "issues.jsonl"), "utf8"),
+    ).resolves.toBe('{"id":"staged-host"}\n');
+    await expect(readFile(join(repoDir, "wip.txt"), "utf8")).resolves.toBe(
+      "uncommitted wip\n",
+    );
+    await expect(readFile(join(repoDir, "hello.txt"), "utf8")).resolves.toBe(
+      "dirty hello\n",
     );
   });
 

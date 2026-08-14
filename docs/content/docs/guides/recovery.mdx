@@ -65,6 +65,11 @@ local landing onto the Hub publish target. Landed code lives on the Hub
 publish ref until a later checkout-projection slice can fast-forward the host
 branch safely.
 
+A task branch that already committed allowlisted Beads runtime/export files
+can still land: Hub removes only those paths from the candidate tree, records
+every filtered path, and leaves the source branch and checkout unchanged.
+Unknown `.beads/**` files are never dropped silently.
+
 Interrupted landing transactions resume automatically on the next mutating
 `archloop run`. Hub reconstructs progress from the journal, candidate
 ref/manifest, verification artifact, atomic receipt, Beads close metadata, and

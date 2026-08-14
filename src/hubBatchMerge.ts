@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { assertAgentCredentialsConfigured } from "./agentAuthGuidance.js";
+import { isAllowlistedBeadsRuntimePath } from "./hubBeadsRuntimePaths.js";
 import {
   appendHubBatchEvent,
   appendHubTaskEvent,
@@ -101,6 +102,7 @@ export interface HubMergeIntegration {
   readonly candidateOid?: string;
   readonly bindVerification?: (fingerprint: string) => Promise<void> | void;
   readonly snapshotCandidate?: () => Promise<HubLandingCandidate>;
+  readonly filteredBeadsRuntimePaths?: readonly string[];
 }
 
 export interface HubBranchCleanupResult {
@@ -264,6 +266,7 @@ export interface HubBatchMergeTaskResult {
   readonly sourceOid?: string;
   readonly baseOid?: string;
   readonly candidateOid?: string;
+  readonly filteredBeadsRuntimePaths?: readonly string[];
 }
 
 export interface RunHubBatchMergeResult {
@@ -312,6 +315,7 @@ const appendMergeProgressEvent = (
     readonly candidateOid?: string;
     readonly publishTargetOid?: string;
     readonly verifierFingerprint?: string;
+    readonly filteredBeadsRuntimePaths?: readonly string[];
     readonly status?: string;
   },
 ): void => {
@@ -330,6 +334,7 @@ const appendMergeProgressEvent = (
     candidateOid: event.candidateOid,
     publishTargetOid: event.publishTargetOid,
     verifierFingerprint: event.verifierFingerprint,
+    filteredBeadsRuntimePaths: event.filteredBeadsRuntimePaths,
   });
 };
 
@@ -338,6 +343,7 @@ type HubLandingIdentity = {
   readonly sourceOid?: string;
   readonly baseOid?: string;
   readonly candidateOid?: string;
+  readonly filteredBeadsRuntimePaths?: readonly string[];
 };
 
 type HubBatchMergeTaskResultExtras = {
@@ -377,13 +383,20 @@ const toBatchMergeTaskResult = (
   ...(extras.candidateOid === undefined
     ? {}
     : { candidateOid: extras.candidateOid }),
+  ...(extras.filteredBeadsRuntimePaths === undefined
+    ? {}
+    : { filteredBeadsRuntimePaths: extras.filteredBeadsRuntimePaths }),
 });
 
 const toLandingIdentity = (
   integration:
     | Pick<
         HubMergeIntegration,
-        "transactionId" | "sourceOid" | "baseOid" | "candidateOid"
+        | "transactionId"
+        | "sourceOid"
+        | "baseOid"
+        | "candidateOid"
+        | "filteredBeadsRuntimePaths"
       >
     | undefined,
 ): HubLandingIdentity => ({
@@ -391,6 +404,7 @@ const toLandingIdentity = (
   sourceOid: integration?.sourceOid,
   baseOid: integration?.baseOid,
   candidateOid: integration?.candidateOid,
+  filteredBeadsRuntimePaths: integration?.filteredBeadsRuntimePaths,
 });
 
 const recordBatchMergeCompleted = (
@@ -711,13 +725,6 @@ const defaultBranchInspector: HubMergeBranchInspector = async (branch, cwd) => {
   }
 };
 
-const normalizeGitPath = (path: string): string => path.replace(/\\/g, "/");
-
-const isTaskStoreRuntimePath = (path: string): boolean => {
-  const normalized = normalizeGitPath(path);
-  return normalized === ".beads" || normalized.startsWith(".beads/");
-};
-
 const parseGitStatusPorcelain = (stdout: string): string[] => {
   const entries = stdout.split("\0").filter((entry) => entry.length > 0);
   const paths: string[] = [];
@@ -755,13 +762,51 @@ const defaultWorktreeInspector: HubMergeWorktreeInspector = async (cwd) => {
   const dirtyFiles = parseGitStatusPorcelain(String(stdout));
   return {
     dirtySourceFiles: dirtyFiles.filter(
-      (path) => !isTaskStoreRuntimePath(path),
+      (path) => !isAllowlistedBeadsRuntimePath(path),
     ),
-    dirtyTaskStoreFiles: dirtyFiles.filter(isTaskStoreRuntimePath),
+    dirtyTaskStoreFiles: dirtyFiles.filter(isAllowlistedBeadsRuntimePath),
   };
 };
 
 export const inspectHubMergeWorktreeState = defaultWorktreeInspector;
+
+const formatAllowlistedRuntimeStripNote = (
+  paths: readonly string[],
+): string | undefined => {
+  if (paths.length === 0) {
+    return undefined;
+  }
+  return `Allowlisted Beads runtime/export files will be stripped from the landing candidate: ${paths.join(", ")}.`;
+};
+
+const buildSelectedBranchMessage = (input: {
+  readonly branch: string;
+  readonly dirtySourceFiles: readonly string[];
+  readonly dirtyTaskStoreFiles: readonly string[];
+  readonly taskStoreBranchFiles: readonly string[];
+}): string => {
+  const stripNote = formatAllowlistedRuntimeStripNote(input.taskStoreBranchFiles);
+
+  if (input.dirtySourceFiles.length > 0) {
+    const base = `Branch ${input.branch} has unmerged work. Source worktree is dirty (${input.dirtySourceFiles.join(", ")}); Hub lands onto a Hub-owned publish target without mutating the checkout.`;
+    if (stripNote === undefined) {
+      return base;
+    }
+    return `${base} ${stripNote}`;
+  }
+
+  const runtimeNotes = [
+    input.dirtyTaskStoreFiles.length > 0
+      ? `task-store dirty: ${input.dirtyTaskStoreFiles.join(", ")}. Hub merge preflight ignores local Beads runtime/export dirtiness.`
+      : undefined,
+    stripNote,
+  ].filter((note): note is string => note !== undefined);
+
+  if (runtimeNotes.length === 0) {
+    return `Branch ${input.branch} has unmerged work.`;
+  }
+  return `Branch ${input.branch} has unmerged work; ${runtimeNotes.join(" ")}`;
+};
 
 const buildSelectionDiagnostic = (
   task: HubTaskProjection,
@@ -1033,21 +1078,8 @@ const evaluateHubBatchMergeSelection = async (input: {
     }
 
     const taskStoreBranchFiles = (branchState.changedFiles ?? []).filter(
-      isTaskStoreRuntimePath,
+      isAllowlistedBeadsRuntimePath,
     );
-    if (taskStoreBranchFiles.length > 0) {
-      diagnostics.push(
-        buildSelectionDiagnostic(task, {
-          decision: "blocked",
-          reason: "task_store_dirty",
-          branch,
-          message: `Task branch changes Beads runtime/export files (${taskStoreBranchFiles.join(", ")}). Keep local task-store state out of normal Hub merges; remove those files from the branch or sync task state through archLoop task sync before retrying.`,
-          taskStoreBranchFiles,
-        }),
-      );
-      continue;
-    }
-
     if (input.worktreeState.dirtySourceFiles.length > 0) {
       selectedTasks.push(task);
       diagnostics.push(
@@ -1055,7 +1087,14 @@ const evaluateHubBatchMergeSelection = async (input: {
           decision: "selected",
           reason: "selected",
           branch,
-          message: `Branch ${branch} has unmerged work. Source worktree is dirty (${input.worktreeState.dirtySourceFiles.join(", ")}); Hub lands onto a Hub-owned publish target without mutating the checkout.`,
+          message: buildSelectedBranchMessage({
+            branch,
+            dirtySourceFiles: input.worktreeState.dirtySourceFiles,
+            dirtyTaskStoreFiles: [],
+            taskStoreBranchFiles,
+          }),
+          taskStoreBranchFiles:
+            taskStoreBranchFiles.length > 0 ? taskStoreBranchFiles : undefined,
         }),
       );
       continue;
@@ -1068,12 +1107,16 @@ const evaluateHubBatchMergeSelection = async (input: {
         decision: "selected",
         reason: "selected",
         branch,
-        message:
-          taskStoreDirtyFiles.length > 0
-            ? `Branch ${branch} has unmerged work; task-store dirty: ${taskStoreDirtyFiles.join(", ")}. Hub merge preflight ignores local Beads runtime/export dirtiness unless the task branch also changes those files.`
-            : `Branch ${branch} has unmerged work.`,
+        message: buildSelectedBranchMessage({
+          branch,
+          dirtySourceFiles: [],
+          dirtyTaskStoreFiles: taskStoreDirtyFiles,
+          taskStoreBranchFiles,
+        }),
         taskStoreDirtyFiles:
           taskStoreDirtyFiles.length > 0 ? taskStoreDirtyFiles : undefined,
+        taskStoreBranchFiles:
+          taskStoreBranchFiles.length > 0 ? taskStoreBranchFiles : undefined,
       }),
     );
   }
@@ -2240,6 +2283,7 @@ export const createHubFlowRunMerger = (options: {
           sourceOid: activeCandidate.sourceOid,
           baseOid: activeCandidate.baseOid,
           candidateOid: activeCandidate.candidateOid,
+          filteredBeadsRuntimePaths: activeCandidate.filteredBeadsRuntimePaths,
           bindVerification: (fingerprint) => {
             bindHubLandingVerification({
               hubProjectDir,

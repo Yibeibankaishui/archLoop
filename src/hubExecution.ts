@@ -227,6 +227,7 @@ export interface HubTaskEvent {
   readonly candidateOid?: string;
   readonly publishTargetOid?: string;
   readonly verifierFingerprint?: string;
+  readonly filteredBeadsRuntimePaths?: readonly string[];
 }
 
 type HubRunEventData =
