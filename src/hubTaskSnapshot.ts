@@ -17,8 +17,8 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { resolveBdExecutable } from "./resolveBdExecutable.js";
 import { runBdTextForHubTaskStore } from "./hubTaskStore.js";
+import { resolveBdExecutable } from "./resolveBdExecutable.js";
 import {
   appendHubTaskComment,
   loadHubTask,
@@ -372,8 +372,23 @@ const resolveAgentBeadsDir = (snapshotDir: string): string => {
   // Keep the isolation store outside the Hub project tree. Nested under the
   // managed store parent, Beads can still discover/route to the live database
   // even when BEADS_DIR is set.
-  const digest = createHash("sha256").update(snapshotDir).digest("hex").slice(0, 16);
+  const digest = createHash("sha256")
+    .update(snapshotDir)
+    .digest("hex")
+    .slice(0, 16);
   return join(tmpdir(), "archloop-hub-agent-beads", digest);
+};
+
+const removeProtectedDirectory = (dir: string | undefined): void => {
+  if (!dir || !existsSync(dir)) {
+    return;
+  }
+  try {
+    chmodSync(dir, 0o700);
+  } catch {
+    // Best-effort so create/cleanup cannot leave a 0500 directory behind.
+  }
+  rmSync(dir, { recursive: true, force: true });
 };
 
 /**
@@ -385,10 +400,9 @@ const seedAgentBeadsIsolationStore = (
   env: NodeJS.ProcessEnv | undefined,
 ): void => {
   mkdirSync(dirname(agentBeadsDir), { recursive: true, mode: 0o700 });
-  if (existsSync(agentBeadsDir)) {
-    rmSync(agentBeadsDir, { recursive: true, force: true });
-  }
+  removeProtectedDirectory(agentBeadsDir);
   mkdirExclusive(agentBeadsDir, 0o700);
+
   const bd = resolveBdExecutable(env ?? process.env);
   // Init from a bare temp cwd so discovery cannot follow a parent Beads store.
   const bareCwd = mkdtempSync(join(tmpdir(), "hub-agent-beads-"));
@@ -469,36 +483,15 @@ export const createHubTaskSnapshot = (
       document,
     };
   } catch (error) {
-    try {
-      chmodSync(snapshotDir, 0o700);
-    } catch {
-      // Best-effort so a failed create cannot leave a 0500 directory behind.
-    }
-    rmSync(snapshotDir, { recursive: true, force: true });
-    if (agentBeadsDir) {
-      try {
-        chmodSync(agentBeadsDir, 0o700);
-      } catch {
-        // Best-effort.
-      }
-      rmSync(agentBeadsDir, { recursive: true, force: true });
-    }
+    removeProtectedDirectory(snapshotDir);
+    removeProtectedDirectory(agentBeadsDir);
     throw error;
   }
 };
 
 export const cleanupHubTaskSnapshot = (snapshot: HubTaskSnapshot): void => {
-  for (const dir of [snapshot.agentBeadsDir, snapshot.snapshotDir]) {
-    if (!dir || !existsSync(dir)) {
-      continue;
-    }
-    try {
-      chmodSync(dir, 0o700);
-    } catch {
-      // Directory may already be gone.
-    }
-    rmSync(dir, { recursive: true, force: true });
-  }
+  removeProtectedDirectory(snapshot.agentBeadsDir);
+  removeProtectedDirectory(snapshot.snapshotDir);
 };
 
 const unwrapFences = (value: string): string => {

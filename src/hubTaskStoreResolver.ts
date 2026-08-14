@@ -140,40 +140,32 @@ export const resolveHubTaskStore = (
 
   if (existsSync(redirectPath)) {
     const redirectTarget = readRedirectTarget(input.repoRoot, redirectPath);
-    if (!redirectTarget || !existsSync(redirectTarget)) {
+    if (
+      redirectTarget &&
+      existsSync(redirectTarget) &&
+      isBeadsStoreMarkerPresent(redirectTarget)
+    ) {
       return {
         kind: "redirect",
-        beadsDir: repoBeadsDir,
+        beadsDir: redirectTarget,
         repoBeadsDir,
         managedBeadsDir,
         redirectPath,
         redirectTarget,
-        redirectError: formatRedirectTargetError(
-          redirectPath,
-          redirectTarget ?? "(empty redirect)",
-        ),
-      };
-    }
-
-    if (!isBeadsStoreMarkerPresent(redirectTarget)) {
-      return {
-        kind: "redirect",
-        beadsDir: repoBeadsDir,
-        repoBeadsDir,
-        managedBeadsDir,
-        redirectPath,
-        redirectTarget,
-        redirectError: formatRedirectTargetError(redirectPath, redirectTarget),
       };
     }
 
     return {
       kind: "redirect",
-      beadsDir: redirectTarget,
+      beadsDir: repoBeadsDir,
       repoBeadsDir,
       managedBeadsDir,
       redirectPath,
       redirectTarget,
+      redirectError: formatRedirectTargetError(
+        redirectPath,
+        redirectTarget ?? "(empty redirect)",
+      ),
     };
   }
 

@@ -370,6 +370,46 @@ const isSuccessfulReview = (result: HubReviewTaskResult): boolean =>
 const isSuccessfulHubTaskResult = (result: HubFlowTaskResult): boolean =>
   result.outcome === "implemented" || result.outcome === "reviewed";
 
+/**
+ * Map Promise.allSettled outcomes so one sibling throw cannot abort waiting for
+ * the rest of a parallel implement/review batch (or their snapshot cleanup).
+ */
+const toFailedSiblingHubTaskResult = (
+  task: HubTaskProjection,
+  reason: unknown,
+  failureStage: NonNullable<HubFlowTaskResult["failureStage"]>,
+): HubFlowTaskResult => {
+  const diagnosticSummary =
+    reason instanceof Error ? reason.message : String(reason);
+  return {
+    taskId: task.id,
+    title: task.title,
+    branch: resolveHubTaskBranch(task.id, task.title),
+    outcome: "agent_failed",
+    hubStatus: task.hubStatus,
+    failureReason: "agent_failed",
+    failureStage,
+    diagnosticSummary,
+    commitCount: 0,
+  };
+};
+
+const resolveSettledHubTaskResults = (
+  tasks: readonly HubTaskProjection[],
+  settled: readonly PromiseSettledResult<HubFlowTaskResult>[],
+  failureStage: NonNullable<HubFlowTaskResult["failureStage"]>,
+): HubFlowTaskResult[] =>
+  settled.map((entry, index) => {
+    if (entry.status === "fulfilled") {
+      return entry.value;
+    }
+    return toFailedSiblingHubTaskResult(
+      tasks[index]!,
+      entry.reason,
+      failureStage,
+    );
+  });
+
 const countSuccessfulHubTaskResults = (
   results: readonly HubFlowTaskResult[],
 ): number => results.filter(isSuccessfulHubTaskResult).length;
@@ -1419,7 +1459,7 @@ const resumeClaimedReviewingTasksInBatch = async (input: {
     return [];
   }
 
-  return Promise.allSettled(
+  const settled = await Promise.allSettled(
     reviewingTasks.map((task) =>
       resumeReviewSelectedTask(
         { ...input.flowInput, cwd: input.repoRoot },
@@ -1432,29 +1472,8 @@ const resumeClaimedReviewingTasksInBatch = async (input: {
         input.mutateLifecycle,
       ),
     ),
-  ).then((settled) =>
-    settled.map((entry, index) => {
-      if (entry.status === "fulfilled") {
-        return entry.value;
-      }
-      const task = reviewingTasks[index]!;
-      const message =
-        entry.reason instanceof Error
-          ? entry.reason.message
-          : String(entry.reason);
-      return {
-        taskId: task.id,
-        title: task.title,
-        branch: resolveHubTaskBranch(task.id, task.title),
-        outcome: "agent_failed" as const,
-        hubStatus: task.hubStatus,
-        failureReason: "agent_failed" as const,
-        failureStage: "review" as const,
-        diagnosticSummary: message,
-        commitCount: 0,
-      };
-    }),
   );
+  return resolveSettledHubTaskResults(reviewingTasks, settled, "review");
 };
 
 const implementSelectedTask = async (
@@ -2078,7 +2097,7 @@ const runObservedHubFlow = async (
       };
     }
 
-    const taskResults = await Promise.allSettled(
+    const settledTaskResults = await Promise.allSettled(
       selectedTasks.map((task) =>
         implementSelectedTask(
           { ...resolvedInput, cwd: repoRoot },
@@ -2094,29 +2113,13 @@ const runObservedHubFlow = async (
         ),
       ),
     );
-    const taskResultsResolved = taskResults.map((settled, index) => {
-      if (settled.status === "fulfilled") {
-        return settled.value;
-      }
-      const task = selectedTasks[index]!;
-      const message =
-        settled.reason instanceof Error
-          ? settled.reason.message
-          : String(settled.reason);
-      return {
-        taskId: task.id,
-        title: task.title,
-        branch: resolveHubTaskBranch(task.id, task.title),
-        outcome: "agent_failed" as const,
-        hubStatus: task.hubStatus,
-        failureReason: "agent_failed" as const,
-        failureStage: "implementation" as const,
-        diagnosticSummary: message,
-        commitCount: 0,
-      };
-    });
+    const taskResults = resolveSettledHubTaskResults(
+      selectedTasks,
+      settledTaskResults,
+      "implementation",
+    );
 
-    const allSelectedTasksSucceeded = taskResultsResolved.every(
+    const allSelectedTasksSucceeded = taskResults.every(
       isSuccessfulHubTaskResult,
     );
     const batchMergeResult = allSelectedTasksSucceeded
@@ -2125,13 +2128,13 @@ const runObservedHubFlow = async (
     const executedBatchResult = resolveHubFlowBatchResult({
       batchId,
       selectedTaskIds: selectedIds,
-      taskResults: taskResultsResolved,
+      taskResults,
       mergeResult: batchMergeResult,
     });
 
     return {
       selectedTaskIds: selectedIds,
-      results: taskResultsResolved,
+      results: taskResults,
       ...(batchSelectionResult ? { batchSelection: batchSelectionResult } : {}),
       ...(batchFallbackReason ? { fallbackReason: batchFallbackReason } : {}),
       ...(batchMergeResult ? { mergeResult: batchMergeResult } : {}),
