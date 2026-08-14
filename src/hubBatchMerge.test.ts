@@ -363,6 +363,7 @@ describe("runHubBatchMerge", () => {
     expect(taskEvents.map((event) => (event as { type: string }).type)).toEqual(
       [
         "task_claimed",
+        "host_contribution_reconciled",
         "merge_started",
         "integration_candidate_created",
         "verification_started",

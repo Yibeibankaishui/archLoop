@@ -23,6 +23,7 @@ import {
 import { formatHubLegacyLandingHistoryLines } from "./hubLandingLegacyHistory.js";
 import { inspectHubCheckoutOutbox } from "./hubCheckoutProjection.js";
 import { inspectHubPublicationOutbox } from "./hubPublication.js";
+import { inspectHubLandingQueue } from "./hubLandingQueue.js";
 import {
   formatHubTaskStoreMigrationMessage,
   inspectHubTaskStoreMigration,
@@ -137,6 +138,8 @@ export interface HubProjectStatus {
   readonly checkoutSyncMessage?: string;
   readonly codePublicationPendingCount?: number;
   readonly codePublicationMessage?: string;
+  readonly landingQueueQuietWaitCount?: number;
+  readonly landingQueueMessage?: string;
 }
 
 export interface HubProjectStatusOptions {
@@ -742,6 +745,15 @@ export const formatHubProjectStatusLines = (
     lines.push(`  ${status.checkoutSyncMessage}`);
     lines.push("");
   }
+  if (
+    status.landingQueueQuietWaitCount &&
+    status.landingQueueQuietWaitCount > 0 &&
+    status.landingQueueMessage
+  ) {
+    lines.push("Landing queue");
+    lines.push(`  ${status.landingQueueMessage}`);
+    lines.push("");
+  }
   if (hasPendingCodePublication(status)) {
     lines.push("Code publication");
     lines.push(`  ${status.codePublicationMessage}`);
@@ -1010,6 +1022,7 @@ export const resolveHubProjectStatus = (
   });
   const checkoutSync = inspectHubCheckoutOutbox({ hubProjectDir });
   const codePublication = inspectHubPublicationOutbox({ hubProjectDir });
+  const landingQueue = inspectHubLandingQueue(hubProjectDir);
 
   return {
     repoRoot,
@@ -1053,6 +1066,8 @@ export const resolveHubProjectStatus = (
     checkoutSyncMessage: checkoutSync.message,
     codePublicationPendingCount: codePublication.pendingCount,
     codePublicationMessage: codePublication.message,
+    landingQueueQuietWaitCount: landingQueue.pendingQuietWaitCount,
+    landingQueueMessage: landingQueue.message,
   };
 };
 
@@ -1155,6 +1170,15 @@ const projectStatusIdentityRows = (
         {
           key: "Checkout sync",
           value: `pending (${status.checkoutSyncPendingCount})`,
+        },
+      ]
+    : []),
+  ...(status.landingQueueQuietWaitCount &&
+  status.landingQueueQuietWaitCount > 0
+    ? [
+        {
+          key: "Landing queue",
+          value: `quiet wait (${status.landingQueueQuietWaitCount})`,
         },
       ]
     : []),

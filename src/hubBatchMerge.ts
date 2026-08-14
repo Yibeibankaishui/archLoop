@@ -47,6 +47,30 @@ import {
   type HubLandingOidEvidence,
 } from "./hubLandingCoordinator.js";
 import {
+  HUB_TARGET_QUIET_WAIT,
+  assignHubLandingQueueTickets,
+  canLandHubLandingTicket,
+  enterHubLandingQuietWait,
+  fifoPositionForTicket,
+  invalidateHubLandingSpeculativeSuffix,
+  markHubLandingQueueBlockedPrerequisite,
+  markHubLandingQueueFailed,
+  markHubLandingQueueLanded,
+  markHubLandingQueueVerified,
+  readHubLandingQueue,
+  reconcileHubHostTargetContribution,
+  recordHubLandingDriftRebuild,
+  recordHubLandingQueueCandidate,
+  resumeHubLandingQuietWaitIfStable,
+  shouldEnterHubLandingQuietWait,
+  waitHubLandingDriftBackoff,
+  type HubLandingQueueClock,
+} from "./hubLandingQueue.js";
+import {
+  ensureHubLandingPolicy,
+  readHubLandingPolicy,
+} from "./hubLandingPolicy.js";
+import {
   hubCheckoutSyncEventReason,
   hubCheckoutSyncEventType,
   syncHubCheckoutProjections,
@@ -97,6 +121,8 @@ export interface HubMergeTaskInput {
   readonly cwd: string;
   readonly runDir: string;
   readonly hubProjectDir?: string;
+  readonly predecessorOid?: string;
+  readonly fifoPosition?: number;
 }
 
 export type HubMergeDiagnostics = Readonly<Record<string, unknown>> & {
@@ -267,6 +293,7 @@ export interface RunHubBatchMergeInput {
   readonly candidateRepairer?: HubCandidateRepairer;
   readonly env?: NodeJS.ProcessEnv;
   readonly hubProjectDir?: string;
+  readonly landingQueueClock?: HubLandingQueueClock;
 }
 
 export interface HubBatchMergeTaskResult {
@@ -283,7 +310,11 @@ export interface HubBatchMergeTaskResult {
     | "skipped";
   readonly hubStatus: HubTaskStatus;
   readonly failureReason?: HubFailureReason;
-  readonly reason?: HubLandingRepairExhaustionReason | "unshipped_prerequisite";
+  readonly reason?:
+    | HubLandingRepairExhaustionReason
+    | "unshipped_prerequisite"
+    | "target_quiet_wait"
+    | "queue_head_blocked";
   readonly diagnosticSummary?: string;
   readonly diagnostics?: HubMergeDiagnostics;
   readonly logPath?: string;
@@ -292,6 +323,9 @@ export interface HubBatchMergeTaskResult {
   readonly sourceOid?: string;
   readonly baseOid?: string;
   readonly candidateOid?: string;
+  readonly predecessorOid?: string;
+  readonly fifoPosition?: number;
+  readonly verificationConcurrency?: number;
   readonly filteredBeadsRuntimePaths?: readonly string[];
 }
 
@@ -327,6 +361,9 @@ type MergeProgressEventType =
   | "target_landing_rebuild"
   | "target_landing_pending"
   | "target_landing_stale_owner_rejected"
+  | "target_quiet_wait"
+  | "speculative_suffix_invalidated"
+  | "host_contribution_reconciled"
   | "checkout_sync_pending"
   | "checkout_sync_succeeded"
   | "target_publish_pending"
@@ -341,6 +378,7 @@ type MergeProgressEventFields = {
   readonly sourceOid?: string;
   readonly baseOid?: string;
   readonly candidateOid?: string;
+  readonly predecessorOid?: string;
   readonly publishTargetOid?: string;
   readonly expectedTargetOid?: string;
   readonly observedTargetOid?: string;
@@ -354,6 +392,10 @@ type MergeProgressEventFields = {
   readonly status?: string;
   readonly reason?: string;
   readonly message?: string;
+  readonly fifoPosition?: number;
+  readonly verificationConcurrency?: number;
+  readonly suffixInvalidatedTaskIds?: readonly string[];
+  readonly hostContributionRelation?: string;
 };
 
 const appendMergeProgressEvent = (
@@ -377,6 +419,7 @@ const appendMergeProgressEvent = (
     sourceOid: event.sourceOid,
     baseOid: event.baseOid,
     candidateOid: event.candidateOid,
+    predecessorOid: event.predecessorOid,
     publishTargetOid: event.publishTargetOid,
     expectedTargetOid: event.expectedTargetOid,
     observedTargetOid: event.observedTargetOid,
@@ -387,6 +430,10 @@ const appendMergeProgressEvent = (
     filteredBeadsRuntimePaths: event.filteredBeadsRuntimePaths,
     reason: event.reason,
     message: event.message,
+    fifoPosition: event.fifoPosition,
+    verificationConcurrency: event.verificationConcurrency,
+    suffixInvalidatedTaskIds: event.suffixInvalidatedTaskIds,
+    hostContributionRelation: event.hostContributionRelation,
   });
 };
 
@@ -405,6 +452,9 @@ type HubBatchMergeTaskResultExtras = {
   readonly cleanup?: HubBranchCleanupResult;
   readonly logPath?: string;
   readonly reason?: HubBatchMergeTaskResult["reason"];
+  readonly predecessorOid?: string;
+  readonly fifoPosition?: number;
+  readonly verificationConcurrency?: number;
 } & HubLandingIdentity;
 
 const toBatchMergeTaskResult = (
@@ -435,6 +485,15 @@ const toBatchMergeTaskResult = (
   ...(extras.candidateOid === undefined
     ? {}
     : { candidateOid: extras.candidateOid }),
+  ...(extras.predecessorOid === undefined
+    ? {}
+    : { predecessorOid: extras.predecessorOid }),
+  ...(extras.fifoPosition === undefined
+    ? {}
+    : { fifoPosition: extras.fifoPosition }),
+  ...(extras.verificationConcurrency === undefined
+    ? {}
+    : { verificationConcurrency: extras.verificationConcurrency }),
   ...(extras.filteredBeadsRuntimePaths === undefined
     ? {}
     : { filteredBeadsRuntimePaths: extras.filteredBeadsRuntimePaths }),
@@ -1832,6 +1891,40 @@ const finalizeLandedCandidate = async (
 ): Promise<FinalizeLandingResult> => {
   let activeIntegration = mergeIntegration;
   let activeLanding = landingIdentity;
+  const clock = session.input.landingQueueClock;
+  const ticket = readHubLandingQueue(session.hubProjectDir)?.tickets.find(
+    (entry) => entry.taskId === session.task.id,
+  );
+  const observedTarget = activeLanding.baseOid;
+
+  if (ticket?.status === "target_quiet_wait") {
+    const resume = resumeHubLandingQuietWaitIfStable({
+      hubProjectDir: session.hubProjectDir,
+      taskId: session.task.id,
+      observedTargetOid: observedTarget ?? "",
+      clock,
+    });
+    if (resume === "waiting") {
+      emitMergeLandingEvent(session, {
+        type: "target_quiet_wait",
+        createdAt: new Date().toISOString(),
+        reason: HUB_TARGET_QUIET_WAIT,
+        message: `Retaining FIFO ticket for ${session.task.id} in ${HUB_TARGET_QUIET_WAIT}. This is not a task failure and does not require a recovery command.`,
+        ...activeLanding,
+        predecessorOid: activeLanding.baseOid,
+        fifoPosition: ticket.sequence,
+      });
+      return {
+        outcome: "failed",
+        result: toPendingMergeTaskResult(
+          session,
+          `Retaining FIFO ticket in ${HUB_TARGET_QUIET_WAIT}.`,
+          { message: HUB_TARGET_QUIET_WAIT },
+          activeLanding,
+        ),
+      };
+    }
+  }
 
   for (;;) {
     if (!activeIntegration.landWithLease) {
@@ -1841,6 +1934,36 @@ const finalizeLandedCandidate = async (
         activeLanding,
         verifierFingerprint,
       );
+    }
+
+    if (
+      !canLandHubLandingTicket({
+        hubProjectDir: session.hubProjectDir,
+        taskId: session.task.id,
+      })
+    ) {
+      const message = `Task ${session.task.id} cannot overtake the FIFO queue head. This is not a task failure and does not require a recovery command.`;
+      emitMergeLandingEvent(session, {
+        type: "target_landing_pending",
+        createdAt: new Date().toISOString(),
+        reason: "queue_head_blocked",
+        message,
+        ...activeLanding,
+        predecessorOid: activeLanding.baseOid,
+        fifoPosition: ticket?.sequence,
+      });
+      return {
+        outcome: "failed",
+        result: {
+          ...toPendingMergeTaskResult(
+            session,
+            message,
+            { message },
+            activeLanding,
+          ),
+          reason: "queue_head_blocked",
+        },
+      };
     }
 
     let attempt: HubLandingAttemptResult;
@@ -1857,6 +1980,7 @@ const finalizeLandedCandidate = async (
 
     if (attempt.kind === "landed") {
       await activeIntegration.cleanup().catch(() => undefined);
+      markHubLandingQueueLanded(session.hubProjectDir, session.task.id);
       const landedIdentity = toLandingIdentity(attempt.candidate);
       emitMergeLandingEvent(session, {
         type: "target_landing_succeeded",
@@ -1865,6 +1989,8 @@ const finalizeLandedCandidate = async (
           ...attempt,
           fenceOid: attempt.commit.fenceOid,
         }),
+        predecessorOid: attempt.candidate.baseOid,
+        fifoPosition: ticket?.sequence,
         publishTargetOid: attempt.commit.publishTargetOid,
         verifierFingerprint,
       });
@@ -1886,6 +2012,115 @@ const finalizeLandedCandidate = async (
         attempt,
         verifierFingerprint,
       );
+    }
+
+    if (attempt.kind === "not_queue_head") {
+      const message =
+        attempt.message ||
+        `Task ${session.task.id} cannot overtake the FIFO queue head. This is not a task failure and does not require a recovery command.`;
+      emitMergeLandingEvent(session, {
+        type: "target_landing_pending",
+        createdAt: new Date().toISOString(),
+        reason: "queue_head_blocked",
+        message,
+        ...oidEventFields(activeLanding, attempt),
+        predecessorOid: activeLanding.baseOid,
+        fifoPosition: ticket?.sequence,
+      });
+      return {
+        outcome: "failed",
+        result: {
+          ...toPendingMergeTaskResult(
+            session,
+            message,
+            { message },
+            activeLanding,
+          ),
+          reason: "queue_head_blocked",
+        },
+      };
+    }
+
+    if (
+      attempt.kind === "target_quiet_wait" ||
+      shouldEnterHubLandingQuietWait({
+        hubProjectDir: session.hubProjectDir,
+        taskId: session.task.id,
+      })
+    ) {
+      if (attempt.kind !== "target_quiet_wait") {
+        enterHubLandingQuietWait({
+          hubProjectDir: session.hubProjectDir,
+          taskId: session.task.id,
+          observedTargetOid: attempt.observedTargetOid,
+          clock,
+        });
+      }
+      const message =
+        attempt.kind === "target_quiet_wait"
+          ? attempt.message
+          : `Queue head ${session.task.id} entered ${HUB_TARGET_QUIET_WAIT} after repeated target drift. Later transactions cannot overtake this ticket. This is not a task failure and does not require a recovery command.`;
+      emitMergeLandingEvent(session, {
+        type: "target_quiet_wait",
+        createdAt: new Date().toISOString(),
+        reason: HUB_TARGET_QUIET_WAIT,
+        message,
+        ...oidEventFields(activeLanding, attempt),
+        predecessorOid: activeLanding.baseOid,
+        fifoPosition: ticket?.sequence,
+      });
+      return {
+        outcome: "failed",
+        result: {
+          ...toPendingMergeTaskResult(
+            session,
+            message,
+            { message },
+            activeLanding,
+          ),
+          reason: "target_quiet_wait",
+        },
+      };
+    }
+
+    if (attempt.kind !== "target_drift") {
+      return failLandedCandidate(
+        session,
+        activeIntegration,
+        activeLanding,
+        new Error(
+          `Unexpected Hub landing attempt kind while finalizing ${session.task.id}.`,
+        ),
+      );
+    }
+
+    await waitHubLandingDriftBackoff(
+      clock,
+      readHubLandingQueue(session.hubProjectDir)?.tickets.find(
+        (entry) => entry.taskId === session.task.id,
+      )?.activationDriftRebuilds ?? 0,
+    );
+    recordHubLandingDriftRebuild({
+      hubProjectDir: session.hubProjectDir,
+      taskId: session.task.id,
+      observedTargetOid: attempt.observedTargetOid,
+      clock,
+    });
+    const invalidated = invalidateHubLandingSpeculativeSuffix({
+      hubProjectDir: session.hubProjectDir,
+      fromTaskId: session.task.id,
+      reason: "target_drift",
+      clock,
+    });
+    if (invalidated.length > 0) {
+      emitMergeLandingEvent(session, {
+        type: "speculative_suffix_invalidated",
+        createdAt: new Date().toISOString(),
+        reason: "target_drift",
+        message: `Invalidated speculative suffix after target drift for ${session.task.id}.`,
+        ...activeLanding,
+        suffixInvalidatedTaskIds: invalidated.map((entry) => entry.taskId),
+      });
     }
 
     const rebuilt = await rebuildAfterTargetDrift(
@@ -1989,6 +2224,11 @@ const processMergeTask = async (
   input: RunHubBatchMergeInput,
   task: HubTaskProjection,
   claim: HubTaskProjection["claim"],
+  options: {
+    readonly predecessorOid?: string;
+    readonly fifoPosition?: number;
+    readonly verificationConcurrency?: number;
+  } = {},
 ): Promise<HubBatchMergeTaskResult> => {
   const branch = resolveBranch(task);
   const context = toLifecycleContext(input);
@@ -2028,14 +2268,38 @@ const processMergeTask = async (
     cwd: input.cwd,
     runDir: input.runDir,
     hubProjectDir: session.hubProjectDir,
+    predecessorOid: options.predecessorOid,
+    fifoPosition: options.fifoPosition,
   });
   const mergeFinishedAt = new Date().toISOString();
   if (mergeResult.outcome !== "success") {
+    markHubLandingQueueFailed(session.hubProjectDir, task.id);
+    invalidateHubLandingSpeculativeSuffix({
+      hubProjectDir: session.hubProjectDir,
+      fromTaskId: task.id,
+      reason: "predecessor_failure",
+      clock: input.landingQueueClock,
+    });
     return settleUnsuccessfulMerge(session, mergeResult, mergeFinishedAt);
   }
 
   const mergeIntegration = mergeResult.integration;
   const landingIdentity = toLandingIdentity(mergeIntegration);
+  if (
+    landingIdentity.transactionId &&
+    landingIdentity.sourceOid &&
+    landingIdentity.baseOid &&
+    landingIdentity.candidateOid
+  ) {
+    recordHubLandingQueueCandidate({
+      hubProjectDir: session.hubProjectDir,
+      taskId: task.id,
+      sourceOid: landingIdentity.sourceOid,
+      predecessorOid: landingIdentity.baseOid,
+      candidateOid: landingIdentity.candidateOid,
+      transactionId: landingIdentity.transactionId,
+    });
+  }
 
   appendMergeProgressEvent(input, {
     type: "integration_candidate_created",
@@ -2044,6 +2308,8 @@ const processMergeTask = async (
     claim,
     createdAt: mergeFinishedAt,
     ...landingIdentity,
+    predecessorOid: landingIdentity.baseOid,
+    fifoPosition: options.fifoPosition,
   });
 
   const verified = await verifyWithBoundedRepair(
@@ -2053,9 +2319,30 @@ const processMergeTask = async (
     mergeFinishedAt,
   );
   if (verified.outcome === "failed") {
+    markHubLandingQueueFailed(session.hubProjectDir, task.id);
+    const invalidated = invalidateHubLandingSpeculativeSuffix({
+      hubProjectDir: session.hubProjectDir,
+      fromTaskId: task.id,
+      reason: "predecessor_failure",
+      clock: input.landingQueueClock,
+    });
+    if (invalidated.length > 0) {
+      appendMergeProgressEvent(input, {
+        type: "speculative_suffix_invalidated",
+        taskId: task.id,
+        branch,
+        claim,
+        createdAt: new Date().toISOString(),
+        ...landingIdentity,
+        reason: "predecessor_failure",
+        suffixInvalidatedTaskIds: invalidated.map((entry) => entry.taskId),
+        message: `Invalidated speculative suffix after ${task.id} failed verification.`,
+      });
+    }
     return verified.result;
   }
 
+  markHubLandingQueueVerified(session.hubProjectDir, task.id);
   const verifierFingerprint = computeHubVerifierFingerprint(input.cwd);
   if (verified.mergeIntegration?.bindVerification) {
     await verified.mergeIntegration.bindVerification(verifierFingerprint);
@@ -2068,6 +2355,9 @@ const processMergeTask = async (
     claim,
     createdAt: verified.verifyFinishedAt,
     ...verified.landingIdentity,
+    predecessorOid: verified.landingIdentity.baseOid,
+    fifoPosition: options.fifoPosition,
+    verificationConcurrency: options.verificationConcurrency,
     verifierFingerprint,
   });
 
@@ -2080,7 +2370,12 @@ const processMergeTask = async (
       verifierFingerprint,
     );
     if (landed.outcome === "failed") {
-      return landed.result;
+      return {
+        ...landed.result,
+        fifoPosition: options.fifoPosition,
+        predecessorOid: landed.result.baseOid,
+        verificationConcurrency: options.verificationConcurrency,
+      };
     }
     landedIdentity = landed.landingIdentity;
   } else {
@@ -2091,9 +2386,12 @@ const processMergeTask = async (
       claim,
       createdAt: new Date().toISOString(),
       ...verified.landingIdentity,
+      predecessorOid: verified.landingIdentity.baseOid,
+      fifoPosition: options.fifoPosition,
       publishTargetOid: verified.landingIdentity.candidateOid,
       verifierFingerprint,
     });
+    markHubLandingQueueLanded(session.hubProjectDir, task.id);
   }
 
   await emitCheckoutProjectionEvents(session, landedIdentity);
@@ -2107,11 +2405,17 @@ const processMergeTask = async (
     ...verified.landingIdentity,
   });
 
-  return closeLandedTask(
+  const closed = await closeLandedTask(
     session,
     landedIdentity,
     verified.verifyFinishedAt,
   );
+  return {
+    ...closed,
+    fifoPosition: options.fifoPosition,
+    predecessorOid: landedIdentity.baseOid,
+    verificationConcurrency: options.verificationConcurrency,
+  };
 };
 
 export const runHubBatchMerge = async (
@@ -2176,12 +2480,95 @@ export const runHubBatchMerge = async (
       .map((entry) => entry.id),
   );
   const orderedTasks = orderTasksByDependencies(selectedTasks);
+  const hubProjectDir = resolveMergeHubProjectDir(input);
+  const policy =
+    readHubLandingPolicy(hubProjectDir) ??
+    ensureHubLandingPolicy({
+      repoRoot: input.cwd,
+      hubProjectDir,
+    }).policy;
+  assignHubLandingQueueTickets({
+    hubProjectDir,
+    publishTargetRef: policy.publishTargetRef,
+    tasks: orderedTasks.map((task) => ({
+      taskId: task.id,
+      blockerTaskIds: readTaskBlockers(task),
+    })),
+    clock: input.landingQueueClock,
+  });
+
+  const hostContribution = await reconcileHubHostTargetContribution({
+    repoRoot: input.cwd,
+    hubProjectDir,
+    policy,
+    clock: input.landingQueueClock,
+    land: async (candidate) =>
+      landHubCandidateWithLease({
+        repoRoot: input.cwd,
+        hubProjectDir,
+        candidate,
+        verifierFingerprint: computeHubVerifierFingerprint(input.cwd),
+      }),
+  });
+  if (hostContribution && orderedTasks[0]) {
+    const headTask = orderedTasks[0];
+    appendMergeProgressEvent(input, {
+      type: "host_contribution_reconciled",
+      taskId: headTask.id,
+      branch: resolveBranch(headTask),
+      claim: headTask.claim,
+      createdAt: new Date().toISOString(),
+      status: "merging",
+      reason: hostContribution.relation,
+      hostContributionRelation: hostContribution.relation,
+      message: hostContribution.message,
+      candidateOid: hostContribution.candidate?.candidateOid,
+      baseOid: hostContribution.targetOid,
+      predecessorOid: hostContribution.targetOid,
+    });
+  }
+  if (hostContribution?.pending) {
+    for (const task of orderedTasks) {
+      revertTaskToWaitingForMerge({
+        cwd: input.cwd,
+        env: input.env,
+        task,
+      });
+      results.push(
+        toBatchMergeTaskResult(
+          task,
+          resolveBranch(task),
+          "pending",
+          "waiting_for_merge",
+          {
+            diagnosticSummary: hostContribution.message,
+            reason: "target_quiet_wait",
+          },
+        ),
+      );
+    }
+    const batchStatus = "partial_failed";
+    recordBatchMergeCompleted(input, selectedTaskIds, batchStatus, results);
+    return {
+      runId: input.runId,
+      batchId: input.batchId,
+      selectedTaskIds,
+      batchStatus,
+      results,
+      selectionDiagnostics: selection.diagnostics,
+    };
+  }
+
+  let predecessorOid = hostContribution?.commit?.candidateOid;
   for (const task of orderedTasks) {
     const claim = task.claim;
+    const queue = readHubLandingQueue(hubProjectDir);
+    const ticket = queue?.tickets.find((entry) => entry.taskId === task.id);
     const unshippedBlockers = readTaskBlockers(task).filter(
       (blockerId) => !shippedIds.has(blockerId),
     );
     if (unshippedBlockers.length > 0) {
+      markHubLandingQueueBlockedPrerequisite(hubProjectDir, task.id);
       revertTaskToWaitingForMerge({
         cwd: input.cwd,
         env: input.env,
@@ -2196,16 +2583,108 @@ export const runHubBatchMerge = async (
           {
             diagnosticSummary: `Waiting for unshipped prerequisite ${unshippedBlockers.join(", ")}.`,
             reason: "unshipped_prerequisite",
+            fifoPosition: ticket ? fifoPositionForTicket(ticket) : undefined,
           },
         ),
       );
       continue;
     }
 
-    const result = await processMergeTask(input, task, claim);
+    if (
+      ticket?.status === "target_quiet_wait" ||
+      queue?.tickets.some(
+        (entry) =>
+          entry.status === "target_quiet_wait" &&
+          entry.sequence < (ticket?.sequence ?? Number.MAX_SAFE_INTEGER),
+      )
+    ) {
+      const observedTarget = await execFileAsync(
+        "git",
+        ["rev-parse", policy.publishTargetRef],
+        { cwd: input.cwd, encoding: "utf8" },
+      ).then((result) => String(result.stdout).trim());
+      const headTicket =
+        queue?.tickets.find((entry) => entry.status === "target_quiet_wait") ??
+        ticket;
+      if (headTicket) {
+        const resume = resumeHubLandingQuietWaitIfStable({
+          hubProjectDir,
+          taskId: headTicket.taskId,
+          observedTargetOid: observedTarget,
+          clock: input.landingQueueClock,
+        });
+        if (resume === "waiting") {
+          revertTaskToWaitingForMerge({
+            cwd: input.cwd,
+            env: input.env,
+            task,
+          });
+          results.push(
+            toBatchMergeTaskResult(
+              task,
+              resolveBranch(task),
+              "pending",
+              "waiting_for_merge",
+              {
+                diagnosticSummary:
+                  task.id === headTicket.taskId
+                    ? `Retaining FIFO ticket in ${HUB_TARGET_QUIET_WAIT}.`
+                    : `Waiting for FIFO queue head ${headTicket.taskId} in ${HUB_TARGET_QUIET_WAIT}.`,
+                reason:
+                  task.id === headTicket.taskId
+                    ? "target_quiet_wait"
+                    : "queue_head_blocked",
+                fifoPosition: ticket
+                  ? fifoPositionForTicket(ticket)
+                  : undefined,
+              },
+            ),
+          );
+          continue;
+        }
+      }
+    }
+
+    const result = await processMergeTask(input, task, claim, {
+      predecessorOid,
+      fifoPosition: ticket ? fifoPositionForTicket(ticket) : undefined,
+      verificationConcurrency: 1,
+    });
     results.push(result);
     if (result.outcome === "merged") {
       shippedIds.add(task.id);
+      predecessorOid = result.candidateOid ?? predecessorOid;
+    }
+    if (result.reason === "target_quiet_wait") {
+      for (const later of orderedTasks) {
+        if (results.some((entry) => entry.taskId === later.id)) {
+          continue;
+        }
+        revertTaskToWaitingForMerge({
+          cwd: input.cwd,
+          env: input.env,
+          task: later,
+        });
+        const laterTicket = readHubLandingQueue(hubProjectDir)?.tickets.find(
+          (entry) => entry.taskId === later.id,
+        );
+        results.push(
+          toBatchMergeTaskResult(
+            later,
+            resolveBranch(later),
+            "pending",
+            "waiting_for_merge",
+            {
+              diagnosticSummary: `Waiting for FIFO queue head ${task.id} in ${HUB_TARGET_QUIET_WAIT}.`,
+              reason: "queue_head_blocked",
+              fifoPosition: laterTicket
+                ? fifoPositionForTicket(laterTicket)
+                : undefined,
+            },
+          ),
+        );
+      }
+      break;
     }
   }
 
@@ -2676,6 +3155,7 @@ export const createHubFlowRunMerger = (options: {
         hubProjectDir,
         taskId: input.taskId,
         branch: input.branch,
+        baseOid: input.predecessorOid,
         merge: async (worktreeDir) => {
           const mergeResult = await runGitMergeInCwd({
             input,
@@ -2710,6 +3190,7 @@ export const createHubFlowRunMerger = (options: {
           hubProjectDir,
           taskId: input.taskId,
           branch: input.branch,
+          baseOid: input.predecessorOid,
           merge: async (worktreeDir) => {
             const mergeResult = await runGitMergeInCwd({
               input,
@@ -2897,7 +3378,16 @@ export const formatHubBatchMergeResultLines = (
     const oidSuffix = [
       taskResult.sourceOid ? `source=${taskResult.sourceOid}` : undefined,
       taskResult.baseOid ? `base=${taskResult.baseOid}` : undefined,
+      taskResult.predecessorOid
+        ? `predecessor=${taskResult.predecessorOid}`
+        : undefined,
       taskResult.candidateOid ? `candidate=${taskResult.candidateOid}` : undefined,
+      taskResult.fifoPosition !== undefined
+        ? `fifo=${taskResult.fifoPosition}`
+        : undefined,
+      taskResult.verificationConcurrency !== undefined
+        ? `verify_concurrency=${taskResult.verificationConcurrency}`
+        : undefined,
     ]
       .filter((value): value is string => value !== undefined)
       .join(" ");

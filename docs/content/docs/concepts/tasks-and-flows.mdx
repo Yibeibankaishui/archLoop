@@ -23,7 +23,17 @@ metadata, and run events.
 - `with-review` — add a reviewer stage before verification and merge.
 
 Tasks within a batch can implement and review concurrently. Eligible branches
-land independently onto a Hub-managed local publish target. A semantic conflict
+land independently onto a Hub-managed local publish target under durable FIFO
+and dependency tickets. Speculative candidates form an ordered chain on each
+predecessor OID, verify exact OIDs concurrently where dependencies permit, and
+land only at the queue head with fenced CAS. Suffix invalidation after
+predecessor repair, failure, committed host contribution, or target drift
+rebuilds independent successors while dependents stay blocked. Committed
+host-target tips (behind, descendant, or diverged) enter the canonical chain
+before task candidates continue; uncommitted host WIP is never imported. After
+at most three immediate drift rebuilds the queue head retains
+`target_quiet_wait` until a stable window resumes automatically without
+resetting repair budgets or requiring `tasks recover`. A semantic conflict
 or verification failure is repaired in bounded Agent attempts, then fully
 reverified; exhaustion blocks only that task. Independent siblings continue to
 verified landing, dependents wait for an unshipped prerequisite, and mixed

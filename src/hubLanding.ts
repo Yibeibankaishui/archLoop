@@ -151,7 +151,9 @@ export class HubLandingCrash extends Error {
 export type HubLandingPendingKind =
   | "pending_contention"
   | "target_drift"
-  | "stale_owner_rejected";
+  | "stale_owner_rejected"
+  | "target_quiet_wait"
+  | "not_queue_head";
 
 export interface HubLandingOidFields {
   readonly expectedTargetOid?: string;
@@ -810,6 +812,7 @@ export const createHubLandingCandidate = async (input: {
   readonly hubProjectDir: string;
   readonly taskId: string;
   readonly branch: string;
+  readonly baseOid?: string;
   readonly now?: Date;
   readonly merge?: (worktreeDir: string) => Promise<void>;
   readonly faultInjection?: HubLandingFaultInjection;
@@ -823,10 +826,9 @@ export const createHubLandingCandidate = async (input: {
     "rev-parse",
     `${input.branch}^{commit}`,
   ]);
-  const baseOid = await gitText(input.repoRoot, [
-    "rev-parse",
-    policy.publishTargetRef,
-  ]);
+  const baseOid =
+    input.baseOid ??
+    (await gitText(input.repoRoot, ["rev-parse", policy.publishTargetRef]));
   const transactionId = resolveHubLandingTransactionId({
     taskId: input.taskId,
     sourceOid,

@@ -200,7 +200,14 @@ npx archloop run --flow with-review
 任务型 Flow 默认按批次选择任务。若同一个 Flow 存在未完成的待合并批次，
 archLoop 会先恢复该批次，再领取新任务。
 
-落地使用 Hub 拥有的本地 Git ref 作为权威目标，不需要远程仓库。archLoop 冻结
+落地使用 Hub 拥有的本地 Git ref 作为权威目标，不需要远程仓库。同一 publish
+target 上的待合并任务领取 durable FIFO/依赖票据；投机候选链按前置 OID 构造，
+精确 OID 在依赖允许时并行验证，只有队头用 fenced CAS 落地。前置修复、失败、
+已提交宿主贡献或目标漂移只会使受影响后缀失效。已提交的 behind/descendant/
+diverged 宿主 tip 会并入权威链并完成验证后，任务候选才继续；未提交宿主状态
+既不导入也不修改。队头激活最多立即重建三次目标漂移，随后保留
+`target_quiet_wait`，稳定窗口到来后自动续跑，不重置语义修复预算，也不要求
+`tasks recover`。archLoop 冻结
 任务源提交、在独立 worktree 中构造并验证 merge candidate，再用一次 Git ref
 事务推进 publish target、fence 和 landing receipt，然后关闭任务。用户工作区、
 index 和未提交改动在落地事务中保持不变。落地之后，Hub 会把宿主分支的快进记入
@@ -336,3 +343,4 @@ API 参数、返回值和生命周期说明见
 | 2026-08-14 | 升级时接纳旧落地历史：已关闭保持完成，无祖先证明不视为落地 |
 | 2026-08-14 | 落地后安全快进宿主分支；不安全 WIP 保持 checkout_sync_pending |
 | 2026-08-14 | best-effort 远程发布 outbox；失败保持 target_publish_pending |
+| 2026-08-14 | FIFO 投机链并行验证；宿主贡献入链；target_quiet_wait 防超车 |

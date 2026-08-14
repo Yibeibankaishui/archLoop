@@ -196,6 +196,9 @@ export interface HubTaskEvent {
     | "target_landing_rebuild"
     | "target_landing_pending"
     | "target_landing_stale_owner_rejected"
+    | "target_quiet_wait"
+    | "speculative_suffix_invalidated"
+    | "host_contribution_reconciled"
     | "checkout_sync_pending"
     | "checkout_sync_succeeded"
     | "target_publish_pending"
@@ -232,6 +235,7 @@ export interface HubTaskEvent {
   readonly sourceOid?: string;
   readonly baseOid?: string;
   readonly candidateOid?: string;
+  readonly predecessorOid?: string;
   readonly publishTargetOid?: string;
   readonly expectedTargetOid?: string;
   readonly observedTargetOid?: string;
@@ -242,6 +246,10 @@ export interface HubTaskEvent {
   readonly filteredBeadsRuntimePaths?: readonly string[];
   readonly remoteRef?: string;
   readonly expectedRemoteOid?: string;
+  readonly fifoPosition?: number;
+  readonly verificationConcurrency?: number;
+  readonly suffixInvalidatedTaskIds?: readonly string[];
+  readonly hostContributionRelation?: string;
 }
 
 type HubRunEventData =

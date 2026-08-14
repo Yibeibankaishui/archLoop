@@ -61,6 +61,10 @@ import {
   syncHubPublications,
   type HubPublicationOutboxInspection,
 } from "./hubPublication.js";
+import {
+  inspectHubLandingQueue,
+  type HubLandingQueueInspection,
+} from "./hubLandingQueue.js";
 import type { HubLandingTaskCloser } from "./hubLanding.js";
 import {
   ensureHubTaskStoreMigrated,
@@ -293,6 +297,7 @@ export interface RunHubFlowResult {
   readonly landingReconciliation?: HubLandingReconciliationOutcome;
   readonly checkoutSync?: HubCheckoutOutboxInspection;
   readonly publication?: HubPublicationOutboxInspection;
+  readonly landingQueue?: HubLandingQueueInspection;
 }
 
 type HubFlowLifecycleMutation = <T>(
@@ -1961,6 +1966,7 @@ const runObservedHubFlow = async (
     landingReconciliation: completedLandingReconciliation,
     checkoutSync: inspectHubCheckoutOutbox({ hubProjectDir }),
     publication: inspectHubPublicationOutbox({ hubProjectDir }),
+    landingQueue: inspectHubLandingQueue(hubProjectDir),
   };
 };
 
@@ -2003,6 +2009,13 @@ export const formatHubFlowResultLines = (
   }
   if (result.publication && result.publication.pendingCount > 0) {
     lines.push(result.publication.message);
+  }
+  if (
+    result.landingQueue &&
+    result.landingQueue.pendingQuietWaitCount > 0 &&
+    result.landingQueue.message
+  ) {
+    lines.push(result.landingQueue.message);
   }
   if (result.worktreeWarning) {
     lines.push(
