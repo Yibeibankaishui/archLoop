@@ -575,6 +575,50 @@ const toLandingIdentity = (
   filteredBeadsRuntimePaths: integration?.filteredBeadsRuntimePaths,
 });
 
+const isAcceptedMergeOutcome = (
+  outcome: HubBatchMergeTaskResult["outcome"],
+): boolean =>
+  outcome === "merged" ||
+  outcome === "pending" ||
+  outcome === "pending_delivery" ||
+  outcome === "skipped";
+
+const summarizeMergeTaskResult = (
+  result: HubBatchMergeTaskResult,
+): string =>
+  `${result.taskId} ${result.outcome}: ${
+    result.diagnosticSummary ??
+    result.reason ??
+    result.failureReason ??
+    result.outcome
+  }`;
+
+const batchMergeFailureFields = (
+  result: HubBatchMergeTaskResult,
+): {
+  readonly failedTaskId: string;
+  readonly failureReason?: string;
+  readonly failureSummary: string;
+  readonly diagnostics?: HubMergeDiagnostics;
+} => ({
+  failedTaskId: result.taskId,
+  failureReason: result.reason ?? result.failureReason,
+  failureSummary: summarizeMergeTaskResult(result),
+  diagnostics: result.diagnostics,
+});
+
+const batchMergePendingFields = (
+  result: HubBatchMergeTaskResult,
+): {
+  readonly failureReason?: string;
+  readonly failureSummary: string;
+} => ({
+  failureReason: result.reason,
+  failureSummary: `${result.taskId} ${result.outcome}: ${
+    result.diagnosticSummary ?? result.reason ?? result.outcome
+  }`,
+});
+
 const recordBatchMergeCompleted = (
   input: RunHubBatchMergeInput,
   selectedTaskIds: readonly string[],
@@ -584,17 +628,16 @@ const recordBatchMergeCompleted = (
   const failedResult =
     batchStatus === "pending"
       ? undefined
-      : results.find(
-          (result) =>
-            result.outcome !== "merged" &&
-            result.outcome !== "pending" &&
-            result.outcome !== "pending_delivery" &&
-            result.outcome !== "skipped",
-        );
+      : results.find((result) => !isAcceptedMergeOutcome(result.outcome));
   const pendingResult =
     batchStatus === "pending"
       ? results.find((result) => result.outcome === "pending")
       : undefined;
+  const statusFields = failedResult
+    ? batchMergeFailureFields(failedResult)
+    : pendingResult
+      ? batchMergePendingFields(pendingResult)
+      : {};
   appendHubBatchEvent(input.runDir, {
     type: "batch_merge_completed",
     runId: input.runId,
@@ -615,28 +658,7 @@ const recordBatchMergeCompleted = (
       ...(result.baseOid ? { baseOid: result.baseOid } : {}),
       ...(result.candidateOid ? { candidateOid: result.candidateOid } : {}),
     })),
-    ...(failedResult
-      ? {
-          failedTaskId: failedResult.taskId,
-          failureReason: failedResult.reason ?? failedResult.failureReason,
-          failureSummary: `${failedResult.taskId} ${failedResult.outcome}: ${
-            failedResult.diagnosticSummary ??
-            failedResult.reason ??
-            failedResult.failureReason ??
-            failedResult.outcome
-          }`,
-          diagnostics: failedResult.diagnostics,
-        }
-      : pendingResult
-        ? {
-            failureReason: pendingResult.reason,
-            failureSummary: `${pendingResult.taskId} ${pendingResult.outcome}: ${
-              pendingResult.diagnosticSummary ??
-              pendingResult.reason ??
-              pendingResult.outcome
-            }`,
-          }
-        : {}),
+    ...statusFields,
   });
 };
 
@@ -1768,20 +1790,13 @@ const resolveBatchMergeStatus = (
   if (results.length === 0) {
     return "done";
   }
-  const allPending = results.every((result) => result.outcome === "pending");
-  if (allPending) {
+  if (results.every((result) => result.outcome === "pending")) {
     return "pending";
   }
-  const allAccepted = results.every(
-    (result) =>
-      result.outcome === "merged" || result.outcome === "pending_delivery",
-  );
-  if (!allAccepted) {
-    return "partial_failed";
+  if (results.every((result) => result.outcome === "merged")) {
+    return "done";
   }
-  return results.every((result) => result.outcome === "merged")
-    ? "done"
-    : "partial_failed";
+  return "partial_failed";
 };
 
 /**

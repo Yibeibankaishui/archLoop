@@ -2,6 +2,10 @@ import { join } from "node:path";
 
 import type { HubRunEvent, HubRunStopReason } from "./hubExecution.js";
 import type { RunHubFlowResult } from "./hubFlowExecution.js";
+import {
+  HUB_HOST_CONTRIBUTION_CONFLICT,
+  HUB_HOST_CONTRIBUTION_PENDING,
+} from "./hubLandingQueue.js";
 
 export type HubRunOutcome =
   | "completed"
@@ -294,6 +298,15 @@ const projectMergeFailureDetails = (
     ];
   });
 
+const isHostContributionPendingReason = (reason: string | undefined): boolean =>
+  reason === HUB_HOST_CONTRIBUTION_CONFLICT ||
+  reason === HUB_HOST_CONTRIBUTION_PENDING;
+
+const pendingMergeStageLabel = (reason: string | undefined): string =>
+  isHostContributionPendingReason(reason)
+    ? "Host contribution pending"
+    : "Waiting for merge";
+
 const projectPendingMergeDetails = (
   result: RunHubFlowResult,
 ): readonly HubRunTaskDetail[] =>
@@ -302,11 +315,7 @@ const projectPendingMergeDetails = (
       ? [
           {
             taskId: task.taskId,
-            stage:
-              task.reason === "host_contribution_conflict" ||
-              task.reason === "host_contribution_pending"
-                ? "Host contribution pending"
-                : "Waiting for merge",
+            stage: pendingMergeStageLabel(task.reason),
             diagnostic:
               task.diagnosticSummary ??
               "Landing is still pending. The task is not semantically failed and does not require a recovery command.",
@@ -346,10 +355,7 @@ const resolveHubRunOutcomeKind = (
   if (hasPendingDelivery && result.stopReason !== "batch_failed") {
     return "completed_with_pending_delivery";
   }
-  if (
-    (hasPendingMerge || result.stopReason === "batch_pending") &&
-    result.stopReason !== "batch_failed"
-  ) {
+  if (hasPendingMerge && result.stopReason !== "batch_failed") {
     return "completed_with_pending_merge";
   }
   if (result.stopReason !== "batch_failed") {
@@ -426,6 +432,44 @@ export const projectHubRunOutcome = (
   };
 };
 
+export type HubRunDisplayBatchStatus =
+  | "planning"
+  | "merging"
+  | "done"
+  | "partial_failed"
+  | "pending";
+
+export const isTerminalHubRunBatchStatus = (
+  status: HubRunDisplayBatchStatus,
+): boolean =>
+  status === "done" || status === "partial_failed" || status === "pending";
+
+const resolveBatchMergeCompletedStage = (
+  batchStatus: "done" | "partial_failed" | "pending",
+): string => {
+  switch (batchStatus) {
+    case "done":
+      return "Completed";
+    case "pending":
+      return "Pending";
+    case "partial_failed":
+      return "Completed with failures";
+  }
+};
+
+const resolveRunCompletedDisplayStatus = (
+  stopReason: HubRunStopReason,
+): HubRunDisplayState["status"] => {
+  switch (stopReason) {
+    case "batch_failed":
+      return "completed_with_failures";
+    case "batch_pending":
+      return "completed_with_pending_merge";
+    default:
+      return "completed";
+  }
+};
+
 export interface HubRunDisplayState {
   readonly hubProjectName: string;
   readonly flowId: string;
@@ -450,12 +494,7 @@ export interface HubRunDisplayState {
         readonly batchId: string;
         readonly selectedTaskIds: readonly string[];
         readonly taskTitles?: Readonly<Record<string, string>>;
-        readonly status:
-          | "planning"
-          | "merging"
-          | "done"
-          | "partial_failed"
-          | "pending";
+        readonly status: HubRunDisplayBatchStatus;
         readonly stage: string;
       }
     >
@@ -674,12 +713,7 @@ const reduceBatchEvent = (
         selectedTaskIds: event.taskIds,
         taskTitles: current?.taskTitles,
         status: event.batchStatus,
-        stage:
-          event.batchStatus === "done"
-            ? "Completed"
-            : event.batchStatus === "pending"
-              ? "Pending"
-              : "Completed with failures",
+        stage: resolveBatchMergeCompletedStage(event.batchStatus),
       };
     default:
       return current;
@@ -764,12 +798,7 @@ export const reduceHubRunDisplayState = (
       return {
         ...state,
         runId: event.runId,
-        status:
-          event.stopReason === "batch_failed"
-            ? "completed_with_failures"
-            : event.stopReason === "batch_pending"
-              ? "completed_with_pending_merge"
-              : "completed",
+        status: resolveRunCompletedDisplayStatus(event.stopReason),
         completedBatchCount: event.completedBatchCount,
         completedTaskCount: event.completedTaskCount,
         stopReason: event.stopReason,

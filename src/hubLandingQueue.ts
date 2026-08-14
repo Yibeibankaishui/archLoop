@@ -897,19 +897,18 @@ const isLandedHostContribution = (
 } => landed.kind === "landed" && "commit" in landed && Boolean(landed.commit);
 
 const isHostContributionMergeConflict = (error: unknown): boolean => {
+  if (
+    error instanceof Error &&
+    error.cause !== undefined &&
+    error.cause !== null &&
+    isHostContributionMergeConflict(error.cause)
+  ) {
+    return true;
+  }
   const message =
     error instanceof Error
       ? `${error.message}\n${error.stack ?? ""}`
       : String(error);
-  const nested =
-    error instanceof Error &&
-    error.cause !== undefined &&
-    error.cause !== null
-      ? isHostContributionMergeConflict(error.cause)
-      : false;
-  if (nested) {
-    return true;
-  }
   // Node execFile errors often carry stdout/stderr on the error object.
   const withOutput = error as {
     readonly stdout?: unknown;

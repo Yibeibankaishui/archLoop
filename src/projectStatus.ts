@@ -380,14 +380,17 @@ const resolveBatchStatus = (
       case "batch_merge_started":
         status = "merging";
         break;
-      case "batch_merge_completed":
-        status =
-          record.batchStatus === "partial_failed"
-            ? "partial_failed"
-            : record.batchStatus === "pending"
-              ? "pending"
-              : "done";
+      case "batch_merge_completed": {
+        const batchStatus = record.batchStatus;
+        if (batchStatus === "partial_failed") {
+          status = "partial_failed";
+        } else if (batchStatus === "pending") {
+          status = "pending";
+        } else {
+          status = "done";
+        }
         break;
+      }
       default:
         break;
     }
