@@ -79,7 +79,7 @@ npx archloop project status
 | 选择默认项目       | `archloop project select <name>`                         |
 | 查看项目状态       | `archloop project status`                                |
 | 修改项目类型约定   | `archloop project configure --project-profile <profile>` |
-| 配置落地与发布策略 | `archloop project configure --publish-policy off\|best_effort\|required` |
+| 配置落地与发布策略 | `archloop project configure --publish-policy off\|best_effort\|required [--remote-target] [--delivery-timeout-ms]` |
 | 修改显示名称       | `archloop project rename <project> <new-name>`           |
 | 仓库移动后重新关联 | `archloop project relink <project> --path <repo-path>`   |
 
@@ -224,7 +224,12 @@ runtime/export 文件（例如 `.beads/issues.jsonl`），Hub 只会从 candidat
 `archloop project configure --publish-policy best_effort --remote-target origin/main`
 后，本地 shipped 会入队 durable publication outbox：网络、凭证、受保护分支或
 未知推送结果记为 `target_publish_pending`，自动重试，不撤销本地交付，且与
-GitHub 任务同步分开显示。每个待合并任务有自己的
+GitHub 任务同步分开显示。显式配置 `--publish-policy required` 时，任务保持
+`publishing`，直到远程祖先证明交付；同一 remote ref 上后继任务可以构造与验证，
+但不能越过未确认的前置任务推进本地交付序列。`--delivery-timeout-ms` 控制等待；
+超时返回 `completed_with_pending_delivery`（非零退出），不把任务标为语义失败。
+推送成功但进程中断后若远程被 force rewrite，记为 integrity incident，不会当成
+普通 drift 自动覆盖。每个待合并任务有自己的
 落地事务：一个任务被拦住时，独立兄弟任务继续落地，依赖未落地前置任务的兄弟
 会等待。Git 冲突和验证失败各最多自动修复两次；耗尽后只把该任务标为
 `blocked`（`merge_conflict_unresolved` 或 `verification_failed`），批次在有
@@ -279,6 +284,7 @@ npx archloop tasks recover <task-id>
 | 任务状态和运行事件不一致    | 先运行 `tasks doctor`，再按建议 repair 或 recover                                         |
 | 落地后工作区看不到改动      | 权威结果在 Hub publish target；宿主分支仅在安全时快进，否则 `checkout_sync_pending`，清理或切换工作区后再跑同一 Flow |
 | 代码已 shipped 但远程未更新 | 显式 `best_effort` 发布会记 `target_publish_pending`；检查 `--remote-target`、凭证与受保护分支，再跑同一 Flow 自动重试 |
+| required 仍在 publishing | 检查远程 proof / FIFO 前置任务；超时是 `completed_with_pending_delivery`，不是任务失败；继续跑同一 Flow 自动重试 |
 | GitHub 同步冲突             | 使用 `tasks resolve --keep local` 或 `--keep remote`                                      |
 | 工作分支仍有可恢复内容      | 使用 `tasks recover`，不要手动强删 worktree 或分支                                        |
 | 后续 iteration 启动即 abort | 只要还有剩余 iteration，运行会继续并带上进度摘要；全部用尽且无完成信号才记 `agent_failed` |
@@ -344,3 +350,4 @@ API 参数、返回值和生命周期说明见
 | 2026-08-14 | 落地后安全快进宿主分支；不安全 WIP 保持 checkout_sync_pending |
 | 2026-08-14 | best-effort 远程发布 outbox；失败保持 target_publish_pending |
 | 2026-08-14 | FIFO 投机链并行验证；宿主贡献入链；target_quiet_wait 防超车 |
+| 2026-08-14 | required 远程交付：publishing、有序 proof、超时 completed_with_pending_delivery |

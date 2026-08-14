@@ -158,6 +158,45 @@ describe("plain Hub run lifecycle output", () => {
     });
   });
 
+  it("returns completed_with_pending_delivery for required publication timeout", () => {
+    const result = makeRunResult({
+      stopReason: "no_ready_tasks",
+      completedBatchCount: 1,
+      completedTaskCount: 0,
+      mergeResult: {
+        runId: "run-1",
+        batchId: "batch-1",
+        selectedTaskIds: ["bd-pub"],
+        selectionDiagnostics: [],
+        batchStatus: "partial_failed",
+        results: [
+          {
+            taskId: "bd-pub",
+            title: "Publish me",
+            branch: "archloop/bd-pub",
+            outcome: "pending_delivery",
+            hubStatus: "publishing",
+            reason: "completed_with_pending_delivery",
+            diagnosticSummary:
+              "Required delivery timed out. The task is not semantically failed.",
+          },
+        ],
+      },
+    });
+
+    expect(projectHubRunOutcome(result)).toMatchObject({
+      outcome: "completed_with_pending_delivery",
+      summary: "Run completed with pending required delivery",
+      exitCode: 1,
+      taskDetails: [
+        expect.objectContaining({
+          taskId: "bd-pub",
+          stage: "Publishing",
+        }),
+      ],
+    });
+  });
+
   it("treats the configured flow-batch limit as successful completion", () => {
     const result: RunHubFlowResult = {
       flowId: "with-review",

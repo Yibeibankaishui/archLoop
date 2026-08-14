@@ -54,14 +54,17 @@ import {
   fifoPositionForTicket,
   findHubLandingQueueTicket,
   invalidateHubLandingSpeculativeSuffix,
+  markHubLandingQueueAfterLocalLand,
   markHubLandingQueueBlockedPrerequisite,
   markHubLandingQueueFailed,
   markHubLandingQueueLanded,
+  markHubLandingQueuePublishing,
   markHubLandingQueueVerified,
   readHubLandingQueue,
   reconcileHubHostTargetContribution,
   recordHubLandingDriftRebuild,
   recordHubLandingQueueCandidate,
+  resolveRequiredDeliveryPredecessor,
   resumeHubLandingQuietWaitIfStable,
   shouldEnterHubLandingQuietWait,
   waitHubLandingDriftBackoff,
@@ -79,6 +82,8 @@ import {
   syncHubCheckoutProjections,
 } from "./hubCheckoutProjection.js";
 import {
+  HUB_COMPLETED_WITH_PENDING_DELIVERY,
+  driveHubRequiredPublication,
   enqueueHubPublicationAfterShipped,
   hubPublicationEventReason,
   hubPublicationEventType,
@@ -107,6 +112,7 @@ import {
   isCompletedHubStatus,
   loadHubTaskBoard,
   resolveHubTaskBranch,
+  updateHubTaskStatus,
   type HubFailureReason,
   type HubTaskProjection,
   type HubTaskStatus,
@@ -310,6 +316,7 @@ export interface HubBatchMergeTaskResult {
     | "verification_failed"
     | "close_failed"
     | "pending"
+    | "pending_delivery"
     | "skipped";
   readonly hubStatus: HubTaskStatus;
   readonly failureReason?: HubFailureReason;
@@ -317,7 +324,8 @@ export interface HubBatchMergeTaskResult {
     | HubLandingRepairExhaustionReason
     | "unshipped_prerequisite"
     | "target_quiet_wait"
-    | "queue_head_blocked";
+    | "queue_head_blocked"
+    | typeof HUB_COMPLETED_WITH_PENDING_DELIVERY;
   readonly diagnosticSummary?: string;
   readonly diagnostics?: HubMergeDiagnostics;
   readonly logPath?: string;
@@ -1727,6 +1735,96 @@ const emitPublicationEvents = async (
   }
 };
 
+const resolveBatchMergeStatus = (
+  results: readonly HubBatchMergeTaskResult[],
+): "done" | "partial_failed" => {
+  const allAccepted = results.every(
+    (result) =>
+      result.outcome === "merged" || result.outcome === "pending_delivery",
+  );
+  if (!allAccepted) {
+    return "partial_failed";
+  }
+  return results.every((result) => result.outcome === "merged")
+    ? "done"
+    : "partial_failed";
+};
+
+/**
+ * Required publication: hold `publishing` until remote proof or delivery timeout.
+ * Returns a pending_delivery result on timeout; otherwise undefined to continue close.
+ */
+const awaitRequiredPublicationBeforeClose = async (
+  session: MergeTaskSession,
+  landingIdentity: HubLandingIdentity,
+  landingMetadata: Readonly<Record<string, unknown>>,
+  policy: NonNullable<ReturnType<typeof readHubLandingPolicy>>,
+): Promise<HubBatchMergeTaskResult | undefined> => {
+  const { input, task, branch, claim, hubProjectDir } = session;
+  updateHubTaskStatus({
+    cwd: input.cwd,
+    taskId: task.id,
+    hubStatus: "publishing",
+    metadata: landingMetadata,
+    env: input.env,
+  });
+  markHubLandingQueuePublishing(hubProjectDir, task.id);
+  appendMergeProgressEvent(input, {
+    type: "target_publish_pending",
+    taskId: task.id,
+    branch,
+    claim,
+    createdAt: new Date().toISOString(),
+    status: "publishing",
+    ...landingIdentity,
+    publishTargetOid: landingIdentity.candidateOid,
+    reason: "publishing",
+    message: `Task ${task.id} is publishing; local landing is complete and the task is not semantically failed.`,
+  });
+  if (landingIdentity.transactionId && landingIdentity.candidateOid) {
+    enqueueHubPublicationAfterShipped({
+      repoRoot: input.cwd,
+      hubProjectDir,
+      transactionId: landingIdentity.transactionId,
+      taskId: task.id,
+      candidateOid: landingIdentity.candidateOid,
+      policy,
+    });
+    await emitPublicationEvents(session, landingIdentity);
+  }
+  const driven = await driveHubRequiredPublication({
+    repoRoot: input.cwd,
+    hubProjectDir,
+    policy,
+  });
+  await emitPublicationEvents(session, landingIdentity);
+  if (driven.outcome !== HUB_COMPLETED_WITH_PENDING_DELIVERY) {
+    markHubLandingQueueLanded(hubProjectDir, task.id);
+    return undefined;
+  }
+  const predecessor = resolveRequiredDeliveryPredecessor({
+    hubProjectDir,
+    taskId: task.id,
+  });
+  appendMergeProgressEvent(input, {
+    type: "target_publish_pending",
+    taskId: task.id,
+    branch,
+    claim,
+    createdAt: new Date().toISOString(),
+    status: "publishing",
+    ...landingIdentity,
+    reason: HUB_COMPLETED_WITH_PENDING_DELIVERY,
+    message: driven.message,
+    ...(predecessor ? { predecessorOid: predecessor.candidateOid } : {}),
+  });
+  return toBatchMergeTaskResult(task, branch, "pending_delivery", "publishing", {
+    reason: HUB_COMPLETED_WITH_PENDING_DELIVERY,
+    diagnosticSummary: driven.message,
+    ...landingIdentity,
+  });
+};
+
 const failLandedCandidate = async (
   session: MergeTaskSession,
   mergeIntegration: HubMergeIntegration,
@@ -2190,20 +2288,35 @@ const closeLandedTask = async (
   verifyFinishedAt: string,
 ): Promise<HubBatchMergeTaskResult> => {
   const { input, task, branch, claim, lifecycleBase, hubProjectDir } = session;
+  const policy = readHubLandingPolicy(hubProjectDir);
+  const landingMetadata = {
+    ...lifecycleBase.metadata,
+    ...(landingIdentity.transactionId
+      ? {
+          landingTransactionId: landingIdentity.transactionId,
+          landingCandidateOid: landingIdentity.candidateOid,
+          landingSourceOid: landingIdentity.sourceOid,
+          landingBaseOid: landingIdentity.baseOid,
+        }
+      : {}),
+  };
+
   try {
+    if (policy?.publishPolicy === "required") {
+      const pendingDelivery = await awaitRequiredPublicationBeforeClose(
+        session,
+        landingIdentity,
+        landingMetadata,
+        policy,
+      );
+      if (pendingDelivery) {
+        return pendingDelivery;
+      }
+    }
+
     const lifecycleResult = await recordTaskClosure({
       ...lifecycleBase,
-      metadata: {
-        ...lifecycleBase.metadata,
-        ...(landingIdentity.transactionId
-          ? {
-              landingTransactionId: landingIdentity.transactionId,
-              landingCandidateOid: landingIdentity.candidateOid,
-              landingSourceOid: landingIdentity.sourceOid,
-              landingBaseOid: landingIdentity.baseOid,
-            }
-          : {}),
-      },
+      metadata: landingMetadata,
       createdAt: verifyFinishedAt,
       closer: input.closer,
     });
@@ -2224,14 +2337,16 @@ const closeLandedTask = async (
         taskId: task.id,
         candidateOid: landingIdentity.candidateOid,
       });
-      enqueueHubPublicationAfterShipped({
-        repoRoot: input.cwd,
-        hubProjectDir,
-        transactionId: landingIdentity.transactionId,
-        taskId: task.id,
-        candidateOid: landingIdentity.candidateOid,
-      });
-      await emitPublicationEvents(session, landingIdentity);
+      if (policy?.publishPolicy !== "required") {
+        enqueueHubPublicationAfterShipped({
+          repoRoot: input.cwd,
+          hubProjectDir,
+          transactionId: landingIdentity.transactionId,
+          taskId: task.id,
+          candidateOid: landingIdentity.candidateOid,
+        });
+        await emitPublicationEvents(session, landingIdentity);
+      }
     }
     const cleanupResult = await runTaskBranchCleanup(input, branch);
     recordTaskBranchCleanup(
@@ -2437,7 +2552,12 @@ const processMergeTask = async (
       publishTargetOid: verified.landingIdentity.candidateOid,
       verifierFingerprint,
     });
-    markHubLandingQueueLanded(session.hubProjectDir, task.id);
+    const landedPolicy = readHubLandingPolicy(session.hubProjectDir);
+    markHubLandingQueueAfterLocalLand(
+      session.hubProjectDir,
+      task.id,
+      landedPolicy?.publishPolicy ?? "off",
+    );
   }
 
   await emitCheckoutProjectionEvents(session, landedIdentity);
@@ -2718,9 +2838,7 @@ export const runHubBatchMerge = async (
     }
   }
 
-  const batchStatus = results.every((result) => result.outcome === "merged")
-    ? "done"
-    : "partial_failed";
+  const batchStatus = resolveBatchMergeStatus(results);
   recordBatchMergeCompleted(input, selectedTaskIds, batchStatus, results);
 
   return {

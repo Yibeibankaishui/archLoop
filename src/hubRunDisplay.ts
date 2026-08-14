@@ -6,6 +6,7 @@ import type { RunHubFlowResult } from "./hubFlowExecution.js";
 export type HubRunOutcome =
   | "completed"
   | "completed_with_failures"
+  | "completed_with_pending_delivery"
   | "failed"
   | "cancelled";
 
@@ -221,7 +222,9 @@ const projectWaitingMergeDetails = (
   );
   const failedMergeTaskIds = new Set(
     (result.mergeResult?.results ?? []).flatMap((task) =>
-      task.outcome === "merged" || task.outcome === "skipped"
+      task.outcome === "merged" ||
+      task.outcome === "skipped" ||
+      task.outcome === "pending_delivery"
         ? []
         : [task.taskId],
     ),
@@ -290,42 +293,95 @@ const projectMergeFailureDetails = (
     ];
   });
 
+const projectPendingDeliveryDetails = (
+  result: RunHubFlowResult,
+): readonly HubRunTaskDetail[] =>
+  (result.mergeResult?.results ?? []).flatMap((task) =>
+    task.outcome === "pending_delivery"
+      ? [
+          {
+            taskId: task.taskId,
+            stage: "Publishing",
+            diagnostic:
+              task.diagnosticSummary ??
+              "Required remote delivery is still pending. Local landing is preserved and the task is not semantically failed.",
+          },
+        ]
+      : [],
+  );
+
+const resolveHubRunOutcomeKind = (
+  result: RunHubFlowResult,
+  options: { readonly cancelled?: boolean },
+  hasPendingDelivery: boolean,
+  hasPartialProgress: boolean,
+): HubRunOutcome => {
+  if (options.cancelled === true) {
+    return "cancelled";
+  }
+  if (hasPendingDelivery && result.stopReason !== "batch_failed") {
+    return "completed_with_pending_delivery";
+  }
+  if (result.stopReason !== "batch_failed") {
+    return "completed";
+  }
+  return hasPartialProgress ? "completed_with_failures" : "failed";
+};
+
+const summarizeHubRunOutcome = (
+  outcome: HubRunOutcome,
+  result: RunHubFlowResult,
+): string => {
+  switch (outcome) {
+    case "cancelled":
+      return "Run cancelled";
+    case "completed_with_pending_delivery":
+      return "Run completed with pending required delivery";
+    case "completed_with_failures":
+      return "Run completed with failures";
+    case "failed":
+      return "Run failed";
+    case "completed":
+      if (
+        result.stopReason === "no_ready_tasks" &&
+        result.completedBatchCount === 0
+      ) {
+        return "Nothing to run";
+      }
+      if (result.stopReason === "max_batches_reached") {
+        return "Reached configured flow-batch limit";
+      }
+      return "Run completed";
+  }
+};
+
 export const projectHubRunOutcome = (
   result: RunHubFlowResult,
   options: { readonly cancelled?: boolean } = {},
 ): HubRunOutcomeProjection => {
   const counts = classifyHubRunTasks(result);
   const hasPartialProgress = counts.completed > 0 || counts.readyToMerge > 0;
-  const outcome: HubRunOutcome =
-    options.cancelled === true
-      ? "cancelled"
-      : result.stopReason !== "batch_failed"
-        ? "completed"
-        : hasPartialProgress
-          ? "completed_with_failures"
-          : "failed";
+  const hasPendingDelivery =
+    result.mergeResult?.results.some(
+      (task) => task.outcome === "pending_delivery",
+    ) === true;
+  const outcome = resolveHubRunOutcomeKind(
+    result,
+    options,
+    hasPendingDelivery,
+    hasPartialProgress,
+  );
 
   return {
     outcome,
-    summary:
-      outcome === "cancelled"
-        ? "Run cancelled"
-        : outcome === "completed_with_failures"
-          ? "Run completed with failures"
-          : outcome === "failed"
-            ? "Run failed"
-            : result.stopReason === "no_ready_tasks" &&
-                result.completedBatchCount === 0
-              ? "Nothing to run"
-              : result.stopReason === "max_batches_reached"
-                ? "Reached configured flow-batch limit"
-                : "Run completed",
+    summary: summarizeHubRunOutcome(outcome, result),
     counts,
     taskDetails: [
       ...projectFailedTaskDetails(result),
       ...projectMergeSelectionDetails(result),
       ...projectMergeFailureDetails(result),
       ...projectWaitingMergeDetails(result),
+      ...projectPendingDeliveryDetails(result),
     ],
     exitCode: resolveHubRunExitCode(outcome),
   };
@@ -341,6 +397,7 @@ export interface HubRunDisplayState {
     | "running"
     | "completed"
     | "completed_with_failures"
+    | "completed_with_pending_delivery"
     | "failed"
     | "cancelled";
   readonly completedBatchCount: number;

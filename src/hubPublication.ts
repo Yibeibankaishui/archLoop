@@ -27,6 +27,12 @@ const execFileAsync = promisify(execFile);
 
 export const HUB_TARGET_PUBLISH_PENDING = "target_publish_pending";
 
+/** Default required-delivery wait during a Hub run (5 minutes). */
+export const HUB_DEFAULT_DELIVERY_TIMEOUT_MS = 5 * 60 * 1000;
+
+export const HUB_COMPLETED_WITH_PENDING_DELIVERY =
+  "completed_with_pending_delivery" as const;
+
 export const HUB_PUBLICATION_PENDING_REASONS = [
   "network_error",
   "credential_rejected",
@@ -35,6 +41,7 @@ export const HUB_PUBLICATION_PENDING_REASONS = [
   "no_remote_configured",
   "transient_remote_error",
   "observe_failed",
+  "remote_force_rewrite_integrity",
 ] as const;
 
 export type HubPublicationPendingReason =
@@ -71,6 +78,8 @@ export interface HubPublicationOutboxItem {
   readonly pendingReason?: HubPublicationPendingReason;
   readonly message?: string;
   readonly publishedOid?: string;
+  /** Set after a push reports success before confirmation is durable. */
+  readonly ambiguousPushAcknowledged?: boolean;
 }
 
 export interface HubPublicationOutboxInspection {
@@ -325,6 +334,9 @@ const parseOutboxItem = (
     ...(isPendingReason(pendingReason) ? { pendingReason } : {}),
     ...(message ? { message } : {}),
     ...(publishedOid ? { publishedOid } : {}),
+    ...(record.ambiguousPushAcknowledged === true
+      ? { ambiguousPushAcknowledged: true }
+      : {}),
   };
 };
 
@@ -370,7 +382,10 @@ export const listHubPublicationOutboxItems = (
 
 const pendingMessage = (item: HubPublicationOutboxItem): string => {
   const reason = item.pendingReason ?? "transient_remote_error";
-  return `Code publication pending for ${item.taskId} (${reason}): remote ${item.remoteTarget} expected ${item.expectedRemoteOid}, candidate ${item.candidateOid}. Local shipped proof is unchanged and is separate from GitHub task sync. ${NO_RECOVER_SUFFIX}`;
+  if (reason === "remote_force_rewrite_integrity") {
+    return `Code publication integrity incident for ${item.taskId}: remote ${item.remoteTarget} was force-rewritten after an ambiguous successful push of candidate ${item.candidateOid}. This is not ordinary target drift and is not overwritten automatically. The task is not semantically failed. ${NO_RECOVER_SUFFIX}`;
+  }
+  return `Code publication pending for ${item.taskId} (${reason}): remote ${item.remoteTarget} expected ${item.expectedRemoteOid}, candidate ${item.candidateOid}. Local shipped proof is unchanged and is separate from GitHub task sync. The task is not semantically failed. ${NO_RECOVER_SUFFIX}`;
 };
 
 const succeededMessage = (item: HubPublicationOutboxItem): string =>
@@ -568,6 +583,19 @@ const markSucceeded = (
     publishedOid: input.publishedOid,
     pendingReason: undefined,
     message: undefined,
+    ambiguousPushAcknowledged: undefined,
+  });
+
+const markAmbiguousPushAcknowledged = (
+  hubProjectDir: string,
+  item: HubPublicationOutboxItem,
+  now: string,
+): HubPublicationOutboxItem =>
+  writeOutboxItem(hubProjectDir, {
+    ...item,
+    status: "pending",
+    ambiguousPushAcknowledged: true,
+    updatedAt: now,
   });
 
 const markPending = (
@@ -600,13 +628,13 @@ const maybeCrash = (
 };
 
 const shouldEnqueuePublication = (policy: HubLandingPolicy): boolean =>
-  policy.publishPolicy === "best_effort";
+  policy.publishPolicy === "best_effort" || policy.publishPolicy === "required";
 
 /**
- * Enqueues best-effort remote publication after local shipped proof.
- * Publication off and required (out of scope here) do not enqueue.
- * Discovering `origin` alone never enables publication — only an explicit
- * Hub policy remoteTarget under best_effort does.
+ * Enqueues remote publication after local landing evidence.
+ * `off` never enqueues. `best_effort` and `required` enqueue only when the
+ * Hub policy was explicitly configured — discovering `origin` alone never
+ * enables publication.
  */
 export const enqueueHubPublicationAfterShipped = (input: {
   readonly repoRoot: string;
@@ -858,14 +886,25 @@ const pushCandidateWithCrashWindows = async (
     );
   }
 
+  // Durable evidence that push reported success before confirmation/crash.
+  const acknowledged = markAmbiguousPushAcknowledged(
+    input.hubProjectDir,
+    item,
+    now,
+  );
   maybeCrash(input.faultInjection, "after");
-  const confirmed = await trySucceedFromRemoteObservation(input, item, now, {
-    crashAfterOnSuccess: false,
-  });
+  const confirmed = await trySucceedFromRemoteObservation(
+    input,
+    acknowledged,
+    now,
+    {
+      crashAfterOnSuccess: false,
+    },
+  );
   if (confirmed) {
     return confirmed;
   }
-  return markSucceeded(input.hubProjectDir, item, {
+  return markSucceeded(input.hubProjectDir, acknowledged, {
     publishedOid: item.candidateOid,
     now,
   });
@@ -878,6 +917,14 @@ const projectOneItem = async (
 ): Promise<HubPublicationOutboxItem> => {
   if (item.status === "succeeded") {
     return item;
+  }
+  if (item.pendingReason === "remote_force_rewrite_integrity") {
+    return markPending(
+      input.hubProjectDir,
+      item,
+      "remote_force_rewrite_integrity",
+      now,
+    );
   }
   if (isUnsetRemoteItem(item)) {
     return markPending(
@@ -907,6 +954,15 @@ const projectOneItem = async (
       publishedOid: tip,
       now,
     });
+  }
+
+  if (item.ambiguousPushAcknowledged === true) {
+    return markPending(
+      input.hubProjectDir,
+      item,
+      "remote_force_rewrite_integrity",
+      now,
+    );
   }
 
   if (remoteTipDivergedFromExpectation(input.repoRoot, item, tip)) {
@@ -1013,5 +1069,113 @@ export const syncHubPublications = async (
   return {
     ...outcome,
     deltas: selectHubPublicationEventDeltas(before, outcome),
+  };
+};
+
+export const isHubRemotePublicationProven = (input: {
+  readonly hubProjectDir: string;
+  readonly transactionId: string;
+  readonly candidateOid?: string;
+}): boolean =>
+  listHubPublicationOutboxItems(input.hubProjectDir).some(
+    (item) =>
+      item.transactionId === input.transactionId &&
+      item.status === "succeeded" &&
+      (input.candidateOid === undefined ||
+        item.candidateOid === input.candidateOid),
+  );
+
+export const resolveHubDeliveryTimeoutMs = (
+  policy: Pick<HubLandingPolicy, "publishPolicy" | "deliveryTimeoutMs">,
+): number => {
+  if (policy.publishPolicy !== "required") {
+    return 0;
+  }
+  return policy.deliveryTimeoutMs ?? HUB_DEFAULT_DELIVERY_TIMEOUT_MS;
+};
+
+export interface HubRequiredDeliveryDriveResult {
+  readonly outcome:
+    | "delivered"
+    | typeof HUB_COMPLETED_WITH_PENDING_DELIVERY
+    | "not_required";
+  readonly publication: HubPublicationOutcome;
+  readonly pendingCount: number;
+  readonly message: string;
+  readonly timedOut: boolean;
+}
+
+/**
+ * For required publication, keep projecting the outbox until empty or the
+ * configured delivery timeout elapses. Timeout preserves local landing and
+ * automatic retry state without semantic task failure.
+ */
+export const driveHubRequiredPublication = async (input: {
+  readonly repoRoot: string;
+  readonly hubProjectDir: string;
+  readonly policy?: HubLandingPolicy;
+  readonly now?: Date;
+  readonly clock?: {
+    readonly now?: () => number;
+    readonly sleep?: (ms: number) => Promise<void>;
+  };
+  readonly pollIntervalMs?: number;
+  readonly faultInjection?: HubLandingFaultInjection;
+}): Promise<HubRequiredDeliveryDriveResult> => {
+  const policy =
+    input.policy ?? readHubLandingPolicy(input.hubProjectDir);
+  const projectOnce = (): Promise<HubPublicationOutcome> =>
+    projectHubPublicationOutbox({
+      repoRoot: input.repoRoot,
+      hubProjectDir: input.hubProjectDir,
+      now: input.now,
+      faultInjection: input.faultInjection,
+    });
+
+  if (!policy || policy.publishPolicy !== "required") {
+    const publication = await projectOnce();
+    return {
+      outcome: "not_required",
+      publication,
+      pendingCount: publication.pendingCount,
+      message: publication.message,
+      timedOut: false,
+    };
+  }
+
+  const timeoutMs = resolveHubDeliveryTimeoutMs(policy);
+  const nowMs = input.clock?.now ?? Date.now;
+  const sleep =
+    input.clock?.sleep ??
+    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const pollIntervalMs = input.pollIntervalMs ?? 50;
+  const startedAt = nowMs();
+  let publication = await projectOnce();
+
+  while (publication.pendingCount > 0) {
+    const elapsed = nowMs() - startedAt;
+    if (elapsed >= timeoutMs) {
+      const message = `Required delivery timed out after ${timeoutMs}ms with ${publication.pendingCount} pending publication(s). Local landing and automatic retry state are preserved; the task is not semantically failed. Outcome: ${HUB_COMPLETED_WITH_PENDING_DELIVERY}.`;
+      return {
+        outcome: HUB_COMPLETED_WITH_PENDING_DELIVERY,
+        publication: {
+          ...publication,
+          message,
+        },
+        pendingCount: publication.pendingCount,
+        message,
+        timedOut: true,
+      };
+    }
+    await sleep(Math.min(pollIntervalMs, Math.max(1, timeoutMs - elapsed)));
+    publication = await projectOnce();
+  }
+
+  return {
+    outcome: "delivered",
+    publication,
+    pendingCount: 0,
+    message: publication.message,
+    timedOut: false,
   };
 };

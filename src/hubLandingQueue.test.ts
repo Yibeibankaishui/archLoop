@@ -24,11 +24,14 @@ import {
   classifyHubHostTargetRelation,
   invalidateHubLandingSpeculativeSuffix,
   markHubLandingQueueFailed,
+  markHubLandingQueueLanded,
+  markHubLandingQueuePublishing,
   readHubHostDirtySnapshot,
   readHubLandingQueue,
   reconcileHubHostTargetContribution,
   recordHubLandingQueueCandidate,
   resolveHubLandingQueueHead,
+  resolveRequiredDeliveryPredecessor,
   selectHubSpeculativeChain,
   verifyHubSpeculativeCandidatesConcurrently,
   type HubLandingQueueClock,
@@ -909,6 +912,53 @@ describe("Hub target quiet wait", () => {
     });
     expect(waiting.kind).toBe("target_quiet_wait");
     expect(sleeps).toBe(sleepsAfterEnter);
+  });
+});
+
+describe("Hub required delivery ordering", () => {
+  it("blocks successor local landing until the predecessor leaves publishing", async () => {
+    const prepared = await prepareRepo("req-fifo");
+    const { configureHubLandingPolicy } = await import("./hubLandingPolicy.js");
+    configureHubLandingPolicy({
+      repoRoot: prepared.repoDir,
+      hubProjectDir: prepared.hubProjectDir,
+      publishPolicy: "required",
+      remoteTarget: "origin/main",
+    });
+    assignHubLandingQueueTickets({
+      hubProjectDir: prepared.hubProjectDir,
+      publishTargetRef: prepared.policy.publishTargetRef,
+      tasks: [{ taskId: "bd-first" }, { taskId: "bd-second" }],
+      clock: silentClock(),
+    });
+    markHubLandingQueuePublishing(prepared.hubProjectDir, "bd-first");
+
+    expect(
+      resolveRequiredDeliveryPredecessor({
+        hubProjectDir: prepared.hubProjectDir,
+        taskId: "bd-second",
+      })?.taskId,
+    ).toBe("bd-first");
+    expect(
+      canLandHubLandingTicket({
+        hubProjectDir: prepared.hubProjectDir,
+        taskId: "bd-second",
+      }),
+    ).toBe(false);
+    expect(
+      selectHubSpeculativeChain(
+        readHubLandingQueue(prepared.hubProjectDir),
+        new Set(),
+      ).map((ticket) => ticket.taskId),
+    ).toEqual(["bd-second"]);
+
+    markHubLandingQueueLanded(prepared.hubProjectDir, "bd-first");
+    expect(
+      canLandHubLandingTicket({
+        hubProjectDir: prepared.hubProjectDir,
+        taskId: "bd-second",
+      }),
+    ).toBe(true);
   });
 });
 

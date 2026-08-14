@@ -319,16 +319,8 @@ export const deriveHubLandingShipped = (input: {
   readonly publishTargetOid?: string;
   readonly legacyClosedGrandfathered?: boolean;
   readonly candidateContainedInTarget?: boolean;
+  readonly remotePublicationProven?: boolean;
 }): HubLandingShippedProof => {
-  if (input.publishPolicy === "required") {
-    return {
-      shipped: false,
-      reason: "required_publication_not_in_scope",
-      transactionId: input.transactionId,
-      candidateOid: input.candidateOid,
-      publishTargetOid: input.publishTargetOid,
-    };
-  }
   if (input.legacyClosedGrandfathered && input.taskClosed) {
     return {
       shipped: true,
@@ -383,6 +375,24 @@ export const deriveHubLandingShipped = (input: {
     return {
       shipped: false,
       reason: "publish_target_does_not_contain_candidate",
+      transactionId: input.transactionId,
+      candidateOid: input.candidateOid,
+      publishTargetOid: input.publishTargetOid,
+    };
+  }
+  if (input.publishPolicy === "required") {
+    if (input.remotePublicationProven !== true) {
+      return {
+        shipped: false,
+        reason: "remote_publication_pending",
+        transactionId: input.transactionId,
+        candidateOid: input.candidateOid,
+        publishTargetOid: input.publishTargetOid,
+      };
+    }
+    return {
+      shipped: true,
+      reason: "verified_landing_matching_closure_and_remote_publication",
       transactionId: input.transactionId,
       candidateOid: input.candidateOid,
       publishTargetOid: input.publishTargetOid,

@@ -190,6 +190,7 @@ const ACTIVE_RUN_TASK_STATUSES = new Set<HubTaskProjection["hubStatus"]>([
   "implementing",
   "reviewing",
   "merging",
+  "publishing",
 ]);
 
 const readObject = (value: unknown): Record<string, unknown> =>

@@ -36,11 +36,12 @@ import {
   enterHubLandingQuietWait,
   findHubLandingQueueTicket,
   invalidateHubLandingSpeculativeSuffix,
-  markHubLandingQueueLanded,
+  markHubLandingQueueAfterLocalLand,
   readHubLandingQueue,
   recordHubLandingDriftRebuild,
   recordHubLandingQueueCandidate,
   resolveHubLandingQueueHead,
+  resolveRequiredDeliveryPredecessor,
   resumeHubLandingQuietWaitIfStable,
   shouldEnterHubLandingQuietWait,
   waitHubLandingDriftBackoff,
@@ -728,6 +729,21 @@ export const coordinateHubQueueHeadLanding = async (input: {
       shippedTaskIds: input.shippedTaskIds,
     })
   ) {
+    const predecessor = resolveRequiredDeliveryPredecessor({
+      hubProjectDir: input.hubProjectDir,
+      taskId: input.taskId,
+    });
+    if (predecessor) {
+      return withFenceEvidence(
+        {
+          kind: "not_queue_head" as const,
+          candidate,
+          message: `Task ${input.taskId} cannot advance the ordered local delivery sequence before required predecessor ${predecessor.taskId} has remote ancestry proof. Successors may build and verify. This is not a task failure and does not require a recovery command.`,
+        },
+        candidate.baseOid,
+        observedTarget,
+      );
+    }
     const head = resolveHubLandingQueueHead(
       readHubLandingQueue(input.hubProjectDir),
       input.shippedTaskIds ?? new Set(),
@@ -755,7 +771,11 @@ export const coordinateHubQueueHeadLanding = async (input: {
     });
     if (outcome.kind !== "target_drift") {
       if (outcome.kind === "landed") {
-        markHubLandingQueueLanded(input.hubProjectDir, input.taskId);
+        markHubLandingQueueAfterLocalLand(
+          input.hubProjectDir,
+          input.taskId,
+          candidate.policy.publishPolicy,
+        );
       }
       return outcome;
     }

@@ -20,6 +20,8 @@ import {
 import { deriveHubLandingShipped } from "./hubLandingTransaction.js";
 import {
   GIT_ZERO_OID,
+  HUB_COMPLETED_WITH_PENDING_DELIVERY,
+  driveHubRequiredPublication,
   enqueueHubPublication,
   inspectHubPublicationOutbox,
   listHubPublicationOutboxItems,
@@ -519,5 +521,189 @@ describe("Hub publication outbox", () => {
     ).toBe(divergedTip);
     expect(divergedTip).not.toBe(fixture.candidate.candidateOid);
     expect(shippedProof(fixture).shipped).toBe(true);
+  });
+});
+
+describe("Hub required publication", () => {
+  it("does not enable required publication merely because origin exists", async () => {
+    const fixture = await prepareLandedFixture("bd-req-off", {
+      withBareRemote: true,
+      publishPolicy: "off",
+    });
+    const enqueued = enqueueHubPublication({
+      repoRoot: fixture.repoDir,
+      hubProjectDir: fixture.hubProjectDir,
+      candidate: fixture.candidate,
+      candidateOid: fixture.candidate.candidateOid,
+    });
+    expect(enqueued).toBeUndefined();
+    expect(shippedProof(fixture).shipped).toBe(true);
+  });
+
+  it("keeps required tasks unshipped until remote ancestry proves delivery", async () => {
+    const fixture = await prepareLandedFixture("bd-req-proof", {
+      withBareRemote: true,
+      publishPolicy: "required",
+      remoteTarget: "origin/main",
+    });
+    expect(shippedProof(fixture).shipped).toBe(false);
+    expect(shippedProof(fixture).reason).toBe("remote_publication_pending");
+
+    const enqueued = enqueueHubPublication({
+      repoRoot: fixture.repoDir,
+      hubProjectDir: fixture.hubProjectDir,
+      candidate: fixture.candidate,
+      candidateOid: fixture.candidate.candidateOid,
+    });
+    expect(enqueued?.status).toBe("pending");
+    expect(shippedProof(fixture).shipped).toBe(false);
+
+    const outcome = await projectHubPublicationOutbox({
+      repoRoot: fixture.repoDir,
+      hubProjectDir: fixture.hubProjectDir,
+    });
+    expect(outcome.pendingCount).toBe(0);
+    expect(outcome.attempts[0]?.status).toBe("succeeded");
+    expect(
+      deriveHubLandingShipped({
+        publishPolicy: "required",
+        taskClosed: true,
+        transactionId: fixture.candidate.transactionId,
+        closedTransactionId: fixture.candidate.transactionId,
+        candidateOid: fixture.candidate.candidateOid,
+        closedCandidateOid: fixture.candidate.candidateOid,
+        publishTargetOid: fixture.candidate.candidateOid,
+        remotePublicationProven: true,
+      }).shipped,
+    ).toBe(true);
+  });
+
+  it("reconstructs required publication after crash without duplicate push", async () => {
+    const fixture = await prepareLandedFixture("bd-req-crash", {
+      withBareRemote: true,
+      publishPolicy: "required",
+      remoteTarget: "origin/main",
+    });
+    enqueueHubPublication({
+      repoRoot: fixture.repoDir,
+      hubProjectDir: fixture.hubProjectDir,
+      candidate: fixture.candidate,
+      candidateOid: fixture.candidate.candidateOid,
+    });
+
+    await expect(
+      projectHubPublicationOutbox({
+        repoRoot: fixture.repoDir,
+        hubProjectDir: fixture.hubProjectDir,
+        faultInjection: { crashAfter: "publication" },
+      }),
+    ).rejects.toBeInstanceOf(HubLandingCrash);
+
+    expect(
+      await gitText(fixture.bareDir, ["rev-parse", "refs/heads/main"]),
+    ).toBe(fixture.candidate.candidateOid);
+
+    const recovered = await projectHubPublicationOutbox({
+      repoRoot: fixture.repoDir,
+      hubProjectDir: fixture.hubProjectDir,
+    });
+    expect(recovered.pendingCount).toBe(0);
+    expect(recovered.attempts[0]?.status).toBe("succeeded");
+    expect(shippedProof(fixture).shipped).toBe(false);
+  });
+
+  it("reports force rewrite after ambiguous successful push as integrity incident", async () => {
+    const fixture = await prepareLandedFixture("bd-req-force", {
+      withBareRemote: true,
+      publishPolicy: "required",
+      remoteTarget: "origin/main",
+    });
+    const originalMain = await gitText(fixture.bareDir, [
+      "rev-parse",
+      "refs/heads/main",
+    ]);
+    enqueueHubPublication({
+      repoRoot: fixture.repoDir,
+      hubProjectDir: fixture.hubProjectDir,
+      candidate: fixture.candidate,
+      candidateOid: fixture.candidate.candidateOid,
+    });
+
+    await expect(
+      projectHubPublicationOutbox({
+        repoRoot: fixture.repoDir,
+        hubProjectDir: fixture.hubProjectDir,
+        faultInjection: { crashAfter: "publication" },
+      }),
+    ).rejects.toBeInstanceOf(HubLandingCrash);
+
+    const remoteWork = join(fixture.root, "force-work");
+    await execFileAsync("git", ["clone", fixture.bareDir, remoteWork]);
+    await execFileAsync("git", ["config", "user.email", "test@test.com"], {
+      cwd: remoteWork,
+    });
+    await execFileAsync("git", ["config", "user.name", "Test"], {
+      cwd: remoteWork,
+    });
+    await execFileAsync("git", ["reset", "--hard", originalMain], {
+      cwd: remoteWork,
+    });
+    await commitFile(remoteWork, "rewrite.txt", "rewrite\n", "force rewrite");
+    await execFileAsync(
+      "git",
+      ["push", "--force", "origin", "HEAD:main"],
+      { cwd: remoteWork },
+    );
+
+    const outcome = await projectHubPublicationOutbox({
+      repoRoot: fixture.repoDir,
+      hubProjectDir: fixture.hubProjectDir,
+    });
+    expect(outcome.pendingCount).toBe(1);
+    expect(outcome.attempts[0]?.pendingReason).toBe(
+      "remote_force_rewrite_integrity",
+    );
+    expect(outcome.message).toContain("integrity");
+    expect(outcome.message).not.toMatch(/ordinary drift/i);
+    expect(shippedProof(fixture).shipped).toBe(false);
+  });
+
+  it("returns completed_with_pending_delivery when required delivery times out", async () => {
+    const fixture = await prepareLandedFixture("bd-req-timeout", {
+      publishPolicy: "required",
+      remoteTarget: "origin/main",
+    });
+    await execFileAsync(
+      "git",
+      ["remote", "add", "origin", "git://127.0.0.1:1/archloop.git"],
+      { cwd: fixture.repoDir },
+    );
+    configureHubLandingPolicy({
+      repoRoot: fixture.repoDir,
+      hubProjectDir: fixture.hubProjectDir,
+      deliveryTimeoutMs: 30,
+    });
+    enqueueHubPublication({
+      repoRoot: fixture.repoDir,
+      hubProjectDir: fixture.hubProjectDir,
+      candidate: fixture.candidate,
+      candidateOid: fixture.candidate.candidateOid,
+    });
+
+    const driven = await driveHubRequiredPublication({
+      repoRoot: fixture.repoDir,
+      hubProjectDir: fixture.hubProjectDir,
+      pollIntervalMs: 5,
+    });
+
+    expect(driven.outcome).toBe(HUB_COMPLETED_WITH_PENDING_DELIVERY);
+    expect(driven.timedOut).toBe(true);
+    expect(driven.pendingCount).toBeGreaterThan(0);
+    expect(driven.message).toContain(HUB_COMPLETED_WITH_PENDING_DELIVERY);
+    expect(driven.message).toContain("not semantically failed");
+    expect(shippedProof(fixture).shipped).toBe(false);
+    expect(
+      listHubPublicationOutboxItems(fixture.hubProjectDir)[0]?.status,
+    ).toBe("pending");
   });
 });

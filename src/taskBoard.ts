@@ -57,6 +57,7 @@ export const HUB_TASK_STATUSES = [
   "reviewing",
   "waiting_for_merge",
   "merging",
+  "publishing",
   "done",
   "wontfix",
   "failed",
@@ -156,6 +157,7 @@ const LABEL_AUTHORITATIVE_STATUSES = new Set<HubTaskStatus>([
   "reviewing",
   "waiting_for_merge",
   "merging",
+  "publishing",
   "failed",
   "done",
   "wontfix",
@@ -172,6 +174,7 @@ const STATUS_LABEL_TO_HUB_STATUS: Readonly<Record<string, HubTaskStatus>> = {
   reviewing: "reviewing",
   waiting_for_merge: "waiting_for_merge",
   merging: "merging",
+  publishing: "publishing",
   done: "done",
   wontfix: "wontfix",
   failed: "failed",
@@ -835,6 +838,7 @@ const HUB_STATUS_LABELS: Readonly<Record<HubTaskStatus, string>> = {
   reviewing: "reviewing",
   waiting_for_merge: "waiting-for-merge",
   merging: "merging",
+  publishing: "publishing",
   failed: "failed",
   done: "done",
   wontfix: "wontfix",
@@ -852,6 +856,7 @@ const HUB_STATUS_BEADS_LIFECYCLE: Readonly<
   reviewing: "in_progress",
   waiting_for_merge: "in_progress",
   merging: "in_progress",
+  publishing: "in_progress",
   failed: "open",
   ready_for_agent: "open",
   ready_for_human: "open",
@@ -973,6 +978,7 @@ const CLAIM_PRESERVING_STATUSES = new Set<HubTaskStatus>([
   "reviewing",
   "waiting_for_merge",
   "merging",
+  "publishing",
   "failed",
 ]);
 
@@ -981,6 +987,7 @@ const CLAIM_REQUIRED_STATUSES = new Set<HubTaskStatus>([
   "reviewing",
   "waiting_for_merge",
   "merging",
+  "publishing",
 ]);
 
 const shouldClearClaimForStatus = (status: HubTaskStatus): boolean =>
@@ -2050,6 +2057,7 @@ export const mapHubStatusToTaskBoardBucket = (
     case "reviewing":
     case "waiting_for_merge":
     case "merging":
+    case "publishing":
       return "in_progress";
     case "blocked":
     case "failed":
