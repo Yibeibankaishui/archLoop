@@ -840,7 +840,7 @@ describe("unsafe Hub Beads migration deferral and split brain", () => {
 });
 
 describe("fresh managed Hub Beads store (no legacy migration)", () => {
-  it("treats project-add immediate init as steady state and allows the first mutating command", async () => {
+  const createFreshManagedProject = async (projectName: string) => {
     const bundledBd = resolveBundledBdExecutable();
     expect(bundledBd).toBeDefined();
 
@@ -858,15 +858,24 @@ describe("fresh managed Hub Beads store (no legacy migration)", () => {
 
     const registered = registerHubProject({
       repoPath: repoDir,
-      projectName: "fresh-alpha",
+      projectName,
       env,
       initializeTaskStore: true,
     });
-    const input = {
-      repoRoot: registered.project.repoRoot,
-      hubProjectDir: registered.project.hubProjectDir,
+    return {
       env,
+      registered,
+      input: {
+        repoRoot: registered.project.repoRoot,
+        hubProjectDir: registered.project.hubProjectDir,
+        env,
+      },
     };
+  };
+
+  it("treats project-add immediate init as steady state and allows the first mutating command", async () => {
+    const { registered, env, input } =
+      await createFreshManagedProject("fresh-alpha");
 
     const inspection = inspectHubTaskStoreMigration(input);
     expect(inspection.phase).not.toBe("redirect_installed");
@@ -911,27 +920,7 @@ describe("fresh managed Hub Beads store (no legacy migration)", () => {
   }, 90_000);
 
   it("releases the migration lease when a source snapshot is missing", async () => {
-    const bundledBd = resolveBundledBdExecutable();
-    expect(bundledBd).toBeDefined();
-
-    const root = await mkdtemp(join(tmpdir(), "hub-missing-snapshot-lease-"));
-    const repoDir = join(root, "repo");
-    await mkdir(repoDir);
-    await initRepo(repoDir);
-    const env: NodeJS.ProcessEnv = {
-      ...process.env,
-      XDG_DATA_HOME: join(root, "xdg-data"),
-      ARCHLOOP_BD_PATH: bundledBd!,
-      BEADS_ACTOR: "archloop-test",
-    };
-    delete env.BEADS_DIR;
-
-    const registered = registerHubProject({
-      repoPath: repoDir,
-      projectName: "lease-alpha",
-      env,
-      initializeTaskStore: true,
-    });
+    const { registered, input } = await createFreshManagedProject("lease-alpha");
     const migrationDir = join(
       registered.project.hubProjectDir,
       "task-store-migration",
@@ -944,11 +933,6 @@ describe("fresh managed Hub Beads store (no legacy migration)", () => {
       `${JSON.stringify({ phase: "redirect_installed", at: new Date().toISOString() })}\n`,
     );
 
-    const input = {
-      repoRoot: registered.project.repoRoot,
-      hubProjectDir: registered.project.hubProjectDir,
-      env,
-    };
     let thrown: unknown;
     try {
       ensureHubTaskStoreMigrated(input);

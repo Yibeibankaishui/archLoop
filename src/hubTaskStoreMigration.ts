@@ -799,27 +799,47 @@ const highestPhase = (
   return highest;
 };
 
+type DurableMigrationEvidence = {
+  readonly quarantineDir: string;
+  readonly snapshot?: StoreIdentity;
+  readonly journalPhases: readonly HubTaskStoreMigrationPhase[];
+};
+
 /**
  * Physical `managed store + redirect` is both the normal steady state for a
  * fresh Hub project and a late phase of real legacy migration. Only durable
  * migration artifacts distinguish those cases; layout alone must not invent
  * an interrupted `redirect_installed` / `managed_copied` phase.
  */
-const hasDurableMigrationEvidence = (input: {
-  readonly quarantineDir: string;
-  readonly snapshot?: StoreIdentity;
-  readonly journalPhases: readonly HubTaskStoreMigrationPhase[];
-}): boolean =>
+const hasDurableMigrationEvidence = (
+  input: DurableMigrationEvidence,
+): boolean =>
   input.journalPhases.length > 0 ||
   input.snapshot !== undefined ||
   isBeadsStoreDatabasePresent(input.quarantineDir);
 
-const derivePhase = (input: {
-  readonly resolution: HubTaskStoreResolution;
-  readonly quarantineDir: string;
-  readonly snapshot?: StoreIdentity;
-  readonly journalPhases: readonly HubTaskStoreMigrationPhase[];
-}): HubTaskStoreMigrationPhase | undefined => {
+/**
+ * Map a late managed layout onto a migration phase only when durable evidence
+ * proves legacy migration actually started; otherwise report steady state.
+ */
+const phaseForManagedLayout = (
+  layoutPhase: "managed_copied" | "redirect_installed",
+  migrationEvidence: boolean,
+): HubTaskStoreMigrationPhase | undefined => {
+  if (!migrationEvidence) {
+    return undefined;
+  }
+  return layoutPhase;
+};
+
+const MISSING_SOURCE_SNAPSHOT_MESSAGE =
+  "Hub Beads migration could not prepare a source snapshot. Inspect the Hub project task-store migration journal and snapshot under task-store-migration/; this is not a task failure and does not require `archloop tasks recover`.";
+
+const derivePhase = (
+  input: {
+    readonly resolution: HubTaskStoreResolution;
+  } & DurableMigrationEvidence,
+): HubTaskStoreMigrationPhase | undefined => {
   const managedBeadsDir = input.resolution.managedBeadsDir;
   const managedReady =
     managedBeadsDir !== undefined &&
@@ -836,10 +856,10 @@ const derivePhase = (input: {
     return "verified";
   }
   if (redirectReady) {
-    return migrationEvidence ? "redirect_installed" : undefined;
+    return phaseForManagedLayout("redirect_installed", migrationEvidence);
   }
   if (managedReady) {
-    return migrationEvidence ? "managed_copied" : undefined;
+    return phaseForManagedLayout("managed_copied", migrationEvidence);
   }
   if (quarantined) {
     return "legacy_quarantined";
@@ -1304,10 +1324,7 @@ export const ensureHubTaskStoreMigrated = (
 
     const sourceSnapshot = snapshot ?? readSnapshot(snapshotPath);
     if (!sourceSnapshot) {
-      throw new TaskBoardError({
-        message:
-          "Hub Beads migration could not prepare a source snapshot. Inspect the Hub project task-store migration journal and snapshot under task-store-migration/; this is not a task failure and does not require `archloop tasks recover`.",
-      });
+      throw new TaskBoardError({ message: MISSING_SOURCE_SNAPSHOT_MESSAGE });
     }
     snapshot = sourceSnapshot;
 
@@ -1411,11 +1428,9 @@ export const ensureHubTaskStoreMigrated = (
       journalPath,
     };
   } finally {
-    // Release on every exit path (success, deferral, split-brain, and terminal
-    // errors such as a missing source snapshot). Interrupted mid-migration
-    // recovery relies on durable journal/snapshot/quarantine evidence plus
-    // lease supersession when the previous owner PID is gone — not on leaving
-    // a stale lease behind after the mutating command already failed.
+    // Always release: success, deferral, split-brain, and terminal errors
+    // (including missing source snapshot). Hard kills still leave lease.json;
+    // resume uses durable journal/snapshot/quarantine plus PID supersession.
     releaseMigrationLease(input.hubProjectDir);
   }
 };
