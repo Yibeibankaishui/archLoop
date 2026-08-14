@@ -37,7 +37,8 @@ TypeScript API to build your own orchestration.
   landings resume from durable evidence on the next run. Independent siblings
   keep landing when one task is blocked; repair is bounded. Legacy task
   branches that committed allowlisted Beads runtime/export files still land
-  their source changes.
+  their source changes. Upgrade adopts pre-transaction history only from Git
+  ancestry; a historical `merge_succeeded` event never proves delivery.
 - Plain terminal and JSONL output for automation
 - Reusable TypeScript primitives such as `run()`, `createSandbox()`, and
   `createWorktree()`

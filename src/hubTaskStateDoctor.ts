@@ -29,6 +29,7 @@ import {
   hubLandingTaskCloseReaderFromTasks,
   inspectHubLandingTransactions,
 } from "./hubLandingReconciliation.js";
+import { formatHubLegacyLandingHistoryLines } from "./hubLandingLegacyHistory.js";
 import {
   formatHubTaskStoreMigrationMessage,
   inspectHubTaskStoreMigration,
@@ -677,6 +678,8 @@ export const doctorHubTaskState = async (
     repoRoot,
     hubProjectDir,
     readTaskClose: hubLandingTaskCloseReaderFromTasks(board.tasks),
+    tasks: board.tasks,
+    events: taskEvents,
   });
   const landingDiagnostics: string[] = [];
   if (landingReconciliation.kind !== "clean") {
@@ -684,6 +687,13 @@ export const doctorHubTaskState = async (
       formatHubLandingReconciliationMessage(landingReconciliation),
     );
     landingDiagnostics.push(`Next action: ${landingReconciliation.nextAction}`);
+  }
+  for (const line of formatHubLegacyLandingHistoryLines(
+    landingReconciliation.legacyHistory,
+  )) {
+    if (!landingDiagnostics.includes(line)) {
+      landingDiagnostics.push(line);
+    }
   }
 
   return {

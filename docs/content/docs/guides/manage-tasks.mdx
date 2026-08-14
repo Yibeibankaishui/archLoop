@@ -66,9 +66,12 @@ npx archloop tasks repair-state <task-id>
 npx archloop tasks recover <task-id>
 ```
 
-Use `doctor` first because it is read-only. `repair-state` fixes the local state
+Use `doctor` first because it is read-only. It can explain which historical
+landing evidence was accepted or rejected. `repair-state` fixes the local state
 projection when run events and task metadata disagree. `recover` handles failed
-or interrupted execution while preserving recoverable branch work.
+or interrupted execution while preserving recoverable branch work. Do not use
+`tasks recover` for managed landing transactions or for legacy history that
+startup already classified.
 
 ## Delete or clean branches
 

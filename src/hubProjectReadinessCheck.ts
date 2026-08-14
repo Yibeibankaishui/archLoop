@@ -245,6 +245,16 @@ const buildTaskStoreSection = (
 };
 
 const buildLandingSection = (status: HubProjectStatus): HubReadinessSection => {
+  if (status.landingIntegrityIncident?.startsWith("legacy_landing_integrity")) {
+    return createSection("Checking Hub landing", [
+      createFinding(
+        "error",
+        "Legacy landing integrity",
+        status.landingReconciliationMessage ??
+          status.landingIntegrityIncident,
+      ),
+    ]);
+  }
   if (status.landingIntegrityIncident) {
     return createSection("Checking Hub landing", [
       createFinding(
@@ -262,6 +272,15 @@ const buildLandingSection = (status: HubProjectStatus): HubReadinessSection => {
         "Landing reconciliation pending",
         status.landingReconciliationMessage ??
           "An incomplete Hub landing transaction will resume automatically from durable evidence. This is not a task failure.",
+      ),
+    ]);
+  }
+  if (status.landingLegacyHistory && status.landingLegacyHistory.length > 0) {
+    return createSection("Checking Hub landing", [
+      createFinding(
+        "success",
+        "Legacy landing history reviewed",
+        status.landingLegacyHistory.join(" "),
       ),
     ]);
   }

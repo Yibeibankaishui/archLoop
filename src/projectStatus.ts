@@ -20,6 +20,7 @@ import {
   hubLandingTaskCloseReaderFromTasks,
   inspectHubLandingTransactions,
 } from "./hubLandingReconciliation.js";
+import { formatHubLegacyLandingHistoryLines } from "./hubLandingLegacyHistory.js";
 import {
   formatHubTaskStoreMigrationMessage,
   inspectHubTaskStoreMigration,
@@ -129,6 +130,7 @@ export interface HubProjectStatus {
   readonly landingReconciliationMessage?: string;
   readonly landingReconciliationPendingCount?: number;
   readonly landingIntegrityIncident?: string;
+  readonly landingLegacyHistory?: readonly string[];
 }
 
 export interface HubProjectStatusOptions {
@@ -691,12 +693,24 @@ export const formatHubProjectStatusLines = (
     lines.push("");
   }
   if (
-    status.landingReconciliationMessage &&
-    status.landingReconciliationKind &&
-    status.landingReconciliationKind !== "clean"
+    (status.landingReconciliationMessage &&
+      status.landingReconciliationKind &&
+      status.landingReconciliationKind !== "clean") ||
+    (status.landingLegacyHistory && status.landingLegacyHistory.length > 0)
   ) {
     lines.push("Landing reconciliation");
-    lines.push(`  ${status.landingReconciliationMessage}`);
+    if (
+      status.landingReconciliationMessage &&
+      status.landingReconciliationKind &&
+      status.landingReconciliationKind !== "clean"
+    ) {
+      lines.push(`  ${status.landingReconciliationMessage}`);
+    }
+    for (const line of status.landingLegacyHistory ?? []) {
+      if (line !== status.landingReconciliationMessage) {
+        lines.push(`  ${line}`);
+      }
+    }
     lines.push("");
   }
   lines.push("");
@@ -958,6 +972,7 @@ export const resolveHubProjectStatus = (
     repoRoot,
     hubProjectDir,
     readTaskClose: hubLandingTaskCloseReaderFromTasks(board?.tasks ?? []),
+    tasks: board?.tasks,
   });
 
   return {
@@ -995,6 +1010,9 @@ export const resolveHubProjectStatus = (
       formatHubLandingReconciliationMessage(landingReconciliation),
     landingReconciliationPendingCount: landingReconciliation.pendingCount,
     landingIntegrityIncident: landingReconciliation.integrityIncident,
+    landingLegacyHistory: formatHubLegacyLandingHistoryLines(
+      landingReconciliation.legacyHistory,
+    ),
   };
 };
 
@@ -1081,6 +1099,14 @@ const projectStatusIdentityRows = (
         {
           key: "Landing reconciliation",
           value: status.landingReconciliationKind,
+        },
+      ]
+    : []),
+  ...(status.landingLegacyHistory && status.landingLegacyHistory.length > 0
+    ? [
+        {
+          key: "Legacy landing history",
+          value: `${status.landingLegacyHistory.length} finding(s)`,
         },
       ]
     : []),

@@ -197,5 +197,15 @@ describe("Hub landing transaction store", () => {
         publishTargetOid: candidateOid,
       }).shipped,
     ).toBe(false);
+    expect(
+      deriveHubLandingShipped({
+        publishPolicy: "off",
+        taskClosed: true,
+        legacyClosedGrandfathered: true,
+      }),
+    ).toMatchObject({
+      shipped: true,
+      reason: "legacy_closed_grandfathered",
+    });
   });
 });

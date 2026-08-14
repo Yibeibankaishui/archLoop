@@ -317,11 +317,22 @@ export const deriveHubLandingShipped = (input: {
   readonly candidateOid?: string;
   readonly closedCandidateOid?: string;
   readonly publishTargetOid?: string;
+  readonly legacyClosedGrandfathered?: boolean;
+  readonly candidateContainedInTarget?: boolean;
 }): HubLandingShippedProof => {
   if (input.publishPolicy === "required") {
     return {
       shipped: false,
       reason: "required_publication_not_in_scope",
+      transactionId: input.transactionId,
+      candidateOid: input.candidateOid,
+      publishTargetOid: input.publishTargetOid,
+    };
+  }
+  if (input.legacyClosedGrandfathered && input.taskClosed) {
+    return {
+      shipped: true,
+      reason: "legacy_closed_grandfathered",
       transactionId: input.transactionId,
       candidateOid: input.candidateOid,
       publishTargetOid: input.publishTargetOid,
@@ -365,7 +376,10 @@ export const deriveHubLandingShipped = (input: {
       publishTargetOid: input.publishTargetOid,
     };
   }
-  if (input.publishTargetOid !== input.candidateOid) {
+  if (
+    input.candidateContainedInTarget !== true &&
+    input.publishTargetOid !== input.candidateOid
+  ) {
     return {
       shipped: false,
       reason: "publish_target_does_not_contain_candidate",

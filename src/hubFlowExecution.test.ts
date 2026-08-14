@@ -3355,6 +3355,96 @@ describe("with-review Hub flow execution", () => {
     }
   });
 
+  it("createHubFlowRunImplementer does not treat merge_succeeded alone as alreadyMerged", async () => {
+    const cwd = await mkdtemp(
+      join(tmpdir(), "hub-flow-implementer-event-only-"),
+    );
+    await initRepo(cwd);
+    await commitFile(cwd, "hello.txt", "hello", "initial commit");
+    const branch = "archloop/bd-1-test-task";
+    await execAsync(`git branch "${branch}"`, { cwd });
+
+    const { createHash } = await import("node:crypto");
+    const projectId = createHash("sha256")
+      .update(cwd)
+      .digest("hex")
+      .slice(0, 12);
+    const priorRunDir = join(
+      cwd,
+      ".test-xdg-data",
+      "archloop",
+      "hub",
+      "projects",
+      projectId,
+      "runs",
+      "run-prior-merged",
+    );
+    await mkdir(join(priorRunDir, "events"), { recursive: true });
+    await writeFile(
+      join(priorRunDir, "events", "task.jsonl"),
+      `${JSON.stringify({
+        type: "merge_succeeded",
+        runId: "run-prior-merged",
+        batchId: "batch-prior",
+        taskId: "bd-1",
+        branch,
+        createdAt: "2026-07-23T09:39:32.000Z",
+        status: "merging",
+      })}\n`,
+      "utf-8",
+    );
+
+    const projectDevelopmentContract =
+      resolveHubProjectDevelopmentContractState({
+        repoRoot: cwd,
+        hubProjectDir: join(cwd, "hub-project"),
+        now: new Date("2026-07-21T12:00:00.000Z"),
+      });
+    const runSpy = vi.spyOn(runModule, "run").mockResolvedValue({
+      completionSignal: "<promise>COMPLETE</promise>",
+      commits: [],
+      branch,
+      iterations: [],
+      stdout: "<promise>COMPLETE</promise>",
+    });
+    const implementer = createHubFlowRunImplementer({
+      cwd,
+      env: { OPENAI_KEY: "test-openai-key" },
+      roleEntry: { provider: "codex", model: "gpt-5.4-mini" },
+    });
+
+    vi.stubEnv("OPENAI_KEY", "");
+    vi.stubEnv("CODEX_HOME", "");
+    try {
+      const result = await implementer({
+        flowId: "no-review",
+        batchId: "batch-test",
+        taskId: "bd-1",
+        title: "Test task",
+        branch,
+        promptFile: "/tmp/prompt.md",
+        cwd,
+        runDir: cwd,
+        hubProjectDir: join(
+          cwd,
+          ".test-xdg-data",
+          "archloop",
+          "hub",
+          "projects",
+          projectId,
+        ),
+        projectDevelopmentContract,
+      });
+
+      expect(result.outcome).toBe("agent_failed");
+      expect(result.alreadyMerged).toBeUndefined();
+      expect(result.message).toBe("Implementer completed without commits");
+    } finally {
+      runSpy.mockRestore();
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("createHubFlowRunImplementer treats COMPLETE + branch commits as success despite non-zero exit", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "hub-flow-implementer-observe-"));
     await initRepo(cwd);

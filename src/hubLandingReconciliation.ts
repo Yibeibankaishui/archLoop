@@ -37,6 +37,14 @@ import {
   isCompletedHubStatus,
   type HubTaskProjection,
 } from "./taskBoard.js";
+import type { HubTaskEvent } from "./hubExecution.js";
+import {
+  adoptHubLegacyLandingHistory,
+  classifyHubLegacyLandingHistory,
+  formatHubLegacyLandingHistoryLines,
+  type HubLegacyLandingEvidence,
+  type HubLegacyLandingTask,
+} from "./hubLandingLegacyHistory.js";
 
 const CHECKPOINT_RANK = new Map(
   HUB_LANDING_CHECKPOINTS.map((checkpoint, index) => [checkpoint, index]),
@@ -118,6 +126,7 @@ export interface HubLandingReconciliationInspection {
   readonly integrityIncident?: string;
   readonly message: string;
   readonly nextAction: string;
+  readonly legacyHistory?: readonly HubLegacyLandingEvidence[];
 }
 
 export interface HubLandingReconciliationOutcome {
@@ -128,6 +137,7 @@ export interface HubLandingReconciliationOutcome {
   readonly integrityIncident?: string;
   readonly message: string;
   readonly nextAction: string;
+  readonly legacyHistory?: readonly HubLegacyLandingEvidence[];
 }
 
 export interface HubLandingReconciliationInput {
@@ -137,6 +147,8 @@ export interface HubLandingReconciliationInput {
   readonly closeTask?: HubLandingTaskCloser;
   readonly now?: Date;
   readonly faultInjection?: HubLandingFaultInjection;
+  readonly tasks?: readonly HubLegacyLandingTask[];
+  readonly events?: readonly HubTaskEvent[];
 }
 
 const NO_RECOVER_SUFFIX =
@@ -152,7 +164,25 @@ export const formatHubLandingReconciliationMessage = (
   inspection:
     | HubLandingReconciliationInspection
     | HubLandingReconciliationOutcome,
-): string => inspection.message;
+): string => {
+  const legacyLines = formatHubLegacyLandingHistoryLines(
+    inspection.legacyHistory,
+  );
+  if (legacyLines.length === 0) {
+    return inspection.message;
+  }
+  if (
+    inspection.kind === "clean" ||
+    inspection.kind === "reconciled" ||
+    inspection.message === legacyLines[0]
+  ) {
+    return legacyLines[0] ?? inspection.message;
+  }
+  return [
+    inspection.message,
+    ...legacyLines.filter((line) => line !== inspection.message),
+  ].join(" ");
+};
 
 const transactionMessage = (
   evidence: HubLandingTransactionEvidence,
@@ -169,6 +199,7 @@ const transactionMessage = (
 const summarize = (
   transactions: readonly HubLandingTransactionEvidence[],
   reconstructedCount = 0,
+  legacyHistory: readonly HubLegacyLandingEvidence[] = [],
 ): {
   readonly kind: HubLandingReconciliationKind;
   readonly pendingCount: number;
@@ -176,8 +207,10 @@ const summarize = (
   readonly integrityIncident?: string;
   readonly message: string;
   readonly nextAction: string;
+  readonly legacyHistory: readonly HubLegacyLandingEvidence[];
 } => {
   const incident = transactions.find((entry) => entry.integrityIncident);
+  const legacyIncident = legacyHistory.find((entry) => entry.integrityIncident);
   const pendingCount = transactions.filter((entry) => entry.pending).length;
   if (incident?.integrityIncident) {
     return {
@@ -187,6 +220,18 @@ const summarize = (
       integrityIncident: incident.integrityIncident,
       message: transactionMessage(incident),
       nextAction: integrityAction,
+      legacyHistory,
+    };
+  }
+  if (legacyIncident?.integrityIncident) {
+    return {
+      kind: "integrity_incident",
+      pendingCount,
+      reconstructedCount,
+      integrityIncident: legacyIncident.integrityIncident,
+      message: legacyIncident.message,
+      nextAction: legacyIncident.nextAction,
+      legacyHistory,
     };
   }
   if (pendingCount > 0) {
@@ -199,6 +244,7 @@ const summarize = (
         ? transactionMessage(pending)
         : `Hub landing reconciliation is pending. ${NO_RECOVER_SUFFIX}`,
       nextAction: pendingAction,
+      legacyHistory,
     };
   }
   if (reconstructedCount > 0) {
@@ -208,14 +254,19 @@ const summarize = (
       reconstructedCount,
       message: `Reconstructed ${reconstructedCount} Hub landing checkpoint(s) from durable evidence. ${NO_RECOVER_SUFFIX}`,
       nextAction: pendingAction,
+      legacyHistory,
     };
   }
+  const acceptedLegacy = legacyHistory.find((entry) => entry.accepted);
   return {
     kind: "clean",
     pendingCount: 0,
     reconstructedCount,
-    message: `No incomplete Hub landing transactions. ${NO_RECOVER_SUFFIX}`,
+    message: acceptedLegacy
+      ? acceptedLegacy.message
+      : `No incomplete Hub landing transactions. ${NO_RECOVER_SUFFIX}`,
     nextAction: pendingAction,
+    legacyHistory,
   };
 };
 
@@ -562,6 +613,27 @@ const toCandidate = (input: {
   };
 };
 
+const collectLegacyHistory = (
+  input: HubLandingReconciliationInput,
+  policy: HubLandingPolicy | undefined,
+  transactions: readonly HubLandingTransactionEvidence[],
+): readonly HubLegacyLandingEvidence[] => {
+  if (!input.tasks || input.tasks.length === 0) {
+    return [];
+  }
+  const existingTaskIds = new Set(
+    transactions.flatMap((entry) => (entry.taskId ? [entry.taskId] : [])),
+  );
+  return classifyHubLegacyLandingHistory({
+    repoRoot: input.repoRoot,
+    hubProjectDir: input.hubProjectDir,
+    tasks: input.tasks,
+    events: input.events,
+    policy,
+    existingTaskIds,
+  });
+};
+
 export const inspectHubLandingTransactions = (
   input: HubLandingReconciliationInput,
 ): HubLandingReconciliationInspection => {
@@ -576,7 +648,8 @@ export const inspectHubLandingTransactions = (
       readTaskClose: input.readTaskClose,
     }),
   );
-  const summary = summarize(transactions);
+  const legacyHistory = collectLegacyHistory(input, policy, transactions);
+  const summary = summarize(transactions, 0, legacyHistory);
   return {
     kind: inspectionKind(summary.kind),
     transactions,
@@ -584,6 +657,7 @@ export const inspectHubLandingTransactions = (
     integrityIncident: summary.integrityIncident,
     message: summary.message,
     nextAction: summary.nextAction,
+    legacyHistory,
   };
 };
 
@@ -595,6 +669,34 @@ export const reconcileHubLandingTransactions = async (
     hubProjectDir: input.hubProjectDir,
     now: input.now,
   }).policy;
+  let legacyHistory: readonly HubLegacyLandingEvidence[] = [];
+  if (input.tasks && input.tasks.length > 0) {
+    const existingIds = listHubLandingTransactionIds(input);
+    const existingTaskIds = new Set(
+      existingIds.flatMap((transactionId) => {
+        const taskId = collectEvidence({
+          repoRoot: input.repoRoot,
+          hubProjectDir: input.hubProjectDir,
+          transactionId,
+          policy,
+          readTaskClose: input.readTaskClose,
+        }).taskId;
+        return taskId ? [taskId] : [];
+      }),
+    );
+    legacyHistory = await adoptHubLegacyLandingHistory({
+      repoRoot: input.repoRoot,
+      hubProjectDir: input.hubProjectDir,
+      tasks: input.tasks,
+      events: input.events,
+      policy,
+      existingTaskIds,
+      now: input.now,
+      readTaskClose: input.readTaskClose,
+      closeTask: input.closeTask,
+      faultInjection: input.faultInjection,
+    });
+  }
   const ids = listHubLandingTransactionIds(input);
   let reconstructedCount = 0;
   for (const transactionId of ids) {
@@ -607,7 +709,7 @@ export const reconcileHubLandingTransactions = async (
     });
     if (before.integrityIncident) {
       return {
-        ...summarize([before]),
+        ...summarize([before], 0, legacyHistory),
         transactions: [before],
       };
     }
@@ -653,8 +755,12 @@ export const reconcileHubLandingTransactions = async (
   }
 
   const after = inspectHubLandingTransactions(input);
+  const mergedLegacy =
+    (after.legacyHistory?.length ?? 0) > 0
+      ? after.legacyHistory ?? []
+      : legacyHistory;
   return {
-    ...summarize(after.transactions, reconstructedCount),
+    ...summarize(after.transactions, reconstructedCount, mergedLegacy),
     transactions: after.transactions,
   };
 };

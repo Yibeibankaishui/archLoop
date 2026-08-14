@@ -21,6 +21,11 @@ import {
   type HubManagedBranchCleanupSkipDetail,
 } from "./hubManagedBranchCleanup.js";
 import { resolveHubAgentProvider } from "./hubProposalAgent.js";
+import { readTaskEvents } from "./hubRunEventLog.js";
+import {
+  classifyHubLegacyLandingHistory,
+  isHubLegacyLandingIntegrity,
+} from "./hubLandingLegacyHistory.js";
 import { run } from "./run.js";
 import { noSandbox } from "./sandboxes/no-sandbox.js";
 import {
@@ -192,7 +197,8 @@ export type HubBatchMergeSelectionReason =
   | "no_unmerged_work"
   | "dirty_worktree"
   | "task_store_dirty"
-  | "state_inconsistent";
+  | "state_inconsistent"
+  | "legacy_landing_integrity";
 
 export interface HubBatchMergeSelectionDiagnostic {
   readonly taskId: string;
@@ -989,6 +995,7 @@ const evaluateHubBatchMergeSelection = async (input: {
   readonly cwd: string;
   readonly runDir: string;
   readonly batchId: string;
+  readonly hubProjectDir?: string;
   readonly tasks: readonly HubTaskProjection[];
   readonly branchInspector: HubMergeBranchInspector;
   readonly worktreeState: HubMergeWorktreeState;
@@ -1002,9 +1009,32 @@ const evaluateHubBatchMergeSelection = async (input: {
     input.runDir,
     input.batchId,
   );
+  const legacyByTask = new Map(
+    (input.hubProjectDir
+      ? classifyHubLegacyLandingHistory({
+          repoRoot: input.cwd,
+          hubProjectDir: input.hubProjectDir,
+          tasks: input.tasks,
+          events: readTaskEvents(input.hubProjectDir),
+        })
+      : []
+    ).map((entry) => [entry.taskId, entry]),
+  );
 
   for (const task of input.tasks) {
     const mergeReadyEvent = mergeReadyEvents.get(task.id);
+    const legacy = legacyByTask.get(task.id);
+    if (isHubLegacyLandingIntegrity(legacy)) {
+      diagnostics.push(
+        buildSelectionDiagnostic(task, {
+          decision: "skipped",
+          reason: "legacy_landing_integrity",
+          branch: resolveClaimBranch(task) ?? legacy?.branch,
+          message: legacy?.message,
+        }),
+      );
+      continue;
+    }
     if (task.hubStatus !== "waiting_for_merge") {
       const stateInconsistentDiagnostic =
         await maybeBuildStateInconsistentDiagnostic({
@@ -2003,6 +2033,7 @@ export const runHubBatchMerge = async (
     cwd: input.cwd,
     runDir: input.runDir,
     batchId: input.batchId,
+    hubProjectDir: input.hubProjectDir,
     tasks: board.tasks,
     branchInspector: input.branchInspector ?? defaultBranchInspector,
     worktreeState,

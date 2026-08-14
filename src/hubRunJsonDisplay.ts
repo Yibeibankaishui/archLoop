@@ -282,7 +282,9 @@ export const createHubRunJsonRenderer = (input: {
               }
             : {}),
           ...(result.landingReconciliation &&
-          result.landingReconciliation.kind !== "clean"
+          (result.landingReconciliation.kind !== "clean" ||
+            (result.landingReconciliation.legacyHistory &&
+              result.landingReconciliation.legacyHistory.length > 0))
             ? {
                 landingReconciliation: {
                   kind: result.landingReconciliation.kind,
@@ -294,6 +296,25 @@ export const createHubRunJsonRenderer = (input: {
                     ? {
                         integrityIncident:
                           result.landingReconciliation.integrityIncident,
+                      }
+                    : {}),
+                  ...(result.landingReconciliation.legacyHistory &&
+                  result.landingReconciliation.legacyHistory.length > 0
+                    ? {
+                        legacyHistory:
+                          result.landingReconciliation.legacyHistory.map(
+                            (entry) => ({
+                              taskId: entry.taskId,
+                              decision: entry.decision,
+                              accepted: entry.accepted,
+                              message: entry.message,
+                              ...(entry.integrityIncident
+                                ? {
+                                    integrityIncident: entry.integrityIncident,
+                                  }
+                                : {}),
+                            }),
+                          ),
                       }
                     : {}),
                 },

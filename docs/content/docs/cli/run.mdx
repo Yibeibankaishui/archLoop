@@ -48,6 +48,13 @@ receipts, then finishes close and cleanup without landing or closing twice.
 Pending reconciliation is not a task failure and does not require
 `archloop tasks recover`.
 
+On upgrade, already closed historical tasks stay completed and do not need new
+landing receipts. An in-flight task whose source branch is contained in the
+configured target is adopted into a new verified transaction automatically.
+A historical `merge_succeeded` event is never landing proof. Missing or
+diverged branch evidence becomes a `legacy_landing_integrity` condition for
+inspection; Hub does not silently close or reimplement that work.
+
 Two runs for the same project or the same task share a landing lease identified
 by owner nonce, process start identity, and boot identity. A live owner is not
 displaced just because a TTL elapsed. Compare-and-swap checks the expected
