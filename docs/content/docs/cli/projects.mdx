@@ -9,9 +9,25 @@ description: Reference for the Hub project command group.
 | `project list`                           | List registered projects and readiness summaries  |
 | `project select [name]`                  | Choose the default CLI project                    |
 | `project status`                         | Show project, task, run, and cleanup diagnostics  |
-| `project configure`                      | Create or refresh the development contract        |
+| `project configure`                      | Create or refresh the development contract and landing policy |
 | `project rename <project> <new-name>`    | Change the display name                           |
 | `project relink <project> --path <path>` | Point an existing identity at a moved repository  |
+
+`project add` can initialize the Hub-owned Beads task store. `project status`
+reports whether that store is Hub-owned, repository-local, missing, or blocked
+by an invalid `.beads/redirect`, shows task-store migration progress or a
+safe pending deferral, and surfaces a split-brain integrity incident when
+both stores were modified independently after redirect. After the first
+upgraded Hub run or `project configure`, it also shows the pinned host target
+branch, Hub publish target, optional remote target, and publish policy.
+It can also show pending landing reconciliation, pending checkout sync, pending
+code publication, or classified legacy landing history without mutating them.
+
+`project configure` accepts `--publish-policy off|best_effort|required` and
+`--remote-target <ref>`. These write Hub-owned landing policy and do not dirty
+the repository. Publication stays `off` until configured, even when `origin`
+exists. `best_effort` plus an explicit remote target publishes through a durable
+outbox after local shipped proof.
 
 Most project-aware commands accept `--project <name>` as an explicit override.
 Interactive pickers are available when required values are omitted in a TTY;

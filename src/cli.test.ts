@@ -1273,7 +1273,7 @@ process.exit(1);
     await initRepo(repoB);
     await commitFile(repoB, "hello.txt", "hello", "initial commit");
 
-    const dataDir = join(repoA, "xdg-data");
+    const dataDir = await mkdtemp(join(tmpdir(), "cli-xdg-data-"));
     const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
 
     await runCli(`project add --name alpha --path "${repoA}"`, otherDir, {
@@ -1455,6 +1455,41 @@ process.exit(1);
     ]);
     expect(contract.verify.join("\n")).toContain("npm run typecheck");
     expect(contract.setup.join("\n")).toContain("Node bootstrap guidance");
+    expect(stdout).toContain("Host target branch");
+    expect(stdout).toContain("Publish policy");
+    expect(stdout).toContain("off");
+  });
+
+  it("project configure can set publish policy without dirtying the repository", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "cli-host-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "package.json", "{}", "initial commit");
+
+    const dataDir = join(hostDir, "xdg-data");
+    const otherDir = await mkdtemp(join(tmpdir(), "cli-other-"));
+    await runCli(`project add --name alpha --path "${hostDir}"`, otherDir, {
+      ...process.env,
+      XDG_DATA_HOME: dataDir,
+    });
+    const { stdout } = await runCli(
+      "project configure --project-profile generic --publish-policy best_effort --remote-target origin/main",
+      otherDir,
+      {
+        ...process.env,
+        XDG_DATA_HOME: dataDir,
+      },
+    );
+
+    expect(stdout).toContain("best_effort");
+    expect(stdout).toContain("origin/main");
+    const { stdout: status } = await execAsync(
+      "git status --porcelain --untracked-files=normal -- . ':(exclude)xdg-data'",
+      { cwd: hostDir },
+    );
+    expect(status).toBe("");
+    await expect(
+      readFile(join(hostDir, "landing-policy.json"), "utf8"),
+    ).rejects.toBeTruthy();
   });
 
   it("project configure reports a backup when the profile changes", async () => {
@@ -1884,9 +1919,10 @@ const { mkdirSync, writeFileSync } = require("node:fs");
 const { join } = require("node:path");
 const [command] = process.argv.slice(2);
 if (command === "init") {
-  mkdirSync(".beads", { recursive: true });
-  mkdirSync(join(".beads", "embeddeddolt"), { recursive: true });
-  writeFileSync(join(".beads", "metadata.json"), JSON.stringify({ backend: "dolt" }));
+  const beadsDir = process.env.BEADS_DIR || ".beads";
+  mkdirSync(beadsDir, { recursive: true });
+  mkdirSync(join(beadsDir, "embeddeddolt"), { recursive: true });
+  writeFileSync(join(beadsDir, "metadata.json"), JSON.stringify({ backend: "dolt" }));
   process.exit(0);
 }
 if (command === "list") {

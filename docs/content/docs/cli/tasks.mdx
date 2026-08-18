@@ -5,7 +5,7 @@ description: Reference for local task-board and GitHub synchronization commands.
 
 | Command                         | Purpose                                   |
 | ------------------------------- | ----------------------------------------- |
-| `tasks init`                    | Initialize the local Beads task store     |
+| `tasks init`                    | Initialize the Hub-owned Beads task store |
 | `tasks list`                    | Show the Hub task board                   |
 | `tasks show <selector>`         | Show one task by ID or exact title        |
 | `tasks create <title>`          | Create an inbox task                      |
@@ -21,6 +21,24 @@ description: Reference for local task-board and GitHub synchronization commands.
 | `tasks cleanup`                 | Preview or perform managed branch cleanup |
 | `tasks delete <selector...>`    | Delete local tasks with safeguards        |
 
+`tasks init` creates the live Beads database under the stable Hub project
+directory, not in the Git repository. It also installs a Git-ignored
+`.beads/redirect` so host `bd where`, `bd ready`, and `bd show` resolve the
+same store. Hub flow agents consume an immutable task snapshot rather than
+that live store. An existing writer-free repository-local store migrates
+automatically on `tasks init` and on the first mutating `archloop run` or task
+command. Migration is journaled and resumes after a crash. An active Beads
+writer, source fingerprint change, unsafe snapshot, or live migration owner
+defers the switch, keeps the verified legacy store, and retries automatically.
+If both the leftover repository-local database and the Hub-owned store change
+after redirect, Hub reports split brain, stops automatic task-store writes, and
+does not merge or delete either database. None of these cases is a task failure
+or requires `tasks recover`.
+
+Landing strips only allowlisted Beads runtime/export files from a legacy task
+branch candidate. Configuration, documentation, hooks, and unknown `.beads/**`
+paths remain ordinary source changes.
+
 Use `--json` where offered for machine-readable output. Preview synchronization,
 cleanup, and deletion with `--dry-run` before applying them in automation.
 
@@ -31,7 +49,12 @@ cleanup, and deletion with `--dry-run` before applying them in automation.
 timeline. Selectors are full Beads IDs or exact titles, never list ordinals.
 
 `tasks doctor` is read-only and groups state, branch, event, and lease findings
-by severity. `tasks repair-state` previews local Beads projection changes and
+by severity. It can display pending landing reconciliation, pending checkout
+sync, a landing integrity incident, or legacy landing history (accepted
+closed/ancestry evidence versus rejected `merge_succeeded` or missing/diverged
+branches) without writing checkpoints, advancing the transaction, or updating
+the checkout.
+`tasks repair-state` previews local Beads projection changes and
 rewrites only archLoop-managed fields after confirmation. It never updates a
 remote GitHub Issue.
 

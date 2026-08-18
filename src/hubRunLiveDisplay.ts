@@ -32,7 +32,10 @@ import type {
   HubRunDisplayState,
   HubRunOutcomeProjection,
 } from "./hubRunDisplay.js";
-import { projectHubRunStateOutcome } from "./hubRunDisplay.js";
+import {
+  isTerminalHubRunBatchStatus,
+  projectHubRunStateOutcome,
+} from "./hubRunDisplay.js";
 import {
   buildRunCardSectionModel,
   detectRunCardTransition,
@@ -199,10 +202,69 @@ export interface LedgerEntry {
   readonly kind: "task" | "batch";
   readonly id: string;
   readonly title: string;
-  readonly outcome: "done" | "failed";
+  readonly outcome: "done" | "failed" | "pending";
   readonly durationMs: number;
   readonly atMs: number;
 }
+
+const taskCountLabel = (count: number, noun: "shipped" | "pending"): string =>
+  `${count} task${count === 1 ? "" : "s"} ${noun}`;
+
+const countShippedBatchTasks = (
+  batch: HubRunDisplayState["batches"][string],
+  state: HubRunDisplayState,
+): number =>
+  batch.selectedTaskIds.filter(
+    (taskId) => state.tasks[taskId]?.status === "done",
+  ).length;
+
+const countPendingBatchTasks = (
+  batch: HubRunDisplayState["batches"][string],
+  state: HubRunDisplayState,
+): number =>
+  batch.selectedTaskIds.filter((taskId) => {
+    const task = state.tasks[taskId];
+    return (
+      task !== undefined &&
+      task.status !== "done" &&
+      task.status !== "failed" &&
+      !task.skipped
+    );
+  }).length;
+
+const resolveBatchLedgerTitle = (input: {
+  readonly batch: HubRunDisplayState["batches"][string];
+  readonly shippedCount: number;
+  readonly pendingCount: number;
+}): string => {
+  const { batch, shippedCount, pendingCount } = input;
+  const showPending =
+    batch.status === "pending" || (shippedCount === 0 && pendingCount > 0);
+  if (showPending) {
+    return taskCountLabel(
+      pendingCount || batch.selectedTaskIds.length,
+      "pending",
+    );
+  }
+  return taskCountLabel(shippedCount, "shipped");
+};
+
+const resolveBatchLedgerOutcome = (input: {
+  readonly batchStatus: HubRunDisplayState["batches"][string]["status"];
+  readonly shippedCount: number;
+}): LedgerEntry["outcome"] => {
+  switch (input.batchStatus) {
+    case "done":
+      return "done";
+    case "pending":
+      return "pending";
+    case "partial_failed":
+      return input.shippedCount > 0 ? "failed" : "pending";
+    default:
+      // planning/merging are filtered out before ledger ingest
+      return "pending";
+  }
+};
 
 const cancellationOutcome = (
   state: HubRunDisplayState,
@@ -215,7 +277,7 @@ const cancellationOutcome = (
 
 const findActiveTaskId = (state: HubRunDisplayState): string | undefined => {
   const activeBatch = Object.values(state.batches).find(
-    (batch) => batch.status !== "done" && batch.status !== "partial_failed",
+    (batch) => !isTerminalHubRunBatchStatus(batch.status),
   );
   if (!activeBatch) {
     return undefined;
@@ -304,13 +366,39 @@ const renderHeaderLine = (
   return MARGIN + alignLeftRight(left, right, columns - MARGIN.length);
 };
 
+const ledgerOutcomeGlyph = (outcome: LedgerEntry["outcome"]): string => {
+  switch (outcome) {
+    case "failed":
+      return "✗";
+    case "pending":
+      return "◐";
+    case "done":
+      return "✓";
+  }
+};
+
+const ledgerOutcomeColor = (
+  outcome: LedgerEntry["outcome"],
+  palette: Palette,
+): ((text: string) => string) => {
+  switch (outcome) {
+    case "failed":
+      return palette.red;
+    case "pending":
+      return palette.yellow;
+    case "done":
+      return palette.green;
+  }
+};
+
 const ledgerRowLine = (
   entry: LedgerEntry,
   palette: Palette,
   columns: number,
 ): string => {
-  const symbolColor = entry.outcome === "failed" ? palette.red : palette.green;
-  const sym = symbolColor(entry.outcome === "failed" ? "✗" : "✓");
+  const sym = ledgerOutcomeColor(entry.outcome, palette)(
+    ledgerOutcomeGlyph(entry.outcome),
+  );
   const kindTag = entry.kind === "batch" ? palette.dim("batch ") : "";
   const idCol = palette.cyan(entry.id);
   const dur = palette.dim(formatClockElapsed(entry.durationMs));
@@ -368,7 +456,7 @@ const renderLedgerRegion = (
 const renderActiveRegion = (input: AltScreenFrameInput): readonly string[] => {
   const { state, palette, columns, nowMs, phaseStartedByTaskId } = input;
   const activeBatches = Object.values(state.batches).filter(
-    (batch) => batch.status !== "done" && batch.status !== "partial_failed",
+    (batch) => !isTerminalHubRunBatchStatus(batch.status),
   );
   const activeTasks = Object.values(state.tasks).filter(
     (task) =>
@@ -864,20 +952,25 @@ const createAltScreenPath = (
       if (st.recordedBatches.has(batch.batchId)) {
         continue;
       }
-      if (batch.status === "done" || batch.status === "partial_failed") {
-        st.recordedBatches.add(batch.batchId);
-        const started =
-          st.batchStartedAt.get(batch.batchId) ?? options.startedAt;
-        const count = batch.selectedTaskIds.length;
-        st.ledger.push({
-          kind: "batch",
-          id: shortHubId(batch.batchId),
-          title: `${count} task${count === 1 ? "" : "s"} shipped`,
-          outcome: batch.status === "done" ? "done" : "failed",
-          durationMs: now - started,
-          atMs: now,
-        });
+      if (!isTerminalHubRunBatchStatus(batch.status)) {
+        continue;
       }
+      st.recordedBatches.add(batch.batchId);
+      const started =
+        st.batchStartedAt.get(batch.batchId) ?? options.startedAt;
+      const shippedCount = countShippedBatchTasks(batch, state);
+      const pendingCount = countPendingBatchTasks(batch, state);
+      st.ledger.push({
+        kind: "batch",
+        id: shortHubId(batch.batchId),
+        title: resolveBatchLedgerTitle({ batch, shippedCount, pendingCount }),
+        outcome: resolveBatchLedgerOutcome({
+          batchStatus: batch.status,
+          shippedCount,
+        }),
+        durationMs: now - started,
+        atMs: now,
+      });
     }
 
     st.latestState = state;
@@ -1033,7 +1126,7 @@ const createFallbackPath = (
         batchStartedAt.set(batch.batchId, now);
       }
       if (
-        (batch.status === "done" || batch.status === "partial_failed") &&
+        isTerminalHubRunBatchStatus(batch.status) &&
         batchDurationsMs[batch.batchId] === undefined
       ) {
         const started = batchStartedAt.get(batch.batchId) ?? options.startedAt;

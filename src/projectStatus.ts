@@ -4,11 +4,31 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { isBdAvailable, resolveBdExecutable } from "./resolveBdExecutable.js";
+import { isBdAvailable } from "./resolveBdExecutable.js";
 import {
   HUB_TASK_STORE_INIT_COMMAND,
   isHubTaskStoreInitialized,
+  runBdTextForHubTaskStore,
 } from "./hubTaskStore.js";
+import {
+  isHubOwnedTaskStoreKind,
+  resolveHubTaskStore,
+  type HubTaskStoreKind,
+} from "./hubTaskStoreResolver.js";
+import {
+  formatHubLandingReconciliationMessage,
+  hubLandingTaskCloseReaderFromTasks,
+  inspectHubLandingTransactions,
+} from "./hubLandingReconciliation.js";
+import { formatHubLegacyLandingHistoryLines } from "./hubLandingLegacyHistory.js";
+import { inspectHubCheckoutOutbox } from "./hubCheckoutProjection.js";
+import { inspectHubPublicationOutbox } from "./hubPublication.js";
+import { inspectHubLandingQueue } from "./hubLandingQueue.js";
+import {
+  formatHubTaskStoreMigrationMessage,
+  inspectHubTaskStoreMigration,
+  type HubTaskStoreMigrationPhase,
+} from "./hubTaskStoreMigration.js";
 import {
   collectHubWorktreeLeaseDiagnosticsForTasks,
   type HubWorktreeLeaseDiagnostic,
@@ -17,6 +37,10 @@ import {
   resolveHubProjectDevelopmentContractPath,
   resolveHubProjectDevelopmentContractState,
 } from "./hubProjectDevelopmentContract.js";
+import {
+  readHubLandingPolicy,
+  type HubLandingPolicy,
+} from "./hubLandingPolicy.js";
 import {
   loadHubTaskBoard,
   type HubFailureReason,
@@ -62,7 +86,8 @@ export interface HubProjectBatchSummary {
     | "planned"
     | "merging"
     | "done"
-    | "partial_failed";
+    | "partial_failed"
+    | "pending";
   readonly flowId?: string;
   readonly taskCount?: number;
   readonly active: boolean;
@@ -86,6 +111,13 @@ export interface HubProjectStatus {
   readonly projectRegistered: boolean;
   readonly beadsAvailable: boolean;
   readonly taskStoreInitialized: boolean;
+  readonly taskStoreKind?: HubTaskStoreKind;
+  readonly taskStoreDir?: string;
+  readonly taskStoreRedirectError?: string;
+  readonly taskStoreMigrationPhase?: HubTaskStoreMigrationPhase;
+  readonly taskStoreMigrationMessage?: string;
+  readonly taskStoreMigrationPendingReason?: string;
+  readonly taskStoreIntegrityIncident?: string;
   readonly taskCounts: HubProjectTaskCounts;
   readonly statusCounts: Partial<Record<HubTaskStatus, number>>;
   readonly failedTasks: readonly HubProjectFailedTask[];
@@ -94,6 +126,21 @@ export interface HubProjectStatus {
   readonly runDirectories: readonly string[];
   readonly recentEvents: readonly string[];
   readonly worktreeLeaseDiagnostics: readonly HubWorktreeLeaseDiagnostic[];
+  readonly landingHostTargetBranch?: string;
+  readonly landingPublishTargetRef?: string;
+  readonly landingRemoteTarget?: string;
+  readonly landingPublishPolicy?: HubLandingPolicy["publishPolicy"];
+  readonly landingReconciliationKind?: "clean" | "pending" | "integrity_incident";
+  readonly landingReconciliationMessage?: string;
+  readonly landingReconciliationPendingCount?: number;
+  readonly landingIntegrityIncident?: string;
+  readonly landingLegacyHistory?: readonly string[];
+  readonly checkoutSyncPendingCount?: number;
+  readonly checkoutSyncMessage?: string;
+  readonly codePublicationPendingCount?: number;
+  readonly codePublicationMessage?: string;
+  readonly landingQueueQuietWaitCount?: number;
+  readonly landingQueueMessage?: string;
 }
 
 export interface HubProjectStatusOptions {
@@ -144,6 +191,7 @@ const ACTIVE_RUN_TASK_STATUSES = new Set<HubTaskProjection["hubStatus"]>([
   "implementing",
   "reviewing",
   "merging",
+  "publishing",
 ]);
 
 const readObject = (value: unknown): Record<string, unknown> =>
@@ -332,10 +380,17 @@ const resolveBatchStatus = (
       case "batch_merge_started":
         status = "merging";
         break;
-      case "batch_merge_completed":
-        status =
-          record.batchStatus === "partial_failed" ? "partial_failed" : "done";
+      case "batch_merge_completed": {
+        const batchStatus = record.batchStatus;
+        if (batchStatus === "partial_failed") {
+          status = "partial_failed";
+        } else if (batchStatus === "pending") {
+          status = "pending";
+        } else {
+          status = "done";
+        }
         break;
+      }
       default:
         break;
     }
@@ -468,12 +523,36 @@ const collectRunDirectories = (
   return [...directories].sort();
 };
 
+const formatTaskStoreLocationValue = (status: HubProjectStatus): string => {
+  if (status.taskStoreRedirectError) {
+    return "invalid redirect";
+  }
+  if (isHubOwnedTaskStoreKind(status.taskStoreKind)) {
+    return status.taskStoreDir ?? "hub-owned";
+  }
+  if (status.taskStoreInitialized || status.taskStoreKind === "legacy") {
+    if (
+      status.taskStoreMigrationPhase &&
+      status.taskStoreMigrationPhase !== "verified"
+    ) {
+      return `repository-local (${status.taskStoreMigrationPhase})`;
+    }
+    return "repository-local";
+  }
+  return "missing";
+};
+
 const appendTaskCountLines = (lines: string[], status: HubProjectStatus) => {
   lines.push("Task counts by Hub status");
   if (!status.beadsAvailable) {
     lines.push(
       "  archLoop task runtime unavailable — install dependencies, set ARCHLOOP_BD_PATH, or ensure the bundled Beads runtime is available.",
     );
+    return;
+  }
+
+  if (status.taskStoreRedirectError) {
+    lines.push(`  ${status.taskStoreRedirectError}`);
     return;
   }
 
@@ -620,12 +699,75 @@ const appendWorktreeLeaseLines = (
   }
 };
 
+const hasCodePublicationPendingCount = (
+  status: Pick<HubProjectStatus, "codePublicationPendingCount">,
+): boolean => (status.codePublicationPendingCount ?? 0) > 0;
+
+const hasPendingCodePublication = (
+  status: Pick<
+    HubProjectStatus,
+    "codePublicationPendingCount" | "codePublicationMessage"
+  >,
+): status is HubProjectStatus & {
+  readonly codePublicationPendingCount: number;
+  readonly codePublicationMessage: string;
+} =>
+  hasCodePublicationPendingCount(status) &&
+  Boolean(status.codePublicationMessage);
+
 export const formatHubProjectStatusLines = (
   status: HubProjectStatus,
   cleanupDiagnosticsLines?: readonly string[],
 ): readonly string[] => {
   const lines: string[] = [];
   appendTaskCountLines(lines, status);
+  if (status.taskStoreMigrationMessage) {
+    lines.push("Task store migration");
+    lines.push(`  ${status.taskStoreMigrationMessage}`);
+    lines.push("");
+  }
+  const hasNonCleanReconciliation =
+    Boolean(status.landingReconciliationMessage) &&
+    Boolean(status.landingReconciliationKind) &&
+    status.landingReconciliationKind !== "clean";
+  const hasLegacyHistoryLines =
+    status.landingLegacyHistory !== undefined &&
+    status.landingLegacyHistory.length > 0;
+  if (hasNonCleanReconciliation || hasLegacyHistoryLines) {
+    lines.push("Landing reconciliation");
+    if (hasNonCleanReconciliation) {
+      lines.push(`  ${status.landingReconciliationMessage}`);
+    }
+    for (const line of status.landingLegacyHistory ?? []) {
+      if (line !== status.landingReconciliationMessage) {
+        lines.push(`  ${line}`);
+      }
+    }
+    lines.push("");
+  }
+  if (
+    status.checkoutSyncPendingCount &&
+    status.checkoutSyncPendingCount > 0 &&
+    status.checkoutSyncMessage
+  ) {
+    lines.push("Checkout sync");
+    lines.push(`  ${status.checkoutSyncMessage}`);
+    lines.push("");
+  }
+  if (
+    status.landingQueueQuietWaitCount &&
+    status.landingQueueQuietWaitCount > 0 &&
+    status.landingQueueMessage
+  ) {
+    lines.push("Landing queue");
+    lines.push(`  ${status.landingQueueMessage}`);
+    lines.push("");
+  }
+  if (hasPendingCodePublication(status)) {
+    lines.push("Code publication");
+    lines.push(`  ${status.codePublicationMessage}`);
+    lines.push("");
+  }
   lines.push("");
   appendActiveBatchLines(lines, status.activeBatches);
   lines.push("");
@@ -710,13 +852,19 @@ const parseJsonCount = (output: string): number => {
   return 0;
 };
 
-const countBdJsonResult = (args: readonly string[], cwd: string): number => {
+const countBdJsonResult = (
+  args: readonly string[],
+  cwd: string,
+  hubProjectDir?: string,
+): number => {
   try {
-    const stdout = execFileSync(resolveBdExecutable(), [...args], {
+    const stdout = runBdTextForHubTaskStore(
       cwd,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+      args,
+      "project status",
+      process.env,
+      { hubProjectDir },
+    );
     return parseJsonCount(stdout);
   } catch {
     return 0;
@@ -737,10 +885,17 @@ const resolveTaskStoreInitialized = (
   repoRoot: string,
   beadsAvailable: boolean,
   detectTaskStoreInitialized: HubProjectStatusOptions["detectTaskStoreInitialized"],
-): boolean =>
-  beadsAvailable
-    ? (detectTaskStoreInitialized ?? isHubTaskStoreInitialized)(repoRoot)
-    : false;
+  hubProjectDir: string,
+): boolean => {
+  if (!beadsAvailable) {
+    return false;
+  }
+  const detect =
+    detectTaskStoreInitialized ??
+    ((repoRootPath: string) =>
+      isHubTaskStoreInitialized(repoRootPath, { hubProjectDir }));
+  return detect(repoRoot);
+};
 
 const resolveTaskCounts = (
   repoRoot: string,
@@ -748,18 +903,19 @@ const resolveTaskCounts = (
   taskStoreInitialized: boolean,
   countReadyTasks: HubProjectStatusOptions["countReadyTasks"],
   countTotalTasks: HubProjectStatusOptions["countTotalTasks"],
+  hubProjectDir: string,
 ): HubProjectTaskCounts =>
   beadsAvailable && taskStoreInitialized
     ? {
         ready: (
           countReadyTasks ??
           ((repoRootPath) =>
-            countBdJsonResult(["ready", "--json"], repoRootPath))
+            countBdJsonResult(["ready", "--json"], repoRootPath, hubProjectDir))
         )(repoRoot),
         total: (
           countTotalTasks ??
           ((repoRootPath) =>
-            countBdJsonResult(["list", "--json"], repoRootPath))
+            countBdJsonResult(["list", "--json"], repoRootPath, hubProjectDir))
         )(repoRoot),
       }
     : { ready: 0, total: 0 };
@@ -822,13 +978,23 @@ export const resolveHubProjectStatus = (
     repoRoot,
     beadsAvailable,
     options.detectTaskStoreInitialized,
+    hubProjectDir,
   );
+  const taskStoreResolution = resolveHubTaskStore({
+    repoRoot,
+    hubProjectDir,
+  });
+  const taskStoreMigration = inspectHubTaskStoreMigration({
+    repoRoot,
+    hubProjectDir,
+  });
   const taskCounts = resolveTaskCounts(
     repoRoot,
     beadsAvailable,
     taskStoreInitialized,
     options.countReadyTasks,
     options.countTotalTasks,
+    hubProjectDir,
   );
   const board = loadTaskBoardSafe(
     repoRoot,
@@ -856,6 +1022,16 @@ export const resolveHubProjectStatus = (
           board.tasks,
           (options.listWorktreeLeases ?? listWorktreeLeases)(repoRoot),
         );
+  const landingPolicy = readHubLandingPolicy(hubProjectDir);
+  const landingReconciliation = inspectHubLandingTransactions({
+    repoRoot,
+    hubProjectDir,
+    readTaskClose: hubLandingTaskCloseReaderFromTasks(board?.tasks ?? []),
+    tasks: board?.tasks,
+  });
+  const checkoutSync = inspectHubCheckoutOutbox({ hubProjectDir });
+  const codePublication = inspectHubPublicationOutbox({ hubProjectDir });
+  const landingQueue = inspectHubLandingQueue(hubProjectDir);
 
   return {
     repoRoot,
@@ -867,6 +1043,14 @@ export const resolveHubProjectStatus = (
     projectRegistered,
     beadsAvailable,
     taskStoreInitialized,
+    taskStoreKind: taskStoreResolution.kind,
+    taskStoreDir: taskStoreResolution.beadsDir,
+    taskStoreRedirectError: taskStoreResolution.redirectError,
+    taskStoreMigrationPhase: taskStoreMigration.phase,
+    taskStoreMigrationMessage:
+      formatHubTaskStoreMigrationMessage(taskStoreMigration),
+    taskStoreMigrationPendingReason: taskStoreMigration.pendingReason,
+    taskStoreIntegrityIncident: taskStoreMigration.integrityIncident,
     taskCounts,
     statusCounts,
     failedTasks,
@@ -875,6 +1059,24 @@ export const resolveHubProjectStatus = (
     runDirectories,
     recentEvents,
     worktreeLeaseDiagnostics,
+    landingHostTargetBranch: landingPolicy?.hostTargetBranch,
+    landingPublishTargetRef: landingPolicy?.publishTargetRef,
+    landingRemoteTarget: landingPolicy?.remoteTarget,
+    landingPublishPolicy: landingPolicy?.publishPolicy,
+    landingReconciliationKind: landingReconciliation.kind,
+    landingReconciliationMessage:
+      formatHubLandingReconciliationMessage(landingReconciliation),
+    landingReconciliationPendingCount: landingReconciliation.pendingCount,
+    landingIntegrityIncident: landingReconciliation.integrityIncident,
+    landingLegacyHistory: formatHubLegacyLandingHistoryLines(
+      landingReconciliation.legacyHistory,
+    ),
+    checkoutSyncPendingCount: checkoutSync.pendingCount,
+    checkoutSyncMessage: checkoutSync.message,
+    codePublicationPendingCount: codePublication.pendingCount,
+    codePublicationMessage: codePublication.message,
+    landingQueueQuietWaitCount: landingQueue.pendingQuietWaitCount,
+    landingQueueMessage: landingQueue.message,
   };
 };
 
@@ -921,8 +1123,82 @@ const projectStatusIdentityRows = (
     key: "Task store initialized",
     value: status.taskStoreInitialized ? "yes" : "no",
   },
+  {
+    key: "Task store",
+    value: formatTaskStoreLocationValue(status),
+  },
+  ...(status.taskStoreMigrationPhase
+    ? [
+        {
+          key: "Task store migration",
+          value: status.taskStoreMigrationPhase,
+        },
+      ]
+    : []),
   { key: "Task board ready", value: String(status.taskCounts.ready) },
   { key: "Task board total", value: String(status.taskCounts.total) },
+  ...(status.landingHostTargetBranch
+    ? [
+        {
+          key: "Host target branch",
+          value: status.landingHostTargetBranch,
+        },
+        {
+          key: "Hub publish target",
+          value: status.landingPublishTargetRef ?? "(unpinned)",
+        },
+        {
+          key: "Publish policy",
+          value: status.landingPublishPolicy ?? "off",
+        },
+        {
+          key: "Remote target",
+          value: status.landingRemoteTarget ?? "(none)",
+        },
+      ]
+    : []),
+  ...(status.landingReconciliationKind &&
+  status.landingReconciliationKind !== "clean"
+    ? [
+        {
+          key: "Landing reconciliation",
+          value: status.landingReconciliationKind,
+        },
+      ]
+    : []),
+  ...(status.landingLegacyHistory && status.landingLegacyHistory.length > 0
+    ? [
+        {
+          key: "Legacy landing history",
+          value: `${status.landingLegacyHistory.length} finding(s)`,
+        },
+      ]
+    : []),
+  ...(status.checkoutSyncPendingCount && status.checkoutSyncPendingCount > 0
+    ? [
+        {
+          key: "Checkout sync",
+          value: `pending (${status.checkoutSyncPendingCount})`,
+        },
+      ]
+    : []),
+  ...(status.landingQueueQuietWaitCount &&
+  status.landingQueueQuietWaitCount > 0
+    ? [
+        {
+          key: "Landing queue",
+          value: `quiet wait (${status.landingQueueQuietWaitCount})`,
+        },
+      ]
+    : []),
+  ...(hasCodePublicationPendingCount(status)
+    ? [
+        {
+          key: "Code publication",
+          value: `pending (${status.codePublicationPendingCount})`,
+        },
+      ]
+    : []),
 ];
 
 export const buildHubProjectStatusSummaryModel = (

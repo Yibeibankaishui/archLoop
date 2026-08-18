@@ -47,7 +47,16 @@ repositories.
 
 `project add` accepts interactive input or explicit `--name`, `--path`, and
 `--project-profile`. Registration selects the project. Selection persists across
-directories.
+directories. Optional task-store initialization creates a Hub-owned Beads
+database under the Hub project directory and a Git-ignored `.beads/redirect`
+so host `bd` commands resolve the same store. That fresh managed layout is
+already steady state: mutating task commands work immediately and must not be
+treated as an interrupted legacy migration. An existing writer-free
+repository-local Beads store migrates automatically on the first mutating
+`archloop run` or task command; crashes resume from the journal without
+`tasks recover`. An active writer, fingerprint change, unsafe snapshot, or
+live migration owner defers the switch and retries later against the verified
+legacy store. Split brain after redirect stops automatic task-store writes.
 
 ## Project operations
 
@@ -56,6 +65,12 @@ npx archloop project list
 npx archloop project select <name>
 npx archloop project status
 npx archloop project configure --project-profile <profile>
+npx archloop project configure --project-profile <profile> --publish-policy off
+npx archloop project configure --project-profile <profile> \
+  --publish-policy best_effort --remote-target origin/main
+npx archloop project configure --project-profile <profile> \
+  --publish-policy required --remote-target origin/main \
+  --delivery-timeout-ms 300000
 npx archloop project rename <project> <new-name>
 npx archloop project relink <project> --path <repo-path>
 ```
@@ -65,7 +80,18 @@ safer than the selected project.
 
 Project profiles include `generic`, `node`, `python`, and `cpp`. Reconfiguring
 with the same profile refreshes detected facts while preserving user-edited
-development contract sections.
+development contract sections. `--publish-policy off|best_effort|required` and
+`--remote-target` write Hub-owned landing policy without dirtying the
+repository. Publication stays `off` until configured; discovering `origin`
+never enables pushes. `best_effort` enqueues a durable code-publication outbox
+after local shipped proof and retries as `target_publish_pending` without
+undoing shipped or mixing with GitHub task sync. `required` keeps the task
+`publishing` until remote ancestry proves delivery; successors may build and
+verify but cannot advance the ordered local delivery sequence past an
+unacknowledged predecessor. Optional `--delivery-timeout-ms` bounds the wait;
+timeout returns `completed_with_pending_delivery` (non-zero exit) without
+semantic task failure. Force rewrite after an ambiguous successful push is an
+integrity incident, not ordinary drift.
 
 ## Agent roles and credentials
 
@@ -107,6 +133,11 @@ JSON). `tasks show` renders the status by severity, labels remaining metadata,
 and presents comments as a timeline rather than a raw metadata blob.
 
 Task commands use the selected project unless `--project <name>` is supplied.
+`tasks init` initializes the Hub-owned store for a registered project. If a
+repository-local Beads database already exists, it migrates that store into
+Hub-owned storage and installs `.beads/redirect`, or defers that migration
+when the switch would be unsafe. Split brain after redirect is an integrity
+incident: writes stop until a human inspects both stores.
 
 ## GitHub synchronization
 
@@ -147,9 +178,17 @@ npx archloop run --flow with-review
 ```
 
 Task-board flows select a batch, run task implementations concurrently, and
-merge eligible branches serially. `with-review` adds a reviewer stage. An
-unfinished same-flow merge-ready batch is recovered before new tasks are
-claimed.
+land eligible branches serially onto a Hub-managed local publish target.
+`with-review` adds a reviewer stage. An unfinished same-flow merge-ready batch
+is recovered before new tasks are claimed. Interrupted `reviewing` work whose
+implementation already succeeded resumes the reviewer only (same preserved
+branch/claim), then continues through merge. Implementation and review agents
+receive an immutable task snapshot (prompt + per-attempt `BEADS_DIR`) instead of
+live `bd` access; Hub never rewrites the shared repository `.beads/redirect` for
+snapshots and applies schema-validated `<task-notes>` after the attempt. Landing freezes source and
+base OIDs, verifies the exact candidate in a Hub-owned worktree, then advances
+the publish target with a fenced Git ref transaction. The user's checkout and
+WIP are not modified, and no remote is required.
 
 Re-running `archloop run` also detects tasks left in implementation, review, or
 merge by an interrupted process. It uses completed-phase events to resume at
@@ -180,10 +219,78 @@ npx archloop tasks recover --stale
 npx archloop tasks cleanup --dry-run
 ```
 
-- Dirty source files block a merge only when they overlap files changed by the
-  merge. Resolve the exact listed paths and rerun the same flow.
-- `tasks doctor` is read-only. It groups diagnostics by severity and reports
-  interrupted execution when no lease diagnostic already explains it.
+- Landing does not mutate the user's checkout, index, HEAD, or WIP during the
+  landing transaction. Dirty source files and staged Beads runtime/export
+  files do not block a local landing. After landing, Hub enqueues a durable
+  checkout projection: an un-checked-out host branch advances with OID CAS,
+  and a checked-out branch fast-forwards only in its owning worktree when Git
+  can prove the update safe. Unsafe WIP, operation state, sparse checkout,
+  submodules, divergence, or extra worktrees stay `checkout_sync_pending`,
+  leave user state unchanged, and retry on a later run. Projection never
+  stashes, switches branches, force-resets, or runs user hooks. Pending
+  checkout sync does not change `shipped`.
+- With `--publish-policy best_effort` and an explicit `--remote-target`, local
+  shipped proof enqueues a durable publication outbox keyed by transaction,
+  remote, ref, candidate OID, and expected remote OID. Publication uses
+  observation plus exact force-with-lease semantics (never unqualified force
+  push). Network, credential, protected-branch, and unknown push outcomes stay
+  `target_publish_pending`, keep local delivery successful, and retry on a
+  later mutating entry point. Remote divergence that changes the deliverable
+  stays pending for fresh reconciliation instead of overwriting. Code
+  publication state is separate from GitHub task sync.
+- Legacy task branches that committed allowlisted Beads runtime/export files
+  (`.beads/issues.jsonl`, `.beads/interactions.jsonl`, `.beads/events.jsonl`,
+  and known Dolt/backup/lock paths) still land their source changes. Hub
+  strips only that allowlist from the candidate, records the filtered paths
+  on the landing transaction and events, and does not rewrite the task branch
+  or checkout. Beads configuration, documentation, hooks, and unknown
+  `.beads/**` paths remain ordinary source changes.
+- Each merge-ready task owns its own landing transaction. Independent siblings
+  continue after one task is blocked; dependents wait for an unshipped
+  prerequisite. Mixed shipped and blocked batches report `partial_failed`.
+- Merge-ready tasks for one publish target receive durable FIFO and dependency
+  tickets. Speculative candidates build on the predecessor OID, verify exact
+  OIDs concurrently where dependencies permit, and land only at the queue head
+  with fenced CAS. Predecessor repair, failure, committed host contribution, or
+  target drift invalidates the affected speculative suffix. Committed host
+  tips (behind/descendant/diverged) reconcile into the canonical chain before
+  task candidates continue; uncommitted host WIP is never imported. Landed host
+  contributions complete as synthetic (non-Beads) transactions during
+  reconciliation — never via Beads close or `tasks recover`. A deterministic
+  host-target merge conflict is `host_contribution_conflict` (pending, not
+  shipped or failed): resolve the conflict, then rerun the same flow — do not
+  run `tasks recover`. After three
+  immediate drift rebuilds the head retains `target_quiet_wait` until a stable
+  window resumes automatically without resetting repair budgets or requiring
+  `tasks recover`. All-pending batches report `pending` /
+  `completed_with_pending_merge` instead of counting as shipped or failed.
+- Semantic Git conflicts get at most two merge-role Agent repairs; verification
+  failures get at most two candidate-repair attempts with a new candidate
+  generation and full re-verification each time. Repair budgets do not reset
+  on target drift, quiet-wait resume, or process restart. Exhaustion blocks only that task as
+  `merge_conflict_unresolved` or `verification_failed`. Transient lock/I/O
+  errors stay pending. Unverified or stale candidates cannot land.
+- Concurrent `archloop run` processes share a landing lease (owner nonce,
+  process start identity, boot identity). A live owner is not stolen when a
+  TTL elapses. Git fence, target, and receipt OIDs advance atomically. Target
+  drift rebuilds and fully reverifies the queue head before another CAS.
+  Contention and stale-owner rejection stay pending, not task failures.
+- Interrupted landing transactions resume automatically on the next
+  `archloop run` from candidate refs, verification artifacts, atomic receipts,
+  Beads close metadata (task-backed only), and resource absence. Do not run
+  `tasks recover` for this pending reconciliation, including synthetic
+  `hub-host-contribution` landings.
+- On upgrade, already closed historical tasks stay completed and do not need
+  new landing receipts. In-flight work whose source branch is contained in the
+  configured target is adopted into a new verified transaction automatically.
+  A historical `merge_succeeded` event is never landing proof. Missing or
+  diverged branches become `legacy_landing_integrity` for inspection; Hub does
+  not silently close or reimplement preserved work.
+- `tasks doctor` is read-only. It groups diagnostics by severity, reports
+  interrupted execution when no lease diagnostic already explains it, and can
+  display landing reconciliation state, checkout sync pending, code
+  publication pending, FIFO quiet wait, and legacy
+  history without advancing the transaction or updating the checkout.
 - `tasks repair-state` previews changes before confirmation and rewrites only
   archLoop-managed status fields; it does not mutate GitHub Issues.
 - `tasks recover --stale` previews all interrupted-task routes by default; use
@@ -193,8 +300,16 @@ npx archloop tasks cleanup --dry-run
   branches; unowned deletion requires `--include-unowned` explicitly.
 - Do not manually delete worktrees, branches, or lock files while an active
   worktree lease exists.
-- Keep `.beads/issues.jsonl` and `.beads/interactions.jsonl` out of code changes;
-  use task sync commands for remote exchange.
+- Keep `.beads/issues.jsonl` and `.beads/interactions.jsonl` out of new code
+  changes; use task sync commands for remote exchange. If a legacy branch
+  already committed those allowlisted runtime/export files, Hub strips them
+  from the landing candidate instead of blocking the merge.
+- A later iteration that aborts during provider startup with no agent output
+  (for example a SessionStart hook error and `stop_reason: abort`) does not
+  fail the whole Hub run while iterations remain. The next iteration continues
+  with a progress summary; an exploration-only turn is nudged to implement.
+  Exhausting iterations with no completion signal and no commits is still
+  `agent_failed`. Do not treat this as an already-merged zero-commit success.
 
 ## Legacy repo-local scaffold
 

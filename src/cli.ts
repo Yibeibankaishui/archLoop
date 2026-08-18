@@ -122,6 +122,10 @@ import {
   hubProjectConfigureSummaryModelToBlocks,
 } from "./hubProjectDevelopmentContract.js";
 import {
+  configureHubLandingPolicy,
+  HUB_LANDING_PUBLISH_POLICIES,
+} from "./hubLandingPolicy.js";
+import {
   createHubFlowRunImplementer,
   createHubFlowRunReviewer,
   formatHubFlowResultLines,
@@ -229,6 +233,10 @@ import {
 import { evaluateHubManagedBranchCleanup } from "./hubManagedBranchCleanup.js";
 import { HUB_TRIAGE_DEFAULT_TASK_QUERY } from "./hubTriage.js";
 import { initHubTaskStore } from "./hubTaskStore.js";
+import {
+  ensureHubTaskStoreMigrated,
+  throwIfHubTaskStoreSplitBrain,
+} from "./hubTaskStoreMigration.js";
 import { isTriageTaskIdInput } from "./hubTriageProposal.js";
 import {
   buildSyncResultModel,
@@ -1758,6 +1766,32 @@ const projectConfigureProjectProfileOption = Options.text(
   Options.optional,
 );
 
+const projectConfigurePublishPolicyOption = Options.choice(
+  "publish-policy",
+  HUB_LANDING_PUBLISH_POLICIES,
+).pipe(
+  Options.withDescription(
+    "Hub code publication policy: off (default, local-first), best_effort, or required.",
+  ),
+  Options.optional,
+);
+
+const projectConfigureRemoteTargetOption = Options.text("remote-target").pipe(
+  Options.withDescription(
+    "Optional remote publication target such as origin/main. Never implied by a Git remote existing.",
+  ),
+  Options.optional,
+);
+
+const projectConfigureDeliveryTimeoutOption = Options.integer(
+  "delivery-timeout-ms",
+).pipe(
+  Options.withDescription(
+    "Required-publication delivery wait in milliseconds during a Hub run (default 300000).",
+  ),
+  Options.optional,
+);
+
 const describeProjectConfigureEditOutcome = (contract: {
   readonly preservedUserEdits: boolean;
   readonly projectProfileChanged: boolean;
@@ -1978,8 +2012,13 @@ const taskSelectorsArg = Args.atLeast(
 
 const resolveTaskCommandProjectTarget = (
   project: OptionalTextFlag,
+  options: { readonly migrateLegacyStore?: boolean } = {},
 ): Effect.Effect<
-  { readonly repoRoot: string; readonly projectName: string },
+  {
+    readonly repoRoot: string;
+    readonly projectName: string;
+    readonly hubProjectDir: string;
+  },
   TaskBoardError,
   never
 > =>
@@ -1990,21 +2029,48 @@ const resolveTaskCommandProjectTarget = (
         isTTY: process.stdin.isTTY === true,
         selectProject: resolveInteractiveProjectSelection,
       });
-      return {
+      const target = {
         repoRoot: resolved.project.repoRoot,
         projectName: resolved.project.name,
+        hubProjectDir: resolved.project.hubProjectDir,
       };
+      if (options.migrateLegacyStore) {
+        const migrated = ensureHubTaskStoreMigrated({
+          repoRoot: target.repoRoot,
+          hubProjectDir: target.hubProjectDir,
+        });
+        throwIfHubTaskStoreSplitBrain(migrated);
+      }
+      return target;
     },
     catch: toTaskBoardError,
   });
 
+const resolveMutatingTaskCommandProjectTarget = (
+  project: OptionalTextFlag,
+): Effect.Effect<
+  {
+    readonly repoRoot: string;
+    readonly projectName: string;
+    readonly hubProjectDir: string;
+  },
+  TaskBoardError,
+  never
+> => resolveTaskCommandProjectTarget(project, { migrateLegacyStore: true });
+
 const resolveTaskCommandRepoRoot = (
   project: OptionalTextFlag,
+  options: { readonly migrateLegacyStore?: boolean } = {},
 ): Effect.Effect<string, TaskBoardError, never> =>
   Effect.map(
-    resolveTaskCommandProjectTarget(project),
+    resolveTaskCommandProjectTarget(project, options),
     (target) => target.repoRoot,
   );
+
+const resolveMutatingTaskCommandRepoRoot = (
+  project: OptionalTextFlag,
+): Effect.Effect<string, TaskBoardError, never> =>
+  resolveTaskCommandRepoRoot(project, { migrateLegacyStore: true });
 
 // Reused empty set so the common healthy-board path (no locks directory) never
 // allocates a fresh `new Set()` for the interrupted badge.
@@ -2093,11 +2159,26 @@ const tasksInitCommand = Command.make(
   ({ project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const target = yield* resolveTaskCommandProjectTarget(project);
       const result = yield* Effect.try({
-        try: () => initHubTaskStore(cwd),
+        try: () =>
+          initHubTaskStore(target.repoRoot, process.env, {
+            hubProjectDir: target.hubProjectDir,
+            projectName: target.projectName,
+          }),
         catch: toTaskBoardError,
       });
+
+      if (result.migrated) {
+        if (result.output.trim().length > 0) {
+          yield* d.text(result.output.trim());
+        }
+        yield* d.status(
+          "Migrated the repository-local Beads store into Hub-owned storage.",
+          "success",
+        );
+        return;
+      }
 
       if (result.alreadyInitialized) {
         yield* d.status("Hub task store is already initialized.", "success");
@@ -2159,7 +2240,7 @@ const tasksCreateCommand = Command.make(
   ({ title, origin, description, kind, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const cwd = yield* resolveMutatingTaskCommandRepoRoot(project);
       const resolvedOrigin = yield* resolveTaskOrigin(origin);
       const kindValue = optionalTextValue(kind);
       const created = yield* Effect.try({
@@ -2229,7 +2310,7 @@ const tasksTriageCommand = Command.make(
   },
   ({ taskId, query, approve, project }) =>
     Effect.gen(function* () {
-      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const cwd = yield* resolveMutatingTaskCommandRepoRoot(project);
       const explicitTaskId = optionalTextValue(taskId)?.trim();
       const explicitQuery = optionalTextValue(query)?.trim();
       const yes = approve;
@@ -2359,7 +2440,7 @@ const tasksFromPrdCommand = Command.make(
   },
   ({ prdRef, approve, status, deps, project }) =>
     Effect.gen(function* () {
-      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const cwd = yield* resolveMutatingTaskCommandRepoRoot(project);
       const explicitHubStatusMode =
         !approve && status._tag === "Some"
           ? yield* resolvePrdHubStatusMode(status)
@@ -2501,7 +2582,7 @@ const tasksSyncCommand = Command.make(
   },
   ({ yes, dryRun, includeClosed, json, project }) =>
     Effect.gen(function* () {
-      const target = yield* resolveTaskCommandProjectTarget(project);
+      const target = yield* resolveMutatingTaskCommandProjectTarget(project);
       return yield* runHubTaskSyncCommand({
         mode: "sync",
         cwd: target.repoRoot,
@@ -2524,7 +2605,7 @@ const tasksPullCommand = Command.make(
   },
   ({ includeClosed, dryRun, json, project }) =>
     Effect.gen(function* () {
-      const target = yield* resolveTaskCommandProjectTarget(project);
+      const target = yield* resolveMutatingTaskCommandProjectTarget(project);
       return yield* runHubTaskSyncCommand({
         mode: "pull",
         cwd: target.repoRoot,
@@ -2545,7 +2626,7 @@ const tasksPushCommand = Command.make(
   },
   ({ dryRun, json, project }) =>
     Effect.gen(function* () {
-      const target = yield* resolveTaskCommandProjectTarget(project);
+      const target = yield* resolveMutatingTaskCommandProjectTarget(project);
       return yield* runHubTaskSyncCommand({
         mode: "push",
         cwd: target.repoRoot,
@@ -2569,7 +2650,7 @@ const tasksCommentCommand = Command.make(
   ({ id, body, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const cwd = yield* resolveMutatingTaskCommandRepoRoot(project);
       const task = yield* Effect.try({
         try: () => resolveHubTaskSelector(cwd, id),
         catch: toTaskBoardError,
@@ -2615,7 +2696,7 @@ const tasksRecoverCommand = Command.make(
   ({ id, stale, yes, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const cwd = yield* resolveMutatingTaskCommandRepoRoot(project);
 
       if (stale) {
         const idValue = optionalTextValue(id);
@@ -2732,7 +2813,7 @@ const tasksResolveCommand = Command.make(
   ({ id, keep, yes, json, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const target = yield* resolveTaskCommandProjectTarget(project);
+      const target = yield* resolveMutatingTaskCommandProjectTarget(project);
       const cwd = target.repoRoot;
       const task = yield* Effect.try({
         try: () => resolveHubTaskSelector(cwd, id),
@@ -2978,7 +3059,7 @@ const tasksRepairStateCommand = Command.make(
   ({ id, yes, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const cwd = yield* resolveMutatingTaskCommandRepoRoot(project);
       const preview = yield* Effect.tryPromise({
         try: () => repairHubTaskState({ cwd, taskSelector: id }),
         catch: toTaskBoardError,
@@ -3052,7 +3133,7 @@ const tasksDeleteCommand = Command.make(
   ({ selectors, yes, dryRun, cascade, project }) =>
     Effect.gen(function* () {
       const d = yield* Display;
-      const cwd = yield* resolveTaskCommandRepoRoot(project);
+      const cwd = yield* resolveMutatingTaskCommandRepoRoot(project);
       const tasks = yield* Effect.try({
         try: () => resolveHubTaskSelectors(cwd, selectors),
         catch: toTaskBoardError,
@@ -3673,11 +3754,18 @@ const confirmProjectAddTaskStoreInitialization = async (): Promise<boolean> => {
 
 const initializeProjectAddTaskStore = (
   display: DisplayService,
-  repoRoot: string,
+  project: {
+    readonly repoRoot: string;
+    readonly hubProjectDir: string;
+    readonly name: string;
+  },
 ): Effect.Effect<boolean> =>
   Effect.gen(function* () {
     try {
-      const result = initHubTaskStore(repoRoot);
+      const result = initHubTaskStore(project.repoRoot, process.env, {
+        hubProjectDir: project.hubProjectDir,
+        projectName: project.name,
+      });
       const output = result.output.trim();
       if (output.length > 0) {
         yield* display.text(output);
@@ -3764,7 +3852,7 @@ const projectAddCommand = Command.make(
         if (shouldInitializeTaskStore) {
           taskStoreInitialized = yield* initializeProjectAddTaskStore(
             d,
-            result.project.repoRoot,
+            result.project,
           );
         }
       }
@@ -3933,8 +4021,11 @@ const projectConfigureCommand = Command.make(
   {
     project: projectTargetOption,
     projectProfile: projectConfigureProjectProfileOption,
+    publishPolicy: projectConfigurePublishPolicyOption,
+    remoteTarget: projectConfigureRemoteTargetOption,
+    deliveryTimeoutMs: projectConfigureDeliveryTimeoutOption,
   },
-  ({ project, projectProfile }) =>
+  ({ project, projectProfile, publishPolicy, remoteTarget, deliveryTimeoutMs }) =>
     Effect.gen(function* () {
       const d = yield* Display;
       const status = yield* resolveProjectTargetStatus(project);
@@ -3972,6 +4063,24 @@ const projectConfigureCommand = Command.make(
         catch: toProjectStatusError,
       });
 
+      const landing = yield* Effect.try({
+        try: () =>
+          configureHubLandingPolicy({
+            repoRoot: status.repoRoot,
+            hubProjectDir: status.hubProjectDir,
+            ...(publishPolicy._tag === "Some"
+              ? { publishPolicy: publishPolicy.value }
+              : {}),
+            ...(remoteTarget._tag === "Some"
+              ? { remoteTarget: remoteTarget.value }
+              : {}),
+            ...(deliveryTimeoutMs._tag === "Some"
+              ? { deliveryTimeoutMs: deliveryTimeoutMs.value }
+              : {}),
+          }),
+        catch: toProjectStatusError,
+      });
+
       yield* d.section(
         "",
         hubProjectConfigureSummaryModelToBlocks(
@@ -3980,6 +4089,10 @@ const projectConfigureCommand = Command.make(
             hubProjectDir: status.hubProjectDir,
             contract,
             editOutcome: describeProjectConfigureEditOutcome(contract),
+            landingHostTargetBranch: landing.policy.hostTargetBranch,
+            landingPublishTargetRef: landing.policy.publishTargetRef,
+            landingPublishPolicy: landing.policy.publishPolicy,
+            landingRemoteTarget: landing.policy.remoteTarget,
           }),
         ),
       );

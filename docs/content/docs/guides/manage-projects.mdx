@@ -21,17 +21,27 @@ npx archloop check --project <name>
 ```
 
 `project list` shows path validity, profile, task readiness, task counts, and
-active runs. `project status` adds the development contract, run artifacts,
-failed-task actions, and managed branch cleanup diagnostics.
+active runs. `project status` adds the development contract, landing policy,
+pending landing reconciliation, legacy landing history, run artifacts,
+failed-task actions, and managed
+branch cleanup diagnostics. Observing status does not resume a landing
+transaction or adopt legacy history.
 
 ## Configure the development contract
 
 ```bash
 npx archloop project configure --project-profile node
+npx archloop project configure --project-profile node --publish-policy off
+npx archloop project configure --project-profile node \
+  --publish-policy best_effort --remote-target origin/main
 ```
 
 Running the command again with the same profile refreshes detected project facts
 while preserving user-edited setup, verification, and context sections.
+`--publish-policy` and `--remote-target` update Hub-owned landing policy and do
+not dirty the code repository. Publication stays off until you set it, even if
+a Git remote exists. `best_effort` retries remote pushes as
+`target_publish_pending` without undoing local shipped proof.
 
 ## Rename or move
 
@@ -40,6 +50,8 @@ npx archloop project rename <project> <new-name>
 npx archloop project relink <project> --path <new-repo-path>
 ```
 
-Both operations preserve the stable project identity, task data, and run
-history. Relinking validates that the new path is an existing Git repository
-with at least one commit.
+Both operations preserve the stable project identity, Hub-owned task store, and
+run history. Relinking validates that the new path is an existing Git
+repository with at least one commit and, when a managed store already exists,
+installs `.beads/redirect` in the new repository instead of creating a second
+database.

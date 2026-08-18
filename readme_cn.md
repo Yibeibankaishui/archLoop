@@ -19,9 +19,9 @@ repo-local 自定义工作流。
 
 - 在共享 Hub 中注册和切换多个 Git 项目
 - 配置规划、实现、评审、合并、Triage 和 Recovery 等 agent role
-- 使用本地 Beads 任务表，并可与 GitHub Issues 同步
+- 使用保存在 Hub 项目目录中的本地 Beads 任务表（仓库内旧库会自动迁移；有活跃 writer 时延期，redirect 后 split brain 会停止自动写入），并可与 GitHub Issues 同步。Hub flow 执行 agent 只拿到不可变任务快照，结构化 notes 由 Hub 在 attempt 之后写回
 - 在 Docker、Podman、Vercel、Daytona 或 no-sandbox 环境中执行代理
-- 管理分支和 git worktree，收集并合并代理提交
+- 管理分支和 git worktree，把已验证的候选提交落到 Hub 本地 publish target，落地事务不改用户工作区；同一 publish target 上的待合并任务按 durable FIFO 票据排队，投机候选链按前置 OID 构造并可并行验证精确 OID，只有队头用 fenced CAS 落地；目标漂移最多立即重建三次后进入 `target_quiet_wait`，后续任务不可超车。已提交的宿主 tip 会并入权威链，未提交 WIP 不会被导入。随后仅在 Git 能证明安全时快进宿主分支，否则保持 `checkout_sync_pending` 并自动重试，不影响 `shipped`。远程发布默认关闭；显式配置 `--publish-policy best_effort` 与 `--remote-target` 后，通过 durable outbox 推送，网络/凭证/受保护分支失败记为 `target_publish_pending`，不撤销本地 shipped，且与 GitHub 任务同步分开。显式 `required` 时任务保持 `publishing` 直到远程祖先证明交付，FIFO 后继不可越过未确认前置；超时返回 `completed_with_pending_delivery`（非零退出）且不把任务标为语义失败。仅发现 `origin` 不会开启发布。并发运行用 landing lease 与 fenced CAS 互斥，target drift 会重建并重验。进程中断后再次运行会从 durable evidence 自动续跑落地事务。升级时已关闭任务保持完成；只有 Git 祖先证明才接纳进行中的旧落地，历史 `merge_succeeded` 不能单独证明交付。独立任务失败不会拖住同批兄弟任务，冲突与验证修复有次数上限。已提交 allowlist Beads runtime 文件的旧任务分支仍可落地源码变更
 - 从中断的运行和待合并批次继续执行
 - 为终端提供可读输出，为自动化提供 JSONL 输出
 - 通过 TypeScript API 构建自定义编排

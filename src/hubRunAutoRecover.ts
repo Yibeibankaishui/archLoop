@@ -25,10 +25,10 @@ import { listWorktreeLeases } from "./worktreeLeaseStore.js";
  * mutation is auditable, not silent.
  *
  * After recovery the run's normal mechanics resume the tasks: `waiting_for_merge`
- * recoveries are picked up by the resumed-batch merge path, and `ready_for_agent`
- * recoveries are selected by the batch planner and re-implemented reusing the
- * preserved worktree. A recovery to `reviewing` preserves the finished
- * implementation (the router keeps the claim) so it is never re-implemented.
+ * recoveries are picked up by the resumed-batch merge path, `reviewing`
+ * recoveries (implementation already completed) are resumed reviewer-only on
+ * the preserved claim/branch, and `ready_for_agent` recoveries are selected by
+ * the batch planner and re-implemented reusing the preserved worktree.
  *
  * This module is orchestration glue over already-tested modules — the detector
  * (arch-c75), the recovery router (arch-ewx), and the per-task recovery wiring
@@ -137,6 +137,11 @@ export const autoRecoverInterruptedHubTasks = async (
           input.resolveLatestPhaseCompletionEvent,
         branchHasUnmergedWork: input.branchHasUnmergedWork,
       });
+      // Idempotent recoveries (already at the resume destination) are omitted so
+      // repeated runs do not look like they re-recovered without progress.
+      if (result.outcome === "unchanged") {
+        continue;
+      }
       recoveries.push({
         taskId,
         priorStatus: result.priorStatus,

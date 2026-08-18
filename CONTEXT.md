@@ -230,6 +230,22 @@ _Avoid_: "batch merge", "git merge command", "run transaction"
 A transaction-specific Git ref advanced atomically with the **Hub publish target** and its fence, proving which exact verified candidate completed local landing.
 _Avoid_: "merge event", "reflog entry", "task status"
 
+**Landing lease**:
+Short-lived exclusive ownership of one **Hub publish target**'s compare-and-swap window. The owner is identified by a nonce, process start identity, and boot identity. A demonstrably live owner is not displaced merely because a TTL elapsed.
+_Avoid_: "file lock", "worktree lease", "merge lock"
+
+**Landing coordinator**:
+The per-**Hub publish target** owner of the **landing lease**, fenced target advancement, and queue-head rebuild after **target drift**.
+_Avoid_: "batch merger", "git lock", "scheduler"
+
+**Target drift**:
+The **Hub publish target** OID changed after a **merge candidate** was built against it. The stale candidate and its verification artifact are invalidated, rebuilt on the new target, and fully reverified before another landing attempt.
+_Avoid_: "merge failed", "CAS retry without rebuild"
+
+**Landing transaction reconciliation**:
+Reconstructing missing **landing transaction** checkpoints from durable physical evidence (candidate refs/manifests, verification artifacts, atomic **landing receipts**, Beads close metadata, and resource absence) at mutating entry points. Read-only commands may display the evidence but must not write checkpoints or advance the transaction.
+_Avoid_: "tasks recover", "event replay", "merge recovery"
+
 **Target quiet wait**:
 A durable, automatically retried landing condition entered after repeated target drift. The oldest transaction retains its FIFO position while Hub waits for a stable target window.
 _Avoid_: "merge failed", "retry exhausted", "requeue"
@@ -522,6 +538,7 @@ _Avoid_: "log event" (the log file contains more than just agent output), "displ
 - **Host hooks** run on the **host**; **sandbox hooks** run inside the **sandbox**. Hooks are grouped under `host` and `sandbox` in the `hooks` option
 - Lifecycle ordering: `copyToWorktree` -> `host.onWorktreeReady` (sequential) -> sandbox created -> `host.onSandboxReady` + `sandbox.onSandboxReady` (parallel)
 - Each **iteration** may produce one or more commits; iterations repeat until the **completion signal** fires or the max count is reached
+- A provider non-zero exit with no **agent** output (a transient startup abort) does not fail a multi-**iteration** run while iterations remain; the next **iteration** continues with a progress summary, and a zero-commit exploration turn is nudged toward implementation. Exhausting the iteration limit with no **completion signal** and no commits is still a failure.
 - **Init** creates the **config directory** on the **host**, prompting the user to select an **agent**, **backlog manager**, and **project profile**
 - **Init** may also prompt the user to select a **capability pack**. archLoop does not silently infer a **capability pack** from repository files in the first version.
 - A **template** defines the scaffolded workflow shape; a **project profile** defines the repo environment and bootstrap assumptions. They compose independently.
@@ -547,7 +564,7 @@ _Avoid_: "log event" (the log file contains more than just agent output), "displ
 - The WeChat Mini Program **capability pack** uses layered verification: native fallback verification is the required core loop when a project-specific `wx:check` is absent, while `miniprogram-ci` platform validation is recommended, automatically enabled when its configuration is detected, and host-dependent runtime or cloud validation is optional.
 - **archLoop Hub** uses the **local task store** as the local source for task planning and the **Hub task board**; **remote task sources** synchronize into and out of it through **task sync**.
 - Hub projects use a **Hub-owned task store** outside the code repository. A local `.beads/redirect` preserves direct `bd` command discovery, while execution agents consume a read-only **task snapshot** and Hub orchestration owns task-state writes.
-- Existing Hub projects perform **task-store migration** automatically on first use. Migration contention or an incomplete attempt keeps the verified old store active, is retried from its durable journal, and does not by itself block a flow run.
+- Existing Hub projects perform **task-store migration** automatically on first use. An active Beads writer, source fingerprint change, unsafe snapshot, or migration contention before quarantine keeps the verified old store active, records **task-store migration pending**, and retries with durable backoff without blocking a flow run. Independent modification of both the leftover legacy database and the Hub-owned store after redirect is **task-store split brain**: automatic task-store writes stop, and neither database is merged or deleted.
 - A **Hub-managed local target** is the default **Hub publish target**; a remote repository is optional rather than a dependency of **landing**.
 - A **merge candidate** is verified before **landing**; **checkout sync** happens only when it is safe and does not determine whether landing succeeded.
 - The default **publish policy** is `off`. `best_effort` preserves local-first completion while **remote publication** is pending; `required` is an explicit per-project delivery contract and never becomes active merely because a Git remote exists.

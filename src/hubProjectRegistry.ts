@@ -10,6 +10,11 @@ import {
 } from "./hubProjectDevelopmentContract.js";
 import { DEFAULT_PROJECT_PROFILE_NAME } from "./InitService.js";
 import { initHubTaskStore } from "./hubTaskStore.js";
+import {
+  installHubTaskStoreRedirect,
+  isBeadsStoreFullyInitialized,
+  resolveManagedHubTaskStoreDir,
+} from "./hubTaskStoreResolver.js";
 import { resolveHubProjectRegistrationRepoRoot } from "./hubProjectOnboarding.js";
 import type {
   SectionBlock,
@@ -439,7 +444,12 @@ export const registerHubProject = (
   );
 
   const taskStoreInitialized = input.initializeTaskStore
-    ? Boolean(initHubTaskStore(repoRoot, input.env))
+    ? Boolean(
+        initHubTaskStore(repoRoot, input.env, {
+          hubProjectDir,
+          projectName: project.name,
+        }),
+      )
     : false;
 
   return {
@@ -500,6 +510,13 @@ export const relinkHubProject = (
     repoRoot,
     updatedAt: now,
   };
+
+  const managedBeadsDir = resolveManagedHubTaskStoreDir(
+    updatedProject.hubProjectDir,
+  );
+  if (isBeadsStoreFullyInitialized(managedBeadsDir)) {
+    installHubTaskStoreRedirect(repoRoot, managedBeadsDir);
+  }
 
   return {
     project: writeUpdatedProject(registry, projectIndex, updatedProject, input),

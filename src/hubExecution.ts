@@ -54,13 +54,14 @@ export interface HubRunCompletedBatchResult {
   readonly batchId: string;
   readonly selectedTaskIds: readonly string[];
   readonly completedTaskCount: number;
-  readonly batchStatus: "completed" | "failed";
+  readonly batchStatus: "completed" | "failed" | "pending";
 }
 
 export type HubRunStopReason =
   | "no_ready_tasks"
   | "max_batches_reached"
-  | "batch_failed";
+  | "batch_failed"
+  | "batch_pending";
 
 export interface HubRunCompletedEvent {
   readonly type: "run_completed";
@@ -71,6 +72,29 @@ export interface HubRunCompletedEvent {
   readonly completedTaskCount: number;
   readonly stopReason: HubRunStopReason;
   readonly batchResults: readonly HubRunCompletedBatchResult[];
+}
+
+export interface HubTaskStoreMigrationEvent {
+  readonly type: "task_store_migration";
+  readonly runId: string;
+  readonly createdAt: string;
+  readonly kind: "migrated" | "not_needed" | "deferred" | "split_brain";
+  readonly phase?: string;
+  readonly beadsDir: string;
+  readonly message: string;
+  readonly reason?: string;
+  readonly pendingUntil?: string;
+}
+
+export interface HubLandingReconciliationEvent {
+  readonly type: "landing_reconciliation";
+  readonly runId: string;
+  readonly createdAt: string;
+  readonly kind: "clean" | "pending" | "reconciled" | "integrity_incident";
+  readonly pendingCount: number;
+  readonly reconstructedCount?: number;
+  readonly message: string;
+  readonly integrityIncident?: string;
 }
 
 export interface HubBatchStartedEvent {
@@ -127,11 +151,21 @@ export interface HubBatchMergeCompletedEvent {
   readonly batchId: string;
   readonly createdAt: string;
   readonly taskIds: readonly string[];
-  readonly batchStatus: "done" | "partial_failed";
+  readonly batchStatus: "done" | "partial_failed" | "pending";
   readonly failedTaskId?: string;
   readonly failureReason?: string;
   readonly failureSummary?: string;
   readonly diagnostics?: Readonly<Record<string, unknown>>;
+  readonly taskResults?: readonly {
+    readonly taskId: string;
+    readonly outcome: string;
+    readonly hubStatus: string;
+    readonly reason?: string;
+    readonly transactionId?: string;
+    readonly sourceOid?: string;
+    readonly baseOid?: string;
+    readonly candidateOid?: string;
+  }[];
 }
 
 export interface HubTaskEvent {
@@ -140,6 +174,8 @@ export interface HubTaskEvent {
     | "task_claim_skipped"
     | "task_retry_blocked"
     | "task_provider_retry"
+    | "task_notes_applied"
+    | "task_notes_rejected"
     | "task_implementation_started"
     | "task_implementation_succeeded"
     | "task_implementation_failed"
@@ -152,11 +188,25 @@ export interface HubTaskEvent {
     | "merge_conflict_resolution_started"
     | "merge_conflict_resolution_succeeded"
     | "merge_conflict_resolution_failed"
+    | "integration_candidate_created"
     | "verification_started"
     | "verification_passed"
+    | "candidate_verification_passed"
     | "verification_failed"
+    | "target_landing_succeeded"
+    | "target_landing_rebuild"
+    | "target_landing_pending"
+    | "target_landing_stale_owner_rejected"
+    | "target_quiet_wait"
+    | "speculative_suffix_invalidated"
+    | "host_contribution_reconciled"
+    | "checkout_sync_pending"
+    | "checkout_sync_succeeded"
+    | "target_publish_pending"
+    | "target_publish_succeeded"
     | "task_close_started"
     | "task_closed"
+    | "task_close_succeeded"
     | "task_close_failed"
     | "task_branch_cleanup"
     | "task_status_advanced";
@@ -182,11 +232,32 @@ export interface HubTaskEvent {
     readonly diagnosticSummary?: string;
     readonly diagnostics?: Readonly<Record<string, unknown>>;
   };
+  readonly transactionId?: string;
+  readonly sourceOid?: string;
+  readonly baseOid?: string;
+  readonly candidateOid?: string;
+  readonly predecessorOid?: string;
+  readonly publishTargetOid?: string;
+  readonly expectedTargetOid?: string;
+  readonly observedTargetOid?: string;
+  readonly expectedFenceOid?: string;
+  readonly observedFenceOid?: string;
+  readonly fenceOid?: string;
+  readonly verifierFingerprint?: string;
+  readonly filteredBeadsRuntimePaths?: readonly string[];
+  readonly remoteRef?: string;
+  readonly expectedRemoteOid?: string;
+  readonly fifoPosition?: number;
+  readonly verificationConcurrency?: number;
+  readonly suffixInvalidatedTaskIds?: readonly string[];
+  readonly hostContributionRelation?: string;
 }
 
 type HubRunEventData =
   | HubRunStartedEvent
   | HubRunCompletedEvent
+  | HubTaskStoreMigrationEvent
+  | HubLandingReconciliationEvent
   | HubBatchStartedEvent
   | HubBatchPlannedEvent
   | HubBatchMergeSelectionEvent
@@ -452,7 +523,11 @@ export const createHubRunContext = (
 
 export const appendHubRunEvent = (
   runDir: string,
-  event: HubRunStartedEvent | HubRunCompletedEvent,
+  event:
+    | HubRunStartedEvent
+    | HubRunCompletedEvent
+    | HubTaskStoreMigrationEvent
+    | HubLandingReconciliationEvent,
 ): string => {
   const { runEventsPath } = resolveHubRunEventsPaths(runDir);
   return appendHubEvent(

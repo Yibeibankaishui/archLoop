@@ -111,6 +111,174 @@ describe("JSONL Hub run lifecycle output", () => {
     });
   });
 
+  it("carries landing transaction and commit identities in JSON output", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+    });
+    const event: HubRunEvent = {
+      type: "target_landing_succeeded",
+      eventId: "run-land:12",
+      sequence: 12,
+      runId: "run-land",
+      batchId: "batch-land",
+      taskId: "bd-land",
+      branch: "archloop/bd-land",
+      createdAt: "2026-08-13T10:00:00.000Z",
+      status: "merging",
+      transactionId: "ltx-bd-land-abc123",
+      sourceOid: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      baseOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      candidateOid: "cccccccccccccccccccccccccccccccccccccccc",
+      publishTargetOid: "cccccccccccccccccccccccccccccccccccccccc",
+      verifierFingerprint: "deadbeef",
+    };
+
+    expect(parseRecord(renderer.event(event)!)).toMatchObject({
+      type: "target_landing_succeeded",
+      taskId: "bd-land",
+      stage: "Target landing succeeded",
+      status: "merging",
+      data: {
+        transactionId: "ltx-bd-land-abc123",
+        candidateOid: "cccccccccccccccccccccccccccccccccccccccc",
+        publishTargetOid: "cccccccccccccccccccccccccccccccccccccccc",
+        verifierFingerprint: "deadbeef",
+      },
+    });
+  });
+
+  it("emits distinct checkout sync pending and success JSON events", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+    });
+    const pending: HubRunEvent = {
+      type: "checkout_sync_pending",
+      eventId: "run-land:40",
+      sequence: 40,
+      runId: "run-land",
+      batchId: "batch-land",
+      taskId: "bd-land",
+      branch: "main",
+      createdAt: "2026-08-14T18:00:00.000Z",
+      status: "done",
+      transactionId: "ltx-bd-land-abc123",
+      candidateOid: "cccccccccccccccccccccccccccccccccccccccc",
+      reason: "unstaged_changes",
+      message: "Checkout sync pending for bd-land (unstaged_changes).",
+    };
+    expect(parseRecord(renderer.event(pending)!)).toMatchObject({
+      type: "checkout_sync_pending",
+      taskId: "bd-land",
+      stage: "Checkout sync pending",
+      status: "done",
+      data: {
+        transactionId: "ltx-bd-land-abc123",
+        candidateOid: "cccccccccccccccccccccccccccccccccccccccc",
+        reason: "unstaged_changes",
+      },
+    });
+
+    const succeeded: HubRunEvent = {
+      ...pending,
+      type: "checkout_sync_succeeded",
+      eventId: "run-land:41",
+      sequence: 41,
+      reason: undefined,
+      message: "Checkout synced main to cccccccccccccccccccccccccccccccccccccccc.",
+    };
+    expect(parseRecord(renderer.event(succeeded)!)).toMatchObject({
+      type: "checkout_sync_succeeded",
+      stage: "Checkout sync succeeded",
+    });
+  });
+
+  it("emits distinct code publication pending and success JSON events", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+    });
+    const pending: HubRunEvent = {
+      type: "target_publish_pending",
+      eventId: "run-land:50",
+      sequence: 50,
+      runId: "run-land",
+      batchId: "batch-land",
+      taskId: "bd-land",
+      branch: "origin/main",
+      createdAt: "2026-08-14T18:30:00.000Z",
+      status: "done",
+      transactionId: "ltx-bd-land-abc123",
+      candidateOid: "cccccccccccccccccccccccccccccccccccccccc",
+      remoteRef: "refs/heads/main",
+      expectedRemoteOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      reason: "network_error",
+      message: "Code publication pending for bd-land (network_error).",
+    };
+    expect(parseRecord(renderer.event(pending)!)).toMatchObject({
+      type: "target_publish_pending",
+      taskId: "bd-land",
+      stage: "Target publish pending",
+      status: "done",
+      data: {
+        transactionId: "ltx-bd-land-abc123",
+        candidateOid: "cccccccccccccccccccccccccccccccccccccccc",
+        remoteRef: "refs/heads/main",
+        expectedRemoteOid: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        reason: "network_error",
+      },
+    });
+
+    const succeeded: HubRunEvent = {
+      ...pending,
+      type: "target_publish_succeeded",
+      eventId: "run-land:51",
+      sequence: 51,
+      reason: undefined,
+      message: "Code published origin/main to cccccccccccccccccccccccccccccccccccccccc.",
+    };
+    expect(parseRecord(renderer.event(succeeded)!)).toMatchObject({
+      type: "target_publish_succeeded",
+      stage: "Target publish succeeded",
+    });
+  });
+
+  it("carries expected and observed target/fence OIDs for rebuild and contention", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+    });
+    const event: HubRunEvent = {
+      type: "target_landing_rebuild",
+      eventId: "run-land:13",
+      sequence: 13,
+      runId: "run-land",
+      batchId: "batch-land",
+      taskId: "bd-land",
+      branch: "archloop/bd-land",
+      createdAt: "2026-08-14T16:00:00.000Z",
+      status: "merging",
+      reason: "target_drift",
+      expectedTargetOid: "a".repeat(40),
+      observedTargetOid: "b".repeat(40),
+      expectedFenceOid: "c".repeat(40),
+      observedFenceOid: "d".repeat(40),
+    };
+
+    expect(parseRecord(renderer.event(event)!)).toMatchObject({
+      type: "target_landing_rebuild",
+      stage: "Target landing rebuild",
+      data: {
+        reason: "target_drift",
+        expectedTargetOid: "a".repeat(40),
+        observedTargetOid: "b".repeat(40),
+        expectedFenceOid: "c".repeat(40),
+        observedFenceOid: "d".repeat(40),
+      },
+    });
+  });
+
   it("suppresses duplicate and stale source events before assigning output order", () => {
     const renderer = createHubRunJsonRenderer({
       hubProjectName: "alpha",
@@ -546,5 +714,210 @@ describe("JSONL Hub run lifecycle output", () => {
       exitCode: testCase.exitCode,
       counts: testCase.counts,
     });
+  });
+
+  it("distinguishes deferred migration from split-brain in the run outcome", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+      now: () => new Date("2026-08-13T12:00:00.000Z"),
+    });
+
+    const deferred = parseRecord(
+      renderer
+        .outcome(
+          makeRunResult({
+            taskStoreMigration: {
+              kind: "deferred",
+              reason: "active_writer",
+              phase: "legacy_active",
+              beadsDir: "/tmp/repo/.beads",
+              pendingUntil: "2026-08-13T12:00:02.000Z",
+              journalPath: "/tmp/hub/journal.jsonl",
+            },
+          }),
+          projectHubRunOutcome(makeRunResult({})),
+        )
+        .at(-1)!,
+    );
+    expect(deferred.taskStoreMigration).toMatchObject({
+      kind: "deferred",
+      reason: "active_writer",
+      pendingUntil: "2026-08-13T12:00:02.000Z",
+    });
+
+    const splitBrain = parseRecord(
+      renderer
+        .outcome(
+          makeRunResult({
+            taskStoreMigration: {
+              kind: "split_brain",
+              beadsDir: "/tmp/hub/.beads",
+              legacyBeadsDir: "/tmp/repo/.beads",
+              managedBeadsDir: "/tmp/hub/.beads",
+              integrityError: "Hub Beads task-store split brain detected.",
+              journalPath: "/tmp/hub/journal.jsonl",
+            },
+          }),
+          projectHubRunOutcome(makeRunResult({})),
+        )
+        .at(-1)!,
+    );
+    expect(splitBrain.taskStoreMigration).toMatchObject({
+      kind: "split_brain",
+      reason: "task_store_split_brain",
+    });
+  });
+
+  it("distinguishes pending landing reconciliation from an integrity incident", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+      now: () => new Date("2026-08-14T12:00:00.000Z"),
+    });
+
+    const pending = parseRecord(
+      renderer
+        .outcome(
+          makeRunResult({
+            landingReconciliation: {
+              kind: "pending",
+              transactions: [],
+              pendingCount: 1,
+              reconstructedCount: 0,
+              message:
+                "Hub landing transaction ltx-1 is pending reconciliation at candidate_created. Automatic retry will resume from durable evidence. This is not a task failure and does not require a recovery command.",
+              nextAction:
+                "Wait for the automatic retry; Hub will resume from durable landing evidence.",
+            },
+          }),
+          projectHubRunOutcome(makeRunResult({})),
+        )
+        .at(-1)!,
+    );
+    expect(pending.landingReconciliation).toMatchObject({
+      kind: "pending",
+      pendingCount: 1,
+    });
+    expect(JSON.stringify(pending)).not.toMatch(/tasks recover/);
+
+    const checkoutPending = parseRecord(
+      renderer
+        .outcome(
+          makeRunResult({
+            checkoutSync: {
+              items: [],
+              pendingCount: 1,
+              succeededCount: 0,
+              message:
+                "Checkout sync pending for bd-land (unstaged_changes): host branch main was not updated. Landed candidate cccccccccccccccccccccccccccccccccccccccc remains on the Hub publish target and the task can stay shipped. This is not a task failure and does not require a recovery command.",
+              nextAction:
+                "Wait for the automatic retry; Hub will fast-forward the host branch when Git can prove the checkout safe.",
+            },
+          }),
+          projectHubRunOutcome(makeRunResult({})),
+        )
+        .at(-1)!,
+    );
+    expect(checkoutPending.checkoutSync).toMatchObject({
+      pendingCount: 1,
+    });
+    expect(JSON.stringify(checkoutPending)).not.toMatch(/tasks recover/);
+
+    const incident = parseRecord(
+      renderer
+        .outcome(
+          makeRunResult({
+            landingReconciliation: {
+              kind: "integrity_incident",
+              transactions: [],
+              pendingCount: 0,
+              reconstructedCount: 0,
+              integrityIncident:
+                "landing_integrity_incident: journal candidate does not match ref",
+              message:
+                "Hub landing integrity incident for ltx-1: landing_integrity_incident: journal candidate does not match ref This is not a task failure and does not require a recovery command.",
+              nextAction:
+                "Inspect the candidate ref, landing receipt, verification artifact, and journal. Do not land or close the task again automatically.",
+            },
+          }),
+          projectHubRunOutcome(makeRunResult({})),
+        )
+        .at(-1)!,
+    );
+    expect(incident.landingReconciliation).toMatchObject({
+      kind: "integrity_incident",
+      integrityIncident: expect.stringContaining("landing_integrity_incident"),
+    });
+    expect(JSON.stringify(incident)).not.toMatch(/tasks recover/);
+  });
+
+  it("explains accepted and rejected legacy landing history in JSON", () => {
+    const renderer = createHubRunJsonRenderer({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+      now: () => new Date("2026-08-14T12:00:00.000Z"),
+    });
+    const record = parseRecord(
+      renderer
+        .outcome(
+          makeRunResult({
+            landingReconciliation: {
+              kind: "integrity_incident",
+              transactions: [],
+              pendingCount: 0,
+              reconstructedCount: 0,
+              integrityIncident: "legacy_landing_integrity: event_without_ancestry",
+              message:
+                "Rejected historical evidence for bd-1: a historical merge_succeeded event is not landing proof. The task is not landed, closed, or shipped. This is not a task failure and does not require a recovery command.",
+              nextAction:
+                "Inspect the task branch, configured target, and historical events. Do not close or reimplement the task automatically.",
+              legacyHistory: [
+                {
+                  taskId: "bd-closed",
+                  decision: "grandfathered_closed",
+                  accepted: true,
+                  hadMergeSucceededEvent: true,
+                  message:
+                    "Accepted historical evidence for bd-closed: already closed Beads status. Grandfathered as completed; no landing receipt required.",
+                  nextAction:
+                    "Inspect the task branch, configured target, and historical events. Do not close or reimplement the task automatically.",
+                },
+                {
+                  taskId: "bd-1",
+                  decision: "event_without_ancestry",
+                  accepted: false,
+                  hadMergeSucceededEvent: true,
+                  message:
+                    "Rejected historical evidence for bd-1: a historical merge_succeeded event is not landing proof.",
+                  nextAction:
+                    "Inspect the task branch, configured target, and historical events. Do not close or reimplement the task automatically.",
+                  integrityIncident:
+                    "legacy_landing_integrity: event_without_ancestry",
+                },
+              ],
+            },
+          }),
+          projectHubRunOutcome(makeRunResult({})),
+        )
+        .at(-1)!,
+    );
+    expect(record.landingReconciliation).toMatchObject({
+      kind: "integrity_incident",
+      integrityIncident: "legacy_landing_integrity: event_without_ancestry",
+      legacyHistory: [
+        expect.objectContaining({
+          taskId: "bd-closed",
+          decision: "grandfathered_closed",
+          accepted: true,
+        }),
+        expect.objectContaining({
+          taskId: "bd-1",
+          decision: "event_without_ancestry",
+          accepted: false,
+        }),
+      ],
+    });
+    expect(JSON.stringify(record)).not.toMatch(/tasks recover/);
   });
 });

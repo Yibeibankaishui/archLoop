@@ -12,14 +12,18 @@ import {
   appendHubTaskEvent,
   createHubRunContext,
   createHubRunIdentifiers,
+  createHubTaskClaimMetadata,
   observeHubRunEvents,
+  type HubLandingReconciliationEvent,
   type HubRunCompletedBatchResult,
   type HubRunEventObserver,
   type HubRunStopReason,
   type HubTaskClaimMetadata,
   type HubTaskEvent,
+  type HubTaskStoreMigrationEvent,
 } from "./hubExecution.js";
 import {
+  createHubCandidateRepairer,
   createHubFlowRunMerger,
   createHubFlowRunVerifier,
   formatHubBatchMergeResultLines,
@@ -36,6 +40,39 @@ import {
   formatHubRunAutoRecoverLines,
   type HubRunAutoRecoverSummary,
 } from "./hubRunAutoRecover.js";
+import { ensureHubLandingPolicy } from "./hubLandingPolicy.js";
+import {
+  beadsCloseEvidenceFromHubTask,
+  formatHubLandingReconciliationMessage,
+  hubLandingReconciliationHasVisibleOutput,
+  reconcileHubLandingTransactions,
+  type HubLandingReconciliationOutcome,
+} from "./hubLandingReconciliation.js";
+import {
+  inspectHubCheckoutOutbox,
+  hubCheckoutSyncEventReason,
+  hubCheckoutSyncEventType,
+  syncHubCheckoutProjections,
+  type HubCheckoutOutboxInspection,
+} from "./hubCheckoutProjection.js";
+import {
+  inspectHubPublicationOutbox,
+  hubPublicationEventReason,
+  hubPublicationEventType,
+  syncHubPublications,
+  type HubPublicationOutboxInspection,
+} from "./hubPublication.js";
+import {
+  inspectHubLandingQueue,
+  type HubLandingQueueInspection,
+} from "./hubLandingQueue.js";
+import type { HubLandingTaskCloser } from "./hubLanding.js";
+import {
+  ensureHubTaskStoreMigrated,
+  formatHubTaskStoreMigrationMessage,
+  throwIfHubTaskStoreSplitBrain,
+  type HubTaskStoreMigrationOutcome,
+} from "./hubTaskStoreMigration.js";
 import {
   createHubProjectDirPhaseCompletionEventResolver,
   type RecoverHubTaskInput,
@@ -64,6 +101,7 @@ import {
 import {
   formatHubRetryPromptContext,
   prepareHubTaskRetry,
+  type HubTaskRetryPreparationReady,
 } from "./hubTaskRetry.js";
 import { readTaskEvents } from "./hubRunEventLog.js";
 import {
@@ -83,9 +121,18 @@ import {
 import type { HubBatchPlannerInvoker } from "./hubBatchPlannerAgent.js";
 import { resolveHubAgentProvider } from "./hubProposalAgent.js";
 import {
+  applyHubTaskNotes,
+  cleanupHubTaskSnapshot,
+  createHubTaskSnapshot,
+  mergeHubAgentSandboxEnv,
+} from "./hubTaskSnapshot.js";
+import type { SandboxProvider } from "./SandboxProvider.js";
+import {
+  closeHubTask,
   loadHubTaskBoard,
   resolveHubTaskBranch,
   loadHubReadyQueue,
+  updateHubTaskStatus,
   type HubFailureReason,
   type HubTaskProjection,
 } from "./taskBoard.js";
@@ -249,6 +296,11 @@ export interface RunHubFlowResult {
    * render the count unconditionally.
    */
   readonly autoRecoverSummary?: HubRunAutoRecoverSummary;
+  readonly taskStoreMigration?: HubTaskStoreMigrationOutcome;
+  readonly landingReconciliation?: HubLandingReconciliationOutcome;
+  readonly checkoutSync?: HubCheckoutOutboxInspection;
+  readonly publication?: HubPublicationOutboxInspection;
+  readonly landingQueue?: HubLandingQueueInspection;
 }
 
 type HubFlowLifecycleMutation = <T>(
@@ -318,6 +370,46 @@ const isSuccessfulReview = (result: HubReviewTaskResult): boolean =>
 const isSuccessfulHubTaskResult = (result: HubFlowTaskResult): boolean =>
   result.outcome === "implemented" || result.outcome === "reviewed";
 
+/**
+ * Map Promise.allSettled outcomes so one sibling throw cannot abort waiting for
+ * the rest of a parallel implement/review batch (or their snapshot cleanup).
+ */
+const toFailedSiblingHubTaskResult = (
+  task: HubTaskProjection,
+  reason: unknown,
+  failureStage: NonNullable<HubFlowTaskResult["failureStage"]>,
+): HubFlowTaskResult => {
+  const diagnosticSummary =
+    reason instanceof Error ? reason.message : String(reason);
+  return {
+    taskId: task.id,
+    title: task.title,
+    branch: resolveHubTaskBranch(task.id, task.title),
+    outcome: "agent_failed",
+    hubStatus: task.hubStatus,
+    failureReason: "agent_failed",
+    failureStage,
+    diagnosticSummary,
+    commitCount: 0,
+  };
+};
+
+const resolveSettledHubTaskResults = (
+  tasks: readonly HubTaskProjection[],
+  settled: readonly PromiseSettledResult<HubFlowTaskResult>[],
+  failureStage: NonNullable<HubFlowTaskResult["failureStage"]>,
+): HubFlowTaskResult[] =>
+  settled.map((entry, index) => {
+    if (entry.status === "fulfilled") {
+      return entry.value;
+    }
+    return toFailedSiblingHubTaskResult(
+      tasks[index]!,
+      entry.reason,
+      failureStage,
+    );
+  });
+
 const countSuccessfulHubTaskResults = (
   results: readonly HubFlowTaskResult[],
 ): number => results.filter(isSuccessfulHubTaskResult).length;
@@ -334,10 +426,10 @@ const countSuccessfulMergeResults = (
 };
 
 const resolveHubFlowMode = (input: {
-  readonly isResumingMergeBatch: boolean;
+  readonly isResumingBatch: boolean;
   readonly selectedTaskCount: number;
 }): RunHubFlowResult["mode"] => {
-  if (input.isResumingMergeBatch) {
+  if (input.isResumingBatch) {
     return "resumed_batch";
   }
   if (input.selectedTaskCount > 0) {
@@ -402,10 +494,10 @@ const resolveHubFlowCompletedTaskCount = (input: {
   readonly taskResults: readonly HubFlowTaskResult[];
   readonly mergeResult?: RunHubBatchMergeResult;
 }): number => {
-  if (input.taskResults.length > 0) {
-    return countSuccessfulHubTaskResults(input.taskResults);
+  if (input.mergeResult) {
+    return countSuccessfulMergeResults(input.mergeResult);
   }
-  return countSuccessfulMergeResults(input.mergeResult);
+  return countSuccessfulHubTaskResults(input.taskResults);
 };
 
 const resolveHubFlowWorktreeWarning = (
@@ -437,6 +529,9 @@ const resolveHubFlowBatchStatus = (input: {
 }): HubFlowBatchResult["batchStatus"] => {
   if (input.taskResults.some((result) => !isSuccessfulHubTaskResult(result))) {
     return "failed";
+  }
+  if (input.mergeResult?.batchStatus === "pending") {
+    return "pending";
   }
   if (input.mergeResult && input.mergeResult.batchStatus !== "done") {
     return "failed";
@@ -518,6 +613,28 @@ const resolveMergeOnlyHubFlowBatchResult = (input: {
   });
 };
 
+/** Batch result after resuming review-only work and/or merge for an unfinished batch. */
+const resolveResumedHubFlowBatchResult = (input: {
+  readonly batchId: string;
+  readonly taskResults: readonly HubFlowTaskResult[];
+  readonly mergeResult?: RunHubBatchMergeResult;
+}): HubFlowBatchResult | undefined => {
+  if (input.taskResults.length > 0) {
+    return resolveHubFlowBatchResult({
+      batchId: input.batchId,
+      selectedTaskIds: input.taskResults.map((result) => result.taskId),
+      taskResults: input.taskResults,
+      mergeResult: input.mergeResult,
+    });
+  }
+
+  return resolveMergeOnlyHubFlowBatchResult({
+    batchId: input.batchId,
+    mergeResult: input.mergeResult,
+    treatSkippedAsFailed: true,
+  });
+};
+
 const buildHubFlowBatchPlannedMetadata = (input: {
   readonly batchSelection?: HubBatchPlannerResult;
   readonly fallbackReason?: string;
@@ -586,15 +703,28 @@ const readJsonlRecords = (path: string): readonly Record<string, unknown>[] => {
     });
 };
 
+const isResumableHubFlowTaskStatus = (
+  hubStatus: HubTaskProjection["hubStatus"],
+  includeReviewResume: boolean,
+): boolean =>
+  hubStatus === "waiting_for_merge" ||
+  (includeReviewResume && hubStatus === "reviewing");
+
 const findResumableHubFlowBatches = (input: {
   readonly hubProjectDir: string;
   readonly flowId: string;
   readonly tasks: readonly HubTaskProjection[];
+  /**
+   * When true (with-review flows), claimed `reviewing` tasks are treated as
+   * unfinished batches so the run can resume the reviewer without re-implementing.
+   */
+  readonly includeReviewResume?: boolean;
 }): readonly ResumableHubFlowBatch[] => {
   const batches = new Map<string, ResumableHubFlowBatch>();
+  const includeReviewResume = input.includeReviewResume === true;
 
   for (const task of input.tasks) {
-    if (task.hubStatus !== "waiting_for_merge") {
+    if (!isResumableHubFlowTaskStatus(task.hubStatus, includeReviewResume)) {
       continue;
     }
     const runId = task.claim?.runId;
@@ -636,6 +766,135 @@ const findResumableHubFlowBatches = (input: {
   });
 };
 
+const resolveImplementCommitCountForReviewResume = (
+  hubProjectDir: string,
+  task: HubTaskProjection,
+): number => {
+  const runId = task.claim?.runId;
+  if (!runId) {
+    return 0;
+  }
+
+  const taskEventsPath = join(
+    hubProjectDir,
+    "runs",
+    runId,
+    "events",
+    "task.jsonl",
+  );
+  // Last matching success event wins when a task was re-implemented earlier.
+  let commitCount = 0;
+  for (const event of readJsonlRecords(taskEventsPath)) {
+    if (
+      event.type !== "task_implementation_succeeded" ||
+      event.taskId !== task.id ||
+      typeof event.commitCount !== "number"
+    ) {
+      continue;
+    }
+    commitCount = event.commitCount;
+  }
+  return commitCount;
+};
+
+/**
+ * Shared lease gate for implement and reviewer-only resume paths. Records
+ * `task_retry_blocked` when another run still holds a live worktree lease.
+ */
+const resolveHubTaskRetryGate = async (input: {
+  readonly cwd: string;
+  readonly branch: string;
+  readonly task: HubTaskProjection;
+  readonly context: ReturnType<typeof createHubRunContext>;
+}): Promise<
+  | { readonly kind: "blocked"; readonly result: HubFlowTaskResult }
+  | {
+      readonly kind: "ready";
+      readonly preparation: HubTaskRetryPreparationReady;
+    }
+> => {
+  const retryPreparation = await prepareHubTaskRetry({
+    repoDir: input.cwd,
+    branch: input.branch,
+    taskId: input.task.id,
+  });
+
+  if (retryPreparation.status === "active_execution") {
+    appendHubTaskEvent(input.context.runDir, {
+      type: "task_retry_blocked",
+      runId: input.context.runId,
+      batchId: input.context.batchId,
+      taskId: input.task.id,
+      branch: input.branch,
+      createdAt: new Date().toISOString(),
+      status: input.task.hubStatus,
+      reason: "active_worktree_lease",
+      message: retryPreparation.message,
+    });
+
+    return {
+      kind: "blocked",
+      result: {
+        taskId: input.task.id,
+        title: input.task.title,
+        branch: input.branch,
+        outcome: "active_execution",
+        hubStatus: input.task.hubStatus,
+        commitCount: 0,
+      },
+    };
+  }
+
+  if (retryPreparation.status === "lease_malformed") {
+    return {
+      kind: "blocked",
+      result: {
+        taskId: input.task.id,
+        title: input.task.title,
+        branch: input.branch,
+        outcome: "sandbox_failed",
+        hubStatus: input.task.hubStatus,
+        failureReason: "sandbox_failed",
+        diagnosticSummary: retryPreparation.message,
+        commitCount: 0,
+      },
+    };
+  }
+
+  return { kind: "ready", preparation: retryPreparation };
+};
+
+/**
+ * Point a preserved claim at the current run while keeping batchId/branch.
+ * Review success events use context.runId; leaving the interrupted runId would
+ * look like claim drift and skip the task after reviewer-only resume.
+ */
+const rehomeHubTaskClaimOntoCurrentRun = (input: {
+  readonly claim: HubTaskClaimMetadata;
+  readonly context: ReturnType<typeof createHubRunContext>;
+  readonly task: HubTaskProjection;
+  readonly branch: string;
+}): HubTaskClaimMetadata =>
+  createHubTaskClaimMetadata({
+    runId: input.context.runId,
+    batchId: input.claim.batchId,
+    branch: input.branch,
+    taskId: input.task.id,
+    claimedAt: input.claim.claimedAt,
+    baseHead: input.claim.baseHead,
+    branchExistedBeforeClaim: input.claim.branchExistedBeforeClaim,
+  });
+
+const loadClaimedReviewingTasksForBatch = (
+  repoRoot: string,
+  env: NodeJS.ProcessEnv | undefined,
+  batchId: string,
+): HubTaskProjection[] =>
+  loadHubTaskBoard(repoRoot, env).tasks.filter(
+    (task) =>
+      task.hubStatus === "reviewing" && task.claim?.batchId === batchId,
+  );
+
 const SANDBOX_FAILURE_TAGS = new Set([
   "DockerError",
   "PodmanError",
@@ -660,13 +919,13 @@ const buildHubAgentPromptArgs = (
   input: Pick<
     HubImplementTaskInput,
     "taskId" | "title" | "branch" | "retryContext"
-  >,
+  > & { readonly taskSnapshot: string },
   projectDevelopmentContract?: HubProjectDevelopmentContractState,
 ): Readonly<Record<string, string>> => ({
   TASK_ID: input.taskId,
   TASK_TITLE: input.title,
   BRANCH: input.branch,
-  VIEW_TASK_COMMAND: `bd show ${input.taskId}`,
+  TASK_SNAPSHOT: input.taskSnapshot,
   RETRY_CONTEXT: input.retryContext ?? "",
   ...(projectDevelopmentContract
     ? buildHubProjectDevelopmentContractPromptArgs({
@@ -677,15 +936,19 @@ const buildHubAgentPromptArgs = (
 
 const HUB_COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
 
-const readCompletionSignalFromLog = (logPath: string): string | undefined => {
+const readTextFileOrEmpty = (path: string): string => {
   try {
-    const content = readFileSync(logPath, "utf8");
-    return content.includes(HUB_COMPLETION_SIGNAL)
-      ? HUB_COMPLETION_SIGNAL
-      : undefined;
+    return readFileSync(path, "utf8");
   } catch {
-    return undefined;
+    return "";
   }
+};
+
+const readCompletionSignalFromLog = (logPath: string): string | undefined => {
+  const content = readTextFileOrEmpty(logPath);
+  return content.includes(HUB_COMPLETION_SIGNAL)
+    ? HUB_COMPLETION_SIGNAL
+    : undefined;
 };
 
 const DEFAULT_PROVIDER_RETRY_ATTEMPTS = 3;
@@ -776,6 +1039,73 @@ const sleepMs = (ms: number, signal?: AbortSignal): Promise<void> =>
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+const withSnapshotSandbox = (
+  sandbox: SandboxProvider,
+  snapshotEnv: Readonly<Record<string, string>>,
+): SandboxProvider => {
+  const env = { ...mergeHubAgentSandboxEnv(sandbox.env, snapshotEnv) };
+  switch (sandbox.tag) {
+    case "bind-mount":
+      return { ...sandbox, env };
+    case "isolated":
+      return { ...sandbox, env };
+    case "none":
+      return { ...sandbox, env };
+  }
+};
+
+const applyHubAgentNotes = (input: {
+  readonly cwd: string;
+  readonly taskId: string;
+  readonly branch: string;
+  readonly runDir: string;
+  readonly batchId: string;
+  readonly status: string;
+  readonly stdout?: string;
+  readonly logPath: string;
+  readonly env?: NodeJS.ProcessEnv;
+}): void => {
+  const text = `${input.stdout ?? ""}\n${readTextFileOrEmpty(input.logPath)}`;
+  const result = applyHubTaskNotes({
+    cwd: input.cwd,
+    taskId: input.taskId,
+    text,
+    env: input.env,
+  });
+  if (result.status === "absent" || result.status === "replayed") {
+    return;
+  }
+
+  const eventBase = {
+    runId: basename(input.runDir),
+    batchId: input.batchId,
+    taskId: input.taskId,
+    branch: input.branch,
+    createdAt: new Date().toISOString(),
+    status: input.status,
+  };
+
+  if (result.status === "applied") {
+    appendHubTaskEvent(input.runDir, {
+      ...eventBase,
+      type: "task_notes_applied",
+      message: `Applied ${result.commentCount} Hub task note(s)`,
+      diagnostics: {
+        fingerprint: result.fingerprint,
+        commentCount: result.commentCount,
+      },
+    });
+    return;
+  }
+
+  appendHubTaskEvent(input.runDir, {
+    ...eventBase,
+    type: "task_notes_rejected",
+    message: `Rejected Hub task notes: ${result.diagnostic}`,
+    diagnostics: { diagnostic: result.diagnostic },
+  });
+};
+
 const runHubAgent = async (input: {
   readonly agent: AgentProvider;
   readonly cwd: string;
@@ -795,6 +1125,10 @@ const runHubAgent = async (input: {
   readonly showAgentStartup?: boolean;
   readonly idleTimeoutSeconds?: number;
   readonly signal?: AbortSignal;
+  readonly sandbox?: SandboxProvider;
+  readonly createTaskSnapshot?: typeof createHubTaskSnapshot;
+  readonly applyTaskNotes?: typeof applyHubAgentNotes;
+  readonly cleanupTaskSnapshot?: typeof cleanupHubTaskSnapshot;
 }) => {
   await assertAgentCredentialsConfigured({
     providerName: input.agent.name,
@@ -804,6 +1138,10 @@ const runHubAgent = async (input: {
 
   const { run } = await import("./run.js");
   const { noSandbox } = await import("./sandboxes/no-sandbox.js");
+  const createTaskSnapshot = input.createTaskSnapshot ?? createHubTaskSnapshot;
+  const cleanupTaskSnapshot =
+    input.cleanupTaskSnapshot ?? cleanupHubTaskSnapshot;
+  const applyTaskNotes = input.applyTaskNotes ?? applyHubAgentNotes;
 
   const envMaxIterations = Number(
     input.env?.ARCHLOOP_HUB_MAX_ITERATIONS ??
@@ -818,50 +1156,87 @@ const runHubAgent = async (input: {
   const retryConfig = resolveProviderRetryConfig(input.env);
   const status = input.role === "review" ? "reviewing" : "implementing";
 
-  const invoke = () =>
-    run({
-      agent: input.agent,
-      sandbox: noSandbox(),
+  const invoke = async () => {
+    const snapshot = createTaskSnapshot({
       cwd: input.cwd,
-      promptFile: input.promptFile,
-      promptArgs: buildHubAgentPromptArgs(
-        input,
-        input.projectDevelopmentContract,
-      ),
-      branchStrategy: { type: "branch", branch: input.branch },
-      name: input.name,
-      maxIterations,
-      idleTimeoutSeconds: input.idleTimeoutSeconds,
-      worktreeLeaseOwner: {
-        kind: "hub",
-        taskId: input.taskId,
-        flowId: input.flowId,
-        batchId: input.batchId,
-      },
-      logging: {
-        type: "file",
-        path: logPath,
-        showStartup: input.showAgentStartup,
-      },
-      signal: input.signal,
+      taskId: input.taskId,
+      runDir: input.runDir,
+      role: input.role,
+      env: input.env,
     });
+    try {
+      return await run({
+        agent: input.agent,
+        sandbox: withSnapshotSandbox(
+          input.sandbox ?? noSandbox(),
+          snapshot.sandboxEnv,
+        ),
+        cwd: input.cwd,
+        promptFile: input.promptFile,
+        promptArgs: buildHubAgentPromptArgs(
+          { ...input, taskSnapshot: snapshot.promptContent },
+          input.projectDevelopmentContract,
+        ),
+        branchStrategy: { type: "branch", branch: input.branch },
+        name: input.name,
+        maxIterations,
+        idleTimeoutSeconds: input.idleTimeoutSeconds,
+        worktreeLeaseOwner: {
+          kind: "hub",
+          taskId: input.taskId,
+          flowId: input.flowId,
+          batchId: input.batchId,
+        },
+        logging: {
+          type: "file",
+          path: logPath,
+          showStartup: input.showAgentStartup,
+        },
+        signal: input.signal,
+      });
+    } finally {
+      cleanupTaskSnapshot(snapshot);
+    }
+  };
+
+  const safeApplyNotes = (stdout?: string): void => {
+    try {
+      applyTaskNotes({
+        cwd: input.cwd,
+        taskId: input.taskId,
+        branch: input.branch,
+        runDir: input.runDir,
+        batchId: input.batchId,
+        status,
+        stdout,
+        logPath,
+        env: input.env,
+      });
+    } catch {
+      // Notes application must not fail Hub orchestration.
+    }
+  };
 
   let attempt = 0;
   for (;;) {
     attempt += 1;
     try {
-      return await invoke();
+      const result = await invoke();
+      safeApplyNotes(result.stdout);
+      return result;
     } catch (error) {
       input.signal?.throwIfAborted();
 
       const completionAlreadyEmitted =
         readCompletionSignalFromLog(logPath) !== undefined;
       if (completionAlreadyEmitted) {
+        safeApplyNotes();
         throw error;
       }
 
       const transientReason = matchProviderTransientReason(errorMessage(error));
       if (transientReason === undefined || attempt >= retryConfig.attempts) {
+        safeApplyNotes();
         throw error;
       }
 
@@ -992,6 +1367,118 @@ const reviewSelectedTask = async (
   };
 };
 
+/**
+ * Resume only the reviewer stage for a claimed `reviewing` task whose
+ * implementation already completed. Preserves the existing claim/branch and
+ * refuses to take over when another run still holds a live worktree lease.
+ */
+const resumeReviewSelectedTask = async (
+  input: RunHubFlowInput,
+  context: ReturnType<typeof createHubRunContext>,
+  task: HubTaskProjection,
+  reviewPromptFile: string,
+  mutateLifecycle: HubFlowLifecycleMutation,
+): Promise<HubFlowTaskResult> => {
+  const cwd = input.cwd ?? process.cwd();
+  const claim = task.claim;
+  const branch = claim?.branch ?? resolveHubTaskBranch(task.id, task.title);
+
+  if (!claim?.runId || !claim.batchId) {
+    return {
+      taskId: task.id,
+      title: task.title,
+      branch,
+      outcome: "sandbox_failed",
+      hubStatus: task.hubStatus,
+      failureReason: "sandbox_failed",
+      diagnosticSummary: `Task ${task.id} is reviewing without claim metadata required to resume review.`,
+      commitCount: 0,
+    };
+  }
+
+  const retryGate = await resolveHubTaskRetryGate({
+    cwd,
+    branch,
+    task,
+    context,
+  });
+  if (retryGate.kind === "blocked") {
+    return retryGate.result;
+  }
+
+  const implementCommitCount = resolveImplementCommitCountForReviewResume(
+    context.hubProjectDir,
+    task,
+  );
+  const resumedClaim = rehomeHubTaskClaimOntoCurrentRun({
+    claim,
+    context,
+    task,
+    branch,
+  });
+  const resumedMetadata = {
+    ...task.metadata,
+    claim: resumedClaim.raw,
+  };
+
+  await mutateLifecycle(() =>
+    updateHubTaskStatus({
+      cwd,
+      taskId: task.id,
+      hubStatus: "reviewing",
+      metadata: resumedMetadata,
+      replaceClaimMetadata: true,
+      env: input.env,
+    }),
+  );
+
+  return reviewSelectedTask(
+    input,
+    context,
+    task,
+    branch,
+    resumedClaim,
+    resumedMetadata,
+    reviewPromptFile,
+    implementCommitCount,
+    mutateLifecycle,
+  );
+};
+
+const resumeClaimedReviewingTasksInBatch = async (input: {
+  readonly flowInput: RunHubFlowInput;
+  readonly context: ReturnType<typeof createHubRunContext>;
+  readonly repoRoot: string;
+  readonly batchId: string;
+  readonly reviewPromptFile: string;
+  readonly mutateLifecycle: HubFlowLifecycleMutation;
+}): Promise<readonly HubFlowTaskResult[]> => {
+  const reviewingTasks = loadClaimedReviewingTasksForBatch(
+    input.repoRoot,
+    input.flowInput.env,
+    input.batchId,
+  );
+  if (reviewingTasks.length === 0) {
+    return [];
+  }
+
+  const settled = await Promise.allSettled(
+    reviewingTasks.map((task) =>
+      resumeReviewSelectedTask(
+        { ...input.flowInput, cwd: input.repoRoot },
+        {
+          ...input.context,
+          batchId: input.batchId,
+        },
+        task,
+        input.reviewPromptFile,
+        input.mutateLifecycle,
+      ),
+    ),
+  );
+  return resolveSettledHubTaskResults(reviewingTasks, settled, "review");
+};
+
 const implementSelectedTask = async (
   input: RunHubFlowInput,
   context: ReturnType<typeof createHubRunContext>,
@@ -1003,52 +1490,20 @@ const implementSelectedTask = async (
 ): Promise<HubFlowTaskResult> => {
   const cwd = input.cwd ?? process.cwd();
   const branch = resolveHubTaskBranch(task.id, task.title);
-  const retryPreparation = await prepareHubTaskRetry({
-    repoDir: cwd,
+  const retryGate = await resolveHubTaskRetryGate({
+    cwd,
     branch,
-    taskId: task.id,
+    task,
+    context,
   });
-
-  if (retryPreparation.status === "active_execution") {
-    appendHubTaskEvent(context.runDir, {
-      type: "task_retry_blocked",
-      runId: context.runId,
-      batchId: context.batchId,
-      taskId: task.id,
-      branch,
-      createdAt: new Date().toISOString(),
-      status: task.hubStatus,
-      reason: "active_worktree_lease",
-      message: retryPreparation.message,
-    });
-
-    return {
-      taskId: task.id,
-      title: task.title,
-      branch,
-      outcome: "active_execution",
-      hubStatus: task.hubStatus,
-      commitCount: 0,
-    };
-  }
-
-  if (retryPreparation.status === "lease_malformed") {
-    return {
-      taskId: task.id,
-      title: task.title,
-      branch,
-      outcome: "sandbox_failed",
-      hubStatus: task.hubStatus,
-      failureReason: "sandbox_failed",
-      diagnosticSummary: retryPreparation.message,
-      commitCount: 0,
-    };
+  if (retryGate.kind === "blocked") {
+    return retryGate.result;
   }
 
   const retryContext = formatHubRetryPromptContext({
     branch,
-    preservedWorktreePath: retryPreparation.preservedWorktreePath,
-    hasDirtyWork: retryPreparation.hasDirtyWork,
+    preservedWorktreePath: retryGate.preparation.preservedWorktreePath,
+    hasDirtyWork: retryGate.preparation.hasDirtyWork,
   });
 
   const claimResult = await mutateLifecycle(() =>
@@ -1113,7 +1568,7 @@ const implementSelectedTask = async (
       hubProjectDir: context.hubProjectDir,
       projectDevelopmentContract: input.projectDevelopmentContract!,
       retryContext,
-      preservedWorktreePath: retryPreparation.preservedWorktreePath,
+      preservedWorktreePath: retryGate.preparation.preservedWorktreePath,
       signal: input.signal,
     });
   } catch (error) {
@@ -1255,6 +1710,83 @@ const implementSelectedTask = async (
   };
 };
 
+const createHubLandingTaskCloseReader = (
+  repoRoot: string,
+  env: NodeJS.ProcessEnv | undefined,
+) => {
+  return (taskId: string) => {
+    try {
+      return beadsCloseEvidenceFromHubTask(
+        loadHubTaskBoard(repoRoot, env).tasks.find(
+          (entry) => entry.id === taskId,
+        ),
+      );
+    } catch {
+      return undefined;
+    }
+  };
+};
+
+const createHubLandingTaskCloser = (
+  repoRoot: string,
+  env: NodeJS.ProcessEnv | undefined,
+): HubLandingTaskCloser =>
+  async ({ taskId, transactionId, candidateOid }) => {
+    closeHubTask({
+      cwd: repoRoot,
+      taskId,
+      metadata: {
+        landingTransactionId: transactionId,
+        landingCandidateOid: candidateOid,
+      },
+      env,
+    });
+  };
+
+const hubLandingReconciliationEventFields = (
+  outcome: HubLandingReconciliationOutcome,
+): Pick<
+  HubLandingReconciliationEvent,
+  | "kind"
+  | "pendingCount"
+  | "reconstructedCount"
+  | "message"
+  | "integrityIncident"
+> => ({
+  kind: outcome.kind,
+  pendingCount: outcome.pendingCount,
+  reconstructedCount: outcome.reconstructedCount,
+  message: formatHubLandingReconciliationMessage(outcome),
+  ...(outcome.integrityIncident
+    ? { integrityIncident: outcome.integrityIncident }
+    : {}),
+});
+
+const hubTaskStoreMigrationEventFields = (
+  outcome: Exclude<HubTaskStoreMigrationOutcome, { kind: "not_needed" }>,
+): Pick<
+  HubTaskStoreMigrationEvent,
+  "kind" | "phase" | "beadsDir" | "message" | "reason" | "pendingUntil"
+> => {
+  const base = {
+    kind: outcome.kind,
+    beadsDir: outcome.beadsDir,
+    message: formatHubTaskStoreMigrationMessage(outcome),
+  };
+  if (outcome.kind === "migrated") {
+    return { ...base, phase: outcome.phase };
+  }
+  if (outcome.kind === "deferred") {
+    return {
+      ...base,
+      phase: outcome.phase,
+      reason: outcome.reason,
+      pendingUntil: outcome.pendingUntil,
+    };
+  }
+  return base;
+};
+
 const runObservedHubFlow = async (
   input: RunHubFlowInput,
 ): Promise<RunHubFlowResult> => {
@@ -1286,12 +1818,40 @@ const runObservedHubFlow = async (
   const hubProjectDir =
     input.hubProjectDir ??
     resolveHubProjectDir(resolveArchloopUserDataDir(input.env), repoRoot);
+  ensureHubLandingPolicy({
+    repoRoot,
+    hubProjectDir,
+  });
+  const taskStoreMigration = ensureHubTaskStoreMigrated({
+    repoRoot,
+    hubProjectDir,
+    env: input.env,
+  });
+  throwIfHubTaskStoreSplitBrain(taskStoreMigration);
+  let landingTasks: ReturnType<typeof loadHubTaskBoard>["tasks"] = [];
+  try {
+    landingTasks = loadHubTaskBoard(repoRoot, input.env).tasks;
+  } catch {
+    // Board may be unavailable before `tasks init`; adopt nothing.
+  }
+  const landingReconciliationInput = {
+    repoRoot,
+    hubProjectDir,
+    readTaskClose: createHubLandingTaskCloseReader(repoRoot, input.env),
+    closeTask: createHubLandingTaskCloser(repoRoot, input.env),
+    tasks: landingTasks,
+    events: readTaskEvents(hubProjectDir),
+  };
+  const landingReconciliation = await reconcileHubLandingTransactions(
+    landingReconciliationInput,
+  );
   // Run-startup auto-recover: detect tasks left stuck in an execution status by
   // a previously-interrupted run and route each one through the event-aware
   // recovery wiring before the run loads the board for the resumed-batch scan.
   // This must precede findResumableHubFlowBatches so a `merging` task recovered
   // to `waiting_for_merge` (claim preserved) is picked up by the resumed-batch
-  // merge path, and a `ready_for_agent` recovery is selected by the planner.
+  // merge path, a `reviewing` recovery is picked up by reviewer-only resume, and
+  // a `ready_for_agent` recovery is selected by the planner.
   const autoRecoverSummary =
     input.autoRecover === false
       ? undefined
@@ -1328,10 +1888,11 @@ const runObservedHubFlow = async (
     hubProjectDir,
     flowId: input.flowId,
     tasks: loadHubTaskBoard(repoRoot, input.env).tasks,
+    includeReviewResume: flowDefinition.hasReviewer === true,
   });
   const unfinishedBatchIds = unfinishedBatches.map((batch) => batch.batchId);
   const resumedBatchId = unfinishedBatches[0]?.batchId;
-  const isResumingMergeBatch = resumedBatchId !== undefined;
+  const isResumingBatch = resumedBatchId !== undefined;
   const context = createHubRunContext({
     cwd: repoRoot,
     hubProjectDir,
@@ -1341,6 +1902,74 @@ const runObservedHubFlow = async (
     env: input.env,
   });
   mkdirSync(join(context.runDir, "logs"), { recursive: true });
+  if (taskStoreMigration.kind !== "not_needed") {
+    appendHubRunEvent(context.runDir, {
+      type: "task_store_migration",
+      runId: context.runId,
+      createdAt: new Date().toISOString(),
+      ...hubTaskStoreMigrationEventFields(taskStoreMigration),
+    });
+  }
+  const appendLandingReconciliationEvent = (
+    outcome: HubLandingReconciliationOutcome,
+  ): void => {
+    if (!hubLandingReconciliationHasVisibleOutput(outcome)) {
+      return;
+    }
+    appendHubRunEvent(context.runDir, {
+      type: "landing_reconciliation",
+      runId: context.runId,
+      createdAt: new Date().toISOString(),
+      ...hubLandingReconciliationEventFields(outcome),
+    });
+  };
+  appendLandingReconciliationEvent(landingReconciliation);
+  const appendCheckoutProjectionEvents = async (): Promise<void> => {
+    const synced = await syncHubCheckoutProjections({
+      repoRoot,
+      hubProjectDir,
+    });
+    for (const attempt of synced.deltas) {
+      appendHubTaskEvent(context.runDir, {
+        type: hubCheckoutSyncEventType(attempt.status),
+        runId: context.runId,
+        batchId: resumedBatchId ?? context.batchId,
+        taskId: attempt.item.taskId,
+        branch: attempt.item.hostTargetBranch,
+        createdAt: new Date().toISOString(),
+        status: "done",
+        transactionId: attempt.item.transactionId,
+        candidateOid: attempt.item.candidateOid,
+        reason: hubCheckoutSyncEventReason(attempt),
+        message: attempt.message,
+      });
+    }
+  };
+  await appendCheckoutProjectionEvents();
+  const appendPublicationEvents = async (): Promise<void> => {
+    const synced = await syncHubPublications({
+      repoRoot,
+      hubProjectDir,
+    });
+    for (const attempt of synced.deltas) {
+      appendHubTaskEvent(context.runDir, {
+        type: hubPublicationEventType(attempt.status),
+        runId: context.runId,
+        batchId: resumedBatchId ?? context.batchId,
+        taskId: attempt.item.taskId,
+        branch: attempt.item.remoteTarget,
+        createdAt: new Date().toISOString(),
+        status: "done",
+        transactionId: attempt.item.transactionId,
+        candidateOid: attempt.item.candidateOid,
+        remoteRef: attempt.item.remoteRef,
+        expectedRemoteOid: attempt.item.expectedRemoteOid,
+        reason: hubPublicationEventReason(attempt),
+        message: attempt.message,
+      });
+    }
+  };
+  await appendPublicationEvents();
   const batchResults: HubFlowBatchResult[] = [];
   const results: HubFlowTaskResult[] = [];
   const selectedTaskIds: string[] = [];
@@ -1351,7 +1980,12 @@ const runObservedHubFlow = async (
   const mutateLifecycle = createHubFlowLifecycleMutationQueue();
   const runMergePhase = input.runMergePhase ?? true;
   const merger =
-    input.merger ?? createHubFlowRunMerger({ cwd: repoRoot, env: input.env });
+    input.merger ??
+    createHubFlowRunMerger({
+      cwd: repoRoot,
+      hubProjectDir,
+      env: input.env,
+    });
   const verifier =
     input.verifier ?? createHubFlowRunVerifier({ cwd: repoRoot });
   let currentBatchId = resumedBatchId ?? context.batchId;
@@ -1387,8 +2021,13 @@ const runObservedHubFlow = async (
       runId: context.runId,
       batchId,
       env: input.env,
+      hubProjectDir,
       merger,
       verifier,
+      candidateRepairer: createHubCandidateRepairer({
+        cwd: repoRoot,
+        env: input.env,
+      }),
     });
   };
 
@@ -1461,7 +2100,7 @@ const runObservedHubFlow = async (
       };
     }
 
-    const taskResults = await Promise.all(
+    const settledTaskResults = await Promise.allSettled(
       selectedTasks.map((task) =>
         implementSelectedTask(
           { ...resolvedInput, cwd: repoRoot },
@@ -1476,6 +2115,11 @@ const runObservedHubFlow = async (
           mutateLifecycle,
         ),
       ),
+    );
+    const taskResults = resolveSettledHubTaskResults(
+      selectedTasks,
+      settledTaskResults,
+      "implementation",
     );
 
     const allSelectedTasksSucceeded = taskResults.every(
@@ -1501,29 +2145,61 @@ const runObservedHubFlow = async (
     };
   };
 
-  if (isResumingMergeBatch && resumedBatchId) {
-    const resumedMergeResult = await runBatchMergePhase(resumedBatchId);
+  if (isResumingBatch && resumedBatchId) {
+    const reviewResults =
+      flowDefinition.hasReviewer === true && reviewPromptFile
+        ? await resumeClaimedReviewingTasksInBatch({
+            flowInput: resolvedInput,
+            context,
+            repoRoot,
+            batchId: resumedBatchId,
+            reviewPromptFile,
+            mutateLifecycle,
+          })
+        : [];
+    selectedTaskIds.push(...reviewResults.map((result) => result.taskId));
+    results.push(...reviewResults);
 
-    mergeResult = resumedMergeResult;
-    const resumedBatchResult = resolveMergeOnlyHubFlowBatchResult({
-      batchId: resumedBatchId,
-      mergeResult: resumedMergeResult,
-      treatSkippedAsFailed: true,
-    });
-    if (resumedBatchResult) {
-      batchResults.push(resumedBatchResult);
-    }
-    if (resumedBatchResult?.batchStatus === "failed") {
+    const resumedReviewFailed =
+      reviewResults.length > 0 &&
+      !reviewResults.every(isSuccessfulHubTaskResult);
+
+    if (resumedReviewFailed) {
+      const reviewBatchResult = resolveHubFlowBatchResult({
+        batchId: resumedBatchId,
+        selectedTaskIds: results.map((result) => result.taskId),
+        taskResults: results,
+      });
+      if (reviewBatchResult) {
+        batchResults.push(reviewBatchResult);
+      }
       stopReason = "batch_failed";
-    } else if (batchResults.length >= maxBatches) {
-      stopReason = "max_batches_reached";
     } else {
-      startNextBatch();
+      const resumedMergeResult = await runBatchMergePhase(resumedBatchId);
+      mergeResult = resumedMergeResult;
+      const resumedBatchResult = resolveResumedHubFlowBatchResult({
+        batchId: resumedBatchId,
+        taskResults: results,
+        mergeResult: resumedMergeResult,
+      });
+      if (resumedBatchResult) {
+        batchResults.push(resumedBatchResult);
+      }
+      if (resumedBatchResult?.batchStatus === "failed") {
+        stopReason = "batch_failed";
+      } else if (resumedBatchResult?.batchStatus === "pending") {
+        stopReason = "batch_pending";
+      } else if (batchResults.length >= maxBatches) {
+        stopReason = "max_batches_reached";
+      } else {
+        startNextBatch();
+      }
     }
   }
 
   while (
     stopReason !== "batch_failed" &&
+    stopReason !== "batch_pending" &&
     stopReason !== "max_batches_reached"
   ) {
     const batchExecution = await executeSelectedBatch(currentBatchId);
@@ -1546,6 +2222,10 @@ const runObservedHubFlow = async (
       batchResults.push(batchExecution.batchResult);
       if (batchExecution.batchResult.batchStatus === "failed") {
         stopReason = "batch_failed";
+        break;
+      }
+      if (batchExecution.batchResult.batchStatus === "pending") {
+        stopReason = "batch_pending";
         break;
       }
     }
@@ -1571,10 +2251,16 @@ const runObservedHubFlow = async (
     0,
   );
   const mode = resolveHubFlowMode({
-    isResumingMergeBatch,
+    isResumingBatch,
     selectedTaskCount: selectedTaskIds.length,
   });
   const effectiveBatchId = resumedBatchId ?? context.batchId;
+
+  const completedLandingReconciliation = await reconcileHubLandingTransactions(
+    landingReconciliationInput,
+  );
+  appendLandingReconciliationEvent(completedLandingReconciliation);
+  await appendCheckoutProjectionEvents();
 
   appendHubRunEvent(context.runDir, {
     type: "run_completed",
@@ -1609,6 +2295,11 @@ const runObservedHubFlow = async (
     projectDevelopmentContractCreatedGenericFallback:
       projectDevelopmentContract.createdGenericFallback,
     autoRecoverSummary,
+    taskStoreMigration,
+    landingReconciliation: completedLandingReconciliation,
+    checkoutSync: inspectHubCheckoutOutbox({ hubProjectDir }),
+    publication: inspectHubPublicationOutbox({ hubProjectDir }),
+    landingQueue: inspectHubLandingQueue(hubProjectDir),
   };
 };
 
@@ -1631,6 +2322,33 @@ export const formatHubFlowResultLines = (
   ];
   for (const line of formatHubRunAutoRecoverLines(result.autoRecoverSummary)) {
     lines.push(line);
+  }
+  if (
+    result.taskStoreMigration &&
+    result.taskStoreMigration.kind !== "not_needed"
+  ) {
+    lines.push(formatHubTaskStoreMigrationMessage(result.taskStoreMigration));
+  }
+  if (
+    result.landingReconciliation &&
+    hubLandingReconciliationHasVisibleOutput(result.landingReconciliation)
+  ) {
+    lines.push(
+      formatHubLandingReconciliationMessage(result.landingReconciliation),
+    );
+  }
+  if (result.checkoutSync && result.checkoutSync.pendingCount > 0) {
+    lines.push(result.checkoutSync.message);
+  }
+  if (result.publication && result.publication.pendingCount > 0) {
+    lines.push(result.publication.message);
+  }
+  if (
+    result.landingQueue &&
+    result.landingQueue.pendingQuietWaitCount > 0 &&
+    result.landingQueue.message
+  ) {
+    lines.push(result.landingQueue.message);
   }
   if (result.worktreeWarning) {
     lines.push(
@@ -1718,11 +2436,13 @@ export const formatHubFlowResultLines = (
 
 /**
  * Pure selector over the Hub run event log: has this task previously reached
- * a merged/done milestone? A prior `merge_succeeded` (the implementation
- * commit reached the base branch) or `task_closed` (the task was closed as
- * done) proves the task's described work is already present on the branch
- * lineage. Used by the implementer to distinguish a faithful zero-new-commit
- * re-run on already-merged work from a genuine no-work failure (arch-d0c).
+ * a merged/done milestone? A prior `target_landing_succeeded`,
+ * `task_close_succeeded`, or `task_closed` proves the
+ * task's described work already landed. A historical `merge_succeeded`
+ * event is not enough: earlier Hub versions emitted it before verification
+ * and final landing. Used by the implementer to distinguish
+ * a faithful zero-new-commit re-run on already-landed work from a genuine
+ * no-work failure (arch-d0c).
  *
  * Events from the *current* run do not carry these types before the
  * implementer returns (implementation is the first phase), so only a prior,
@@ -1738,7 +2458,9 @@ const hasPriorMergedCompletion = (
   events.some(
     (event) =>
       event.taskId === taskId &&
-      (event.type === "merge_succeeded" || event.type === "task_closed"),
+      (event.type === "target_landing_succeeded" ||
+        event.type === "task_close_succeeded" ||
+        event.type === "task_closed"),
   );
 
 /**
@@ -1849,6 +2571,9 @@ export const createHubFlowRunImplementer = (options: {
   readonly roleEntry?: HubAgentRoleEntry;
   readonly showAgentStartup?: boolean;
   readonly idleTimeoutSeconds?: number;
+  readonly sandbox?: SandboxProvider;
+  readonly createTaskSnapshot?: typeof createHubTaskSnapshot;
+  readonly cleanupTaskSnapshot?: typeof cleanupHubTaskSnapshot;
   /**
    * Override for whether the task's implementation was previously merged/done
    * (arch-d0c). The default reads the Hub run event log; inject a stub in
@@ -1886,6 +2611,9 @@ export const createHubFlowRunImplementer = (options: {
         showAgentStartup: options.showAgentStartup,
         idleTimeoutSeconds: options.idleTimeoutSeconds,
         signal: input.signal,
+        sandbox: options.sandbox,
+        createTaskSnapshot: options.createTaskSnapshot,
+        cleanupTaskSnapshot: options.cleanupTaskSnapshot,
       });
     } catch (error) {
       input.signal?.throwIfAborted();
@@ -1975,6 +2703,9 @@ export const createHubFlowRunReviewer = (options: {
   readonly roleEntry?: HubAgentRoleEntry;
   readonly showAgentStartup?: boolean;
   readonly idleTimeoutSeconds?: number;
+  readonly sandbox?: SandboxProvider;
+  readonly createTaskSnapshot?: typeof createHubTaskSnapshot;
+  readonly cleanupTaskSnapshot?: typeof cleanupHubTaskSnapshot;
 }): HubFlowReviewer => {
   const agent = resolveHubFlowRunnerAgent("review", options);
 
@@ -1997,6 +2728,9 @@ export const createHubFlowRunReviewer = (options: {
         showAgentStartup: options.showAgentStartup,
         idleTimeoutSeconds: options.idleTimeoutSeconds,
         signal: input.signal,
+        sandbox: options.sandbox,
+        createTaskSnapshot: options.createTaskSnapshot,
+        cleanupTaskSnapshot: options.cleanupTaskSnapshot,
       });
 
       if (!result.completionSignal) {

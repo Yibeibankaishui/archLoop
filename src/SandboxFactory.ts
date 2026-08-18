@@ -263,6 +263,7 @@ const attachPreservedPath = <E>(
       return new AgentError({
         message: e.message,
         preservedWorktreePath: path,
+        transientStartupAbort: e.transientStartupAbort,
       }) as unknown as E | SandboxError;
     }
   }

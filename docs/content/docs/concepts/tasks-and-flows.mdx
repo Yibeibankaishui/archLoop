@@ -3,8 +3,12 @@ title: Tasks and flows
 description: Understand local tasks, collaboration statuses, batches, and flow behavior.
 ---
 
-archLoop uses a local Beads task store as the source of task-board state. GitHub
-Issues synchronization is optional and explicit.
+archLoop uses a local Beads task store as the source of task-board state. For
+new Hub projects that store lives under the stable Hub project directory, with
+a Git-ignored `.beads/redirect` for direct `bd` discovery. Existing
+repository-local stores migrate automatically unless Hub defers an unsafe
+switch; split brain after redirect stops automatic writes. GitHub Issues
+synchronization is optional and explicit.
 
 ## Task lifecycle
 
@@ -19,7 +23,55 @@ metadata, and run events.
 - `with-review` — add a reviewer stage before verification and merge.
 
 Tasks within a batch can implement and review concurrently. Eligible branches
-merge serially so verification failures have a clear boundary.
+land independently onto a Hub-managed local publish target under durable FIFO
+and dependency tickets. Speculative candidates form an ordered chain on each
+predecessor OID, verify exact OIDs concurrently where dependencies permit, and
+land only at the queue head with fenced CAS. Suffix invalidation after
+predecessor repair, failure, committed host contribution, or target drift
+rebuilds independent successors while dependents stay blocked. Committed
+host-target tips (behind, descendant, or diverged) enter the canonical chain
+before task candidates continue; uncommitted host WIP is never imported. That
+host contribution uses a synthetic landing transaction, not a Beads task, and
+reconciliation completes it without Beads close. A deterministic host-target
+merge conflict is `host_contribution_conflict` (pending merge, not shipped or
+failed); resolve it then rerun the same flow — not `tasks recover`. After
+at most three immediate drift rebuilds the queue head retains
+`target_quiet_wait` until a stable window resumes automatically without
+resetting repair budgets or requiring `tasks recover`. A semantic conflict
+or verification failure is repaired in bounded Agent attempts, then fully
+reverified; exhaustion blocks only that task. Independent siblings continue to
+verified landing, dependents wait for an unshipped prerequisite, and mixed
+outcomes report `partial_failed`. All-pending batches report `pending` /
+`completed_with_pending_merge` instead of counting as shipped or failed.
+Landing does not merge into the user's
+checkout. After landing, Hub projects the host branch only when a fast-forward
+is provably safe; otherwise `checkout_sync_pending` stays visible and retries
+automatically without affecting `shipped`. With an explicit `best_effort`
+publish policy and remote target, code publication retries as
+`target_publish_pending` separately from GitHub task sync and does not undo
+local shipped proof. Concurrent runs share a landing lease and fenced compare-and-swap;
+target drift rebuilds and reverifies the queue head before another landing
+attempt. Lease and CAS contention stay pending. A crashed landing resumes from
+durable evidence on the next run without `tasks recover`. Already closed
+historical tasks stay completed. In-flight pre-transaction history is adopted
+only when Git ancestry proves the source reached the configured target; a
+legacy `merge_succeeded` event never proves delivery. Ambiguous missing or
+diverged branches surface as `legacy_landing_integrity` instead of automatic
+close or reimplementation.
+
+Legacy task branches that committed known Beads runtime/export files such as
+`.beads/issues.jsonl` still land their source changes. Candidate construction
+strips only that documented allowlist, records the filtered paths on the
+transaction and `integration_candidate_created` event, and leaves the task
+branch and checkout untouched. Beads configuration, documentation, hooks,
+redirect, and unknown `.beads/**` paths stay in the candidate for normal
+review.
+
+Implementer iterations continue past a provider startup abort that produced no
+agent output, as long as iterations remain. A turn that only explored (no
+commits, no completion signal) nudges the next iteration to start writing
+instead of repeating the same reads. Exhausting the iteration limit with no
+completion signal and no branch work is still `agent_failed`.
 
 If the same flow already has an unfinished merge-ready batch, a later run
 recovers it before claiming new tasks.

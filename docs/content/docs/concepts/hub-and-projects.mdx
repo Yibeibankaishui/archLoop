@@ -9,14 +9,33 @@ archLoop user data directory.
 
 A Hub project points to one existing Git repository. It has a stable internal
 identity, a user-facing name, a selected project profile, a development
-contract, and local task/run data. Renaming or relinking a project preserves its
-identity and history.
+contract, and local task/run data. New projects store the live Beads database
+in the Hub project directory. A Git-ignored `.beads/redirect` keeps host `bd`
+commands pointed at that store. Hub implementation and review agents receive an
+immutable task snapshot instead of live `bd` access; structured notes are
+applied by Hub after the attempt. Existing repository-local stores migrate
+automatically unless a writer or other unsafe condition defers the switch.
+Split brain after redirect stops automatic task-store writes. Renaming or
+relinking a project preserves its identity, history, and task store.
 
 ## Project selection
 
 The CLI remembers one selected project. Commands such as `project status`,
 `tasks list`, and `run --flow` use it by default. Pass `--project <name>` when a
 script or one-off command should target another project explicitly.
+
+## Landing policy
+
+The first upgraded Hub run pins the active host target branch into Hub-owned
+project state and defaults publication to `off`. The Hub publish target is a
+stable local Git ref. `archloop project configure --publish-policy` and
+`--remote-target` update that policy without dirtying the repository.
+Publication stays `off` until configured; discovering `origin` alone never
+enables pushes. With `best_effort`, local shipped proof enqueues a durable
+publication outbox that retries as `target_publish_pending` without undoing
+shipped. Checkout synchronization is a separate projection of that host
+branch: it fast-forwards only when safe and otherwise remains
+`checkout_sync_pending`.
 
 ## Hub versus repo-local configuration
 

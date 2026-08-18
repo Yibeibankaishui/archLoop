@@ -8,6 +8,9 @@ import {
   resolveGitRepoRoot,
 } from "./projectStatus.js";
 import type { HubProjectRegistryEntry } from "./hubProjectRegistry.js";
+import { HUB_TASK_STORE_SPLIT_BRAIN_INCIDENT } from "./hubTaskStoreMigration.js";
+import { isHubOwnedTaskStoreKind } from "./hubTaskStoreResolver.js";
+import { HUB_LEGACY_LANDING_INTEGRITY } from "./hubLandingLegacyHistory.js";
 import {
   formatReadinessCheckLines,
   type HubReadinessCheckReport,
@@ -44,6 +47,15 @@ const createSection = (
   title,
   findings,
 });
+
+const createLandingSection = (
+  severity: HubReadinessFinding["severity"],
+  title: string,
+  message: string,
+): HubReadinessSection =>
+  createSection("Checking Hub landing", [
+    createFinding(severity, title, message),
+  ]);
 
 const repoPathSection = (
   project: HubProjectRegistryEntry,
@@ -190,13 +202,46 @@ const buildTaskStoreSection = (
     ]);
   }
 
-  if (status.taskStoreInitialized) {
+  if (status.taskStoreRedirectError) {
     return createSection("Checking local task store", [
       createFinding(
-        "success",
-        "Local task store is initialized",
-        "Local task store is initialized.",
+        "error",
+        "Task store redirect is invalid",
+        status.taskStoreRedirectError,
       ),
+    ]);
+  }
+
+  if (status.taskStoreInitialized) {
+    if (status.taskStoreIntegrityIncident === HUB_TASK_STORE_SPLIT_BRAIN_INCIDENT) {
+      return createSection("Checking local task store", [
+        createFinding(
+          "error",
+          "Task store split brain",
+          status.taskStoreMigrationMessage ??
+            "Hub Beads task-store split brain detected. Automatic task-store writes are stopped.",
+        ),
+      ]);
+    }
+    let message = "Local task store is initialized.";
+    let severity: HubReadinessFinding["severity"] = "success";
+    let title = "Local task store is initialized";
+    if (isHubOwnedTaskStoreKind(status.taskStoreKind)) {
+      message = `Hub-owned task store is initialized at ${status.taskStoreDir}.`;
+    } else if (status.taskStoreKind === "legacy") {
+      if (status.taskStoreMigrationPendingReason) {
+        severity = "warn";
+        title = "Task store migration pending";
+        message =
+          status.taskStoreMigrationMessage ??
+          "Repository-local Beads store remains active while migration is pending. Hub will retry automatically.";
+      } else {
+        message =
+          "Repository-local Beads store is initialized and will migrate automatically on the next mutating Hub command.";
+      }
+    }
+    return createSection("Checking local task store", [
+      createFinding(severity, title, message),
     ]);
   }
 
@@ -207,6 +252,45 @@ const buildTaskStoreSection = (
       "Local task store not initialized. Run `archloop tasks init` in this repository first.",
     ),
   ]);
+};
+
+const buildLandingSection = (status: HubProjectStatus): HubReadinessSection => {
+  if (status.landingIntegrityIncident) {
+    if (
+      status.landingIntegrityIncident.startsWith(HUB_LEGACY_LANDING_INTEGRITY)
+    ) {
+      return createLandingSection(
+        "error",
+        "Legacy landing integrity",
+        status.landingReconciliationMessage ?? status.landingIntegrityIncident,
+      );
+    }
+    return createLandingSection(
+      "error",
+      "Landing integrity incident",
+      status.landingReconciliationMessage ?? status.landingIntegrityIncident,
+    );
+  }
+  if (status.landingReconciliationKind === "pending") {
+    return createLandingSection(
+      "warn",
+      "Landing reconciliation pending",
+      status.landingReconciliationMessage ??
+        "An incomplete Hub landing transaction will resume automatically from durable evidence. This is not a task failure.",
+    );
+  }
+  if (status.landingLegacyHistory && status.landingLegacyHistory.length > 0) {
+    return createLandingSection(
+      "success",
+      "Legacy landing history reviewed",
+      status.landingLegacyHistory.join(" "),
+    );
+  }
+  return createLandingSection(
+    "success",
+    "Landing transactions are idle",
+    "No incomplete Hub landing transactions need reconciliation.",
+  );
 };
 
 const buildTaskSummarySection = (
@@ -370,6 +454,7 @@ export const collectHubProjectReadinessCheck = async (
     resolveDefaultProjectStatus(project, options);
   sections.push(buildDevelopmentContractSection(project, status));
   sections.push(buildTaskStoreSection(status));
+  sections.push(buildLandingSection(status));
   sections.push(buildTaskSummarySection(status));
   sections.push(buildFailedTaskSection(status));
   sections.push(buildActiveRunsSection(status));

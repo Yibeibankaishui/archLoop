@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { isAllowlistedBeadsRuntimePath } from "./hubBeadsRuntimePaths.js";
 import type { HubTaskEvent } from "./hubExecution.js";
 import { readTaskEvents } from "./hubRunEventLog.js";
 import {
@@ -22,6 +23,20 @@ import {
   isInterruptedHubTaskExecution,
 } from "./hubTaskInterruptedExecutionDetector.js";
 import { latestPhaseCompletionEventByTask } from "./hubTaskRecoveryRouter.js";
+import { readHubProjectRegistry } from "./hubProjectRegistry.js";
+import {
+  formatHubLandingReconciliationMessage,
+  hubLandingTaskCloseReaderFromTasks,
+  inspectHubLandingTransactions,
+} from "./hubLandingReconciliation.js";
+import { formatHubLegacyLandingHistoryLines } from "./hubLandingLegacyHistory.js";
+import { inspectHubCheckoutOutbox } from "./hubCheckoutProjection.js";
+import { inspectHubPublicationOutbox } from "./hubPublication.js";
+import { inspectHubLandingQueue } from "./hubLandingQueue.js";
+import {
+  formatHubTaskStoreMigrationMessage,
+  inspectHubTaskStoreMigration,
+} from "./hubTaskStoreMigration.js";
 import {
   resolveGitRepoRoot,
   resolveHubProjectDir,
@@ -102,6 +117,8 @@ export interface DoctorHubTaskStateInput {
 export interface DoctorHubTaskStateResult {
   readonly diagnostics: readonly HubTaskStateDiagnostic[];
   readonly managedBranchCleanupDiagnostics: readonly string[];
+  readonly taskStoreDiagnostics?: readonly string[];
+  readonly landingDiagnostics?: readonly string[];
 }
 
 export interface HubTaskStatePlannedRepair {
@@ -132,6 +149,7 @@ const HUB_STATUS_LABELS: Readonly<Record<HubTaskStatus, string>> = {
   reviewing: "reviewing",
   waiting_for_merge: "waiting-for-merge",
   merging: "merging",
+  publishing: "publishing",
   failed: "failed",
   done: "done",
   wontfix: "wontfix",
@@ -152,6 +170,7 @@ const CLAIM_REQUIRED_STATUSES = new Set<HubTaskStatus>([
   "reviewing",
   "waiting_for_merge",
   "merging",
+  "publishing",
 ]);
 
 const HUB_STATUS_VALUES = new Set<string>([
@@ -164,6 +183,7 @@ const HUB_STATUS_VALUES = new Set<string>([
   "reviewing",
   "waiting_for_merge",
   "merging",
+  "publishing",
   "done",
   "wontfix",
   "failed",
@@ -261,13 +281,6 @@ const defaultBranchInspector: HubTaskStateBranchInspector = async (
   }
 };
 
-const normalizeGitPath = (path: string): string => path.replace(/\\/g, "/");
-
-const isTaskStoreRuntimePath = (path: string): boolean => {
-  const normalized = normalizeGitPath(path);
-  return normalized === ".beads" || normalized.startsWith(".beads/");
-};
-
 const parseGitStatusPorcelain = (stdout: string): string[] => {
   const entries = stdout.split("\0").filter((entry) => entry.length > 0);
   const paths: string[] = [];
@@ -305,9 +318,9 @@ const defaultWorktreeInspector: HubTaskStateWorktreeInspector = async (cwd) => {
   const dirtyFiles = parseGitStatusPorcelain(String(stdout));
   return {
     dirtySourceFiles: dirtyFiles.filter(
-      (path) => !isTaskStoreRuntimePath(path),
+      (path) => !isAllowlistedBeadsRuntimePath(path),
     ),
-    dirtyTaskStoreFiles: dirtyFiles.filter(isTaskStoreRuntimePath),
+    dirtyTaskStoreFiles: dirtyFiles.filter(isAllowlistedBeadsRuntimePath),
   };
 };
 
@@ -502,11 +515,16 @@ export const doctorHubTaskState = async (
   input: DoctorHubTaskStateInput,
 ): Promise<DoctorHubTaskStateResult> => {
   const repoRoot = resolveGitRepoRoot(input.cwd);
-  const hubProjectDir = resolveHubProjectDir(
-    input.archloopUserDataDir ??
-      resolveArchloopUserDataDir(input.env ?? process.env),
-    repoRoot,
+  const env = input.env ?? process.env;
+  const registeredProject = readHubProjectRegistry({ env }).find(
+    (project) => project.repoRoot === repoRoot,
   );
+  const hubProjectDir =
+    registeredProject?.hubProjectDir ??
+    resolveHubProjectDir(
+      input.archloopUserDataDir ?? resolveArchloopUserDataDir(env),
+      repoRoot,
+    );
   const board = loadHubTaskBoard(repoRoot, input.env);
   const taskEvents = readTaskEvents(hubProjectDir);
   const mergeReadyEvents = latestMergeReadyEventsByTask(taskEvents);
@@ -643,12 +661,72 @@ export const doctorHubTaskState = async (
     }
   }
 
+  const taskStoreMigration = inspectHubTaskStoreMigration({
+    repoRoot,
+    hubProjectDir,
+  });
+  const taskStoreDiagnostics: string[] = [];
+  if (
+    taskStoreMigration.integrityIncident ||
+    taskStoreMigration.pendingReason
+  ) {
+    taskStoreDiagnostics.push(
+      formatHubTaskStoreMigrationMessage(taskStoreMigration),
+    );
+    if (taskStoreMigration.nextAction) {
+      taskStoreDiagnostics.push(
+        `Next action: ${taskStoreMigration.nextAction}`,
+      );
+    }
+  }
+
+  const landingReconciliation = inspectHubLandingTransactions({
+    repoRoot,
+    hubProjectDir,
+    readTaskClose: hubLandingTaskCloseReaderFromTasks(board.tasks),
+    tasks: board.tasks,
+    events: taskEvents,
+  });
+  const landingDiagnostics: string[] = [];
+  if (landingReconciliation.kind !== "clean") {
+    landingDiagnostics.push(
+      formatHubLandingReconciliationMessage(landingReconciliation),
+    );
+    landingDiagnostics.push(`Next action: ${landingReconciliation.nextAction}`);
+  }
+  for (const line of formatHubLegacyLandingHistoryLines(
+    landingReconciliation.legacyHistory,
+  )) {
+    if (!landingDiagnostics.includes(line)) {
+      landingDiagnostics.push(line);
+    }
+  }
+  const checkoutSync = inspectHubCheckoutOutbox({ hubProjectDir });
+  if (checkoutSync.pendingCount > 0) {
+    landingDiagnostics.push(checkoutSync.message);
+    landingDiagnostics.push(`Next action: ${checkoutSync.nextAction}`);
+  }
+  const codePublication = inspectHubPublicationOutbox({ hubProjectDir });
+  if (codePublication.pendingCount > 0) {
+    landingDiagnostics.push(codePublication.message);
+    landingDiagnostics.push(`Next action: ${codePublication.nextAction}`);
+  }
+  const landingQueue = inspectHubLandingQueue(hubProjectDir);
+  if (landingQueue.pendingQuietWaitCount > 0 && landingQueue.message) {
+    landingDiagnostics.push(landingQueue.message);
+    if (landingQueue.nextAction) {
+      landingDiagnostics.push(`Next action: ${landingQueue.nextAction}`);
+    }
+  }
+
   return {
     diagnostics,
     managedBranchCleanupDiagnostics:
       formatHubManagedBranchCleanupDiagnosticsLines(
         managedBranchCleanupEvaluation,
       ),
+    taskStoreDiagnostics,
+    landingDiagnostics,
   };
 };
 
@@ -860,6 +938,8 @@ export const formatHubTaskStateDoctorLines = (
   );
   return [
     ...flattenSectionForLog(blocks),
+    ...(result.taskStoreDiagnostics ?? []),
+    ...(result.landingDiagnostics ?? []),
     ...result.managedBranchCleanupDiagnostics,
   ];
 };

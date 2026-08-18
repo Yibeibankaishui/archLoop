@@ -35,6 +35,124 @@ npx archloop project relink <project> --path <repo-path>
 
 Create the repository's intended initial commit, then rerun `archloop check`.
 
+## Task store redirect is invalid
+
+**Cause:** `.beads/redirect` points at a missing or inaccessible Hub-owned
+Beads directory.
+
+```bash
+npx archloop project status
+npx archloop tasks init
+```
+
+Fix the redirect path, or rerun `tasks init` for the registered project to
+recreate the Hub-owned store and redirect. Do not initialize a second database
+in the Git repository.
+
+## Redirect points at a task snapshot directory
+
+**Cause:** A crashed or raced parallel Agent attempt left `.beads/redirect`
+pointing at a `task-snapshots/...` attempt directory instead of the managed
+store. Snapshot directories are not Beads databases.
+
+```bash
+npx archloop project status
+```
+
+Restore the redirect to the verified Hub-owned store under the project
+directory. Do **not** run `archloop tasks init` for this recovery. After the
+board is readable again, recover any claim-only interrupted tasks with
+`archloop tasks recover <task-id>` if needed.
+
+## Legacy Beads store still lives in the repository
+
+**Cause:** The project still has a repository-local Beads database. Hub
+migrates a writer-free legacy store automatically on the first mutating
+`archloop run` or task command.
+
+No extra migration command is required. If a previous attempt crashed, retry
+the same mutating command; Hub resumes from the durable journal and backup.
+If an external `bd` writer or migration owner is active, Hub defers the switch
+and keeps using the verified legacy store until the next automatic retry.
+Do not run `archloop tasks recover` for this.
+
+Fresh projects that initialized the task store during `project add` already
+own a Hub-managed store plus redirect. That layout is steady state, not an
+interrupted migration, so mutating commands must not ask for a migration
+source snapshot.
+
+## Interrupted Hub landing transaction
+
+**Cause:** A previous run stopped between candidate creation, verification,
+atomic landing, task close, or cleanup.
+
+```bash
+npx archloop run --flow with-review
+npx archloop tasks doctor
+npx archloop project status
+```
+
+The next mutating `archloop run` resumes from durable Git refs, artifacts, and
+receipts. It reuses the exact candidate and a matching verification artifact,
+recognizes an atomic landing receipt, retries Beads close idempotently for
+task-backed landings, and retries cleanup without undoing `shipped`. Synthetic
+host-contribution landings (`hub-host-contribution`) complete with internal
+journal evidence only — they are not Beads tasks and must never be passed to
+`tasks recover` or Beads close. `tasks doctor` is read-only. Pending
+reconciliation is not a task failure; do not run `archloop tasks recover` for
+this.
+
+## Checkout sync pending
+
+**Cause:** Hub landed the verified candidate on the publish target, but the
+configured host branch could not be fast-forwarded without touching WIP,
+operation state, sparse checkout, submodules, divergence, or another unsafe
+worktree condition.
+
+```bash
+npx archloop project status
+npx archloop tasks doctor
+npx archloop run --flow with-review
+```
+
+User state is left byte-for-byte unchanged. `shipped` is unchanged. Clean or
+switch the checkout, then rerun the same flow; Hub retries the same outbox
+item automatically. Do not run `archloop tasks recover` for this.
+
+## Legacy Hub landing history
+
+**Cause:** The project has pre-transaction merge history from before durable
+landing transactions.
+
+```bash
+npx archloop run --flow with-review
+npx archloop tasks doctor
+npx archloop project status
+```
+
+Already closed tasks stay completed and do not get manufactured landing
+receipts. If Git ancestry proves the task branch is contained in the configured
+target, the next mutating `archloop run` adopts that work into a new verified
+transaction. A historical `merge_succeeded` event is never enough to mark a
+task landed, closed, or shipped. Missing or diverged branches become
+`legacy_landing_integrity` for inspection; Hub does not silently close or
+reimplement preserved work. `tasks doctor` and `project status` stay
+read-only. Do not run `archloop tasks recover` for this.
+
+## Task-store split brain after redirect
+
+**Cause:** After `.beads/redirect` was installed, both the leftover
+repository-local database and the Hub-owned store were modified independently.
+
+```bash
+npx archloop project status
+npx archloop tasks doctor
+```
+
+Automatic task-store writes are stopped. Inspect both databases and keep the
+intended history. Hub does not merge or delete either store. This is not a
+task failure and does not require `tasks recover`.
+
 ## Agent role or credential is missing
 
 ```bash
@@ -115,6 +233,19 @@ Preview the next `tasks sync` or `tasks push` after resolving.
 Hub execution retries recognized transient provider failures with backoff unless
 the agent already emitted its completion signal. Inspect `project status` and
 the run directory reported by the CLI before retrying or recovering the task.
+
+## Run died on a later iteration after an exploration-only turn
+
+A provider startup abort with no agent output (for example a SessionStart hook
+failure and `stop_reason: abort`) no longer fails the whole multi-iteration
+run while iterations remain. The next iteration continues and receives a
+progress summary plus a "make implementation progress" nudge when the previous
+turn produced no commits.
+
+The run still records `agent_failed` when every iteration is exhausted with
+neither commits nor a completion signal, or when the last remaining iteration
+aborts during startup. An already-merged zero-commit rerun with a completion
+signal is unchanged — see "Implementer exited non-zero after finishing".
 
 ## Preserved worktree after close
 

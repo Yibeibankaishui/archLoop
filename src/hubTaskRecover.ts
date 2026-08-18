@@ -604,8 +604,22 @@ const recoverStaleExecutionStatus = async (
 
   if (plan.preserveClaim) {
     // Finished phase: resume at the router's target and keep claim metadata so
-    // the resumed-batch merge path (claim.runId / claim.batchId) can find it.
-    // updateHubTaskStatus preserves the claim; recoverFailedHubTask would strip it.
+    // the resumed-batch merge/review path (claim.runId / claim.batchId) can
+    // find it. updateHubTaskStatus preserves the claim; recoverFailedHubTask
+    // would strip it.
+    const alreadyAtResumeDestination = plan.priorStatus === plan.targetStatus;
+    if (alreadyAtResumeDestination) {
+      // e.g. reviewing → reviewing after implementation succeeded: skip the
+      // board mutation and recovery comment so repeated runs stay quiet.
+      return {
+        outcome: "unchanged",
+        priorStatus: task.hubStatus,
+        hubStatus: task.hubStatus,
+        summary: plan.reason,
+        task,
+      };
+    }
+
     const updatedTask = updateHubTaskStatus({
       cwd: input.cwd,
       taskId: input.taskId,

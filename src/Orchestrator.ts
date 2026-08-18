@@ -69,6 +69,12 @@ const invokeAgent = (
 > =>
   Effect.gen(function* () {
     let resultText = "";
+    let producedAgentOutput = false;
+    const noteAgentOutput = (text: string) => {
+      if (text.trim()) {
+        producedAgentOutput = true;
+      }
+    };
     let sessionId: string | undefined;
     let agentRootPid: number | undefined;
     const execAbortController = new AbortController();
@@ -161,10 +167,13 @@ const invokeAgent = (
           resetIdleTimer();
           for (const parsed of provider.parseStreamLine(line)) {
             if (parsed.type === "text") {
+              noteAgentOutput(parsed.text);
               onText(parsed.text);
             } else if (parsed.type === "result") {
               resultText = parsed.result;
+              noteAgentOutput(parsed.result);
             } else if (parsed.type === "tool_call") {
+              producedAgentOutput = true;
               onToolCall(parsed.name, parsed.args);
             } else if (parsed.type === "session_id") {
               sessionId = parsed.sessionId;
@@ -217,6 +226,7 @@ const invokeAgent = (
         return yield* Effect.fail(
           new AgentError({
             message: `${provider.name} exited with code ${execResult.exitCode}:\n${errorDetail}`,
+            transientStartupAbort: !producedAgentOutput,
           }),
         );
       }
@@ -256,6 +266,58 @@ const invokeAgent = (
 
 const DEFAULT_COMPLETION_SIGNAL = "<promise>COMPLETE</promise>";
 const DEFAULT_IDLE_TIMEOUT_SECONDS = 10 * 60; // 600 seconds
+const ITERATION_CONTINUATION_OUTPUT_LIMIT = 4000;
+
+type IterationContinuationKind =
+  | "zero_progress"
+  | "progress"
+  | "transient_startup_abort";
+
+const truncateTail = (text: string, limit: number): string => {
+  const trimmed = text.trim();
+  if (trimmed.length <= limit) {
+    return trimmed;
+  }
+  return `…${trimmed.slice(-limit)}`;
+};
+
+const continuationMessage = (
+  kind: IterationContinuationKind,
+  previousIteration: number,
+): string => {
+  switch (kind) {
+    case "transient_startup_abort":
+      return `Iteration ${previousIteration} aborted during provider startup before the agent produced output. Continue the task. Do not restart exploration from scratch.`;
+    case "zero_progress":
+      return `Iteration ${previousIteration} produced no commits and no completion signal (exploration only). Do not repeat that exploration. Make implementation progress now: write the change, verify it, and commit.`;
+    case "progress":
+      return `Iteration ${previousIteration} did not emit a completion signal. Continue from the progress below instead of repeating the same exploration.`;
+  }
+};
+
+const buildIterationContinuationPrompt = (input: {
+  readonly previousIteration: number;
+  readonly kind: IterationContinuationKind;
+  readonly previousOutput?: string;
+}): string => {
+  const lines = [
+    "",
+    "# ITERATION CONTINUATION",
+    "",
+    continuationMessage(input.kind, input.previousIteration),
+  ];
+  const previousOutput = input.previousOutput
+    ? truncateTail(input.previousOutput, ITERATION_CONTINUATION_OUTPUT_LIMIT)
+    : "";
+  if (previousOutput) {
+    lines.push("", "Progress from earlier iteration(s):", previousOutput);
+  }
+  lines.push("");
+  return lines.join("\n");
+};
+
+const isTransientStartupAbortError = (error: unknown): error is AgentError =>
+  error instanceof AgentError && error.transientStartupAbort === true;
 
 export interface OrchestrateOptions {
   readonly hostRepoDir: string;
@@ -339,6 +401,8 @@ export const orchestrate = (
     let allStdout = "";
     let resolvedBranch = "";
     let iterationPreservedPath: string | undefined;
+    let continuationSuffix = "";
+    let lastUsefulOutput = "";
 
     // Helper: check abort signal and bail via defect so run() can
     // re-throw the signal's reason verbatim (no archLoop wrapping).
@@ -349,158 +413,206 @@ export const orchestrate = (
       yield* checkAbort();
       yield* display.status(label(`Iteration ${i}/${iterations}`), "info");
 
-      const sandboxResult = yield* factory.withSandbox(
-        ({ hostWorktreePath, sandboxRepoPath, applyToHost, bindMountHandle }) =>
-          withSandboxLifecycle(
-            {
-              hostRepoDir,
-              sandboxRepoDir: sandboxRepoPath,
-              hooks,
-              branch,
-              hostWorktreePath,
-              applyToHost,
-              signal: options.signal,
-            },
-            (ctx) =>
-              Effect.gen(function* () {
-                // Resume session: transfer JSONL from host to sandbox before iteration 1
-                const iterationResumeSession =
-                  i === 1 ? options.resumeSession : undefined;
-                if (iterationResumeSession && bindMountHandle) {
-                  yield* display.status(label("Resuming session"), "info");
-                  const sbStore = sandboxSessionStore(
-                    ctx.sandboxRepoDir,
-                    bindMountHandle,
-                    sandboxProjectsDir,
-                  );
-                  const hStore = hostSessionStore(hostRepoDir, hostProjectsDir);
-                  yield* Effect.tryPromise({
-                    try: () =>
-                      transferSession(hStore, sbStore, iterationResumeSession),
-                    catch: (e) =>
-                      new SessionCaptureError({
-                        message: `Session resume failed: ${e instanceof Error ? e.message : String(e)}`,
-                        sessionId: iterationResumeSession,
-                      }),
-                  });
-                }
-
-                // Preprocess prompt (run !`command` expressions inside sandbox).
-                // Inline prompts pass through literally — skip expansion.
-                const fullPrompt = options.skipPromptExpansion
-                  ? prompt
-                  : yield* preprocessPrompt(
-                      prompt,
-                      ctx.sandbox,
+      const sandboxResult = yield* factory
+        .withSandbox(
+          ({
+            hostWorktreePath,
+            sandboxRepoPath,
+            applyToHost,
+            bindMountHandle,
+          }) =>
+            withSandboxLifecycle(
+              {
+                hostRepoDir,
+                sandboxRepoDir: sandboxRepoPath,
+                hooks,
+                branch,
+                hostWorktreePath,
+                applyToHost,
+                signal: options.signal,
+              },
+              (ctx) =>
+                Effect.gen(function* () {
+                  // Resume session: transfer JSONL from host to sandbox before iteration 1
+                  const iterationResumeSession =
+                    i === 1 ? options.resumeSession : undefined;
+                  if (iterationResumeSession && bindMountHandle) {
+                    yield* display.status(label("Resuming session"), "info");
+                    const sbStore = sandboxSessionStore(
                       ctx.sandboxRepoDir,
+                      bindMountHandle,
+                      sandboxProjectsDir,
                     );
+                    const hStore = hostSessionStore(
+                      hostRepoDir,
+                      hostProjectsDir,
+                    );
+                    yield* Effect.tryPromise({
+                      try: () =>
+                        transferSession(
+                          hStore,
+                          sbStore,
+                          iterationResumeSession,
+                        ),
+                      catch: (e) =>
+                        new SessionCaptureError({
+                          message: `Session resume failed: ${e instanceof Error ? e.message : String(e)}`,
+                          sessionId: iterationResumeSession,
+                        }),
+                    });
+                  }
 
-                yield* display.status(label("Agent started"), "success");
+                  // Preprocess prompt (run !`command` expressions inside sandbox).
+                  // Inline prompts pass through literally — skip expansion.
+                  const basePrompt = options.skipPromptExpansion
+                    ? prompt
+                    : yield* preprocessPrompt(
+                        prompt,
+                        ctx.sandbox,
+                        ctx.sandboxRepoDir,
+                      );
+                  const fullPrompt = `${basePrompt}${continuationSuffix}`;
 
-                // Invoke the agent — buffer text deltas so Pi's single-token
-                // chunks are displayed as readable multi-word lines.
-                const textBuffer = new TextDeltaBuffer((chunk) => {
-                  Effect.runPromise(display.text(chunk));
-                  Effect.runPromise(
-                    streamEmitter.emit({
-                      type: "text",
-                      message: chunk,
-                      iteration: i,
-                      timestamp: new Date(),
-                    }),
-                  );
-                });
-                const onText = (text: string) => {
-                  textBuffer.write(text);
-                };
-                const onToolCall = (name: string, formattedArgs: string) => {
-                  textBuffer.flush();
-                  Effect.runPromise(display.toolCall(name, formattedArgs));
-                  Effect.runPromise(
-                    streamEmitter.emit({
-                      type: "toolCall",
-                      name,
-                      formattedArgs,
-                      iteration: i,
-                      timestamp: new Date(),
-                    }),
-                  );
-                };
-                const onIdleWarning = (minutes: number) => {
-                  const msg =
-                    minutes === 1
-                      ? "Agent idle for 1 minute"
-                      : `Agent idle for ${minutes} minutes`;
-                  Effect.runPromise(display.status(label(msg), "warn"));
-                };
-                const { result: agentOutput, sessionId } = yield* invokeAgent(
-                  ctx.sandbox,
-                  ctx.sandboxRepoDir,
-                  fullPrompt,
-                  provider,
-                  idleTimeoutMs,
-                  onText,
-                  onToolCall,
-                  onIdleWarning,
-                  options._idleWarningIntervalMs,
-                  iterationResumeSession,
-                  options.signal,
-                  options._hasActiveChildProcesses,
-                );
+                  yield* display.status(label("Agent started"), "success");
 
-                // Flush any remaining buffered text deltas
-                textBuffer.dispose();
-
-                yield* display.status(label("Agent stopped"), "info");
-
-                // Capture session while sandbox is still alive
-                let sessionFilePath: string | undefined;
-                let usage: IterationUsage | undefined;
-                if (provider.captureSessions && sessionId && bindMountHandle) {
-                  yield* display.status(label("Capturing session"), "info");
-                  const sbStore = sandboxSessionStore(
-                    ctx.sandboxRepoDir,
-                    bindMountHandle,
-                    sandboxProjectsDir,
-                  );
-                  const hStore = hostSessionStore(hostRepoDir, hostProjectsDir);
-                  yield* Effect.tryPromise({
-                    try: () => transferSession(sbStore, hStore, sessionId),
-                    catch: (e) =>
-                      new SessionCaptureError({
-                        message: `Session capture failed: ${e instanceof Error ? e.message : String(e)}`,
-                        sessionId,
+                  // Invoke the agent — buffer text deltas so Pi's single-token
+                  // chunks are displayed as readable multi-word lines.
+                  const textBuffer = new TextDeltaBuffer((chunk) => {
+                    Effect.runPromise(display.text(chunk));
+                    Effect.runPromise(
+                      streamEmitter.emit({
+                        type: "text",
+                        message: chunk,
+                        iteration: i,
+                        timestamp: new Date(),
                       }),
-                  });
-                  sessionFilePath = hStore.sessionFilePath(sessionId);
-
-                  // Parse token usage from the captured session JSONL
-                  if (provider.parseSessionUsage) {
-                    const content = yield* Effect.promise(() =>
-                      hStore
-                        .readSession(sessionId)
-                        .catch(() => undefined as string | undefined),
                     );
-                    if (content) {
-                      usage = provider.parseSessionUsage(content);
+                  });
+                  const onText = (text: string) => {
+                    textBuffer.write(text);
+                  };
+                  const onToolCall = (name: string, formattedArgs: string) => {
+                    textBuffer.flush();
+                    Effect.runPromise(display.toolCall(name, formattedArgs));
+                    Effect.runPromise(
+                      streamEmitter.emit({
+                        type: "toolCall",
+                        name,
+                        formattedArgs,
+                        iteration: i,
+                        timestamp: new Date(),
+                      }),
+                    );
+                  };
+                  const onIdleWarning = (minutes: number) => {
+                    const msg =
+                      minutes === 1
+                        ? "Agent idle for 1 minute"
+                        : `Agent idle for ${minutes} minutes`;
+                    Effect.runPromise(display.status(label(msg), "warn"));
+                  };
+                  const { result: agentOutput, sessionId } = yield* invokeAgent(
+                    ctx.sandbox,
+                    ctx.sandboxRepoDir,
+                    fullPrompt,
+                    provider,
+                    idleTimeoutMs,
+                    onText,
+                    onToolCall,
+                    onIdleWarning,
+                    options._idleWarningIntervalMs,
+                    iterationResumeSession,
+                    options.signal,
+                    options._hasActiveChildProcesses,
+                  );
+
+                  // Flush any remaining buffered text deltas
+                  textBuffer.dispose();
+
+                  yield* display.status(label("Agent stopped"), "info");
+
+                  // Capture session while sandbox is still alive
+                  let sessionFilePath: string | undefined;
+                  let usage: IterationUsage | undefined;
+                  if (
+                    provider.captureSessions &&
+                    sessionId &&
+                    bindMountHandle
+                  ) {
+                    yield* display.status(label("Capturing session"), "info");
+                    const sbStore = sandboxSessionStore(
+                      ctx.sandboxRepoDir,
+                      bindMountHandle,
+                      sandboxProjectsDir,
+                    );
+                    const hStore = hostSessionStore(
+                      hostRepoDir,
+                      hostProjectsDir,
+                    );
+                    yield* Effect.tryPromise({
+                      try: () => transferSession(sbStore, hStore, sessionId),
+                      catch: (e) =>
+                        new SessionCaptureError({
+                          message: `Session capture failed: ${e instanceof Error ? e.message : String(e)}`,
+                          sessionId,
+                        }),
+                    });
+                    sessionFilePath = hStore.sessionFilePath(sessionId);
+
+                    // Parse token usage from the captured session JSONL
+                    if (provider.parseSessionUsage) {
+                      const content = yield* Effect.promise(() =>
+                        hStore
+                          .readSession(sessionId)
+                          .catch(() => undefined as string | undefined),
+                      );
+                      if (content) {
+                        usage = provider.parseSessionUsage(content);
+                      }
                     }
                   }
-                }
 
-                // Check completion signal
-                const matchedSignal = completionSignals.find((sig) =>
-                  agentOutput.includes(sig),
+                  // Check completion signal
+                  const matchedSignal = completionSignals.find((sig) =>
+                    agentOutput.includes(sig),
+                  );
+                  return {
+                    completionSignal: matchedSignal,
+                    stdout: agentOutput,
+                    sessionId,
+                    sessionFilePath,
+                    usage,
+                  } as const;
+                }),
+            ),
+        )
+        .pipe(
+          Effect.catchIf(
+            (error): error is AgentError =>
+              isTransientStartupAbortError(error) && i < iterations,
+            () =>
+              Effect.gen(function* () {
+                const remaining = iterations - i;
+                yield* display.status(
+                  label(
+                    `Iteration ${i} aborted during provider startup with no agent output — continuing (${remaining} iteration(s) remaining)`,
+                  ),
+                  "warn",
                 );
-                return {
-                  completionSignal: matchedSignal,
-                  stdout: agentOutput,
-                  sessionId,
-                  sessionFilePath,
-                  usage,
-                } as const;
+                return undefined;
               }),
           ),
-      );
+        );
+
+      if (sandboxResult === undefined) {
+        allIterations.push({});
+        continuationSuffix = buildIterationContinuationPrompt({
+          previousIteration: i,
+          kind: "transient_startup_abort",
+          previousOutput: lastUsefulOutput,
+        });
+        continue;
+      }
 
       const lifecycleResult = sandboxResult.value;
       iterationPreservedPath = sandboxResult.preservedWorktreePath;
@@ -529,6 +641,15 @@ export const orchestrate = (
           preservedWorktreePath: iterationPreservedPath,
         };
       }
+
+      lastUsefulOutput = lifecycleResult.result.stdout;
+      const continuationKind: IterationContinuationKind =
+        lifecycleResult.commits.length === 0 ? "zero_progress" : "progress";
+      continuationSuffix = buildIterationContinuationPrompt({
+        previousIteration: i,
+        kind: continuationKind,
+        previousOutput: lastUsefulOutput,
+      });
     }
 
     yield* display.status(

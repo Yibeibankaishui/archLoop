@@ -631,6 +631,52 @@ describe("createHubRunLiveDisplay (alt-screen dashboard)", () => {
     expect(harness.out.value).toContain("\x1b[?1049l");
   });
 
+  it("records a pending host-contribution batch as pending, not shipped or failed", () => {
+    const harness = createHarness();
+    const display = createHubRunLiveDisplay({
+      terminal: { write: (chunk) => (harness.out.value += chunk) },
+      clock: { now: () => 10_000 },
+      startedAt: 5_000,
+      columns: 100,
+      rows: 40,
+      color: false,
+      mode: "alt-screen",
+      altScreen: harness.adapters,
+    });
+
+    const base = runningState();
+    display.update(base);
+    display.update({
+      ...base,
+      batches: {
+        "batch-fd3cdf79-1786-4647-8899-d5f80fd8255b": {
+          ...base.batches["batch-fd3cdf79-1786-4647-8899-d5f80fd8255b"]!,
+          selectedTaskIds: ["task-a"],
+          status: "pending",
+          stage: "Pending",
+        },
+      },
+      tasks: {
+        "task-a": {
+          ...base.tasks["task-a"]!,
+          status: "waiting_for_merge",
+          stage: "Waiting for merge",
+        },
+      },
+    });
+
+    const ledger = display.ledger?.() ?? [];
+    expect(ledger).toEqual([
+      expect.objectContaining({
+        kind: "batch",
+        title: "1 task pending",
+        outcome: "pending",
+      }),
+    ]);
+    expect(JSON.stringify(ledger)).not.toMatch(/shipped|failed/);
+    display.dispose();
+  });
+
   it("cleans up on q keypress and dumps a scrollback summary", () => {
     const harness = createHarness();
     const display = createHubRunLiveDisplay({

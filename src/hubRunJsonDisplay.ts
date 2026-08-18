@@ -6,6 +6,11 @@ import {
   type HubRunOutcomeProjection,
 } from "./hubRunDisplay.js";
 import type { RunHubFlowResult } from "./hubFlowExecution.js";
+import { hubLandingReconciliationHasVisibleOutput } from "./hubLandingReconciliation.js";
+import {
+  hasHubLegacyLandingHistory,
+  type HubLegacyLandingEvidence,
+} from "./hubLandingLegacyHistory.js";
 
 export const HUB_RUN_JSON_SCHEMA_VERSION = 1 as const;
 
@@ -24,6 +29,98 @@ export interface HubRunJsonRenderer {
 
 const eventTimestamp = (event: HubRunEvent): string =>
   "createdAt" in event ? event.createdAt : event.startedAt;
+
+const taskStoreMigrationJsonFields = (
+  migration: NonNullable<RunHubFlowResult["taskStoreMigration"]>,
+): Readonly<Record<string, unknown>> => {
+  switch (migration.kind) {
+    case "migrated":
+      return {
+        phase: migration.phase,
+        backupDir: migration.backupDir,
+      };
+    case "deferred":
+      return {
+        reason: migration.reason,
+        phase: migration.phase,
+        pendingUntil: migration.pendingUntil,
+      };
+    case "split_brain":
+      return {
+        reason: "task_store_split_brain",
+        integrityError: migration.integrityError,
+      };
+    case "not_needed":
+      return {
+        reason: migration.reason,
+      };
+  }
+};
+
+const landingLegacyHistoryJson = (
+  history: readonly HubLegacyLandingEvidence[] | undefined,
+): Readonly<Record<string, unknown>> => {
+  if (!hasHubLegacyLandingHistory(history)) {
+    return {};
+  }
+  return {
+    legacyHistory: history.map((entry) => ({
+      taskId: entry.taskId,
+      decision: entry.decision,
+      accepted: entry.accepted,
+      message: entry.message,
+      ...(entry.integrityIncident
+        ? { integrityIncident: entry.integrityIncident }
+        : {}),
+    })),
+  };
+};
+
+const codePublicationJson = (
+  publication: RunHubFlowResult["publication"],
+): Readonly<Record<string, unknown>> => {
+  if (!publication || publication.pendingCount <= 0) {
+    return {};
+  }
+  return {
+    codePublication: {
+      pendingCount: publication.pendingCount,
+      succeededCount: publication.succeededCount,
+      message: publication.message,
+      nextAction: publication.nextAction,
+      items: publication.items
+        .filter((item) => item.status === "pending")
+        .map((item) => ({
+          transactionId: item.transactionId,
+          candidateOid: item.candidateOid,
+          remoteRef: item.remoteRef,
+          expectedRemoteOid: item.expectedRemoteOid,
+          pendingReason: item.pendingReason,
+        })),
+    },
+  };
+};
+
+const landingQueueJson = (
+  landingQueue: RunHubFlowResult["landingQueue"],
+): Readonly<Record<string, unknown>> => {
+  if (!landingQueue || landingQueue.pendingQuietWaitCount <= 0) {
+    return {};
+  }
+  return {
+    landingQueue: {
+      pendingQuietWaitCount: landingQueue.pendingQuietWaitCount,
+      ...(landingQueue.fifoHeadTaskId
+        ? { fifoHeadTaskId: landingQueue.fifoHeadTaskId }
+        : {}),
+      ...(landingQueue.fifoHeadPosition === undefined
+        ? {}
+        : { fifoHeadPosition: landingQueue.fifoHeadPosition }),
+      message: landingQueue.message,
+      nextAction: landingQueue.nextAction,
+    },
+  };
+};
 
 const eventData = (event: HubRunEvent): Readonly<Record<string, unknown>> => {
   const data = { ...event } as Record<string, unknown>;
@@ -242,6 +339,85 @@ export const createHubRunJsonRenderer = (input: {
                       message: failure.message,
                     }),
                   ),
+                },
+              }
+            : {}),
+          ...(result.taskStoreMigration
+            ? {
+                taskStoreMigration: {
+                  kind: result.taskStoreMigration.kind,
+                  beadsDir: result.taskStoreMigration.beadsDir,
+                  ...taskStoreMigrationJsonFields(result.taskStoreMigration),
+                },
+              }
+            : {}),
+          ...(result.landingReconciliation &&
+          hubLandingReconciliationHasVisibleOutput(result.landingReconciliation)
+            ? {
+                landingReconciliation: {
+                  kind: result.landingReconciliation.kind,
+                  pendingCount: result.landingReconciliation.pendingCount,
+                  reconstructedCount:
+                    result.landingReconciliation.reconstructedCount,
+                  message: result.landingReconciliation.message,
+                  ...(result.landingReconciliation.integrityIncident
+                    ? {
+                        integrityIncident:
+                          result.landingReconciliation.integrityIncident,
+                      }
+                    : {}),
+                  ...landingLegacyHistoryJson(
+                    result.landingReconciliation.legacyHistory,
+                  ),
+                },
+              }
+            : {}),
+          ...(result.checkoutSync && result.checkoutSync.pendingCount > 0
+            ? {
+                checkoutSync: {
+                  pendingCount: result.checkoutSync.pendingCount,
+                  succeededCount: result.checkoutSync.succeededCount,
+                  message: result.checkoutSync.message,
+                  nextAction: result.checkoutSync.nextAction,
+                },
+              }
+            : {}),
+          ...codePublicationJson(result.publication),
+          ...landingQueueJson(result.landingQueue),
+          ...(result.mergeResult
+            ? {
+                merge: {
+                  batchStatus: result.mergeResult.batchStatus,
+                  selectedTaskIds: result.mergeResult.selectedTaskIds,
+                  results: result.mergeResult.results.map((task) => ({
+                    taskId: task.taskId,
+                    outcome: task.outcome,
+                    hubStatus: task.hubStatus,
+                    ...(task.reason ? { reason: task.reason } : {}),
+                    ...(task.failureReason
+                      ? { failureReason: task.failureReason }
+                      : {}),
+                    ...(task.transactionId
+                      ? { transactionId: task.transactionId }
+                      : {}),
+                    ...(task.sourceOid ? { sourceOid: task.sourceOid } : {}),
+                    ...(task.baseOid ? { baseOid: task.baseOid } : {}),
+                    ...(task.candidateOid
+                      ? { candidateOid: task.candidateOid }
+                      : {}),
+                    ...(task.predecessorOid
+                      ? { predecessorOid: task.predecessorOid }
+                      : {}),
+                    ...(task.fifoPosition === undefined
+                      ? {}
+                      : { fifoPosition: task.fifoPosition }),
+                    ...(task.verificationConcurrency === undefined
+                      ? {}
+                      : {
+                          verificationConcurrency:
+                            task.verificationConcurrency,
+                        }),
+                  })),
                 },
               }
             : {}),

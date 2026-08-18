@@ -158,6 +158,114 @@ describe("plain Hub run lifecycle output", () => {
     });
   });
 
+  it("returns completed_with_pending_delivery for required publication timeout", () => {
+    const result = makeRunResult({
+      stopReason: "no_ready_tasks",
+      completedBatchCount: 1,
+      completedTaskCount: 0,
+      mergeResult: {
+        runId: "run-1",
+        batchId: "batch-1",
+        selectedTaskIds: ["bd-pub"],
+        selectionDiagnostics: [],
+        batchStatus: "partial_failed",
+        results: [
+          {
+            taskId: "bd-pub",
+            title: "Publish me",
+            branch: "archloop/bd-pub",
+            outcome: "pending_delivery",
+            hubStatus: "publishing",
+            reason: "completed_with_pending_delivery",
+            diagnosticSummary:
+              "Required delivery timed out. The task is not semantically failed.",
+          },
+        ],
+      },
+    });
+
+    expect(projectHubRunOutcome(result)).toMatchObject({
+      outcome: "completed_with_pending_delivery",
+      summary: "Run completed with pending required delivery",
+      exitCode: 1,
+      taskDetails: [
+        expect.objectContaining({
+          taskId: "bd-pub",
+          stage: "Publishing",
+        }),
+      ],
+    });
+  });
+
+  it("keeps host-contribution pending distinct from failed and shipped", () => {
+    const result = makeRunResult({
+      stopReason: "batch_pending",
+      completedBatchCount: 0,
+      completedTaskCount: 0,
+      batchResults: [
+        {
+          batchId: "batch-1",
+          selectedTaskIds: ["bd-host"],
+          completedTaskCount: 0,
+          batchStatus: "pending",
+        },
+      ],
+      results: [
+        {
+          taskId: "bd-host",
+          title: "Host pending",
+          branch: "archloop/bd-host",
+          outcome: "reviewed",
+          hubStatus: "waiting_for_merge",
+          commitCount: 1,
+        },
+      ],
+      mergeResult: {
+        runId: "run-1",
+        batchId: "batch-1",
+        selectedTaskIds: ["bd-host"],
+        selectionDiagnostics: [],
+        batchStatus: "pending",
+        results: [
+          {
+            taskId: "bd-host",
+            title: "Host pending",
+            branch: "archloop/bd-host",
+            outcome: "pending",
+            hubStatus: "waiting_for_merge",
+            reason: "host_contribution_conflict",
+            diagnosticSummary:
+              "Host contribution for main has a deterministic merge conflict. Resolve the conflict, then rerun the same flow. This is not a task failure and does not require a recovery command.",
+          },
+        ],
+      },
+    });
+
+    const projection = projectHubRunOutcome(result);
+    expect(projection).toMatchObject({
+      outcome: "completed_with_pending_merge",
+      summary: "Run completed with pending merge",
+      exitCode: 1,
+      counts: {
+        completed: 0,
+        failed: 0,
+        blocked: 0,
+        skipped: 0,
+        readyToMerge: 1,
+      },
+    });
+    expect(projection.taskDetails).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-host",
+        stage: "Host contribution pending",
+      }),
+    );
+    expect(JSON.stringify(projection)).not.toMatch(/tasks recover/);
+    expect(formatPlainHubRunOutcome(result, projection).join("\n")).toContain(
+      'outcome="completed_with_pending_merge"',
+    );
+  });
+
   it("treats the configured flow-batch limit as successful completion", () => {
     const result: RunHubFlowResult = {
       flowId: "with-review",
@@ -865,5 +973,174 @@ describe("plain Hub run lifecycle output", () => {
     );
     expect(line.split("\n")).toHaveLength(1);
     expect(line).not.toMatch(/\u001b\[[0-?]*[ -/]*[@-~]/);
+  });
+
+  it("formats landing reconciliation as pending work, not semantic failure", () => {
+    const event: HubRunEvent = {
+      type: "landing_reconciliation",
+      eventId: "run-1:9",
+      sequence: 9,
+      runId: "run-1",
+      createdAt: "2026-08-14T12:00:00.000Z",
+      kind: "pending",
+      pendingCount: 1,
+      message:
+        "Hub landing transaction ltx-1 is pending reconciliation at candidate_created. Automatic retry will resume from durable evidence. This is not a task failure and does not require a recovery command.",
+    };
+    const line = formatPlainHubRunEvent(
+      event,
+      createHubRunDisplayState({
+        hubProjectName: "alpha",
+        flowId: "no-review",
+      }),
+    );
+    expect(line).toContain("event=landing_reconciliation");
+    expect(line).toContain('kind="pending"');
+    expect(line).not.toMatch(/tasks recover/);
+  });
+
+  it("formats landing rebuild, contention, and stale-owner events with target and fence OIDs", () => {
+    const state = createHubRunDisplayState({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+    });
+    const base = {
+      eventId: "run-1:20",
+      sequence: 20,
+      runId: "run-1",
+      batchId: "batch-1",
+      taskId: "bd-land",
+      branch: "archloop/bd-land",
+      createdAt: "2026-08-14T16:00:00.000Z",
+      status: "merging",
+      expectedTargetOid: "a".repeat(40),
+      observedTargetOid: "b".repeat(40),
+      expectedFenceOid: "c".repeat(40),
+      observedFenceOid: "d".repeat(40),
+    } as const;
+
+    const rebuild = formatPlainHubRunEvent(
+      { ...base, type: "target_landing_rebuild", reason: "target_drift" },
+      state,
+    );
+    expect(rebuild).toContain("event=target_landing_rebuild");
+    expect(rebuild).toContain("Rebuilding landing candidate");
+    expect(rebuild).toContain(`expected_target_oid="${"a".repeat(40)}"`);
+    expect(rebuild).toContain(`observed_target_oid="${"b".repeat(40)}"`);
+    expect(rebuild).not.toMatch(/tasks recover/);
+
+    const pending = formatPlainHubRunEvent(
+      {
+        ...base,
+        type: "target_landing_pending",
+        reason: "pending_contention",
+      },
+      state,
+    );
+    expect(pending).toContain("event=target_landing_pending");
+    expect(pending).toContain("Landing pending");
+    expect(pending).toContain(`expected_fence_oid="${"c".repeat(40)}"`);
+
+    const stale = formatPlainHubRunEvent(
+      {
+        ...base,
+        type: "target_landing_stale_owner_rejected",
+        reason: "stale_owner_rejected",
+      },
+      state,
+    );
+    expect(stale).toContain("event=target_landing_stale_owner_rejected");
+    expect(stale).toContain("Stale landing owner rejected");
+    expect(stale).toContain(`observed_fence_oid="${"d".repeat(40)}"`);
+  });
+
+  it("formats checkout sync pending and success without recover or shipped failure", () => {
+    const state = createHubRunDisplayState({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+    });
+    const base = {
+      eventId: "run-1:30",
+      sequence: 30,
+      runId: "run-1",
+      batchId: "batch-1",
+      taskId: "bd-land",
+      branch: "main",
+      createdAt: "2026-08-14T18:00:00.000Z",
+      status: "done",
+      transactionId: "ltx-bd-land-abc123",
+      candidateOid: "c".repeat(40),
+    } as const;
+
+    const pending = formatPlainHubRunEvent(
+      {
+        ...base,
+        type: "checkout_sync_pending",
+        reason: "unstaged_changes",
+        message: "Checkout sync pending for bd-land (unstaged_changes).",
+      },
+      state,
+    );
+    expect(pending).toContain("event=checkout_sync_pending");
+    expect(pending).toContain("Checkout sync pending");
+    expect(pending).toContain('reason="unstaged_changes"');
+    expect(pending).toContain(`transaction_id="${base.transactionId}"`);
+    expect(pending).toContain(`candidate_oid="${base.candidateOid}"`);
+    expect(pending).not.toMatch(/tasks recover/);
+
+    const synced = formatPlainHubRunEvent(
+      { ...base, type: "checkout_sync_succeeded" },
+      state,
+    );
+    expect(synced).toContain("event=checkout_sync_succeeded");
+    expect(synced).toContain("Checkout synced");
+    expect(synced).not.toMatch(/tasks recover/);
+  });
+
+  it("formats code publication pending and success separately from task sync", () => {
+    const state = createHubRunDisplayState({
+      hubProjectName: "alpha",
+      flowId: "no-review",
+    });
+    const base = {
+      eventId: "run-1:50",
+      sequence: 50,
+      runId: "run-1",
+      batchId: "batch-1",
+      taskId: "bd-land",
+      branch: "origin/main",
+      createdAt: "2026-08-14T19:00:00.000Z",
+      status: "done",
+      transactionId: "ltx-bd-land-abc123",
+      candidateOid: "c".repeat(40),
+      remoteRef: "refs/heads/main",
+      expectedRemoteOid: "b".repeat(40),
+    } as const;
+
+    const pending = formatPlainHubRunEvent(
+      {
+        ...base,
+        type: "target_publish_pending",
+        reason: "network_error",
+        message: "Code publication pending for bd-land (network_error).",
+      },
+      state,
+    );
+    expect(pending).toContain("event=target_publish_pending");
+    expect(pending).toContain("Code publication pending");
+    expect(pending).toContain('reason="network_error"');
+    expect(pending).toContain(`transaction_id="${base.transactionId}"`);
+    expect(pending).toContain(`candidate_oid="${base.candidateOid}"`);
+    expect(pending).toContain(`remote_ref="${base.remoteRef}"`);
+    expect(pending).toContain(`expected_remote_oid="${base.expectedRemoteOid}"`);
+    expect(pending).not.toMatch(/tasks recover/);
+
+    const published = formatPlainHubRunEvent(
+      { ...base, type: "target_publish_succeeded" },
+      state,
+    );
+    expect(published).toContain("event=target_publish_succeeded");
+    expect(published).toContain("Code published");
+    expect(published).not.toMatch(/tasks recover/);
   });
 });

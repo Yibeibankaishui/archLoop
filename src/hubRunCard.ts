@@ -1,4 +1,8 @@
-import type { HubRunDisplayState } from "./hubRunDisplay.js";
+import {
+  isTerminalHubRunBatchStatus,
+  type HubRunDisplayBatchStatus,
+  type HubRunDisplayState,
+} from "./hubRunDisplay.js";
 import {
   renderSection,
   type RenderSectionOptions,
@@ -178,7 +182,7 @@ const currentBatch = (
   state: HubRunDisplayState,
 ): HubRunDisplayState["batches"][string] | undefined =>
   Object.values(state.batches).find(
-    (batch) => batch.status !== "done" && batch.status !== "partial_failed",
+    (batch) => !isTerminalHubRunBatchStatus(batch.status),
   );
 
 const sortedBatches = (
@@ -229,7 +233,43 @@ const collapsedSummary = (
   if (batch.status === "done") {
     return `✓ batch ${short}   ${count}   done${duration}`;
   }
+  if (batch.status === "pending") {
+    return `◐ batch ${short}   ${count}   pending${duration}`;
+  }
   return `✗ batch ${short}   ${count}   failed${duration}`;
+};
+
+const batchGroupSymbol = (
+  status: HubRunDisplayBatchStatus,
+): "✓" | "✗" | "◐" => {
+  switch (status) {
+    case "done":
+      return "✓";
+    case "partial_failed":
+      return "✗";
+    default:
+      return "◐";
+  }
+};
+
+const batchGroupRightHint = (
+  batch: HubRunDisplayState["batches"][string],
+  activeTaskStatus?: string,
+): string => {
+  switch (batch.status) {
+    case "planning":
+      return activeTaskStatus
+        ? `planning · ${phaseLabel(activeTaskStatus)}`
+        : "planning";
+    case "merging":
+      return "merging";
+    case "done":
+      return "done";
+    case "pending":
+      return "pending";
+    case "partial_failed":
+      return "failed";
+  }
 };
 
 const currentBatchGroup = (
@@ -237,31 +277,16 @@ const currentBatchGroup = (
   activeTaskStatus?: string,
 ): SectionGroupBlock => {
   const short = shortHubId(batch.batchId);
-  const symbol =
-    batch.status === "done"
-      ? "✓"
-      : batch.status === "partial_failed"
-        ? "✗"
-        : "◐";
+  const symbol = batchGroupSymbol(batch.status);
   const severity =
     symbol === "✓" ? "success" : symbol === "✗" ? "error" : "warn";
-  const rightHint =
-    batch.status === "planning"
-      ? activeTaskStatus
-        ? `planning · ${phaseLabel(activeTaskStatus)}`
-        : "planning"
-      : batch.status === "merging"
-        ? "merging"
-        : batch.status === "done"
-          ? "done"
-          : "failed";
   return {
     kind: "group",
     symbol,
     severity,
     name: `batch ${short}`,
     count: batch.selectedTaskIds.length,
-    rightHint,
+    rightHint: batchGroupRightHint(batch, activeTaskStatus),
     items: [],
   };
 };
@@ -324,8 +349,7 @@ const buildBatchViews = (
   const active = currentBatch(state);
 
   for (const batch of sortedBatches(state)) {
-    const isTerminalBatch =
-      batch.status === "done" || batch.status === "partial_failed";
+    const isTerminalBatch = isTerminalHubRunBatchStatus(batch.status);
     const collapseThis =
       isTerminalBatch ||
       kind === "batch.completed" ||
@@ -681,9 +705,8 @@ export const detectRunCardTransition = (
       const before = prev.batches[batch.batchId];
       if (
         before &&
-        before.status !== "done" &&
-        before.status !== "partial_failed" &&
-        (batch.status === "done" || batch.status === "partial_failed")
+        !isTerminalHubRunBatchStatus(before.status) &&
+        isTerminalHubRunBatchStatus(batch.status)
       ) {
         return { kind: "batch.completed" };
       }

@@ -23,8 +23,10 @@ npx archloop run --flow <flow-id>
 
 Startup detects tasks left in implementation, review, or merge without a live
 worktree lease. Completed implementation or review events route the task to the
-next stage, while preserved branch and worktree changes remain available. The
-CLI reports each route; JSONL includes the structured `autoRecover` result.
+next stage, while preserved branch and worktree changes remain available. For
+`with-review`, a recovered `reviewing` task resumes the reviewer only and then
+continues through merge — it does not re-run implementation. The CLI reports
+each route; JSONL includes the structured `autoRecover` result.
 
 To preview all interrupted tasks without starting a flow:
 
@@ -59,10 +61,51 @@ lease, and cleanup findings by severity.
 
 ## Dirty source checkout
 
-Non-overlapping uncommitted files do not necessarily block a merge. If a task
-branch overlaps dirty source files, archLoop lists the exact paths and keeps the
-task merge-ready. Commit, stash, or discard those paths, then rerun the same
-flow.
+Hub landing does not merge into the user's checkout. Overlapping uncommitted
+files, staged Beads exports, and other WIP stay unchanged and do not block a
+local landing onto the Hub publish target. After a successful landing, Hub
+fast-forwards the configured host branch only when Git can prove that update
+safe. Dirty, sparse, submodule, operation-in-progress, diverged, or otherwise
+unsafe checkouts stay `checkout_sync_pending` and are retried automatically
+on a later `archloop run`. Cleaning or switching the checkout is enough; do
+not run `tasks recover`. Pending checkout sync never changes `shipped`.
+
+Best-effort remote code publication is separate: when configured with
+`--publish-policy best_effort` and `--remote-target`, network, credential,
+protected-branch, or unknown push outcomes stay `target_publish_pending` and
+retry automatically without undoing local shipped proof. Remote divergence
+that changes the deliverable stays pending for fresh reconciliation instead of
+force-overwriting. Discovering `origin` alone never enables publication.
+
+A task branch that already committed allowlisted Beads runtime/export files
+can still land: Hub removes only those paths from the candidate tree, records
+every filtered path, and leaves the source branch and checkout unchanged.
+Unknown `.beads/**` files are never dropped silently.
+
+Interrupted landing transactions resume automatically on the next mutating
+`archloop run`. Hub reconstructs progress from the journal, candidate
+ref/manifest, verification artifact, atomic receipt, Beads close metadata, and
+missing worktrees. Committed host-target contributions use a synthetic
+`hub-host-contribution` transaction that is not a Beads task: after the
+candidate lands, reconciliation records internal completion and cleanup without
+calling Beads close APIs, and never recommends `tasks recover` for that id.
+`tasks doctor` and `project status` can show that pending state without
+changing it. Do not run `archloop tasks recover` for this.
+
+Pre-transaction history is classified the same way. Already closed tasks remain
+completed. Ancestry-proven in-flight branches are adopted into a new
+transaction on the next mutating run. A historical `merge_succeeded` event
+never proves delivery. Missing or diverged branches are reported as
+`legacy_landing_integrity` and are not closed or reimplemented.
+
+A semantic merge conflict or verification failure is repaired automatically up
+to two times. If that budget is exhausted, only that task becomes `blocked`
+with `merge_conflict_unresolved` or `verification_failed`. Independent siblings
+in the same batch still land. Transient Git lock, landing-lease, and I/O errors
+stay pending and retry on the next run. If the Hub publish target moves before
+landing, Hub invalidates that candidate, rebuilds on the new target, and
+re-runs full verification. A live landing-lease owner is not displaced just
+because a TTL elapsed.
 
 ## Active worktree lease
 

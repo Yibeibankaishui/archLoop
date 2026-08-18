@@ -29,6 +29,7 @@ export const HUB_EXECUTION_STATUSES = new Set<HubTaskStatus>([
   "reviewing",
   "waiting_for_merge",
   "merging",
+  "publishing",
   "failed",
 ]);
 

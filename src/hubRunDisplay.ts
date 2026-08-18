@@ -2,10 +2,16 @@ import { join } from "node:path";
 
 import type { HubRunEvent, HubRunStopReason } from "./hubExecution.js";
 import type { RunHubFlowResult } from "./hubFlowExecution.js";
+import {
+  HUB_HOST_CONTRIBUTION_CONFLICT,
+  HUB_HOST_CONTRIBUTION_PENDING,
+} from "./hubLandingQueue.js";
 
 export type HubRunOutcome =
   | "completed"
   | "completed_with_failures"
+  | "completed_with_pending_delivery"
+  | "completed_with_pending_merge"
   | "failed"
   | "cancelled";
 
@@ -94,6 +100,10 @@ const classifyHubRunTasks = (
       } else {
         skipped.add(task.taskId);
       }
+    } else if (task.outcome === "pending") {
+      readyToMerge.add(task.taskId);
+    } else if (task.hubStatus === "blocked" || task.reason) {
+      blocked.add(task.taskId);
     } else {
       failed.add(task.taskId);
     }
@@ -217,7 +227,9 @@ const projectWaitingMergeDetails = (
   );
   const failedMergeTaskIds = new Set(
     (result.mergeResult?.results ?? []).flatMap((task) =>
-      task.outcome === "merged" || task.outcome === "skipped"
+      task.outcome === "merged" ||
+      task.outcome === "skipped" ||
+      task.outcome === "pending_delivery"
         ? []
         : [task.taskId],
     ),
@@ -286,45 +298,176 @@ const projectMergeFailureDetails = (
     ];
   });
 
+const isHostContributionPendingReason = (reason: string | undefined): boolean =>
+  reason === HUB_HOST_CONTRIBUTION_CONFLICT ||
+  reason === HUB_HOST_CONTRIBUTION_PENDING;
+
+const pendingMergeStageLabel = (reason: string | undefined): string =>
+  isHostContributionPendingReason(reason)
+    ? "Host contribution pending"
+    : "Waiting for merge";
+
+const projectPendingMergeDetails = (
+  result: RunHubFlowResult,
+): readonly HubRunTaskDetail[] =>
+  (result.mergeResult?.results ?? []).flatMap((task) =>
+    task.outcome === "pending"
+      ? [
+          {
+            taskId: task.taskId,
+            stage: pendingMergeStageLabel(task.reason),
+            diagnostic:
+              task.diagnosticSummary ??
+              "Landing is still pending. The task is not semantically failed and does not require a recovery command.",
+            recoveryCommand: `archloop run --flow ${result.flowId}`,
+          },
+        ]
+      : [],
+  );
+
+const projectPendingDeliveryDetails = (
+  result: RunHubFlowResult,
+): readonly HubRunTaskDetail[] =>
+  (result.mergeResult?.results ?? []).flatMap((task) =>
+    task.outcome === "pending_delivery"
+      ? [
+          {
+            taskId: task.taskId,
+            stage: "Publishing",
+            diagnostic:
+              task.diagnosticSummary ??
+              "Required remote delivery is still pending. Local landing is preserved and the task is not semantically failed.",
+          },
+        ]
+      : [],
+  );
+
+const resolveHubRunOutcomeKind = (
+  result: RunHubFlowResult,
+  options: { readonly cancelled?: boolean },
+  hasPendingDelivery: boolean,
+  hasPendingMerge: boolean,
+  hasPartialProgress: boolean,
+): HubRunOutcome => {
+  if (options.cancelled === true) {
+    return "cancelled";
+  }
+  if (hasPendingDelivery && result.stopReason !== "batch_failed") {
+    return "completed_with_pending_delivery";
+  }
+  if (hasPendingMerge && result.stopReason !== "batch_failed") {
+    return "completed_with_pending_merge";
+  }
+  if (result.stopReason !== "batch_failed") {
+    return "completed";
+  }
+  return hasPartialProgress ? "completed_with_failures" : "failed";
+};
+
+const summarizeHubRunOutcome = (
+  outcome: HubRunOutcome,
+  result: RunHubFlowResult,
+): string => {
+  switch (outcome) {
+    case "cancelled":
+      return "Run cancelled";
+    case "completed_with_pending_delivery":
+      return "Run completed with pending required delivery";
+    case "completed_with_pending_merge":
+      return "Run completed with pending merge";
+    case "completed_with_failures":
+      return "Run completed with failures";
+    case "failed":
+      return "Run failed";
+    case "completed":
+      if (
+        result.stopReason === "no_ready_tasks" &&
+        result.completedBatchCount === 0
+      ) {
+        return "Nothing to run";
+      }
+      if (result.stopReason === "max_batches_reached") {
+        return "Reached configured flow-batch limit";
+      }
+      return "Run completed";
+  }
+};
+
 export const projectHubRunOutcome = (
   result: RunHubFlowResult,
   options: { readonly cancelled?: boolean } = {},
 ): HubRunOutcomeProjection => {
   const counts = classifyHubRunTasks(result);
   const hasPartialProgress = counts.completed > 0 || counts.readyToMerge > 0;
-  const outcome: HubRunOutcome =
-    options.cancelled === true
-      ? "cancelled"
-      : result.stopReason !== "batch_failed"
-        ? "completed"
-        : hasPartialProgress
-          ? "completed_with_failures"
-          : "failed";
+  const hasPendingDelivery =
+    result.mergeResult?.results.some(
+      (task) => task.outcome === "pending_delivery",
+    ) === true;
+  const hasPendingMerge =
+    result.mergeResult?.results.some((task) => task.outcome === "pending") ===
+      true ||
+    result.batchResults.some((batch) => batch.batchStatus === "pending") ||
+    result.stopReason === "batch_pending";
+  const outcome = resolveHubRunOutcomeKind(
+    result,
+    options,
+    hasPendingDelivery,
+    hasPendingMerge,
+    hasPartialProgress,
+  );
 
   return {
     outcome,
-    summary:
-      outcome === "cancelled"
-        ? "Run cancelled"
-        : outcome === "completed_with_failures"
-          ? "Run completed with failures"
-          : outcome === "failed"
-            ? "Run failed"
-            : result.stopReason === "no_ready_tasks" &&
-                result.completedBatchCount === 0
-              ? "Nothing to run"
-              : result.stopReason === "max_batches_reached"
-                ? "Reached configured flow-batch limit"
-                : "Run completed",
+    summary: summarizeHubRunOutcome(outcome, result),
     counts,
     taskDetails: [
       ...projectFailedTaskDetails(result),
       ...projectMergeSelectionDetails(result),
       ...projectMergeFailureDetails(result),
       ...projectWaitingMergeDetails(result),
+      ...projectPendingMergeDetails(result),
+      ...projectPendingDeliveryDetails(result),
     ],
     exitCode: resolveHubRunExitCode(outcome),
   };
+};
+
+export type HubRunDisplayBatchStatus =
+  | "planning"
+  | "merging"
+  | "done"
+  | "partial_failed"
+  | "pending";
+
+export const isTerminalHubRunBatchStatus = (
+  status: HubRunDisplayBatchStatus,
+): boolean =>
+  status === "done" || status === "partial_failed" || status === "pending";
+
+const resolveBatchMergeCompletedStage = (
+  batchStatus: "done" | "partial_failed" | "pending",
+): string => {
+  switch (batchStatus) {
+    case "done":
+      return "Completed";
+    case "pending":
+      return "Pending";
+    case "partial_failed":
+      return "Completed with failures";
+  }
+};
+
+const resolveRunCompletedDisplayStatus = (
+  stopReason: HubRunStopReason,
+): HubRunDisplayState["status"] => {
+  switch (stopReason) {
+    case "batch_failed":
+      return "completed_with_failures";
+    case "batch_pending":
+      return "completed_with_pending_merge";
+    default:
+      return "completed";
+  }
 };
 
 export interface HubRunDisplayState {
@@ -337,6 +480,8 @@ export interface HubRunDisplayState {
     | "running"
     | "completed"
     | "completed_with_failures"
+    | "completed_with_pending_delivery"
+    | "completed_with_pending_merge"
     | "failed"
     | "cancelled";
   readonly completedBatchCount: number;
@@ -349,7 +494,7 @@ export interface HubRunDisplayState {
         readonly batchId: string;
         readonly selectedTaskIds: readonly string[];
         readonly taskTitles?: Readonly<Record<string, string>>;
-        readonly status: "planning" | "merging" | "done" | "partial_failed";
+        readonly status: HubRunDisplayBatchStatus;
         readonly stage: string;
       }
     >
@@ -411,9 +556,35 @@ const resolveTaskStage = (event: Extract<HubRunEvent, { taskId: string }>) => {
       return "Resolving merge conflict";
     case "verification_started":
       return "Verifying";
+    case "integration_candidate_created":
+      return "Creating landing candidate";
+    case "candidate_verification_passed":
     case "verification_passed":
+      return "Landing";
+    case "target_landing_succeeded":
     case "task_close_started":
       return "Closing";
+    case "target_landing_rebuild":
+      return "Rebuilding landing candidate";
+    case "target_landing_pending":
+      return "Landing pending";
+    case "target_landing_stale_owner_rejected":
+      return "Stale landing owner rejected";
+    case "target_quiet_wait":
+      return "Target quiet wait";
+    case "speculative_suffix_invalidated":
+      return "Speculative suffix invalidated";
+    case "host_contribution_reconciled":
+      return "Host contribution reconciled";
+    case "checkout_sync_pending":
+      return "Checkout sync pending";
+    case "checkout_sync_succeeded":
+      return "Checkout synced";
+    case "target_publish_pending":
+      return "Code publication pending";
+    case "target_publish_succeeded":
+      return "Code published";
+    case "task_close_succeeded":
     case "task_closed":
       return "Completed";
     default:
@@ -542,10 +713,7 @@ const reduceBatchEvent = (
         selectedTaskIds: event.taskIds,
         taskTitles: current?.taskTitles,
         status: event.batchStatus,
-        stage:
-          event.batchStatus === "done"
-            ? "Completed"
-            : "Completed with failures",
+        stage: resolveBatchMergeCompletedStage(event.batchStatus),
       };
     default:
       return current;
@@ -630,10 +798,7 @@ export const reduceHubRunDisplayState = (
       return {
         ...state,
         runId: event.runId,
-        status:
-          event.stopReason === "batch_failed"
-            ? "completed_with_failures"
-            : "completed",
+        status: resolveRunCompletedDisplayStatus(event.stopReason),
         completedBatchCount: event.completedBatchCount,
         completedTaskCount: event.completedTaskCount,
         stopReason: event.stopReason,
@@ -647,6 +812,13 @@ export const reduceHubRunDisplayState = (
 
 const textField = (name: string, value: string): string =>
   `${name}=${JSON.stringify(value)}`;
+
+const optionalTextFields = (
+  entries: ReadonlyArray<readonly [string, string | undefined]>,
+): string[] =>
+  entries.flatMap(([name, value]) =>
+    value ? [textField(name, value)] : [],
+  );
 
 const numberField = (name: string, value: number): string => `${name}=${value}`;
 
@@ -762,6 +934,32 @@ export const formatPlainHubRunEvent = (
       textField("batch_id", event.batchId),
       textField("task_id", event.taskId),
       textField("stage", resolveTaskStage(event)),
+      ...optionalTextFields([
+        ["expected_target_oid", event.expectedTargetOid],
+        ["observed_target_oid", event.observedTargetOid],
+        ["expected_fence_oid", event.expectedFenceOid],
+        ["observed_fence_oid", event.observedFenceOid],
+        ["transaction_id", event.transactionId],
+        ["candidate_oid", event.candidateOid],
+        ["predecessor_oid", event.predecessorOid],
+        ["remote_ref", event.remoteRef],
+        ["expected_remote_oid", event.expectedRemoteOid],
+        ["reason", event.reason],
+        ["message", event.message],
+        ["host_contribution", event.hostContributionRelation],
+      ]),
+      ...(typeof event.fifoPosition === "number"
+        ? [numberField("fifo_position", event.fifoPosition)]
+        : []),
+      ...(typeof event.verificationConcurrency === "number"
+        ? [numberField("verification_concurrency", event.verificationConcurrency)]
+        : []),
+      ...(event.suffixInvalidatedTaskIds &&
+      event.suffixInvalidatedTaskIds.length > 0
+        ? [
+            `suffix_invalidated_task_ids=${JSON.stringify(event.suffixInvalidatedTaskIds)}`,
+          ]
+        : []),
     ].join(" ");
   }
 
@@ -790,6 +988,26 @@ export const formatPlainHubRunEvent = (
         textField("flow", state.flowId),
         textField("run_id", event.runId),
         textField("logs", join(event.hubProjectDir, "runs", event.runId)),
+      ].join(" ");
+    case "task_store_migration":
+      return [
+        "event=task_store_migration",
+        textField("run_id", event.runId),
+        textField("kind", event.kind),
+        ...(event.reason ? [textField("reason", event.reason)] : []),
+        textField("beads_dir", event.beadsDir),
+        textField("message", event.message),
+      ].join(" ");
+    case "landing_reconciliation":
+      return [
+        "event=landing_reconciliation",
+        textField("run_id", event.runId),
+        textField("kind", event.kind),
+        numberField("pending_count", event.pendingCount),
+        ...(event.integrityIncident
+          ? [textField("integrity_incident", event.integrityIncident)]
+          : []),
+        textField("message", event.message),
       ].join(" ");
     case "batch_started":
       return [
