@@ -852,32 +852,73 @@ describe("JSONL Hub run lifecycle output", () => {
     });
     expect(JSON.stringify(checkoutPending)).not.toMatch(/tasks recover/);
 
-    const incident = parseRecord(
-      renderer
-        .outcome(
-          makeRunResult({
-            landingReconciliation: {
-              kind: "integrity_incident",
-              transactions: [],
-              pendingCount: 0,
-              reconstructedCount: 0,
-              integrityIncident:
-                "landing_integrity_incident: journal candidate does not match ref",
-              message:
-                "Hub landing integrity incident for ltx-1: landing_integrity_incident: journal candidate does not match ref This is not a task failure and does not require a recovery command.",
-              nextAction:
-                "Inspect the candidate ref, landing receipt, verification artifact, and journal. Do not land or close the task again automatically.",
-            },
-          }),
-          projectHubRunOutcome(makeRunResult({})),
-        )
-        .at(-1)!,
+    const incidentResult = makeRunResult({
+      stopReason: "no_ready_tasks",
+      completedBatchCount: 1,
+      completedTaskCount: 2,
+      batchResults: [
+        {
+          batchId: "batch-1",
+          selectedTaskIds: ["t1", "t2"],
+          completedTaskCount: 2,
+          batchStatus: "completed",
+        },
+      ],
+      landingReconciliation: {
+        kind: "integrity_incident",
+        transactions: [
+          {
+            transactionId: "ltx-1",
+            taskId: "hub-host-contribution",
+            taskBacked: false,
+            verificationReusable: false,
+            landed: false,
+            closed: false,
+            cleaned: false,
+            worktreePresent: false,
+            integrityIncident:
+              "landing_integrity_incident: journal candidate does not match ref",
+            pending: false,
+            nextAction:
+              "Inspect the candidate ref, landing receipt, verification artifact, and journal. Do not land or close the task again automatically.",
+          },
+        ],
+        pendingCount: 0,
+        reconstructedCount: 0,
+        integrityIncident:
+          "landing_integrity_incident: journal candidate does not match ref",
+        message:
+          "Hub landing integrity incident for ltx-1: landing_integrity_incident: journal candidate does not match ref This is not a task failure and does not require a recovery command.",
+        nextAction:
+          "Inspect the candidate ref, landing receipt, verification artifact, and journal. Do not land or close the task again automatically.",
+      },
+    });
+    const incidentLines = renderer.outcome(
+      incidentResult,
+      projectHubRunOutcome(incidentResult),
     );
+    const incidentWarning = parseRecord(incidentLines[0]!);
+    expect(incidentWarning).toMatchObject({
+      type: "landing_reconciliation_incident",
+      transactionId: "ltx-1",
+      affectsCurrentBatch: false,
+      nextAction: expect.stringContaining("Inspect the candidate ref"),
+    });
+    const incident = parseRecord(incidentLines.at(-1)!);
+    expect(incident).toMatchObject({
+      outcome: "completed",
+      exitCode: 0,
+      completedBatchCount: 1,
+      stopReason: "no_ready_tasks",
+    });
     expect(incident.landingReconciliation).toMatchObject({
       kind: "integrity_incident",
       integrityIncident: expect.stringContaining("landing_integrity_incident"),
+      nextAction: expect.stringContaining("Inspect the candidate ref"),
+      affectsCurrentBatch: false,
     });
     expect(JSON.stringify(incident)).not.toMatch(/tasks recover/);
+    expect(JSON.stringify(incident)).not.toMatch(/batch_failed|completed_with_failures/);
   });
 
   it("explains accepted and rejected legacy landing history in JSON", () => {

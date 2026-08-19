@@ -2,6 +2,7 @@ import {
   isTerminalHubRunBatchStatus,
   type HubRunDisplayBatchStatus,
   type HubRunDisplayState,
+  type HubRunWarning,
 } from "./hubRunDisplay.js";
 import {
   renderSection,
@@ -64,6 +65,7 @@ export interface BuildRunCardSectionModelInput {
     readonly diagnostic: string;
     readonly recoveryCommand?: string;
   }[];
+  readonly warnings?: readonly HubRunWarning[];
 }
 
 const TASK_COUNT_LABEL = (count: number): string =>
@@ -564,7 +566,10 @@ export const buildRunCardSectionModel = (
   const batches =
     input.kind === "run.started"
       ? []
-      : appendTaskDetailBlocks(input, buildBatchViews(input));
+      : appendWarningBlocks(
+          input,
+          appendTaskDetailBlocks(input, buildBatchViews(input)),
+        );
   return {
     kind: input.kind,
     header: buildHeader(input.state, input.kind, elapsedMs),
@@ -651,6 +656,41 @@ const appendTaskDetailBlocks = (
         id: detail.taskId,
         title: detail.stage,
         subLines,
+      },
+    });
+  }
+  return views;
+};
+
+const appendWarningBlocks = (
+  input: BuildRunCardSectionModelInput,
+  batches: readonly RunCardBatchView[],
+): readonly RunCardBatchView[] => {
+  const warnings = input.warnings;
+  if (!warnings || warnings.length === 0) {
+    return batches;
+  }
+  const views = [...batches];
+  for (const warning of warnings) {
+    const id =
+      warning.transactionId ?? warning.taskId ?? "landing-reconciliation";
+    views.push({
+      kind: "current",
+      line: {
+        kind: "group",
+        symbol: "◐",
+        severity: "warn",
+        name: "Landing reconciliation incident",
+        count: 1,
+        items: [],
+      },
+      current: {
+        kind: "indented-block",
+        leading: "◐",
+        leadingSeverity: "warn",
+        id,
+        title: "Landing reconciliation incident",
+        subLines: [warning.message, `Next action: ${warning.nextAction}`],
       },
     });
   }

@@ -301,7 +301,10 @@ npx archloop project prune-test-fixtures
   configured target is adopted into a new verified transaction automatically.
   A historical `merge_succeeded` event is never landing proof. Missing or
   diverged branches become `legacy_landing_integrity` for inspection; Hub does
-  not silently close or reimplement preserved work.
+  not silently close or reimplement preserved work. A stale
+  `landing_integrity_incident` is a non-fatal warning (plain/JSON/live) with
+  evidence and next action; it does not mark a successful current batch as
+  `batch_failed`.
 - `tasks doctor` is read-only. It groups diagnostics by severity, reports
   interrupted execution when no lease diagnostic already explains it, and can
   display landing reconciliation state, checkout sync pending, code

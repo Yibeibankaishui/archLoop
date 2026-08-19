@@ -93,7 +93,11 @@ landing receipts. An in-flight task whose source branch is contained in the
 configured target is adopted into a new verified transaction automatically.
 A historical `merge_succeeded` event is never landing proof. Missing or
 diverged branch evidence becomes a `legacy_landing_integrity` condition for
-inspection; Hub does not silently close or reimplement that work.
+inspection; Hub does not silently close or reimplement that work. A stale
+`landing_integrity_incident` is emitted as a structured non-fatal warning
+(evidence, next action, `affectsCurrentBatch: false`) in plain, JSON, and live
+output; it does not flip a successful current batch to `batch_failed` or change
+completed-task counts.
 
 Two runs for the same project or the same task share a landing lease identified
 by owner nonce, process start identity, and boot identity. A live owner is not

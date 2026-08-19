@@ -12,6 +12,8 @@ import { appendHubBatchEvent, appendHubTaskEvent, createHubRunContext } from "./
 import {
   createHubRunDisplayState,
   formatPlainHubRunEvent,
+  formatPlainHubRunOutcome,
+  projectHubRunOutcome,
   reduceHubRunDisplayState,
 } from "./hubRunDisplay.js";
 import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
@@ -46,6 +48,8 @@ import {
 import * as taskBoard from "./taskBoard.js";
 import * as WorktreeManager from "./WorktreeManager.js";
 import { leaseLockPath, leaseNameFromBranch } from "./WorktreeLease.js";
+import { createHubLandingCandidate } from "./hubLanding.js";
+import { ensureHubLandingPolicy } from "./hubLandingPolicy.js";
 
 vi.mock("./hubTaskSnapshot.js", () => ({
   HUB_TASK_NOTES_TAG: "task-notes",
@@ -577,6 +581,139 @@ describe("Hub flow planner", () => {
     expect(
       finalState.find((task) => task.id === "bd-second")?.labels,
     ).toContain("waiting-for-merge");
+  });
+
+  it("keeps a successful current batch successful when stale landing integrity is present", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-flow-stale-landing-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const hubProjectDir = join(
+      repoDir,
+      "data",
+      "archloop",
+      "hub",
+      "projects",
+      "stale-landing",
+    );
+    ensureHubLandingPolicy({
+      repoRoot: repoDir,
+      hubProjectDir,
+    });
+    // Plant a historical integrity incident on an unrelated side branch without
+    // leaving the host tip ahead of the Hub publish target.
+    await execAsync("git checkout -b stale-side", { cwd: repoDir });
+    await commitFile(repoDir, "stale-side.txt", "stale\n", "stale side tip");
+    const staleCandidate = await createHubLandingCandidate({
+      repoRoot: repoDir,
+      hubProjectDir,
+      taskId: "bd-stale-historical",
+      branch: "stale-side",
+    });
+    await execAsync("git checkout main", { cwd: repoDir });
+    const mainHead = (
+      await execAsync("git rev-parse HEAD", { cwd: repoDir })
+    ).stdout.trim();
+    await execAsync(
+      `git update-ref ${staleCandidate.candidateRef} ${mainHead}`,
+      { cwd: repoDir },
+    );
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-current",
+        title: "Current successful task",
+        status: "open",
+        labels: ["ready-for-agent"],
+        metadata: {},
+      },
+    ]);
+
+    const result = await runHubFlow({
+      flowId: "no-review",
+      cwd: repoDir,
+      hubProjectDir,
+      env,
+      maxBatches: 1,
+      implementer: async (input) => {
+        await execAsync(`git checkout -b ${input.branch}`, { cwd: repoDir });
+        await commitFile(
+          repoDir,
+          `${input.taskId}.txt`,
+          "current work\n",
+          `implement ${input.taskId}`,
+        );
+        await execAsync("git checkout main", { cwd: repoDir });
+        return {
+          outcome: "success",
+          commits: [{ sha: "abc123" }],
+          completionSignal: "<promise>COMPLETE</promise>",
+        };
+      },
+      merger: async () => ({ outcome: "success" }),
+      verifier: async () => ({ outcome: "success" }),
+    });
+
+    expect(result.stopReason).not.toBe("batch_failed");
+    expect(result.completedBatchCount).toBe(1);
+    expect(result.completedTaskCount).toBe(1);
+    expect(result.batchResults).toEqual([
+      expect.objectContaining({
+        selectedTaskIds: ["bd-current"],
+        completedTaskCount: 1,
+        batchStatus: "completed",
+      }),
+    ]);
+    expect(result.landingReconciliation?.kind).toBe("integrity_incident");
+    expect(result.landingReconciliation?.integrityIncident).toMatch(
+      /landing_integrity_incident/,
+    );
+    expect(result.landingReconciliation?.nextAction).toMatch(/Inspect/);
+
+    const projection = projectHubRunOutcome(result);
+    expect(projection).toMatchObject({
+      outcome: "completed",
+      exitCode: 0,
+      counts: { completed: 1, failed: 0 },
+    });
+    expect(projection.warnings).toContainEqual(
+      expect.objectContaining({
+        kind: "landing_reconciliation_incident",
+        affectsCurrentBatch: false,
+        transactionId: staleCandidate.transactionId,
+      }),
+    );
+
+    const plain = formatPlainHubRunOutcome(result, projection).join("\n");
+    expect(plain).toContain("event=landing_reconciliation_incident");
+    expect(plain).toContain('outcome="completed"');
+    expect(plain).not.toMatch(/batch_failed|completed_with_failures|tasks recover/);
+
+    const summary = formatHubFlowResultLines(result).join("\n");
+    expect(summary).toContain("Landing reconciliation incident (non-fatal)");
+    expect(summary).toContain(result.landingReconciliation!.nextAction);
+
+    const runEvents = await readJsonl(
+      join(result.runDir, "events", "run.jsonl"),
+    );
+    expect(runEvents).toContainEqual(
+      expect.objectContaining({
+        type: "landing_reconciliation",
+        kind: "integrity_incident",
+        affectsCurrentBatch: false,
+        nextAction: result.landingReconciliation!.nextAction,
+        incidentTransactionId: staleCandidate.transactionId,
+      }),
+    );
+    expect(runEvents).toContainEqual(
+      expect.objectContaining({
+        type: "run_completed",
+        stopReason: result.stopReason,
+        completedBatchCount: 1,
+        completedTaskCount: 1,
+      }),
+    );
   });
 
   it("defaults to planned batch strategy with max 3 and conservative fallback until planner is wired", async () => {

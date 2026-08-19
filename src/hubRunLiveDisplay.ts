@@ -338,6 +338,8 @@ export interface AltScreenFrameInput {
   readonly runOutcome?: "done" | "failed" | "cancelled";
   /** Optional outcome summary line (e.g. "Nothing to run", "Run completed"). */
   readonly outcomeSummary?: string;
+  /** Non-fatal warnings (e.g. stale landing integrity) distinct from batch failure. */
+  readonly warnings?: HubRunOutcomeProjection["warnings"];
   /** Phase-elapsed start reference per taskId — for the "N s in this step" sub-line. */
   readonly phaseStartedByTaskId: ReadonlyMap<string, number>;
 }
@@ -662,6 +664,18 @@ export const paintScrollbackSummary = (input: AltScreenFrameInput): string => {
       );
     }
   }
+  for (const warning of input.warnings ?? []) {
+    const subject =
+      warning.transactionId ?? warning.taskId ?? "landing-incident";
+    diagnosticLines.push(
+      MARGIN +
+        `${input.palette.yellow("!")} ${input.palette.cyan(subject)}   ${input.palette.dim("Landing reconciliation incident")}`,
+    );
+    diagnosticLines.push(MARGIN + `    ${warning.message}`);
+    diagnosticLines.push(
+      MARGIN + `    ${input.palette.dim(`Next action: ${warning.nextAction}`)}`,
+    );
+  }
   const fixFooter =
     outcome === "failed" && input.state.runId
       ? MARGIN +
@@ -695,6 +709,7 @@ interface AltScreenState {
   latestState: HubRunDisplayState | undefined;
   runOutcome: "done" | "failed" | "cancelled" | undefined;
   outcomeSummary: string | undefined;
+  warnings: HubRunOutcomeProjection["warnings"];
   ticker: NodeJS.Timeout | undefined;
   holdTimer: NodeJS.Timeout | undefined;
   cleanedUp: boolean;
@@ -743,6 +758,7 @@ const createAltScreenPath = (
     latestState: undefined,
     runOutcome: undefined,
     outcomeSummary: undefined,
+    warnings: [],
     ticker: undefined,
     holdTimer: undefined,
     cleanedUp: false,
@@ -779,6 +795,7 @@ const createAltScreenPath = (
       palette,
       runOutcome: st.runOutcome,
       outcomeSummary: st.outcomeSummary,
+      warnings: st.warnings,
       phaseStartedByTaskId: st.phaseStartedByTaskId,
     };
   };
@@ -999,6 +1016,7 @@ const createAltScreenPath = (
           ? "cancelled"
           : "done";
     st.outcomeSummary = outcome.summary;
+    st.warnings = outcome.warnings;
     // Paint the final frame so the user sees the outcome, then immediately
     // dump summary + restore terminal. `cli.ts` controls the process exit
     // via `process.exitCode`; the 2-second hold + exit lives on the
@@ -1144,6 +1162,7 @@ const createFallbackPath = (
       readonly outcomeCounts?: HubRunOutcomeProjection["counts"];
       readonly outcomeSummary?: string;
       readonly taskDetails?: HubRunOutcomeProjection["taskDetails"];
+      readonly warnings?: HubRunOutcomeProjection["warnings"];
     } = {},
   ): void => {
     const now = options.clock.now();
@@ -1180,6 +1199,7 @@ const createFallbackPath = (
       outcomeCounts: extras.outcomeCounts,
       outcomeSummary: extras.outcomeSummary,
       taskDetails: extras.taskDetails,
+      warnings: extras.warnings,
     });
     appendModel(model);
   };
@@ -1203,6 +1223,7 @@ const createFallbackPath = (
       outcomeCounts: outcome.counts,
       outcomeSummary: outcome.summary,
       taskDetails: outcome.taskDetails,
+      warnings: outcome.warnings,
     });
     stopSpinner(false);
     options.terminal.write(SHOW_CURSOR);

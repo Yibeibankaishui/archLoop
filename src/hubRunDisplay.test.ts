@@ -154,6 +154,7 @@ describe("plain Hub run lifecycle output", () => {
         readyToMerge: 0,
       },
       taskDetails: [],
+      warnings: [],
       exitCode: 0,
     });
   });
@@ -264,6 +265,128 @@ describe("plain Hub run lifecycle output", () => {
     expect(formatPlainHubRunOutcome(result, projection).join("\n")).toContain(
       'outcome="completed_with_pending_merge"',
     );
+  });
+
+  it("keeps a successful current batch successful when stale landing integrity is present", () => {
+    const staleEvidence =
+      "landing_integrity_incident: landing receipt exists but the Hub publish target no longer contains candidate " +
+      "a".repeat(40);
+    const nextAction =
+      "Inspect the candidate ref, landing receipt, verification artifact, and journal. Do not land or close the task again automatically.";
+    const result = makeRunResult({
+      stopReason: "no_ready_tasks",
+      completedBatchCount: 1,
+      completedTaskCount: 2,
+      batchResults: [
+        {
+          batchId: "batch-1",
+          selectedTaskIds: ["viorerunbridge-9t3", "viorerunbridge-qde"],
+          completedTaskCount: 2,
+          batchStatus: "completed",
+        },
+      ],
+      selectedTaskIds: ["viorerunbridge-9t3", "viorerunbridge-qde"],
+      results: [
+        {
+          taskId: "viorerunbridge-9t3",
+          title: "First shipped",
+          branch: "archloop/viorerunbridge-9t3",
+          outcome: "reviewed",
+          hubStatus: "done",
+          commitCount: 1,
+        },
+        {
+          taskId: "viorerunbridge-qde",
+          title: "Second shipped",
+          branch: "archloop/viorerunbridge-qde",
+          outcome: "reviewed",
+          hubStatus: "done",
+          commitCount: 1,
+        },
+      ],
+      mergeResult: {
+        runId: "run-1",
+        batchId: "batch-1",
+        selectedTaskIds: ["viorerunbridge-9t3", "viorerunbridge-qde"],
+        selectionDiagnostics: [],
+        batchStatus: "done",
+        results: [
+          {
+            taskId: "viorerunbridge-9t3",
+            title: "First shipped",
+            branch: "archloop/viorerunbridge-9t3",
+            outcome: "merged",
+            hubStatus: "done",
+          },
+          {
+            taskId: "viorerunbridge-qde",
+            title: "Second shipped",
+            branch: "archloop/viorerunbridge-qde",
+            outcome: "merged",
+            hubStatus: "done",
+          },
+        ],
+      },
+      landingReconciliation: {
+        kind: "integrity_incident",
+        transactions: [
+          {
+            transactionId: "ltx-stale-host",
+            taskId: "hub-host-contribution",
+            taskBacked: false,
+            verificationReusable: false,
+            landed: false,
+            closed: false,
+            cleaned: false,
+            worktreePresent: false,
+            integrityIncident: staleEvidence,
+            pending: false,
+            nextAction,
+          },
+        ],
+        pendingCount: 0,
+        reconstructedCount: 0,
+        integrityIncident: staleEvidence,
+        message: `Hub landing integrity incident for ltx-stale-host: ${staleEvidence} This is not a task failure and does not require a recovery command.`,
+        nextAction,
+      },
+    });
+
+    const projection = projectHubRunOutcome(result);
+    expect(projection).toMatchObject({
+      outcome: "completed",
+      summary: "Run completed",
+      exitCode: 0,
+      counts: {
+        completed: 2,
+        failed: 0,
+        blocked: 0,
+        skipped: 0,
+        readyToMerge: 0,
+      },
+    });
+    expect(projection.warnings).toContainEqual(
+      expect.objectContaining({
+        kind: "landing_reconciliation_incident",
+        transactionId: "ltx-stale-host",
+        taskId: "hub-host-contribution",
+        evidence: staleEvidence,
+        nextAction,
+        affectsCurrentBatch: false,
+      }),
+    );
+    expect(JSON.stringify(projection)).not.toMatch(/tasks recover/);
+    expect(JSON.stringify(projection)).not.toMatch(/completed with failures/);
+
+    const plain = formatPlainHubRunOutcome(result, projection);
+    expect(plain.some((line) => line.includes("event=landing_reconciliation_incident"))).toBe(
+      true,
+    );
+    expect(plain.join("\n")).toContain(`next_action=${JSON.stringify(nextAction)}`);
+    expect(plain.join("\n")).toContain('transaction_id="ltx-stale-host"');
+    expect(plain.at(-1)).toContain('outcome="completed"');
+    expect(plain.at(-1)).toContain("completed_batches=1");
+    expect(plain.join("\n")).not.toMatch(/batch_failed|completed_with_failures/);
   });
 
   it("treats the configured flow-batch limit as successful completion", () => {
