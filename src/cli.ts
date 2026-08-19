@@ -4451,8 +4451,13 @@ type RunProjectResolution = {
   readonly repoRoot: string;
   readonly targetProjectName?: string;
   readonly legacyProjectTarget?: string;
-  readonly hubProjectDir?: string;
+  readonly hubProjectDir: string;
 };
+
+const findRegisteredHubProjectByRepoRoot = (repoRoot: string) =>
+  readHubProjectRegistry({ env: process.env }).find(
+    (project) => project.repoRoot === repoRoot,
+  );
 
 const resolveRunHubProjectDir = (
   repoRoot: string,
@@ -4493,9 +4498,7 @@ const resolveRunProjectTarget = ({
           "warn",
         );
       }
-      const registeredProject = readHubProjectRegistry({ env: process.env }).find(
-        (project) => project.repoRoot === repoRoot,
-      );
+      const registeredProject = findRegisteredHubProjectByRepoRoot(repoRoot);
       return {
         repoRoot,
         legacyProjectTarget,
@@ -4520,7 +4523,10 @@ const resolveRunProjectTarget = ({
     return {
       repoRoot: target.project.repoRoot,
       targetProjectName: target.project.name,
-      hubProjectDir: target.project.hubProjectDir,
+      hubProjectDir: resolveRunHubProjectDir(
+        target.project.repoRoot,
+        target.project.hubProjectDir,
+      ),
     };
   });
 
