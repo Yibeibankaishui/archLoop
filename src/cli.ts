@@ -76,6 +76,8 @@ import {
 } from "./presetAgents.js";
 import {
   resolveGitRepoRoot,
+  resolveArchloopUserDataDir,
+  resolveHubProjectDir,
   buildHubProjectStatusSummaryModel,
   hubProjectStatusSummaryModelToBlocks,
   resolveHubProjectStatus,
@@ -101,6 +103,7 @@ import {
   hubProjectRelinkSummaryModelToBlocks,
   hubProjectRenameSummaryModelToBlocks,
   listHubProjects,
+  readHubProjectRegistry,
   registerHubProject,
   relinkHubProject,
   renameHubProject,
@@ -4448,7 +4451,20 @@ type RunProjectResolution = {
   readonly repoRoot: string;
   readonly targetProjectName?: string;
   readonly legacyProjectTarget?: string;
+  readonly hubProjectDir: string;
 };
+
+const findRegisteredHubProjectByRepoRoot = (repoRoot: string) =>
+  readHubProjectRegistry({ env: process.env }).find(
+    (project) => project.repoRoot === repoRoot,
+  );
+
+const resolveRunHubProjectDir = (
+  repoRoot: string,
+  registeredHubProjectDir?: string,
+): string =>
+  registeredHubProjectDir ??
+  resolveHubProjectDir(resolveArchloopUserDataDir(process.env), repoRoot);
 
 const resolveRunProjectTarget = ({
   projectFlag,
@@ -4482,9 +4498,15 @@ const resolveRunProjectTarget = ({
           "warn",
         );
       }
+      const registeredProject = findRegisteredHubProjectByRepoRoot(repoRoot);
       return {
         repoRoot,
         legacyProjectTarget,
+        targetProjectName: registeredProject?.name,
+        hubProjectDir: resolveRunHubProjectDir(
+          repoRoot,
+          registeredProject?.hubProjectDir,
+        ),
       };
     }
 
@@ -4501,6 +4523,10 @@ const resolveRunProjectTarget = ({
     return {
       repoRoot: target.project.repoRoot,
       targetProjectName: target.project.name,
+      hubProjectDir: resolveRunHubProjectDir(
+        target.project.repoRoot,
+        target.project.hubProjectDir,
+      ),
     };
   });
 
@@ -5047,7 +5073,7 @@ const runCommand = Command.make(
       const positionalProject = trimOptionalText(
         optionalTextValue(projectPath),
       );
-      const { repoRoot, targetProjectName, legacyProjectTarget } =
+      const { repoRoot, targetProjectName, legacyProjectTarget, hubProjectDir } =
         yield* resolveRunProjectTarget({
           projectFlag,
           positionalProject,
@@ -5324,6 +5350,7 @@ const runCommand = Command.make(
         const proposalAttempt = yield* Effect.promise(() =>
           runHubProposalFlowFromCli({
             cwd: repoRoot,
+            hubProjectDir,
             validatedInput: requireProposalRunInput(
               flowDefinition,
               validatedInput,
@@ -5580,6 +5607,7 @@ const runCommand = Command.make(
         runHubFlow({
           flowId: flowDefinition.id,
           cwd: repoRoot,
+          hubProjectDir,
           signal: taskBoardRunSignal.signal,
           implementer: createHubFlowRunImplementer({
             cwd: repoRoot,

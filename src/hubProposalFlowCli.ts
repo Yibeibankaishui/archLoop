@@ -182,6 +182,7 @@ const createPrdDecompositionInteraction = (input: {
 
 export const runPrdDecompositionProposalFlowFromCli = async (input: {
   readonly cwd: string;
+  readonly hubProjectDir?: string;
   readonly prdRef: string;
   readonly yes: boolean;
   readonly hubStatusMode?: PrdHubStatusMode;
@@ -198,6 +199,7 @@ export const runPrdDecompositionProposalFlowFromCli = async (input: {
 
   return runPrdDecompositionFlow({
     cwd: input.cwd,
+    hubProjectDir: input.hubProjectDir,
     prdRef: input.prdRef,
     yes: input.yes,
     hubStatusMode: input.hubStatusMode,
@@ -280,6 +282,7 @@ export const handleTriageProposalFlowDisplay = <E>(
 
 export const runHubProposalFlowFromCli = async (input: {
   readonly cwd: string;
+  readonly hubProjectDir?: string;
   readonly validatedInput: ValidatedHubFlowInput;
   readonly yes: boolean;
   readonly isTTY?: boolean;
@@ -299,6 +302,7 @@ export const runHubProposalFlowFromCli = async (input: {
         flowId: "prd-decomposition",
         result: await runPrdDecompositionProposalFlowFromCli({
           cwd: input.cwd,
+          hubProjectDir: input.hubProjectDir,
           prdRef: input.validatedInput.ref,
           yes: input.yes,
           hubStatusMode: input.hubStatusMode,
@@ -327,6 +331,7 @@ export const runHubProposalFlowFromCli = async (input: {
         flowId: "triage",
         result: await runTriageProposalFlowFromCli({
           cwd: input.cwd,
+          hubProjectDir: input.hubProjectDir,
           taskIds,
           query,
           yes: input.yes,
