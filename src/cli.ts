@@ -109,6 +109,10 @@ import {
   type HubProjectRegistryEntry,
   type HubProjectListEntry,
 } from "./hubProjectRegistry.js";
+import {
+  applyLeakedCliTestFixtures,
+  formatLeakedCliTestFixturesLines,
+} from "./hubLeakedCliTestFixtures.js";
 import { resolveHubProjectTarget } from "./hubProjectTargetResolver.js";
 import {
   formatHubProjectProfileRecommendation,
@@ -4025,7 +4029,13 @@ const projectConfigureCommand = Command.make(
     remoteTarget: projectConfigureRemoteTargetOption,
     deliveryTimeoutMs: projectConfigureDeliveryTimeoutOption,
   },
-  ({ project, projectProfile, publishPolicy, remoteTarget, deliveryTimeoutMs }) =>
+  ({
+    project,
+    projectProfile,
+    publishPolicy,
+    remoteTarget,
+    deliveryTimeoutMs,
+  }) =>
     Effect.gen(function* () {
       const d = yield* Display;
       const status = yield* resolveProjectTargetStatus(project);
@@ -4101,6 +4111,100 @@ const projectConfigureCommand = Command.make(
     }),
 );
 
+const projectPruneTestFixturesApplyOption = Options.boolean("apply").pipe(
+  Options.withDescription(
+    "Remove leaked CLI-test Hub fixtures after writing a recoverable backup. Default is a dry run.",
+  ),
+  Options.withDefault(false),
+);
+
+const projectPruneTestFixturesYesOption = Options.boolean("yes").pipe(
+  Options.withDescription(
+    "Confirm leaked CLI-test fixture removal in non-interactive mode.",
+  ),
+  Options.withDefault(false),
+);
+
+const projectPruneTestFixturesCommand = Command.make(
+  "prune-test-fixtures",
+  {
+    apply: projectPruneTestFixturesApplyOption,
+    yes: projectPruneTestFixturesYesOption,
+  },
+  ({ apply, yes }) =>
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const isTTY = process.stdin.isTTY === true;
+      const preview = yield* Effect.try({
+        try: () => applyLeakedCliTestFixtures({ apply: false }),
+        catch: toHubProjectRegistryError,
+      });
+
+      for (const line of formatLeakedCliTestFixturesLines(preview)) {
+        yield* d.text(line);
+      }
+
+      if (!apply) {
+        yield* d.status("Dry run for leaked CLI-test Hub fixtures.", "info");
+        return;
+      }
+
+      if (
+        preview.registryEntries.length === 0 &&
+        preview.pathHashProjectDirs.length === 0
+      ) {
+        yield* d.status("No leaked CLI-test Hub fixtures to remove.", "info");
+        return;
+      }
+
+      if (!yes && !isTTY) {
+        return yield* Effect.fail(
+          new HubProjectRegistryError({
+            message:
+              "archloop project prune-test-fixtures --apply mutates the Hub registry. Re-run with --yes in non-interactive mode, or omit --apply to preview.",
+          }),
+        );
+      }
+
+      if (!yes && isTTY) {
+        const approved = yield* Effect.tryPromise({
+          try: async () => {
+            const result = await clack.confirm({
+              message: `Remove ${preview.registryEntries.length} leaked registry entr${
+                preview.registryEntries.length === 1 ? "y" : "ies"
+              } and ${preview.pathHashProjectDirs.length} path-hash run director${
+                preview.pathHashProjectDirs.length === 1 ? "y" : "ies"
+              }?`,
+              initialValue: false,
+            });
+            if (clack.isCancel(result)) {
+              throw new HubProjectRegistryError({
+                message: "Leaked CLI-test fixture cleanup cancelled.",
+              });
+            }
+            return result === true;
+          },
+          catch: toHubProjectRegistryError,
+        });
+
+        if (!approved) {
+          yield* d.status("Leaked CLI-test fixture cleanup cancelled.", "info");
+          return;
+        }
+      }
+
+      const applied = yield* Effect.try({
+        try: () => applyLeakedCliTestFixtures({ apply: true }),
+        catch: toHubProjectRegistryError,
+      });
+
+      for (const line of formatLeakedCliTestFixturesLines(applied)) {
+        yield* d.text(line);
+      }
+      yield* d.status("Removed leaked CLI-test Hub fixtures.", "success");
+    }),
+);
+
 const projectCommand = Command.make("project", {}, () =>
   Effect.gen(function* () {
     const d = yield* Display;
@@ -4118,6 +4222,7 @@ const projectCommand = Command.make("project", {}, () =>
     projectRelinkCommand,
     projectStatusCommand,
     projectConfigureCommand,
+    projectPruneTestFixturesCommand,
   ]),
 );
 

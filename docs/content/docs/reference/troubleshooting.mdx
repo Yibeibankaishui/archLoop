@@ -21,6 +21,21 @@ npx archloop project list
 npx archloop project select <name>
 ```
 
+## `project list` is full of `cli-host-*` fixtures
+
+**Cause:** older CLI tests registered temporary repositories into the real Hub
+registry.
+
+```bash
+npx archloop project prune-test-fixtures
+npx archloop project prune-test-fixtures --apply --yes
+```
+
+Preview first. The command only removes `cli-host-*` / `cli-resolve-*` entries
+whose repository path is under the system temp directory, plus path-hash run
+directories classified from `run_started.repoRoot`. Durable projects stay
+registered.
+
 ## Registered repository path is missing
 
 **Cause:** the repository moved after registration.

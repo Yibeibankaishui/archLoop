@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 
 import { HubProjectRegistryError } from "./errors.js";
 import { resolveArchloopUserDataDir } from "./projectStatus.js";
+import { assertHubUserDataDirIsolatedForTests } from "./hubTestIsolation.js";
 import {
   configureHubProjectDevelopmentContract,
   resolveHubProjectDevelopmentContractPath,
@@ -173,23 +174,23 @@ const writeJson = (path: string, value: unknown): void => {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 };
 
+const resolveIsolatedArchloopUserDataDir = (
+  options: HubProjectRegistryOptions = {},
+): string => {
+  const userDataDir = resolveArchloopUserDataDir(options.env, options.homeDir);
+  assertHubUserDataDirIsolatedForTests(userDataDir, options.homeDir);
+  return userDataDir;
+};
+
 export const resolveHubProjectRegistryPath = (
   options: HubProjectRegistryOptions = {},
 ): string =>
-  join(
-    resolveArchloopUserDataDir(options.env, options.homeDir),
-    "hub",
-    REGISTRY_FILE_NAME,
-  );
+  join(resolveIsolatedArchloopUserDataDir(options), "hub", REGISTRY_FILE_NAME);
 
 export const resolveHubProjectSelectionPath = (
   options: HubProjectRegistryOptions = {},
 ): string =>
-  join(
-    resolveArchloopUserDataDir(options.env, options.homeDir),
-    "hub",
-    SELECTION_FILE_NAME,
-  );
+  join(resolveIsolatedArchloopUserDataDir(options), "hub", SELECTION_FILE_NAME);
 
 export const resolveRegisteredHubProjectDir = (
   archloopUserDataDir: string,
@@ -252,7 +253,7 @@ const resolveProjectDir = (
   projectId: string,
 ): string =>
   resolveRegisteredHubProjectDir(
-    resolveArchloopUserDataDir(options.env, options.homeDir),
+    resolveIsolatedArchloopUserDataDir(options),
     projectId,
   );
 

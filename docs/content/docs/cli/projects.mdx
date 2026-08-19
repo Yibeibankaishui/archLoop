@@ -3,15 +3,16 @@ title: Project commands
 description: Reference for the Hub project command group.
 ---
 
-| Command                                  | Purpose                                           |
-| ---------------------------------------- | ------------------------------------------------- |
-| `project add`                            | Register an existing Git repository and select it |
-| `project list`                           | List registered projects and readiness summaries  |
-| `project select [name]`                  | Choose the default CLI project                    |
-| `project status`                         | Show project, task, run, and cleanup diagnostics  |
+| Command                                  | Purpose                                                       |
+| ---------------------------------------- | ------------------------------------------------------------- |
+| `project add`                            | Register an existing Git repository and select it             |
+| `project list`                           | List registered projects and readiness summaries              |
+| `project select [name]`                  | Choose the default CLI project                                |
+| `project status`                         | Show project, task, run, and cleanup diagnostics              |
 | `project configure`                      | Create or refresh the development contract and landing policy |
-| `project rename <project> <new-name>`    | Change the display name                           |
-| `project relink <project> --path <path>` | Point an existing identity at a moved repository  |
+| `project rename <project> <new-name>`    | Change the display name                                       |
+| `project relink <project> --path <path>` | Point an existing identity at a moved repository              |
+| `project prune-test-fixtures`            | Preview or remove leaked CLI-test Hub fixtures                |
 
 `project add` can initialize the Hub-owned Beads task store. `project status`
 reports whether that store is Hub-owned, repository-local, missing, or blocked
@@ -32,3 +33,12 @@ outbox after local shipped proof.
 Most project-aware commands accept `--project <name>` as an explicit override.
 Interactive pickers are available when required values are omitted in a TTY;
 scripts should provide explicit names and paths.
+
+`project prune-test-fixtures` is a recovery tool for Hub registries that were
+polluted by older CLI tests. It only matches `cli-host-*` / `cli-resolve-*`
+names whose repository path is under the system temp directory, plus legacy
+path-hash run directories whose `run_started.repoRoot` has the same shape. The
+default invocation is a dry run. `--apply --yes` writes a recoverable backup,
+removes those fixtures, and either keeps a remaining selected project or leaves
+the Hub unselected. Durable registered projects and run histories whose
+`repoRoot` is not a temp CLI-test fixture are left unchanged.
