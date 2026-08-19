@@ -11,11 +11,16 @@ import { ClackDisplay, SilentDisplay, type DisplayEntry } from "./Display.js";
 import { HUB_AGENT_ROLES, setHubAgentRole } from "./hubAgentConfig.js";
 import type { RunHubFlowInput, RunHubFlowResult } from "./hubFlowExecution.js";
 import {
+  readHubProjectRegistry,
   registerHubProject,
   resolveHubProjectSelectionPath,
   selectHubProject,
 } from "./hubProjectRegistry.js";
-import { resolveGitRepoRoot } from "./projectStatus.js";
+import {
+  resolveArchloopUserDataDir,
+  resolveGitRepoRoot,
+  resolveHubProjectDir,
+} from "./projectStatus.js";
 
 const mockSelect = vi.fn();
 const mockConfirm = vi.fn();
@@ -2007,6 +2012,101 @@ describe("archloop run project targeting", () => {
     await expect(runCli(["run"])).rejects.toMatchObject({
       message:
         "No Hub flow was provided. Run `archloop run --flow <id>`, `archloop run <project-name> --flow <id>`, or `archloop run --project <name> --flow <id>`.",
+    });
+  });
+
+  describe("registered hubProjectDir preservation", () => {
+    const registeredHubProjectDir = (
+      projectName: string,
+    ): string | undefined =>
+      readHubProjectRegistry({ env: process.env }).find(
+        (project) => project.name === projectName,
+      )?.hubProjectDir;
+
+    const mockRunWithHubProjectDirCapture = (
+      expectedDir: string | undefined,
+    ) => {
+      let capturedHubProjectDir: string | undefined;
+      mockRunHubFlow.mockImplementation(async (input) => {
+        capturedHubProjectDir = input.hubProjectDir;
+        const runId = "run-hub-project-dir";
+        return {
+          flowId: "no-review",
+          runId,
+          batchId: "batch-hub-project-dir",
+          runDir: join(expectedDir ?? "/tmp", "runs", runId),
+          mode: "new_batch" as const,
+          completedBatchCount: 0,
+          completedTaskCount: 0,
+          stopReason: "no_ready_tasks" as const,
+          batchResults: [],
+          selectedTaskIds: [],
+          results: [],
+          unfinishedBatchIds: [],
+          projectDevelopmentContractPath: "/tmp/contract.md",
+          projectDevelopmentContractCreatedGenericFallback: false,
+        };
+      });
+      return () => capturedHubProjectDir;
+    };
+
+    it("passes the selected project's registered hubProjectDir for the default run target", async () => {
+      const expectedDir = registeredHubProjectDir("alpha");
+      expect(expectedDir).toBeDefined();
+      expect(expectedDir).not.toBe(
+        resolveHubProjectDir(
+          resolveArchloopUserDataDir(process.env),
+          resolveGitRepoRoot(repoAlpha),
+        ),
+      );
+      const readCaptured = mockRunWithHubProjectDirCapture(expectedDir);
+      await runCli(["run", "--flow", "no-review"]);
+      expect(readCaptured()).toBe(expectedDir);
+    });
+
+    it("passes the explicit --project target's registered hubProjectDir", async () => {
+      const expectedDir = registeredHubProjectDir("beta");
+      expect(expectedDir).toBeDefined();
+      const readCaptured = mockRunWithHubProjectDirCapture(expectedDir);
+      await runCli(["run", "--project", "beta", "--flow", "no-review"]);
+      expect(readCaptured()).toBe(expectedDir);
+    });
+
+    it("passes the positional project target's registered hubProjectDir", async () => {
+      const expectedDir = registeredHubProjectDir("beta");
+      expect(expectedDir).toBeDefined();
+      const readCaptured = mockRunWithHubProjectDirCapture(expectedDir);
+      await runCli(["run", "beta", "--flow", "no-review"]);
+      expect(readCaptured()).toBe(expectedDir);
+    });
+
+    it("uses the path-hash fallback for legacy targets without a registered project", async () => {
+      const unregisteredDir = await mkdtemp(
+        join(tmpdir(), "cli-run-unregistered-"),
+      );
+      await initRepo(unregisteredDir);
+      await commitFile(
+        unregisteredDir,
+        "solo.txt",
+        "solo",
+        "initial unregistered",
+      );
+      const repoRoot = resolveGitRepoRoot(unregisteredDir);
+      const expectedDir = resolveHubProjectDir(
+        resolveArchloopUserDataDir(process.env),
+        repoRoot,
+      );
+      const readCaptured = mockRunWithHubProjectDirCapture(expectedDir);
+      await runCli(["run", ".", "--flow", "no-review"], unregisteredDir);
+      expect(readCaptured()).toBe(expectedDir);
+    });
+
+    it("passes the registered hubProjectDir for a legacy path target of a registered repo", async () => {
+      const expectedDir = registeredHubProjectDir("alpha");
+      expect(expectedDir).toBeDefined();
+      const readCaptured = mockRunWithHubProjectDirCapture(expectedDir);
+      await runCli(["run", ".", "--flow", "no-review"], repoAlpha);
+      expect(readCaptured()).toBe(expectedDir);
     });
   });
 });

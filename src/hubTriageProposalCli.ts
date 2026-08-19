@@ -246,6 +246,7 @@ export const displayTriageProposalFlowResult = (
 
 export const runTriageProposalFlowFromCli = async (input: {
   readonly cwd: string;
+  readonly hubProjectDir?: string;
   readonly taskIds?: readonly string[];
   readonly query?: string;
   readonly yes: boolean;
@@ -259,6 +260,7 @@ export const runTriageProposalFlowFromCli = async (input: {
 }): Promise<RunTriageProposalFlowResult> =>
   runTriageProposalFlow({
     cwd: input.cwd,
+    hubProjectDir: input.hubProjectDir,
     taskIds: input.taskIds,
     query: input.query,
     yes: input.yes,
