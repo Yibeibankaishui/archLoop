@@ -2,6 +2,13 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { isAllowlistedBeadsRuntimePath } from "./hubBeadsRuntimePaths.js";
+import {
+  formatHubGitRepositoryIntegrityMessage,
+  HUB_REPOSITORY_INTEGRITY_RECOVERY_GUIDANCE,
+  inspectHubGitBranch,
+  type HubGitBranchInspection,
+  type HubGitCommandDiagnostic,
+} from "./hubGitRepositoryIntegrity.js";
 import type { HubTaskEvent } from "./hubExecution.js";
 import { readTaskEvents } from "./hubRunEventLog.js";
 import {
@@ -59,10 +66,10 @@ import { listWorktreeLeases } from "./worktreeLeaseStore.js";
 
 const execFileAsync = promisify(execFile);
 
-export interface HubTaskStateBranchState {
-  readonly exists: boolean;
-  readonly hasUnmergedWork: boolean;
-}
+export type HubTaskStateBranchState = Pick<
+  HubGitBranchInspection,
+  "exists" | "hasUnmergedWork" | "integrityFailure"
+>;
 
 export interface HubTaskStateWorktreeState {
   readonly dirtySourceFiles: readonly string[];
@@ -88,6 +95,7 @@ export type HubTaskStateDiagnosticReason =
   | "dirty_worktree"
   | "task_sync_push_pending"
   | "interrupted_execution"
+  | "repository_integrity"
   | HubWorktreeLeaseDiagnosticReason;
 
 export interface HubTaskStateDiagnostic {
@@ -255,31 +263,7 @@ const hasStaleClaimFields = (
 const defaultBranchInspector: HubTaskStateBranchInspector = async (
   branch,
   cwd,
-) => {
-  try {
-    await execFileAsync(
-      "git",
-      ["rev-parse", "--verify", `${branch}^{commit}`],
-      { cwd },
-    );
-  } catch {
-    return { exists: false, hasUnmergedWork: false };
-  }
-
-  try {
-    const { stdout } = await execFileAsync(
-      "git",
-      ["rev-list", "--count", `HEAD..${branch}`],
-      { cwd, encoding: "utf8" },
-    );
-    return {
-      exists: true,
-      hasUnmergedWork: Number(String(stdout).trim()) > 0,
-    };
-  } catch {
-    return { exists: true, hasUnmergedWork: false };
-  }
-};
+) => inspectHubGitBranch(cwd, branch);
 
 const parseGitStatusPorcelain = (stdout: string): string[] => {
   const entries = stdout.split("\0").filter((entry) => entry.length > 0);
@@ -323,6 +307,21 @@ const defaultWorktreeInspector: HubTaskStateWorktreeInspector = async (cwd) => {
     dirtyTaskStoreFiles: dirtyFiles.filter(isAllowlistedBeadsRuntimePath),
   };
 };
+
+const buildRepositoryIntegrityDiagnostic = (
+  task: HubTaskProjection,
+  branch: string,
+  diagnostic: HubGitCommandDiagnostic,
+): HubTaskStateDiagnostic => ({
+  taskId: task.id,
+  title: task.title,
+  reason: "repository_integrity",
+  repairable: false,
+  currentStatus: task.hubStatus,
+  branch,
+  nextAction: HUB_REPOSITORY_INTEGRITY_RECOVERY_GUIDANCE,
+  message: formatHubGitRepositoryIntegrityMessage({ branch, diagnostic }),
+});
 
 const buildStateInconsistentDiagnostic = (
   task: HubTaskProjection,
@@ -596,7 +595,15 @@ export const doctorHubTaskState = async (
 
     if (task.hubStatus === "failed" && task.claim?.branch) {
       const branchState = await branchInspector(task.claim.branch, repoRoot);
-      if (branchState.exists && branchState.hasUnmergedWork) {
+      if (branchState.integrityFailure) {
+        diagnostics.push(
+          buildRepositoryIntegrityDiagnostic(
+            task,
+            task.claim.branch,
+            branchState.integrityFailure,
+          ),
+        );
+      } else if (branchState.exists && branchState.hasUnmergedWork) {
         diagnostics.push(buildFailedBranchWorkDiagnostic(task));
       }
     }
@@ -625,6 +632,16 @@ export const doctorHubTaskState = async (
       worktreeState.dirtySourceFiles.length > 0
     ) {
       const branchState = await branchInspector(task.claim.branch, repoRoot);
+      if (branchState.integrityFailure) {
+        diagnostics.push(
+          buildRepositoryIntegrityDiagnostic(
+            task,
+            task.claim.branch,
+            branchState.integrityFailure,
+          ),
+        );
+        continue;
+      }
       if (branchState.exists && branchState.hasUnmergedWork) {
         diagnostics.push(
           buildDirtyWorktreeDiagnostic(task, worktreeState.dirtySourceFiles),
@@ -650,6 +667,16 @@ export const doctorHubTaskState = async (
     }
 
     const branchState = await branchInspector(event.branch, repoRoot);
+    if (branchState.integrityFailure) {
+      diagnostics.push(
+        buildRepositoryIntegrityDiagnostic(
+          task,
+          event.branch,
+          branchState.integrityFailure,
+        ),
+      );
+      continue;
+    }
     if (
       branchState.exists &&
       branchState.hasUnmergedWork &&
@@ -791,6 +818,7 @@ const DOCTOR_SEVERITY_BY_REASON: Record<
 > = {
   interrupted_execution: "error",
   failed_branch_work: "error",
+  repository_integrity: "error",
   worktree_lease_missing: "error",
   worktree_lease_active_with_failed_claim: "error",
   worktree_lease_stale_with_failed_claim: "error",

@@ -668,6 +668,54 @@ describe("plain Hub run lifecycle output", () => {
     );
   });
 
+  it("surfaces repository integrity merge blockers with git diagnostics", () => {
+    const result = makeRunResult({
+      stopReason: "batch_failed",
+      mergeResult: {
+        runId: "run-1",
+        batchId: "batch-1",
+        selectedTaskIds: [],
+        batchStatus: "skipped",
+        results: [],
+        selectionDiagnostics: [
+          {
+            taskId: "task-corrupt",
+            title: "Corrupt branch",
+            hubStatus: "waiting_for_merge",
+            decision: "blocked",
+            reason: "repository_integrity",
+            branch: "archloop/task-corrupt",
+            message:
+              "Repository integrity failure for branch archloop/task-corrupt: fatal: loose object abc is corrupt",
+            suggestedRecovery:
+              "Run `git fsck --full`, inspect `git reflog show <branch>`, or restore the branch from a trusted remote. Hub does not reset or rewrite refs automatically.",
+            gitDiagnostic: {
+              command: "git rev-parse --verify archloop/task-corrupt^{commit}",
+              exitCode: 128,
+              stderr: "fatal: loose object abc is corrupt",
+              repositoryPath: "/repo",
+              ref: "refs/heads/archloop/task-corrupt",
+              object: "abc",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(projectHubRunOutcome(result).taskDetails).toContainEqual(
+      expect.objectContaining({
+        taskId: "task-corrupt",
+        stage: "Repository integrity",
+        diagnostic: expect.stringContaining("Repository integrity failure"),
+        recoveryCommand: expect.stringContaining("git fsck --full"),
+        gitDiagnostic: expect.objectContaining({
+          command: "git rev-parse --verify archloop/task-corrupt^{commit}",
+          exitCode: 128,
+        }),
+      }),
+    );
+  });
+
   it("does not recommend task recovery for a malformed lease before claim", () => {
     const result = makeRunResult({
       stopReason: "batch_failed",

@@ -403,6 +403,22 @@ export const createHubRunJsonRenderer = (input: {
                 merge: {
                   batchStatus: result.mergeResult.batchStatus,
                   selectedTaskIds: result.mergeResult.selectedTaskIds,
+                  selectionDiagnostics:
+                    result.mergeResult.selectionDiagnostics.map((diagnostic) => ({
+                      taskId: diagnostic.taskId,
+                      decision: diagnostic.decision,
+                      reason: diagnostic.reason,
+                      ...(diagnostic.branch ? { branch: diagnostic.branch } : {}),
+                      ...(diagnostic.message
+                        ? { message: diagnostic.message }
+                        : {}),
+                      ...(diagnostic.suggestedRecovery
+                        ? { suggestedRecovery: diagnostic.suggestedRecovery }
+                        : {}),
+                      ...(diagnostic.gitDiagnostic
+                        ? { gitDiagnostic: diagnostic.gitDiagnostic }
+                        : {}),
+                    })),
                   results: result.mergeResult.results.map((task) => ({
                     taskId: task.taskId,
                     outcome: task.outcome,

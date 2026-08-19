@@ -307,6 +307,11 @@ npx archloop project prune-test-fixtures
   display landing reconciliation state, checkout sync pending, code
   publication pending, FIFO quiet wait, and legacy
   history without advancing the transaction or updating the checkout.
+- Corrupt Git refs/objects are reported as repository-integrity failures with
+  preserved command, exit code, stderr, repository path, and affected ref/object.
+  Merge selection blocks the batch instead of mislabeling corruption as a missing
+  branch or empty diff. Recovery guidance recommends `git fsck --full`, reflog
+  inspection, or restoring from a trusted remote; Hub never auto-resets refs.
 - `tasks repair-state` previews changes before confirmation and rewrites only
   archLoop-managed status fields; it does not mutate GitHub Issues.
 - `tasks recover --stale` previews all interrupted-task routes by default; use
