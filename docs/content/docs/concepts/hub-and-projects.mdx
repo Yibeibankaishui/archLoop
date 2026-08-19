@@ -35,7 +35,7 @@ enables pushes. With `best_effort`, local shipped proof enqueues a durable
 publication outbox that retries as `target_publish_pending` without undoing
 shipped. Checkout synchronization is a separate projection of that host
 branch: it fast-forwards only when safe and otherwise remains
-`checkout_sync_pending`.
+`checkout_sync_pending`, listing any blocking host paths.
 
 ## Hub versus repo-local configuration
 

@@ -704,6 +704,90 @@ describe("plain Hub run lifecycle output", () => {
     });
   });
 
+  it("exposes checkout-sync-pending blocking paths without failing a shipped task", () => {
+    const result = makeRunResult({
+      flowId: "with-review",
+      stopReason: "no_ready_tasks",
+      completedBatchCount: 1,
+      completedTaskCount: 1,
+      batchResults: [
+        {
+          batchId: "batch-1",
+          selectedTaskIds: ["bd-land"],
+          completedTaskCount: 1,
+          batchStatus: "completed",
+        },
+      ],
+      mergeResult: {
+        runId: "run-1",
+        batchId: "batch-1",
+        selectedTaskIds: ["bd-land"],
+        batchStatus: "done",
+        results: [
+          {
+            taskId: "bd-land",
+            title: "Landed task",
+            branch: "archloop/bd-land",
+            outcome: "merged",
+            hubStatus: "done",
+            candidateOid: "c".repeat(40),
+            transactionId: "ltx-bd-land-abc123",
+          },
+        ],
+        selectionDiagnostics: [],
+      },
+      checkoutSync: {
+        items: [
+          {
+            version: 1,
+            id: "cpo-1",
+            transactionId: "ltx-bd-land-abc123",
+            taskId: "bd-land",
+            hostTargetBranch: "main",
+            branchRef: "refs/heads/main",
+            candidateOid: "c".repeat(40),
+            expectedBranchOid: "b".repeat(40),
+            publishTargetRef: "refs/archloop/publish/main",
+            status: "pending",
+            createdAt: "2026-08-19T00:00:00.000Z",
+            updatedAt: "2026-08-19T00:00:00.000Z",
+            pendingReason: "untracked_paths",
+            blockingPaths: ["notes.txt"],
+            message:
+              "Checkout sync pending for bd-land (untracked_paths): host branch main was not updated. Blocking host paths: notes.txt. Landed candidate remains shipped.",
+          },
+        ],
+        pendingCount: 1,
+        succeededCount: 0,
+        message:
+          "Checkout sync pending for bd-land (untracked_paths): host branch main was not updated. Blocking host paths: notes.txt.",
+        nextAction:
+          "Commit or stash the listed host paths, then retry the same run. Hub will fast-forward the host branch when Git can prove the checkout safe.",
+      },
+    });
+
+    const projection = projectHubRunOutcome(result);
+    expect(projection.outcome).toBe("completed");
+    expect(projection.taskDetails).toContainEqual({
+      taskId: "bd-land",
+      stage: "Checkout sync pending",
+      diagnostic: result.checkoutSync!.items[0]!.message,
+      blockingPaths: ["notes.txt"],
+      recoveryCommand: "archloop run --flow with-review",
+    });
+    expect(projection.taskDetails).not.toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-land",
+        recoveryCommand: expect.stringMatching(/tasks recover/),
+      }),
+    );
+    expect(
+      formatPlainHubRunOutcome(result, projection).some((line) =>
+        line.includes('blocking_paths=["notes.txt"]'),
+      ),
+    ).toBe(true);
+  });
+
   it("keeps a verification failure visible instead of showing waiting merge", () => {
     const result = makeRunResult({
       stopReason: "batch_failed",
@@ -1078,6 +1162,7 @@ describe("plain Hub run lifecycle output", () => {
         type: "checkout_sync_pending",
         reason: "unstaged_changes",
         message: "Checkout sync pending for bd-land (unstaged_changes).",
+        blockingPaths: ["hello.txt"],
       },
       state,
     );
@@ -1086,6 +1171,7 @@ describe("plain Hub run lifecycle output", () => {
     expect(pending).toContain('reason="unstaged_changes"');
     expect(pending).toContain(`transaction_id="${base.transactionId}"`);
     expect(pending).toContain(`candidate_oid="${base.candidateOid}"`);
+    expect(pending).toContain('blocking_paths=["hello.txt"]');
     expect(pending).not.toMatch(/tasks recover/);
 
     const synced = formatPlainHubRunEvent(

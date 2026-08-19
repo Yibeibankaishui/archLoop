@@ -393,6 +393,25 @@ const summarizeHubRunOutcome = (
   }
 };
 
+const projectCheckoutSyncDetails = (
+  result: RunHubFlowResult,
+): readonly HubRunTaskDetail[] =>
+  (result.checkoutSync?.items ?? []).flatMap((item) =>
+    item.status === "pending"
+      ? [
+          {
+            taskId: item.taskId,
+            stage: "Checkout sync pending",
+            diagnostic: item.message ?? result.checkoutSync?.message ?? "",
+            ...(item.blockingPaths
+              ? { blockingPaths: item.blockingPaths }
+              : {}),
+            recoveryCommand: `archloop run --flow ${result.flowId}`,
+          },
+        ]
+      : [],
+  );
+
 export const projectHubRunOutcome = (
   result: RunHubFlowResult,
   options: { readonly cancelled?: boolean } = {},
@@ -427,6 +446,7 @@ export const projectHubRunOutcome = (
       ...projectWaitingMergeDetails(result),
       ...projectPendingMergeDetails(result),
       ...projectPendingDeliveryDetails(result),
+      ...projectCheckoutSyncDetails(result),
     ],
     exitCode: resolveHubRunExitCode(outcome),
   };
@@ -959,6 +979,9 @@ export const formatPlainHubRunEvent = (
         ? [
             `suffix_invalidated_task_ids=${JSON.stringify(event.suffixInvalidatedTaskIds)}`,
           ]
+        : []),
+      ...(event.blockingPaths && event.blockingPaths.length > 0
+        ? [`blocking_paths=${JSON.stringify(event.blockingPaths)}`]
         : []),
     ].join(" ");
   }

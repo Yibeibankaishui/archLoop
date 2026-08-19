@@ -71,7 +71,10 @@ fast-forwards only in its owning worktree when Git can prove the index,
 working tree, operation state, untracked paths, sparse checkout, submodules,
 and other worktrees safe. Otherwise Hub records `checkout_sync_pending`,
 leaves every byte of user state unchanged, and retries on a later run or
-other mutating entry point. archLoop never stashes, replays, creates hidden
+other mutating entry point. Pending dirty checkouts persist the exact blocking
+host paths from Git status in the outbox, task results, and plain/JSON/live
+events. Commit or stash those paths, then retry the same run; do not run
+`tasks recover`. archLoop never stashes, replays, creates hidden
 WIP commits, switches branches, force-resets, or runs user hooks during
 background projection. Pending checkout sync does not change `shipped` and
 does not block later tasks. A remote repository is not required. `shipped`
@@ -100,7 +103,8 @@ and CAS contention stay pending for automatic retry. Plain and JSON output
 include the expected and observed target/fence OIDs and distinguish rebuild,
 pending contention, stale-owner rejection, and successful landing. Checkout
 pending and checkout success are distinct events (`checkout_sync_pending`,
-`checkout_sync_succeeded`) in plain and JSON output. With an explicit
+`checkout_sync_succeeded`) in plain and JSON output. Dirty pending events
+include the exact blocking host paths. With an explicit
 `--publish-policy best_effort` and `--remote-target`, local shipped proof also
 enqueues a durable code-publication outbox. Network, credential,
 protected-branch, and unknown push outcomes stay `target_publish_pending`

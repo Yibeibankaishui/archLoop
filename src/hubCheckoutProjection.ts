@@ -56,6 +56,7 @@ export interface HubCheckoutOutboxItem {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly pendingReason?: HubCheckoutPendingReason;
+  readonly blockingPaths?: readonly string[];
   readonly message?: string;
   readonly projectedOid?: string;
   readonly worktreePath?: string;
@@ -73,6 +74,7 @@ export interface HubCheckoutProjectionAttempt {
   readonly item: HubCheckoutOutboxItem;
   readonly status: HubCheckoutProjectionStatus;
   readonly pendingReason?: HubCheckoutPendingReason;
+  readonly blockingPaths?: readonly string[];
   readonly message: string;
 }
 
@@ -107,6 +109,9 @@ const NO_RECOVER_SUFFIX =
 const pendingAction =
   "Wait for the automatic retry; Hub will fast-forward the host branch when Git can prove the checkout safe.";
 
+const dirtyPendingAction =
+  "Commit or stash the listed host paths, then retry the same run. Hub will fast-forward the host branch when Git can prove the checkout safe.";
+
 const gitEnv = (): NodeJS.ProcessEnv => ({
   ...process.env,
   GIT_TERMINAL_PROMPT: "0",
@@ -120,6 +125,16 @@ const gitTextSync = (cwd: string, args: readonly string[]): string =>
     stdio: ["ignore", "pipe", "pipe"],
     env: gitEnv(),
   }).trim();
+
+// Porcelain status must keep the leading space in ` M path`; trimming would
+// drop that XY column and mis-parse blocking paths.
+const gitPorcelainZSync = (cwd: string, args: readonly string[]): string =>
+  execFileSync("git", [...args], {
+    cwd,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    env: gitEnv(),
+  });
 
 const gitOkSync = (cwd: string, args: readonly string[]): boolean => {
   try {
@@ -188,6 +203,24 @@ const readString = (
 const isPendingReason = (value: unknown): value is HubCheckoutPendingReason =>
   typeof value === "string" &&
   (HUB_CHECKOUT_PENDING_REASONS as readonly string[]).includes(value);
+
+const readStringArray = (
+  record: Readonly<Record<string, unknown>>,
+  key: string,
+): readonly string[] | undefined => {
+  const value = record[key];
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const paths = value.flatMap((entry) => {
+    if (typeof entry !== "string") {
+      return [];
+    }
+    const trimmed = entry.trim();
+    return trimmed.length > 0 ? [trimmed] : [];
+  });
+  return paths.length > 0 ? paths : undefined;
+};
 
 export const resolveHubCheckoutOutboxDir = (hubProjectDir: string): string =>
   join(hubProjectDir, "landing", "checkout-outbox");
@@ -267,6 +300,7 @@ const parseOutboxItem = (value: unknown): HubCheckoutOutboxItem | undefined => {
   }
   const message = readString(record, "message");
   const worktreePath = readString(record, "worktreePath");
+  const blockingPaths = readStringArray(record, "blockingPaths");
   return {
     version: 1,
     id,
@@ -281,6 +315,7 @@ const parseOutboxItem = (value: unknown): HubCheckoutOutboxItem | undefined => {
     createdAt,
     updatedAt,
     ...(isPendingReason(pendingReason) ? { pendingReason } : {}),
+    ...(blockingPaths ? { blockingPaths } : {}),
     ...(message ? { message } : {}),
     ...(projectedOid ? { projectedOid } : {}),
     ...(worktreePath ? { worktreePath } : {}),
@@ -327,9 +362,21 @@ export const listHubCheckoutOutboxItems = (
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
 };
 
+const formatBlockingPaths = (paths: readonly string[]): string =>
+  paths.join(", ");
+
 const pendingMessage = (item: HubCheckoutOutboxItem): string => {
   const reason = item.pendingReason ?? "unsafe_checkout";
-  return `Checkout sync pending for ${item.taskId} (${reason}): host branch ${item.hostTargetBranch} was not updated. Landed candidate ${item.candidateOid} remains on the Hub publish target and the task can stay shipped. ${NO_RECOVER_SUFFIX}`;
+  const paths = item.blockingPaths;
+  const pathClause =
+    paths && paths.length > 0
+      ? ` Blocking host paths: ${formatBlockingPaths(paths)}.`
+      : "";
+  const recoveryClause =
+    paths && paths.length > 0
+      ? " Next steps: commit or stash the listed paths, then retry the run."
+      : "";
+  return `Checkout sync pending for ${item.taskId} (${reason}): host branch ${item.hostTargetBranch} was not updated.${pathClause} Landed candidate ${item.candidateOid} remains on the Hub publish target and the task can stay shipped.${recoveryClause} ${NO_RECOVER_SUFFIX}`;
 };
 
 const succeededMessage = (item: HubCheckoutOutboxItem): string =>
@@ -360,7 +407,16 @@ export const inspectHubCheckoutOutbox = (input: {
     pendingCount,
     succeededCount,
     message: formatHubCheckoutSyncMessage({ items, pendingCount }),
-    nextAction: pendingCount > 0 ? pendingAction : "",
+    nextAction:
+      pendingCount > 0
+        ? items.some(
+            (item) =>
+              item.status === "pending" &&
+              (item.blockingPaths?.length ?? 0) > 0,
+          )
+          ? dirtyPendingAction
+          : pendingAction
+        : "",
   };
 };
 
@@ -501,53 +557,109 @@ const treeHasGitlink = (cwd: string, treeish: string): boolean => {
 const isRenameCopyOrDeleteCode = (code: string): boolean =>
   code === "R" || code === "C" || code === "D";
 
+type PorcelainEntry = {
+  readonly x: string;
+  readonly y: string;
+  readonly paths: readonly string[];
+};
+
+const parsePorcelainZ = (status: string): readonly PorcelainEntry[] => {
+  const fields = status.split("\0").filter((field) => field.length > 0);
+  const entries: PorcelainEntry[] = [];
+  for (let index = 0; index < fields.length; index += 1) {
+    const field = fields[index]!;
+    if (field.length < 3) {
+      continue;
+    }
+    const x = field[0] ?? " ";
+    const y = field[1] ?? " ";
+    const path = field.slice(3);
+    const paths = path.length > 0 ? [path] : [];
+    if (isRenameCopyOrDeleteCode(x) || isRenameCopyOrDeleteCode(y)) {
+      index += 1;
+      const renamedPath = fields[index];
+      if (renamedPath && renamedPath.length > 0) {
+        paths.push(renamedPath);
+      }
+    }
+    entries.push({ x, y, paths });
+  }
+  return entries;
+};
+
+const uniquePaths = (entries: readonly PorcelainEntry[]): readonly string[] => {
+  const seen = new Set<string>();
+  const paths: string[] = [];
+  for (const entry of entries) {
+    for (const path of entry.paths) {
+      if (!seen.has(path)) {
+        seen.add(path);
+        paths.push(path);
+      }
+    }
+  }
+  return paths;
+};
+
 const classifyPorcelain = (
-  status: string,
+  entries: readonly PorcelainEntry[],
 ): HubCheckoutPendingReason | undefined => {
-  const lines = status.split("\n").filter((line) => line.length > 0);
-  if (lines.length === 0) {
+  if (entries.length === 0) {
     return undefined;
   }
-  for (const line of lines) {
-    const x = line[0] ?? " ";
-    const y = line[1] ?? " ";
-    if (isRenameCopyOrDeleteCode(x) || isRenameCopyOrDeleteCode(y)) {
+  for (const entry of entries) {
+    if (isRenameCopyOrDeleteCode(entry.x) || isRenameCopyOrDeleteCode(entry.y)) {
       return "rename_or_delete";
     }
   }
-  if (lines.some((line) => line.startsWith("??") || line.startsWith("!!"))) {
+  if (entries.some((entry) => entry.x === "?" || entry.y === "?" || entry.x === "!")) {
     return "untracked_paths";
   }
-  if (
-    lines.some((line) => {
-      const x = line[0] ?? " ";
-      return x !== " " && x !== "?";
-    })
-  ) {
+  if (entries.some((entry) => entry.x !== " " && entry.x !== "?")) {
     return "staged_changes";
   }
   return "unstaged_changes";
 };
 
+type CheckoutSafetyHold = {
+  readonly pendingReason: HubCheckoutPendingReason;
+  readonly blockingPaths?: readonly string[];
+};
+
 const inspectOwningWorktreeSafety = (
   cwd: string,
   candidateOid: string,
-): HubCheckoutPendingReason | undefined => {
+): CheckoutSafetyHold | undefined => {
   if (hasOperationInProgress(cwd)) {
-    return "operation_in_progress";
+    return { pendingReason: "operation_in_progress" };
   }
   if (hasSparseCheckout(cwd)) {
-    return "sparse_checkout";
+    return { pendingReason: "sparse_checkout" };
   }
   if (treeHasGitlink(cwd, candidateOid)) {
-    return "submodule";
+    return { pendingReason: "submodule" };
   }
-  const status = tryGitTextSync(cwd, [
-    "status",
-    "--porcelain=v1",
-    "--untracked-files=all",
-  ]);
-  return classifyPorcelain(status ?? "");
+  let status = "";
+  try {
+    status = gitPorcelainZSync(cwd, [
+      "status",
+      "--porcelain=v1",
+      "-z",
+      "--untracked-files=all",
+    ]);
+  } catch {
+    status = "";
+  }
+  const entries = parsePorcelainZ(status);
+  const pendingReason = classifyPorcelain(entries);
+  if (!pendingReason) {
+    return undefined;
+  }
+  const blockingPaths = uniquePaths(entries);
+  return {
+    pendingReason,
+    ...(blockingPaths.length > 0 ? { blockingPaths } : {}),
+  };
 };
 
 const isAncestor = (
@@ -578,6 +690,7 @@ const markSucceeded = (
     updatedAt: input.now,
     projectedOid: input.projectedOid,
     pendingReason: undefined,
+    blockingPaths: undefined,
     message: undefined,
     ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
   });
@@ -587,12 +700,15 @@ const markPending = (
   item: HubCheckoutOutboxItem,
   reason: HubCheckoutPendingReason,
   now: string,
+  blockingPaths?: readonly string[],
 ): HubCheckoutOutboxItem => {
   const next: HubCheckoutOutboxItem = {
     ...item,
     status: "pending",
     pendingReason: reason,
     updatedAt: now,
+    blockingPaths:
+      blockingPaths && blockingPaths.length > 0 ? blockingPaths : undefined,
   };
   return writeOutboxItem(hubProjectDir, {
     ...next,
@@ -686,9 +802,9 @@ const advanceHostBranchWithCrashWindows = async (input: {
   readonly item: HubCheckoutOutboxItem;
   readonly now: string;
   readonly mutate: () => Promise<void>;
-  readonly pendingReasonAfterFailure: (
+  readonly pendingAfterFailure: (
     observedOid: string | undefined,
-  ) => HubCheckoutPendingReason;
+  ) => CheckoutSafetyHold;
   readonly worktreePath?: string;
 }): Promise<HubCheckoutOutboxItem> => {
   const { projection, item, now } = input;
@@ -714,11 +830,13 @@ const advanceHostBranchWithCrashWindows = async (input: {
       maybeCrash(projection.faultInjection, "after");
       return succeeded(observedOid);
     }
+    const hold = input.pendingAfterFailure(observedOid);
     return markPending(
       projection.hubProjectDir,
       item,
-      input.pendingReasonAfterFailure(observedOid),
+      hold.pendingReason,
       now,
+      hold.blockingPaths,
     );
   }
   maybeCrash(projection.faultInjection, "after");
@@ -764,15 +882,26 @@ const projectOneItem = async (
       now,
       mutate: () =>
         attemptCas(input.repoRoot, input.hubProjectDir, item, currentOid),
-      pendingReasonAfterFailure: (observedOid) =>
-        casFailureReason(input.repoRoot, item.candidateOid, observedOid),
+      pendingAfterFailure: (observedOid) => ({
+        pendingReason: casFailureReason(
+          input.repoRoot,
+          item.candidateOid,
+          observedOid,
+        ),
+      }),
     });
   }
 
   const owner = owners[0]!;
   const unsafe = inspectOwningWorktreeSafety(owner.path, item.candidateOid);
   if (unsafe) {
-    return markPending(input.hubProjectDir, item, unsafe, now);
+    return markPending(
+      input.hubProjectDir,
+      item,
+      unsafe.pendingReason,
+      now,
+      unsafe.blockingPaths,
+    );
   }
   return advanceHostBranchWithCrashWindows({
     projection: input,
@@ -780,9 +909,10 @@ const projectOneItem = async (
     now,
     mutate: () =>
       attemptFastForward(owner.path, input.hubProjectDir, item.candidateOid),
-    pendingReasonAfterFailure: () =>
-      inspectOwningWorktreeSafety(owner.path, item.candidateOid) ??
-      "operation_in_progress",
+    pendingAfterFailure: () =>
+      inspectOwningWorktreeSafety(owner.path, item.candidateOid) ?? {
+        pendingReason: "operation_in_progress",
+      },
     worktreePath: owner.path,
   });
 };
@@ -800,6 +930,7 @@ const toAttempt = (
   item,
   status: item.status,
   ...(item.pendingReason ? { pendingReason: item.pendingReason } : {}),
+  ...(item.blockingPaths ? { blockingPaths: item.blockingPaths } : {}),
   message: attemptMessage(item),
 });
 

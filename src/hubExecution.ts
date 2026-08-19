@@ -251,6 +251,7 @@ export interface HubTaskEvent {
   readonly verificationConcurrency?: number;
   readonly suffixInvalidatedTaskIds?: readonly string[];
   readonly hostContributionRelation?: string;
+  readonly blockingPaths?: readonly string[];
 }
 
 type HubRunEventData =

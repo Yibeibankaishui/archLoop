@@ -144,7 +144,8 @@ The task-board flows resume unfinished merge-ready work before claiming new
 tasks. Eligible tasks land through a durable fenced transaction onto a
 Hub-managed local Git ref; landing does not rewrite the checkout, index, or
 WIP. A later safe fast-forward may update the host branch; unsafe WIP stays
-`checkout_sync_pending` and does not change `shipped`. With
+`checkout_sync_pending` with the blocking host paths and does not change
+`shipped`. With
 `--publish-policy best_effort --remote-target <remote/ref>`, code publication
 retries as `target_publish_pending` separately from GitHub task sync and does
 not undo local shipped proof. With `--publish-policy required`, tasks stay

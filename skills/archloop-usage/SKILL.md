@@ -226,9 +226,11 @@ npx archloop tasks cleanup --dry-run
   and a checked-out branch fast-forwards only in its owning worktree when Git
   can prove the update safe. Unsafe WIP, operation state, sparse checkout,
   submodules, divergence, or extra worktrees stay `checkout_sync_pending`,
-  leave user state unchanged, and retry on a later run. Projection never
-  stashes, switches branches, force-resets, or runs user hooks. Pending
-  checkout sync does not change `shipped`.
+  leave user state unchanged, and retry on a later run. Dirty checkouts persist
+  the exact blocking host paths in the outbox, task results, and run output.
+  Commit or stash those paths, then retry; do not run `tasks recover`.
+  Projection never stashes, switches branches, force-resets, or runs user
+  hooks. Pending checkout sync does not change `shipped`.
 - With `--publish-policy best_effort` and an explicit `--remote-target`, local
   shipped proof enqueues a durable publication outbox keyed by transaction,
   remote, ref, candidate OID, and expected remote OID. Publication uses

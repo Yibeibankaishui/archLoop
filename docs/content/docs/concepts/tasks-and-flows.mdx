@@ -45,8 +45,10 @@ outcomes report `partial_failed`. All-pending batches report `pending` /
 `completed_with_pending_merge` instead of counting as shipped or failed.
 Landing does not merge into the user's
 checkout. After landing, Hub projects the host branch only when a fast-forward
-is provably safe; otherwise `checkout_sync_pending` stays visible and retries
-automatically without affecting `shipped`. With an explicit `best_effort`
+is provably safe; otherwise `checkout_sync_pending` stays visible with the
+exact blocking host paths and retries automatically without affecting
+`shipped`. Commit or stash the listed paths, then rerun the same flow. With an
+explicit `best_effort`
 publish policy and remote target, code publication retries as
 `target_publish_pending` separately from GitHub task sync and does not undo
 local shipped proof. Concurrent runs share a landing lease and fenced compare-and-swap;

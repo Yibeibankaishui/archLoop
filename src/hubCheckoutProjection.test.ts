@@ -344,16 +344,72 @@ describe("Hub checkout projection outbox", () => {
     ).rejects.toBeTruthy();
   });
 
+  it("persists exact untracked blocking paths on the durable checkout outbox", async () => {
+    const fixture = await prepareLandedFixture("bd-untracked-paths");
+    await writeFile(join(fixture.repoDir, "notes.txt"), "local notes\n");
+    const before = await captureCheckout(fixture.repoDir);
+    enqueueHubCheckoutProjection({
+      repoRoot: fixture.repoDir,
+      hubProjectDir: fixture.hubProjectDir,
+      candidate: fixture.candidate,
+      candidateOid: fixture.candidate.candidateOid,
+    });
+
+    const outcome = await projectHubCheckoutOutbox({
+      repoRoot: fixture.repoDir,
+      hubProjectDir: fixture.hubProjectDir,
+    });
+
+    expect(outcome.attempts[0]?.status).toBe("pending");
+    expect(outcome.attempts[0]?.pendingReason).toBe("untracked_paths");
+    expect(outcome.attempts[0]?.blockingPaths).toEqual(["notes.txt"]);
+    expect(outcome.attempts[0]?.item.blockingPaths).toEqual(["notes.txt"]);
+    expect(outcome.message).toContain("notes.txt");
+    expect(outcome.message).toContain("commit or stash");
+    expect(outcome.message).not.toMatch(/tasks recover/);
+    const stored = inspectHubCheckoutOutbox({
+      hubProjectDir: fixture.hubProjectDir,
+    });
+    expect(stored.items[0]?.blockingPaths).toEqual(["notes.txt"]);
+    expect(stored.nextAction).toContain("Commit or stash");
+    const raw = JSON.parse(
+      await readFile(
+        join(
+          fixture.hubProjectDir,
+          "landing",
+          "checkout-outbox",
+          `${stored.items[0]!.id}.json`,
+        ),
+        "utf8",
+      ),
+    ) as { blockingPaths?: unknown };
+    expect(raw.blockingPaths).toEqual(["notes.txt"]);
+    expect(await captureCheckout(fixture.repoDir)).toEqual(before);
+    expect(
+      deriveHubLandingShipped({
+        publishPolicy: "off",
+        taskClosed: true,
+        transactionId: fixture.candidate.transactionId,
+        closedTransactionId: fixture.candidate.transactionId,
+        candidateOid: fixture.candidate.candidateOid,
+        closedCandidateOid: fixture.candidate.candidateOid,
+        publishTargetOid: fixture.candidate.candidateOid,
+      }).shipped,
+    ).toBe(true);
+  });
+
   it("retains pending for dirty non-overlap, overlap, staged, untracked, and rename/delete without touching state", async () => {
     const cases: {
       readonly label: string;
       readonly reason: string | readonly string[];
+      readonly blockingPaths: readonly string[];
       readonly setup: (repoDir: string) => Promise<void>;
       readonly readback: (repoDir: string) => Promise<void>;
     }[] = [
       {
         label: "nonoverlap",
         reason: "untracked_paths",
+        blockingPaths: ["notes.txt"],
         setup: async (repoDir) => {
           await writeFile(join(repoDir, "notes.txt"), "local notes\n");
         },
@@ -369,6 +425,7 @@ describe("Hub checkout projection outbox", () => {
       {
         label: "overlap",
         reason: ["unstaged_changes", "staged_changes"],
+        blockingPaths: ["hello.txt"],
         setup: async (repoDir) => {
           await writeFile(join(repoDir, "hello.txt"), "dirty hello\n");
         },
@@ -381,6 +438,7 @@ describe("Hub checkout projection outbox", () => {
       {
         label: "staged",
         reason: "staged_changes",
+        blockingPaths: ["staged.txt"],
         setup: async (repoDir) => {
           await writeFile(join(repoDir, "staged.txt"), "staged\n");
           await execFileAsync("git", ["add", "staged.txt"], { cwd: repoDir });
@@ -390,8 +448,29 @@ describe("Hub checkout projection outbox", () => {
         },
       },
       {
+        label: "mixed",
+        reason: ["untracked_paths", "staged_changes", "unstaged_changes"],
+        blockingPaths: ["hello.txt", "staged.txt", "notes.txt"],
+        setup: async (repoDir) => {
+          await writeFile(join(repoDir, "hello.txt"), "dirty hello\n");
+          await writeFile(join(repoDir, "staged.txt"), "staged\n");
+          await execFileAsync("git", ["add", "staged.txt"], { cwd: repoDir });
+          await writeFile(join(repoDir, "notes.txt"), "local notes\n");
+        },
+        readback: async (repoDir) => {
+          await expect(readFile(join(repoDir, "hello.txt"), "utf8")).resolves.toBe(
+            "dirty hello\n",
+          );
+          expect(await gitText(repoDir, ["show", ":staged.txt"])).toBe("staged");
+          await expect(readFile(join(repoDir, "notes.txt"), "utf8")).resolves.toBe(
+            "local notes\n",
+          );
+        },
+      },
+      {
         label: "rename",
         reason: "rename_or_delete",
+        blockingPaths: ["hello.txt", "hello-renamed.txt"],
         setup: async (repoDir) => {
           await execFileAsync("git", ["mv", "hello.txt", "hello-renamed.txt"], {
             cwd: repoDir,
@@ -426,8 +505,38 @@ describe("Hub checkout projection outbox", () => {
           : [testCase.reason],
         testCase.label,
       ).toContain(outcome.attempts[0]?.pendingReason);
+      expect(
+        [...(outcome.attempts[0]?.blockingPaths ?? [])].sort(),
+        testCase.label,
+      ).toEqual([...testCase.blockingPaths].sort());
       expect(outcome.message, testCase.label).toContain("Checkout sync pending");
+      for (const path of testCase.blockingPaths) {
+        expect(outcome.message, testCase.label).toContain(path);
+      }
       expect(outcome.message, testCase.label).not.toMatch(/tasks recover/);
+      const stored = inspectHubCheckoutOutbox({
+        hubProjectDir: fixture.hubProjectDir,
+      });
+      expect(
+        [...(stored.items[0]?.blockingPaths ?? [])].sort(),
+        testCase.label,
+      ).toEqual([...testCase.blockingPaths].sort());
+      const raw = JSON.parse(
+        await readFile(
+          join(
+            fixture.hubProjectDir,
+            "landing",
+            "checkout-outbox",
+            `${stored.items[0]!.id}.json`,
+          ),
+          "utf8",
+        ),
+      ) as { blockingPaths?: unknown; status?: unknown };
+      expect(raw.status, testCase.label).toBe("pending");
+      expect(
+        [...((raw.blockingPaths as string[] | undefined) ?? [])].sort(),
+        testCase.label,
+      ).toEqual([...testCase.blockingPaths].sort());
       expect(await captureCheckout(fixture.repoDir), testCase.label).toEqual(
         before,
       );

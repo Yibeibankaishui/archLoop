@@ -167,6 +167,7 @@ describe("JSONL Hub run lifecycle output", () => {
       candidateOid: "cccccccccccccccccccccccccccccccccccccccc",
       reason: "unstaged_changes",
       message: "Checkout sync pending for bd-land (unstaged_changes).",
+      blockingPaths: ["hello.txt"],
     };
     expect(parseRecord(renderer.event(pending)!)).toMatchObject({
       type: "checkout_sync_pending",
@@ -177,6 +178,7 @@ describe("JSONL Hub run lifecycle output", () => {
         transactionId: "ltx-bd-land-abc123",
         candidateOid: "cccccccccccccccccccccccccccccccccccccccc",
         reason: "unstaged_changes",
+        blockingPaths: ["hello.txt"],
       },
     });
 
@@ -806,13 +808,32 @@ describe("JSONL Hub run lifecycle output", () => {
         .outcome(
           makeRunResult({
             checkoutSync: {
-              items: [],
+              items: [
+                {
+                  version: 1,
+                  id: "cpo-1",
+                  transactionId: "ltx-bd-land-abc123",
+                  taskId: "bd-land",
+                  hostTargetBranch: "main",
+                  branchRef: "refs/heads/main",
+                  candidateOid: "c".repeat(40),
+                  expectedBranchOid: "b".repeat(40),
+                  publishTargetRef: "refs/archloop/publish/main",
+                  status: "pending",
+                  createdAt: "2026-08-14T18:00:00.000Z",
+                  updatedAt: "2026-08-14T18:00:00.000Z",
+                  pendingReason: "unstaged_changes",
+                  blockingPaths: ["hello.txt"],
+                  message:
+                    "Checkout sync pending for bd-land (unstaged_changes): host branch main was not updated. Blocking host paths: hello.txt. Landed candidate cccccccccccccccccccccccccccccccccccccccc remains on the Hub publish target and the task can stay shipped. Next steps: commit or stash the listed paths, then retry the run. This is not a task failure and does not require a recovery command.",
+                },
+              ],
               pendingCount: 1,
               succeededCount: 0,
               message:
-                "Checkout sync pending for bd-land (unstaged_changes): host branch main was not updated. Landed candidate cccccccccccccccccccccccccccccccccccccccc remains on the Hub publish target and the task can stay shipped. This is not a task failure and does not require a recovery command.",
+                "Checkout sync pending for bd-land (unstaged_changes): host branch main was not updated. Blocking host paths: hello.txt. Landed candidate cccccccccccccccccccccccccccccccccccccccc remains on the Hub publish target and the task can stay shipped. Next steps: commit or stash the listed paths, then retry the run. This is not a task failure and does not require a recovery command.",
               nextAction:
-                "Wait for the automatic retry; Hub will fast-forward the host branch when Git can prove the checkout safe.",
+                "Commit or stash the listed host paths, then retry the same run. Hub will fast-forward the host branch when Git can prove the checkout safe.",
             },
           }),
           projectHubRunOutcome(makeRunResult({})),
@@ -821,6 +842,13 @@ describe("JSONL Hub run lifecycle output", () => {
     );
     expect(checkoutPending.checkoutSync).toMatchObject({
       pendingCount: 1,
+      items: [
+        {
+          taskId: "bd-land",
+          pendingReason: "unstaged_changes",
+          blockingPaths: ["hello.txt"],
+        },
+      ],
     });
     expect(JSON.stringify(checkoutPending)).not.toMatch(/tasks recover/);
 
