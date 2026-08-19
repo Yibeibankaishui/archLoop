@@ -2,6 +2,7 @@ import { join } from "node:path";
 
 import type { HubRunEvent, HubRunStopReason } from "./hubExecution.js";
 import type { RunHubFlowResult } from "./hubFlowExecution.js";
+import type { HubGitCommandDiagnostic } from "./hubGitRepositoryIntegrity.js";
 import {
   HUB_HOST_CONTRIBUTION_CONFLICT,
   HUB_HOST_CONTRIBUTION_PENDING,
@@ -22,6 +23,7 @@ export interface HubRunTaskDetail {
   readonly logPath?: string;
   readonly recoveryCommand?: string;
   readonly blockingPaths?: readonly string[];
+  readonly gitDiagnostic?: HubGitCommandDiagnostic;
 }
 
 export interface HubRunOutcomeProjection {
@@ -188,28 +190,39 @@ const projectMergeSelectionDetails = (
   (result.mergeResult?.selectionDiagnostics ?? []).flatMap((diagnostic) => {
     if (
       diagnostic.reason !== "state_inconsistent" &&
-      diagnostic.reason !== "dirty_worktree"
+      diagnostic.reason !== "dirty_worktree" &&
+      diagnostic.reason !== "repository_integrity"
     ) {
       return [];
     }
 
     const isStateInconsistent = diagnostic.reason === "state_inconsistent";
+    const isRepositoryIntegrity = diagnostic.reason === "repository_integrity";
     return [
       {
         taskId: diagnostic.taskId,
-        stage: "Merge blocked",
+        stage: isRepositoryIntegrity ? "Repository integrity" : "Merge blocked",
         diagnostic:
           diagnostic.message ??
-          (isStateInconsistent
-            ? "Task projection state is inconsistent."
-            : "Dirty source files overlap this task branch. Commit, stash, or discard them, then rerun the same flow."),
+          (isRepositoryIntegrity
+            ? "Git could not resolve the task branch."
+            : isStateInconsistent
+              ? "Task projection state is inconsistent."
+              : "Dirty source files overlap this task branch. Commit, stash, or discard them, then rerun the same flow."),
         ...(isStateInconsistent
           ? {
               recoveryCommand:
                 diagnostic.suggestedRecovery ??
                 `archloop tasks repair-state ${diagnostic.taskId}`,
             }
-          : {}),
+          : isRepositoryIntegrity
+            ? {
+                recoveryCommand: diagnostic.suggestedRecovery,
+                ...(diagnostic.gitDiagnostic
+                  ? { gitDiagnostic: diagnostic.gitDiagnostic }
+                  : {}),
+              }
+            : {}),
         ...(diagnostic.blockingPaths
           ? { blockingPaths: diagnostic.blockingPaths }
           : {}),

@@ -7,6 +7,12 @@ import { promisify } from "node:util";
 import { assertAgentCredentialsConfigured } from "./agentAuthGuidance.js";
 import { isAllowlistedBeadsRuntimePath } from "./hubBeadsRuntimePaths.js";
 import {
+  formatHubGitRepositoryIntegrityMessage,
+  HUB_REPOSITORY_INTEGRITY_RECOVERY_GUIDANCE,
+  inspectHubGitBranch,
+  type HubGitCommandDiagnostic,
+} from "./hubGitRepositoryIntegrity.js";
+import {
   appendHubBatchEvent,
   appendHubTaskEvent,
   recordHubTaskStatusAdvanced,
@@ -248,7 +254,8 @@ export type HubBatchMergeSelectionReason =
   | "dirty_worktree"
   | "task_store_dirty"
   | "state_inconsistent"
-  | "legacy_landing_integrity";
+  | "legacy_landing_integrity"
+  | "repository_integrity";
 
 export interface HubBatchMergeSelectionDiagnostic {
   readonly taskId: string;
@@ -267,12 +274,14 @@ export interface HubBatchMergeSelectionDiagnostic {
   readonly staleClaimFields?: Readonly<Record<string, string>>;
   readonly suggestedRecovery?: string;
   readonly mergeReadyEventType?: string;
+  readonly gitDiagnostic?: HubGitCommandDiagnostic;
 }
 
 export interface HubMergeBranchState {
   readonly exists: boolean;
   readonly hasUnmergedWork: boolean;
   readonly changedFiles?: readonly string[];
+  readonly integrityFailure?: HubGitCommandDiagnostic;
 }
 
 export type HubMergeBranchInspector = (
@@ -902,42 +911,8 @@ const extractErrorDiagnostics = (error: unknown): HubMergeDiagnostics => {
   };
 };
 
-const defaultBranchInspector: HubMergeBranchInspector = async (branch, cwd) => {
-  try {
-    await execFileAsync(
-      "git",
-      ["rev-parse", "--verify", `${branch}^{commit}`],
-      {
-        cwd,
-      },
-    );
-  } catch {
-    return { exists: false, hasUnmergedWork: false };
-  }
-
-  try {
-    const { stdout } = await execFileAsync(
-      "git",
-      ["rev-list", "--count", `HEAD..${branch}`],
-      { cwd, encoding: "utf8" },
-    );
-    const diff = await execFileAsync(
-      "git",
-      ["diff", "--name-only", `HEAD...${branch}`],
-      { cwd, encoding: "utf8" },
-    ).catch(() => ({ stdout: "" }));
-    return {
-      exists: true,
-      hasUnmergedWork: Number(String(stdout).trim()) > 0,
-      changedFiles: String(diff.stdout)
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0),
-    };
-  } catch {
-    return { exists: true, hasUnmergedWork: false };
-  }
-};
+const defaultBranchInspector: HubMergeBranchInspector = async (branch, cwd) =>
+  inspectHubGitBranch(cwd, branch);
 
 const parseGitStatusPorcelain = (stdout: string): string[] => {
   const entries = stdout.split("\0").filter((entry) => entry.length > 0);
@@ -1038,6 +1013,7 @@ const buildSelectionDiagnostic = (
     | "staleClaimFields"
     | "suggestedRecovery"
     | "mergeReadyEventType"
+    | "gitDiagnostic"
   >,
 ): HubBatchMergeSelectionDiagnostic => ({
   taskId: task.id,
@@ -1046,6 +1022,20 @@ const buildSelectionDiagnostic = (
   batchId: task.claim?.batchId,
   ...input,
 });
+
+const buildRepositoryIntegritySelectionDiagnostic = (
+  task: HubTaskProjection,
+  branch: string,
+  diagnostic: HubGitCommandDiagnostic,
+): HubBatchMergeSelectionDiagnostic =>
+  buildSelectionDiagnostic(task, {
+    decision: "blocked",
+    reason: "repository_integrity",
+    branch,
+    gitDiagnostic: diagnostic,
+    suggestedRecovery: HUB_REPOSITORY_INTEGRITY_RECOVERY_GUIDANCE,
+    message: `${formatHubGitRepositoryIntegrityMessage({ branch, diagnostic })} ${HUB_REPOSITORY_INTEGRITY_RECOVERY_GUIDANCE}`,
+  });
 
 const parseHubTaskEvents = (runDir: string): readonly HubTaskEvent[] => {
   const { taskEventsPath } = resolveHubRunEventsPaths(runDir);
@@ -1151,6 +1141,13 @@ const maybeBuildStateInconsistentDiagnostic = async (input: {
 
   const branch = event.branch;
   const branchState = await input.branchInspector(branch, input.cwd);
+  if (branchState.integrityFailure) {
+    return buildRepositoryIntegritySelectionDiagnostic(
+      input.task,
+      branch,
+      branchState.integrityFailure,
+    );
+  }
   if (!branchState.exists || !branchState.hasUnmergedWork) {
     return undefined;
   }
@@ -1299,6 +1296,16 @@ const evaluateHubBatchMergeSelection = async (input: {
     }
 
     const branchState = await input.branchInspector(branch, input.cwd);
+    if (branchState.integrityFailure) {
+      diagnostics.push(
+        buildRepositoryIntegritySelectionDiagnostic(
+          task,
+          branch,
+          branchState.integrityFailure,
+        ),
+      );
+      continue;
+    }
     if (!branchState.exists) {
       diagnostics.push(
         buildSelectionDiagnostic(task, {

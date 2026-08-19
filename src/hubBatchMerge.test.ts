@@ -51,6 +51,16 @@ const commitFile = async (
   await execAsync(`git commit -m "${message}"`, { cwd: dir });
 };
 
+const corruptBranchTip = async (repoDir: string, branch: string) => {
+  const { stdout } = await execAsync(`git rev-parse ${branch}`, {
+    cwd: repoDir,
+  });
+  const oid = stdout.trim();
+  const objectPath = `.git/objects/${oid.slice(0, 2)}/${oid.slice(2)}`;
+  await execAsync(`chmod u+w ${objectPath}`, { cwd: repoDir });
+  await execAsync(`truncate -s 0 ${objectPath}`, { cwd: repoDir });
+};
+
 const readJsonl = async (path: string): Promise<unknown[]> => {
   const content = await readFile(path, "utf-8");
   return content
@@ -786,6 +796,78 @@ describe("runHubBatchMerge", () => {
     expect(summary).toContain("bd-missing-claim: skipped missing_claim");
     expect(summary).toContain("bd-missing-branch: skipped missing_branch");
     expect(summary).toContain("bd-no-work: skipped no_unmerged_work");
+  });
+
+  it("blocks corrupt branch tips as repository integrity failures", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "hub-batch-merge-corrupt-"));
+    await initRepo(repoDir);
+    await commitFile(repoDir, "hello.txt", "hello", "initial commit");
+
+    const batchId = "batch-corrupt";
+    const branch = "branch-corrupt";
+    await execAsync(`git checkout -b ${branch}`, { cwd: repoDir });
+    await commitFile(repoDir, "work.txt", "work", "task work");
+    await execAsync("git checkout main", { cwd: repoDir });
+    await corruptBranchTip(repoDir, branch);
+
+    const stateFile = join(repoDir, "bd-state.json");
+    const { env } = await writeMockBd(repoDir, stateFile, [
+      {
+        id: "bd-corrupt",
+        title: "Corrupt branch",
+        status: "in_progress",
+        labels: ["waiting-for-merge"],
+        metadata: {
+          hubStatus: "waiting_for_merge",
+          claim: {
+            runId: "run-merge-test",
+            batchId,
+            branch,
+            claimedAt: "2026-06-12T10:00:00Z",
+          },
+        },
+      },
+    ]);
+
+    const context = createMergeContext(
+      repoDir,
+      batchId,
+      join(repoDir, "data", "archloop", "hub"),
+    );
+
+    const result = await runHubBatchMerge({
+      flowId: "no-review",
+      cwd: repoDir,
+      runDir: context.runDir,
+      runId: context.runId,
+      batchId,
+      env,
+      merger: successMerger,
+      verifier: successVerifier,
+      worktreeInspector: cleanWorktreeInspector,
+    });
+
+    expect(result.selectedTaskIds).toEqual([]);
+    expect(result.batchStatus).toBe("skipped");
+    expect(result.selectionDiagnostics).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-corrupt",
+        decision: "blocked",
+        reason: "repository_integrity",
+        branch,
+        gitDiagnostic: expect.objectContaining({
+          command: `git rev-parse --verify ${branch}^{commit}`,
+          repositoryPath: repoDir,
+          ref: `refs/heads/${branch}`,
+          exitCode: 128,
+        }),
+        suggestedRecovery: expect.stringContaining("git fsck --full"),
+      }),
+    );
+
+    const summary = formatHubBatchMergeResultLines(result).join("\n");
+    expect(summary).toContain("bd-corrupt: blocked repository_integrity");
+    expect(summary).toMatch(/corrupt|empty/i);
   });
 
   it("diagnoses reviewed branch work with stale Beads projection as state inconsistent", async () => {
