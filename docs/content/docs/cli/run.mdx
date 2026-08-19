@@ -22,7 +22,10 @@ Common flow IDs are `no-review`, `with-review`, `triage`, and
 | `--no-color`       | Disable color styling for flow output                                       |
 
 Task-board flows recover an unfinished same-flow merge-ready batch before
-claiming new work. Proposal flows reject task-batch options that do not apply.
+claiming new work. Planned selection recovers an `explicit_blocker` deferral
+when live board description and blocker metadata show no effective blocker,
+and keeps the deferral when the candidate is a real dependency of a selected
+task. Proposal flows reject task-batch options that do not apply.
 
 At startup, task-board runs also detect tasks left in implementation, review,
 or merge without a live worktree lease. The event-aware recovery route resumes

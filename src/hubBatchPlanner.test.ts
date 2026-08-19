@@ -528,6 +528,278 @@ describe("hubBatchPlanner", () => {
     expect(result.diagnosticReason).toBeUndefined();
   });
 
+  it("keeps explicit_blocker deferrals when board-only blocker prose is still open", async () => {
+    const { repoDir, env } = await createTempHubTaskStoreRepo({
+      listRecords: [
+        {
+          id: "bd-github-152",
+          title: "Open github blocker",
+          hub_status: "implementing",
+          remoteRefs: [{ url: "github#152" }],
+        },
+        {
+          id: "bd-first",
+          title: "First ready task",
+          status: "open",
+          labels: ["ready-for-agent"],
+          metadata: {},
+        },
+        {
+          id: "bd-second",
+          title: "Second ready task",
+          status: "open",
+          labels: ["ready-for-agent"],
+          metadata: {},
+          description: "## Blocked by\n\n- #152",
+        },
+      ],
+    });
+
+    const result = await planHubFlowBatch({
+      flowId: "no-review",
+      cwd: repoDir,
+      env,
+      runDir: "/tmp/run",
+      candidates: [readyTask("bd-first"), readyTask("bd-second")],
+      batchStrategy: "planned",
+      maxTasks: 3,
+      batchPlanner: async () =>
+        plannerStdout({
+          selectedTaskIds: ["bd-first"],
+          deferred: [{ taskId: "bd-second", reason: "explicit_blocker" }],
+        }),
+    });
+
+    expect(result.selectedTasks.map((task) => task.id)).toEqual(["bd-first"]);
+    expect(result.deferredTasks).toEqual([
+      { taskId: "bd-second", reason: "explicit_blocker" },
+    ]);
+    expect(result.diagnosticReason).toBeUndefined();
+  });
+
+  it("recovers board-only stale Blocked by prose when the blocker is already done", async () => {
+    const { repoDir, env } = await createTempHubTaskStoreRepo({
+      listRecords: [
+        {
+          id: "bd-github-152",
+          title: "Closed github blocker",
+          hub_status: "done",
+          remoteRefs: [{ url: "github#152" }],
+        },
+        {
+          id: "bd-first",
+          title: "First ready task",
+          status: "open",
+          labels: ["ready-for-agent"],
+          metadata: {},
+        },
+        {
+          id: "bd-second",
+          title: "Second ready task",
+          status: "open",
+          labels: ["ready-for-agent"],
+          metadata: {},
+          description: "## Blocked by\n\n- #152",
+        },
+      ],
+    });
+
+    const result = await planHubFlowBatch({
+      flowId: "no-review",
+      cwd: repoDir,
+      env,
+      runDir: "/tmp/run",
+      candidates: [readyTask("bd-first"), readyTask("bd-second")],
+      batchStrategy: "planned",
+      maxTasks: 3,
+      batchPlanner: async () =>
+        plannerStdout({
+          selectedTaskIds: ["bd-first"],
+          deferred: [{ taskId: "bd-second", reason: "explicit_blocker" }],
+        }),
+    });
+
+    expect(result.selectedTasks.map((task) => task.id)).toEqual([
+      "bd-first",
+      "bd-second",
+    ]);
+    expect(result.deferredTasks).toEqual([]);
+    expect(result.diagnosticReason).toBe("invalid_explicit_blocker_deferral");
+  });
+
+  it("keeps explicit_blocker deferrals when selected-task blocker prose lives only on the board", async () => {
+    const { repoDir, env } = await createTempHubTaskStoreRepo({
+      listRecords: [
+        {
+          id: "bd-first",
+          title: "First ready task",
+          status: "open",
+          labels: ["ready-for-agent"],
+          metadata: {},
+          description: "## Blocked by\n\n- bd-second",
+        },
+        {
+          id: "bd-second",
+          title: "Second ready task",
+          status: "open",
+          labels: ["ready-for-agent"],
+          metadata: {},
+        },
+      ],
+    });
+
+    const result = await planHubFlowBatch({
+      flowId: "no-review",
+      cwd: repoDir,
+      env,
+      runDir: "/tmp/run",
+      candidates: [readyTask("bd-first"), readyTask("bd-second")],
+      batchStrategy: "planned",
+      maxTasks: 3,
+      batchPlanner: async () =>
+        plannerStdout({
+          selectedTaskIds: ["bd-first"],
+          deferred: [{ taskId: "bd-second", reason: "explicit_blocker" }],
+        }),
+    });
+
+    expect(result.selectedTasks.map((task) => task.id)).toEqual(["bd-first"]);
+    expect(result.deferredTasks).toEqual([
+      { taskId: "bd-second", reason: "explicit_blocker" },
+    ]);
+    expect(result.diagnosticReason).toBeUndefined();
+  });
+
+  it("keeps explicit_blocker deferrals from unresolved beads dependency metadata", async () => {
+    const { repoDir, env } = await createTempHubTaskStoreRepo({
+      depListRecords: [
+        { issue_id: "bd-first", depends_on_id: "bd-second", type: "blocks" },
+      ],
+      listRecords: [
+        {
+          id: "bd-first",
+          title: "First ready task",
+          status: "open",
+          labels: ["ready-for-agent"],
+          metadata: {},
+        },
+      ],
+    });
+
+    const result = await planHubFlowBatch({
+      flowId: "no-review",
+      cwd: repoDir,
+      env,
+      runDir: "/tmp/run",
+      candidates: [readyTask("bd-first"), readyTask("bd-second")],
+      batchStrategy: "planned",
+      maxTasks: 3,
+      batchPlanner: async () =>
+        plannerStdout({
+          selectedTaskIds: ["bd-first"],
+          deferred: [{ taskId: "bd-second", reason: "explicit_blocker" }],
+        }),
+    });
+
+    expect(result.selectedTasks.map((task) => task.id)).toEqual(["bd-first"]);
+    expect(result.deferredTasks).toEqual([
+      { taskId: "bd-second", reason: "explicit_blocker" },
+    ]);
+    expect(result.diagnosticReason).toBeUndefined();
+  });
+
+  it("recovers invalid explicit_blocker deferrals only up to max-tasks", async () => {
+    const { repoDir, env } = await createTempHubTaskStoreRepo({
+      listRecords: [
+        {
+          id: "bd-github-152",
+          title: "Closed blocker",
+          hub_status: "done",
+          remoteRefs: [{ url: "github#152" }],
+        },
+        {
+          id: "bd-first",
+          title: "First ready task",
+          status: "open",
+          labels: ["ready-for-agent"],
+          metadata: {},
+        },
+        {
+          id: "bd-second",
+          title: "Second ready task",
+          status: "open",
+          labels: ["ready-for-agent"],
+          metadata: {},
+          description: "## Blocked by\n\n- #152",
+        },
+        {
+          id: "bd-third",
+          title: "Third ready task",
+          status: "open",
+          labels: ["ready-for-agent"],
+          metadata: {},
+          description: "## Blocked by\n\n- #152",
+        },
+      ],
+    });
+
+    const result = await planHubFlowBatch({
+      flowId: "no-review",
+      cwd: repoDir,
+      env,
+      runDir: "/tmp/run",
+      candidates: [
+        readyTask("bd-first"),
+        readyTask("bd-second"),
+        readyTask("bd-third"),
+      ],
+      batchStrategy: "planned",
+      maxTasks: 2,
+      batchPlanner: async () =>
+        plannerStdout({
+          selectedTaskIds: ["bd-first"],
+          deferred: [
+            { taskId: "bd-second", reason: "explicit_blocker" },
+            { taskId: "bd-third", reason: "explicit_blocker" },
+          ],
+        }),
+    });
+
+    expect(result.selectedTasks.map((task) => task.id)).toEqual([
+      "bd-first",
+      "bd-second",
+    ]);
+    expect(result.deferredTasks).toEqual([
+      { taskId: "bd-third", reason: "over_max_tasks" },
+    ]);
+    expect(result.diagnosticReason).toBe("invalid_explicit_blocker_deferral");
+  });
+
+  it("keeps explicit_blocker deferrals from candidate metadata blockers", async () => {
+    const result = await planHubFlowBatch({
+      flowId: "no-review",
+      cwd: "/tmp/repo",
+      runDir: "/tmp/run",
+      candidates: [
+        readyTask("bd-first", { metadata: { blockers: ["bd-second"] } }),
+        readyTask("bd-second"),
+      ],
+      batchStrategy: "planned",
+      maxTasks: 3,
+      batchPlanner: async () =>
+        plannerStdout({
+          selectedTaskIds: ["bd-first"],
+          deferred: [{ taskId: "bd-second", reason: "explicit_blocker" }],
+        }),
+    });
+
+    expect(result.selectedTasks.map((task) => task.id)).toEqual(["bd-first"]);
+    expect(result.deferredTasks).toEqual([
+      { taskId: "bd-second", reason: "explicit_blocker" },
+    ]);
+    expect(result.diagnosticReason).toBeUndefined();
+  });
+
   it("selects at most max-tasks eligible ready tasks for limited strategy", async () => {
     const candidates = [
       readyTask("bd-first"),
