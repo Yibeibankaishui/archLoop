@@ -7,9 +7,11 @@ import { resolveArchloopUserDataDir } from "./projectStatus.js";
 export const REAL_HUB_REGISTRY_TEST_GUARD_MESSAGE =
   "Tests must not resolve the real Hub project registry. Set a test-owned XDG_DATA_HOME (and isolated XDG_CONFIG_HOME / XDG_CACHE_HOME) before Hub registry or selection I/O.";
 
+const DEFAULT_PROCESS_ENV: NodeJS.ProcessEnv = {};
+
 export const resolveDefaultArchloopUserDataDir = (
   homeDir: string = homedir(),
-): string => resolveArchloopUserDataDir({} as NodeJS.ProcessEnv, homeDir);
+): string => resolveArchloopUserDataDir(DEFAULT_PROCESS_ENV, homeDir);
 
 export const isRealArchloopUserDataDir = (
   userDataDir: string,

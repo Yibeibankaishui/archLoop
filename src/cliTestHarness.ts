@@ -14,13 +14,34 @@ export const CLI_TEST_XDG_DATA_DIRNAME = ".test-xdg-data";
 export const CLI_TEST_XDG_CONFIG_DIRNAME = ".test-xdg-config";
 export const CLI_TEST_XDG_CACHE_DIRNAME = ".test-xdg-cache";
 
-export const createCliTestIsolationEnv = (
-  rootDir: string,
-): NodeJS.ProcessEnv => ({
+export type CliTestIsolationEnv = {
+  readonly XDG_DATA_HOME: string;
+  readonly XDG_CONFIG_HOME: string;
+  readonly XDG_CACHE_HOME: string;
+};
+
+export const createCliTestIsolationEnv = (rootDir: string): CliTestIsolationEnv => ({
   XDG_DATA_HOME: join(rootDir, CLI_TEST_XDG_DATA_DIRNAME),
   XDG_CONFIG_HOME: join(rootDir, CLI_TEST_XDG_CONFIG_DIRNAME),
   XDG_CACHE_HOME: join(rootDir, CLI_TEST_XDG_CACHE_DIRNAME),
 });
+
+const CLI_TEST_XDG_KEYS = [
+  "XDG_DATA_HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_CACHE_HOME",
+] as const satisfies readonly (keyof CliTestIsolationEnv)[];
+
+const applyIsolatedXdgRootsWhenEmpty = (
+  env: NodeJS.ProcessEnv,
+  isolatedRoots: CliTestIsolationEnv,
+): void => {
+  for (const key of CLI_TEST_XDG_KEYS) {
+    if (!env[key]?.trim()) {
+      env[key] = isolatedRoots[key];
+    }
+  }
+};
 
 export const hasInitialCommit = (repoDir: string): boolean => {
   try {
@@ -58,46 +79,39 @@ export const ensureTaskBoardProjectRegistered = (
   });
 };
 
+const parseWithBdEnvArgs = (
+  repoDirOrEnv?: string | NodeJS.ProcessEnv,
+  maybeEnv?: NodeJS.ProcessEnv,
+): { readonly repoDir?: string; readonly mergedEnv: NodeJS.ProcessEnv } => {
+  if (typeof repoDirOrEnv === "string") {
+    return { repoDir: repoDirOrEnv, mergedEnv: maybeEnv ?? {} };
+  }
+  return { repoDir: undefined, mergedEnv: repoDirOrEnv ?? {} };
+};
+
 export const withBdEnv = (
   bdPath: string,
   repoDirOrEnv?: string | NodeJS.ProcessEnv,
   maybeEnv?: NodeJS.ProcessEnv,
 ): NodeJS.ProcessEnv => {
-  let repoDir: string | undefined;
-  let mergedEnv: NodeJS.ProcessEnv = {};
-
-  if (typeof repoDirOrEnv === "string") {
-    repoDir = repoDirOrEnv;
-    mergedEnv = maybeEnv ?? {};
-  } else if (repoDirOrEnv) {
-    mergedEnv = repoDirOrEnv;
-  }
+  const { repoDir, mergedEnv } = parseWithBdEnvArgs(repoDirOrEnv, maybeEnv);
 
   if (repoDir) {
     seedHubTaskStoreMetadata(repoDir);
   }
 
-  const isolatedRoots = repoDir ? createCliTestIsolationEnv(repoDir) : {};
+  const isolatedRoots = repoDir ? createCliTestIsolationEnv(repoDir) : undefined;
 
   const env: NodeJS.ProcessEnv = {
     ...process.env,
-    ...isolatedRoots,
+    ...(isolatedRoots ?? {}),
     ...mergedEnv,
     PATH: `${dirname(bdPath)}:${mergedEnv.PATH ?? process.env.PATH ?? ""}`,
     ARCHLOOP_BD_PATH: bdPath,
   };
 
-  if (!env.XDG_DATA_HOME?.trim() && isolatedRoots.XDG_DATA_HOME) {
-    env.XDG_DATA_HOME = isolatedRoots.XDG_DATA_HOME;
-  }
-  if (!env.XDG_CONFIG_HOME?.trim() && isolatedRoots.XDG_CONFIG_HOME) {
-    env.XDG_CONFIG_HOME = isolatedRoots.XDG_CONFIG_HOME;
-  }
-  if (!env.XDG_CACHE_HOME?.trim() && isolatedRoots.XDG_CACHE_HOME) {
-    env.XDG_CACHE_HOME = isolatedRoots.XDG_CACHE_HOME;
-  }
-
-  if (repoDir) {
+  if (isolatedRoots && repoDir) {
+    applyIsolatedXdgRootsWhenEmpty(env, isolatedRoots);
     ensureTaskBoardProjectRegistered(repoDir, env);
   }
 

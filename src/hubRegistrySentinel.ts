@@ -3,6 +3,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { resolveDefaultArchloopUserDataDir } from "./hubTestIsolation.js";
+
 export interface HubRegistrySentinelSnapshot {
   readonly hubDir: string;
   readonly registryHash: string | null;
@@ -28,7 +30,7 @@ const listProjectDirNames = (projectsDir: string): readonly string[] => {
 };
 
 export const resolveRealHubDir = (homeDir: string = homedir()): string =>
-  join(homeDir, ".local", "share", "archloop", "hub");
+  join(resolveDefaultArchloopUserDataDir(homeDir), "hub");
 
 export const snapshotHubRegistry = (
   hubDir: string,
