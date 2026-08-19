@@ -22,6 +22,10 @@ metadata, and run events.
 - `no-review` — plan a batch, implement tasks, verify, and merge.
 - `with-review` — add a reviewer stage before verification and merge.
 
+Planned batch selection uses live board descriptions and blocker metadata.
+False `explicit_blocker` deferrals are recovered up to `--max-tasks`; a
+candidate that a selected task still depends on stays deferred.
+
 Tasks within a batch can implement and review concurrently. Eligible branches
 land independently onto a Hub-managed local publish target under durable FIFO
 and dependency tickets. Speculative candidates form an ordered chain on each

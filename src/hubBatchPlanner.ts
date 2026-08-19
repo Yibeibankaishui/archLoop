@@ -369,6 +369,15 @@ const collectSelectedTaskBlockerIds = (
   for (const task of selectedTasks) {
     for (const blocker of task.blockersResolved) {
       blockerIds.add(blocker.taskId);
+      blockerIds.add(blocker.ref);
+    }
+    for (const ref of [
+      ...task.explicitBlockers,
+      ...task.blockersDeclared,
+      ...task.openBlockers,
+      ...task.unknownBlockers,
+    ]) {
+      blockerIds.add(ref);
     }
   }
   return blockerIds;

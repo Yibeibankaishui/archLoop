@@ -257,6 +257,37 @@ describe("hubBatchPlannerCandidates", () => {
     expect(candidate?.unknownBlockers).toEqual([]);
   });
 
+  it("fills missing candidate description from live hub board state", async () => {
+    const { repoDir, env } = await createTempHubTaskStoreRepo({
+      depListRecords: [],
+      listRecords: [
+        {
+          id: "bd-github-152",
+          title: "Open github blocker",
+          hub_status: "implementing",
+          remoteRefs: [{ url: "github#152" }],
+        },
+        {
+          id: "bd-child",
+          title: "Task bd-child",
+          hub_status: "ready_for_agent",
+          description: "## Blocked by\n\n- #152",
+        },
+      ],
+    });
+
+    const [candidate] = enrichHubBatchPlannerCandidates({
+      cwd: repoDir,
+      candidates: [readyTask("bd-child")],
+      env,
+    });
+
+    expect(candidate?.description).toBe("## Blocked by\n\n- #152");
+    expect(candidate?.blockersDeclared).toEqual(["github#152"]);
+    expect(candidate?.openBlockers).toEqual(["github#152"]);
+    expect(candidate?.unknownBlockers).toEqual([]);
+  });
+
   it("strips stale blocker prose from the planner payload", () => {
     const candidate: HubBatchPlannerCandidate = {
       id: "bd-child",

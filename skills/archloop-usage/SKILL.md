@@ -179,6 +179,8 @@ npx archloop run --flow with-review
 
 Task-board flows select a batch, run task implementations concurrently, and
 land eligible branches serially onto a Hub-managed local publish target.
+Planned batches recover false `explicit_blocker` deferrals when live blocker
+fields are empty, and keep valid dependency blockers deferred.
 `with-review` adds a reviewer stage. An unfinished same-flow merge-ready batch
 is recovered before new tasks are claimed. Interrupted `reviewing` work whose
 implementation already succeeded resumes the reviewer only (same preserved

@@ -518,6 +518,7 @@ archloop run . --flow <NO_REVIEW_FLOW_ID>
 Expected:
 
 - Default run uses `planned` with max 3; CLI output and batch events record strategy requested/used, deferred tasks, and fallback reason when applicable.
+- Planned selection recovers invalid `explicit_blocker` deferrals when live board description/metadata show no effective blocker, keeps valid selected-task dependencies deferred, and records `invalid_explicit_blocker_deferral` when it corrects the planner.
 - `limited` selects the first eligible ready tasks in queue order up to `--max-tasks`.
 - `conservative` selects at most one eligible ready task.
 - Proposal flows reject `--batch-strategy` and `--max-tasks`.

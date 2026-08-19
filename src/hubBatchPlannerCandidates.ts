@@ -303,6 +303,41 @@ const resolveDeclaredBlockers = (
   };
 };
 
+const firstNonEmptyText = (
+  ...values: readonly (string | undefined)[]
+): string | undefined => {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value;
+    }
+  }
+  return undefined;
+};
+
+const mergePlannerCandidateFields = (
+  task: HubTaskProjection,
+  boardTask: HubTaskProjection | undefined,
+): {
+  readonly description?: string;
+  readonly metadata: Readonly<Record<string, unknown>>;
+  readonly remoteRefs: readonly string[];
+} => {
+  const description = firstNonEmptyText(
+    task.description,
+    boardTask?.description,
+  );
+  const metadata = {
+    ...(boardTask?.metadata ?? {}),
+    ...(task.metadata ?? {}),
+  };
+  const remoteRefs = uniqueStrings([
+    ...(boardTask?.remoteRefs ?? []),
+    ...(task.remoteRefs ?? []),
+  ]);
+
+  return { description, metadata, remoteRefs };
+};
+
 export const enrichHubBatchPlannerCandidate = (
   task: HubTaskProjection,
   input: {
@@ -310,14 +345,19 @@ export const enrichHubBatchPlannerCandidate = (
     readonly hubTaskBlockerIndexes?: HubTaskBlockerIndexes;
   } = {},
 ): HubBatchPlannerCandidate => {
-  const metadataBlockers = readMetadataBlockers(task.metadata);
+  const boardTask = input.hubTaskBlockerIndexes?.byId.get(task.id);
+  const { description, metadata, remoteRefs } = mergePlannerCandidateFields(
+    task,
+    boardTask,
+  );
+  const metadataBlockers = readMetadataBlockers(metadata);
   const beadsDependencyBlockers = input.beadsDependencyBlockers ?? [];
   const explicitBlockers =
     beadsDependencyBlockers.length > 0
       ? beadsDependencyBlockers
       : metadataBlockers;
 
-  const declaredBlockers = parseDeclaredHubBlockers(task.description ?? "");
+  const declaredBlockers = parseDeclaredHubBlockers(description ?? "");
   const blockersDeclared =
     explicitBlockers.length > 0 ? explicitBlockers : declaredBlockers;
   const blockerSource = resolveBlockerSource({
@@ -333,14 +373,14 @@ export const enrichHubBatchPlannerCandidate = (
   return {
     id: task.id,
     title: task.title,
-    description: task.description,
-    priority: readPriority(task.metadata),
+    description,
+    priority: readPriority(metadata),
     labels: task.labels ?? [],
     hubStatus: task.hubStatus,
     claimState: task.claimState,
-    metadata: task.metadata ?? {},
-    remoteRefs: task.remoteRefs ?? [],
-    parentPrdRef: readParentPrdRef(task.metadata, task.remoteRefs ?? []),
+    metadata,
+    remoteRefs,
+    parentPrdRef: readParentPrdRef(metadata, remoteRefs),
     explicitBlockers,
     blockersDeclared,
     blockersResolved: blockerResolution.blockersResolved,
