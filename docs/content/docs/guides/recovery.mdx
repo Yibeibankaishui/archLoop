@@ -67,8 +67,10 @@ local landing onto the Hub publish target. After a successful landing, Hub
 fast-forwards the configured host branch only when Git can prove that update
 safe. Dirty, sparse, submodule, operation-in-progress, diverged, or otherwise
 unsafe checkouts stay `checkout_sync_pending` and are retried automatically
-on a later `archloop run`. Cleaning or switching the checkout is enough; do
-not run `tasks recover`. Pending checkout sync never changes `shipped`.
+on a later `archloop run`. Dirty checkouts list the exact blocking host paths.
+Commit or stash those paths, or switch to a clean checkout, then rerun the
+same flow; do not run `tasks recover`. Pending checkout sync never changes
+`shipped`.
 
 Best-effort remote code publication is separate: when configured with
 `--publish-policy best_effort` and `--remote-target`, network, credential,

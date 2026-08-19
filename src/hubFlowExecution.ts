@@ -1942,6 +1942,9 @@ const runObservedHubFlow = async (
         candidateOid: attempt.item.candidateOid,
         reason: hubCheckoutSyncEventReason(attempt),
         message: attempt.message,
+        ...(attempt.blockingPaths
+          ? { blockingPaths: attempt.blockingPaths }
+          : {}),
       });
     }
   };

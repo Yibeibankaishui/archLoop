@@ -412,6 +412,7 @@ type MergeProgressEventFields = {
   readonly verificationConcurrency?: number;
   readonly suffixInvalidatedTaskIds?: readonly string[];
   readonly hostContributionRelation?: string;
+  readonly blockingPaths?: readonly string[];
 };
 
 const appendMergeProgressEvent = (
@@ -450,6 +451,7 @@ const appendMergeProgressEvent = (
     verificationConcurrency: event.verificationConcurrency,
     suffixInvalidatedTaskIds: event.suffixInvalidatedTaskIds,
     hostContributionRelation: event.hostContributionRelation,
+    blockingPaths: event.blockingPaths,
   });
 };
 
@@ -1751,6 +1753,9 @@ const emitCheckoutProjectionEvents = async (
       candidateOid: attempt.item.candidateOid,
       reason: hubCheckoutSyncEventReason(attempt),
       message: attempt.message,
+      ...(attempt.blockingPaths
+        ? { blockingPaths: attempt.blockingPaths }
+        : {}),
     });
   }
 };

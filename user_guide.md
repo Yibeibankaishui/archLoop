@@ -218,8 +218,9 @@ index 和未提交改动在落地事务中保持不变。落地之后，Hub 会�
 durable outbox：未被任何 worktree 检出的本地分支用 OID CAS 推进；已检出的分
 支只在所属 worktree 里、且 Git 能证明 index、工作区、操作状态、未跟踪文件、
 sparse checkout、submodule 和其他 worktree 都安全时才快进。否则记录
-`checkout_sync_pending`，用户状态一字不改，并在之后的 `archloop run` 自动重
-试。后台投影不会 stash、切分支、force-reset 或跑用户 hooks。待同步不影响
+`checkout_sync_pending`，列出精确的宿主阻塞路径，用户状态一字不改，并在之后
+的 `archloop run` 自动重试。先提交或 stash 这些路径再重跑同一 Flow，不要用
+`tasks recover`。后台投影不会 stash、切分支、force-reset 或跑用户 hooks。待同步不影响
 `shipped`，也不拦住后续任务。若任务分支已经提交了 allowlist 内的 Beads
 runtime/export 文件（例如 `.beads/issues.jsonl`），Hub 只会从 candidate 中
 去掉这些路径并记录过滤结果，不会改写任务分支或用户 checkout；Beads 配置、
@@ -287,7 +288,7 @@ npx archloop tasks recover <task-id>
 | 没有初始提交                | 先在目标仓库创建一次 Git 提交                                                                                          |
 | 运行被中断                  | 重新执行同一 Flow，或先用 `tasks recover --stale` 预览                                                                 |
 | 任务状态和运行事件不一致    | 先运行 `tasks doctor`，再按建议 repair 或 recover                                                                      |
-| 落地后工作区看不到改动      | 权威结果在 Hub publish target；宿主分支仅在安全时快进，否则 `checkout_sync_pending`，清理或切换工作区后再跑同一 Flow   |
+| 落地后工作区看不到改动      | 权威结果在 Hub publish target；宿主分支仅在安全时快进，否则 `checkout_sync_pending` 并列出阻塞路径，提交或 stash 这些路径后再跑同一 Flow |
 | 代码已 shipped 但远程未更新 | 显式 `best_effort` 发布会记 `target_publish_pending`；检查 `--remote-target`、凭证与受保护分支，再跑同一 Flow 自动重试 |
 | required 仍在 publishing    | 检查远程 proof / FIFO 前置任务；超时是 `completed_with_pending_delivery`，不是任务失败；继续跑同一 Flow 自动重试       |
 | GitHub 同步冲突             | 使用 `tasks resolve --keep local` 或 `--keep remote`                                                                   |
@@ -358,3 +359,4 @@ API 参数、返回值和生命周期说明见
 | 2026-08-14 | required 远程交付：publishing、有序 proof、超时 completed_with_pending_delivery |
 | 2026-08-15 | 宿主贡献冲突记为 host_contribution_conflict / pending，不算 shipped 或失败      |
 | 2026-08-19 | CLI 测试不再写入真实 Hub registry；`project prune-test-fixtures` 清理历史泄漏   |
+| 2026-08-19 | checkout_sync_pending 列出精确阻塞路径；任务保持 shipped，不改本地 WIP          |

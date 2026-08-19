@@ -267,7 +267,7 @@ A best-effort update that makes the **host**'s checked-out branch reflect a land
 _Avoid_: "landing", "merge completion", "stash and replay"
 
 **Checkout sync pending**:
-A non-failure reconciliation condition (`checkout_sync_pending`) recorded when **checkout sync** cannot safely update the host's checked-out branch. It does not change whether a task is **shipped**, does not block later tasks, and is retried automatically.
+A non-failure reconciliation condition (`checkout_sync_pending`) recorded when **checkout sync** cannot safely update the host's checked-out branch. Dirty checkouts record the exact blocking host paths. It does not change whether a task is **shipped**, does not block later tasks, and is retried automatically after the listed paths are committed, stashed, or otherwise cleared.
 _Avoid_: "merge failed", "recovery required", "dirty worktree failure"
 
 ### Agents

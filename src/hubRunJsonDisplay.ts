@@ -379,6 +379,18 @@ export const createHubRunJsonRenderer = (input: {
                   succeededCount: result.checkoutSync.succeededCount,
                   message: result.checkoutSync.message,
                   nextAction: result.checkoutSync.nextAction,
+                  items: result.checkoutSync.items
+                    .filter((item) => item.status === "pending")
+                    .map((item) => ({
+                      taskId: item.taskId,
+                      transactionId: item.transactionId,
+                      candidateOid: item.candidateOid,
+                      hostTargetBranch: item.hostTargetBranch,
+                      pendingReason: item.pendingReason,
+                      ...(item.blockingPaths
+                        ? { blockingPaths: item.blockingPaths }
+                        : {}),
+                    })),
                 },
               }
             : {}),

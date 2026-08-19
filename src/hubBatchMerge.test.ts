@@ -1513,12 +1513,32 @@ test ! -f notes.txt
       new Set(landingEvents.map((event) => event.transactionId)).size,
     ).toBe(1);
     expect(landingEvents.every((event) => event.candidateOid)).toBe(true);
-    expect(
-      taskEvents.some(
-        (event) =>
-          (event as { type?: string }).type === "checkout_sync_pending",
-      ),
-    ).toBe(true);
+    const checkoutPending = taskEvents.find(
+      (event) =>
+        (event as { type?: string }).type === "checkout_sync_pending",
+    ) as
+      | {
+          type: string;
+          status?: string;
+          blockingPaths?: readonly string[];
+          reason?: string;
+          message?: string;
+        }
+      | undefined;
+    expect(checkoutPending?.type).toBe("checkout_sync_pending");
+    expect(checkoutPending?.status).toBe("done");
+    expect(checkoutPending?.reason).toBe("untracked_paths");
+    expect(checkoutPending?.blockingPaths).toContain("notes.txt");
+    expect(checkoutPending?.blockingPaths?.length).toBeGreaterThan(0);
+    expect(checkoutPending?.message).toContain("notes.txt");
+    expect(checkoutPending?.message).not.toMatch(/tasks recover/);
+    expect(result.results).toContainEqual(
+      expect.objectContaining({
+        taskId: "bd-dirty-compatible",
+        outcome: "merged",
+        hubStatus: "done",
+      }),
+    );
   });
 
   it("selects task branches that include allowlisted Beads runtime/export files so landing can strip them", async () => {
