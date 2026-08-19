@@ -509,11 +509,9 @@ export const projectHubRunOutcome = (
       ...projectPendingDeliveryDetails(result),
       ...projectCheckoutSyncDetails(result),
     ],
-    warnings: [
-      ...projectHubLandingReconciliationIncidentWarnings(
-        result.landingReconciliation,
-      ),
-    ],
+    warnings: projectHubLandingReconciliationIncidentWarnings(
+      result.landingReconciliation,
+    ),
     exitCode: resolveHubRunExitCode(outcome),
   };
 };

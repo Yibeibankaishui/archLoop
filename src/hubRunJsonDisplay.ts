@@ -385,10 +385,7 @@ export const createHubRunJsonRenderer = (input: {
                   ...(result.landingReconciliation.kind === "integrity_incident"
                     ? {
                         affectsCurrentBatch: false,
-                        incidents: projection.warnings.filter(
-                          (warning) =>
-                            warning.kind === "landing_reconciliation_incident",
-                        ),
+                        incidents: projection.warnings,
                       }
                     : {}),
                   ...landingLegacyHistoryJson(

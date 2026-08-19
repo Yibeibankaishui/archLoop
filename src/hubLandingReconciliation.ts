@@ -189,6 +189,19 @@ export interface HubLandingReconciliationIncidentWarning {
   readonly affectsCurrentBatch: false;
 }
 
+type LandingReconciliationIncidentWarningFields = Omit<
+  HubLandingReconciliationIncidentWarning,
+  "kind" | "affectsCurrentBatch"
+>;
+
+const createLandingReconciliationIncidentWarning = (
+  fields: LandingReconciliationIncidentWarningFields,
+): HubLandingReconciliationIncidentWarning => ({
+  kind: "landing_reconciliation_incident",
+  affectsCurrentBatch: false,
+  ...fields,
+});
+
 export const projectHubLandingReconciliationIncidentWarnings = (
   outcome: HubLandingReconciliationOutcome | undefined,
 ): readonly HubLandingReconciliationIncidentWarning[] => {
@@ -196,22 +209,19 @@ export const projectHubLandingReconciliationIncidentWarnings = (
     return [];
   }
 
-  const fromTransactions = outcome.transactions.flatMap((entry) => {
-    if (!entry.integrityIncident) {
-      return [];
-    }
-    return [
-      {
-        kind: "landing_reconciliation_incident" as const,
-        transactionId: entry.transactionId,
-        ...(entry.taskId ? { taskId: entry.taskId } : {}),
-        evidence: entry.integrityIncident,
-        message: transactionMessage(entry),
-        nextAction: entry.nextAction,
-        affectsCurrentBatch: false as const,
-      },
-    ];
-  });
+  const fromTransactions = outcome.transactions.flatMap((entry) =>
+    entry.integrityIncident
+      ? [
+          createLandingReconciliationIncidentWarning({
+            transactionId: entry.transactionId,
+            ...(entry.taskId ? { taskId: entry.taskId } : {}),
+            evidence: entry.integrityIncident,
+            message: transactionMessage(entry),
+            nextAction: entry.nextAction,
+          }),
+        ]
+      : [],
+  );
   if (fromTransactions.length > 0) {
     return fromTransactions;
   }
@@ -221,14 +231,12 @@ export const projectHubLandingReconciliationIncidentWarnings = (
   );
   if (legacyIncident?.integrityIncident) {
     return [
-      {
-        kind: "landing_reconciliation_incident",
+      createLandingReconciliationIncidentWarning({
         taskId: legacyIncident.taskId,
         evidence: legacyIncident.integrityIncident,
         message: legacyIncident.message,
         nextAction: legacyIncident.nextAction,
-        affectsCurrentBatch: false,
-      },
+      }),
     ];
   }
 
@@ -237,13 +245,11 @@ export const projectHubLandingReconciliationIncidentWarnings = (
   }
 
   return [
-    {
-      kind: "landing_reconciliation_incident",
+    createLandingReconciliationIncidentWarning({
       evidence: outcome.integrityIncident,
       message: formatHubLandingReconciliationMessage(outcome),
       nextAction: outcome.nextAction,
-      affectsCurrentBatch: false,
-    },
+    }),
   ];
 };
 

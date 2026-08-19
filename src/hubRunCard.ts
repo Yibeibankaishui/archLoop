@@ -2,6 +2,7 @@ import {
   isTerminalHubRunBatchStatus,
   type HubRunDisplayBatchStatus,
   type HubRunDisplayState,
+  type HubRunWarning,
 } from "./hubRunDisplay.js";
 import {
   renderSection,
@@ -64,13 +65,7 @@ export interface BuildRunCardSectionModelInput {
     readonly diagnostic: string;
     readonly recoveryCommand?: string;
   }[];
-  readonly warnings?: readonly {
-    readonly kind: string;
-    readonly transactionId?: string;
-    readonly taskId?: string;
-    readonly message: string;
-    readonly nextAction: string;
-  }[];
+  readonly warnings?: readonly HubRunWarning[];
 }
 
 const TASK_COUNT_LABEL = (count: number): string =>
