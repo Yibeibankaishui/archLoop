@@ -1,4 +1,4 @@
-import { exec, execSync } from "node:child_process";
+import { exec } from "node:child_process";
 import {
   access,
   chmod,
@@ -10,7 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import { NodeContext } from "@effect/platform-node";
 import { Effect, Ref } from "effect";
@@ -23,18 +23,25 @@ import {
   createHubTaskClaimMetadata,
 } from "./hubExecution.js";
 import { HUB_AGENT_ROLES, setHubAgentRole } from "./hubAgentConfig.js";
-import { resolveGitRepoRoot, resolveHubProjectDir } from "./projectStatus.js";
-import { resolveHubProjectDevelopmentContractPath } from "./hubProjectDevelopmentContract.js";
 import {
   readHubProjectRegistry,
-  registerHubProject,
   resolveSelectedHubProject,
 } from "./hubProjectRegistry.js";
 import { seedHubTaskStoreMetadata } from "./hubTaskStore.js";
+import {
+  createCliTestIsolationEnv,
+  ensureTaskBoardProjectRegistered,
+  withBdEnv,
+} from "./cliTestHarness.js";
+import { resolveHubProjectDevelopmentContractPath } from "./hubProjectDevelopmentContract.js";
+import {
+  resolveArchloopUserDataDir,
+  resolveGitRepoRoot,
+  resolveHubProjectDir,
+} from "./projectStatus.js";
 
 const execAsync = promisify(exec);
 vi.setConfig({ testTimeout: 60_000 });
-const TEST_PROJECT_TIMESTAMP = new Date("2026-07-04T12:00:00.000Z");
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
@@ -89,7 +96,7 @@ const cliPath = join(import.meta.dirname, "..", "dist", "main.js");
 const runCli = (args: string, cwd: string, env?: NodeJS.ProcessEnv) =>
   execAsync(`"${process.execPath}" ${cliPath} ${args}`, {
     cwd,
-    env: env ?? { ...process.env, XDG_DATA_HOME: join(cwd, ".test-xdg-data") },
+    env: env ?? { ...process.env, ...createCliTestIsolationEnv(cwd) },
   });
 
 const runNonInteractiveInit = (cwd: string, args: string) =>
@@ -117,73 +124,18 @@ const cliFailureOutput = (err: unknown): string => {
 const flattenCliOutput = (output: string): string =>
   output.replace(/\x1b\[[0-9;]*[A-Za-z]/g, "").replace(/[│\s]+/g, "");
 
-const hasInitialCommit = (repoDir: string): boolean => {
-  try {
-    execSync("git rev-parse --verify HEAD", {
-      cwd: repoDir,
-      stdio: "pipe",
-    });
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const ensureTaskBoardProjectRegistered = (
+const resolveRegisteredTestHubProjectDir = (
   repoDir: string,
   env: NodeJS.ProcessEnv,
-) => {
-  if (!hasInitialCommit(repoDir)) {
-    return;
-  }
-
+): string => {
   const repoRoot = resolveGitRepoRoot(repoDir);
-  const alreadyRegistered = readHubProjectRegistry({ env }).some(
+  const registered = readHubProjectRegistry({ env }).find(
     (project) => project.repoRoot === repoRoot,
   );
-  if (alreadyRegistered) {
-    return;
-  }
-
-  registerHubProject({
-    repoPath: repoRoot,
-    projectName: basename(repoRoot),
-    env,
-    now: TEST_PROJECT_TIMESTAMP,
-  });
-};
-
-const withBdEnv = (
-  bdPath: string,
-  repoDirOrEnv?: string | NodeJS.ProcessEnv,
-  maybeEnv?: NodeJS.ProcessEnv,
-): NodeJS.ProcessEnv => {
-  let repoDir: string | undefined;
-  let mergedEnv: NodeJS.ProcessEnv = {};
-
-  if (typeof repoDirOrEnv === "string") {
-    repoDir = repoDirOrEnv;
-    mergedEnv = maybeEnv ?? {};
-  } else if (repoDirOrEnv) {
-    mergedEnv = repoDirOrEnv;
-  }
-
-  if (repoDir) {
-    seedHubTaskStoreMetadata(repoDir);
-  }
-
-  const env = {
-    ...process.env,
-    ...mergedEnv,
-    PATH: `${dirname(bdPath)}:${mergedEnv.PATH ?? process.env.PATH ?? ""}`,
-    ARCHLOOP_BD_PATH: bdPath,
-  };
-
-  if (repoDir) {
-    ensureTaskBoardProjectRegistered(repoDir, env);
-  }
-
-  return env;
+  return (
+    registered?.hubProjectDir ??
+    resolveHubProjectDir(resolveArchloopUserDataDir(env), repoRoot)
+  );
 };
 
 const createMockTool = async (
@@ -3858,6 +3810,7 @@ exit 1
     const context = createHubRunContext({
       cwd: hostDir,
       env,
+      hubProjectDir: resolveRegisteredTestHubProjectDir(hostDir, env),
       branch: "flow/with-review",
       runId: "run-cli-doctor",
       batchId: "batch-cli-doctor",
@@ -3994,6 +3947,7 @@ process.exit(1);
     const context = createHubRunContext({
       cwd: hostDir,
       env,
+      hubProjectDir: resolveRegisteredTestHubProjectDir(hostDir, env),
       branch: "flow/with-review",
       runId: "run-cli-repair",
       batchId: "batch-cli-repair",

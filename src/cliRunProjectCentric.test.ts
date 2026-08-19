@@ -15,7 +15,6 @@ import {
   resolveHubProjectSelectionPath,
   selectHubProject,
 } from "./hubProjectRegistry.js";
-import { initHubTaskStore } from "./hubTaskStore.js";
 import { resolveGitRepoRoot } from "./projectStatus.js";
 
 const mockSelect = vi.fn();
@@ -234,19 +233,19 @@ describe("archloop run project targeting", () => {
 
     const repoAlphaRoot = resolveGitRepoRoot(repoAlpha);
     const repoBetaRoot = resolveGitRepoRoot(repoBeta);
-    initHubTaskStore(repoAlphaRoot);
-    initHubTaskStore(repoBetaRoot);
 
     registerHubProject({
       repoPath: repoAlphaRoot,
       projectName: "alpha",
       env: process.env,
+      initializeTaskStore: true,
       now: new Date("2026-07-04T12:00:00.000Z"),
     });
     registerHubProject({
       repoPath: repoBetaRoot,
       projectName: "beta",
       env: process.env,
+      initializeTaskStore: true,
       now: new Date("2026-07-04T12:01:00.000Z"),
     });
     selectHubProject({
@@ -1968,13 +1967,14 @@ describe("archloop run project targeting", () => {
         const text = String(chunk);
         // The final scrollback summary is the one write that carries the
         // failed-run fix footer (`fix   archloop run` for an interrupted run
-        // with no failed task). Match that summary — its `✗ Run failed`
-        // outcome line and the `archloop run` fix footer land in the same
-        // chunk — to simulate a terminal write failure mid-finalization.
+        // with no failed task). Match that summary — failed outcome marker
+        // and the `archloop run` fix footer land in the same chunk — to
+        // simulate a terminal write failure mid-finalization.
         if (
           !failedFinalWrite &&
+          text.includes("fix") &&
           text.includes("archloop run") &&
-          text.includes("Run failed")
+          text.includes("✗")
         ) {
           failedFinalWrite = true;
           throw new Error("simulated failure terminal write failure");

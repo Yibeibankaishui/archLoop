@@ -73,10 +73,17 @@ npx archloop project configure --project-profile <profile> \
   --delivery-timeout-ms 300000
 npx archloop project rename <project> <new-name>
 npx archloop project relink <project> --path <repo-path>
+npx archloop project prune-test-fixtures
 ```
 
 Use `--project <name>` on project-aware Hub commands when an explicit target is
 safer than the selected project.
+
+If `project list` is filled with `cli-host-*` or `cli-resolve-*` names that
+point at missing temp repositories, preview
+`archloop project prune-test-fixtures` and apply with `--apply --yes`. That
+recovery path only removes those known CLI-test fixtures and path-hash run
+directories classified from `run_started.repoRoot`; durable projects stay.
 
 Project profiles include `generic`, `node`, `python`, and `cpp`. Reconfiguring
 with the same profile refreshes detected facts while preserving user-edited
@@ -217,6 +224,7 @@ npx archloop tasks repair-state <task-id>
 npx archloop tasks recover <task-id>
 npx archloop tasks recover --stale
 npx archloop tasks cleanup --dry-run
+npx archloop project prune-test-fixtures
 ```
 
 - Landing does not mutate the user's checkout, index, HEAD, or WIP during the

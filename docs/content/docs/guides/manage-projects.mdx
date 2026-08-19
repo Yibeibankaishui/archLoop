@@ -1,6 +1,6 @@
 ---
 title: Manage projects
-description: Register, select, inspect, rename, configure, and relink Hub projects.
+description: Register, select, inspect, rename, configure, relink, and recover Hub projects.
 ---
 
 ## Register
@@ -55,3 +55,19 @@ run history. Relinking validates that the new path is an existing Git
 repository with at least one commit and, when a managed store already exists,
 installs `.beads/redirect` in the new repository instead of creating a second
 database.
+
+## Recover leaked CLI-test fixtures
+
+Older CLI tests could register temporary repositories into the real Hub
+registry. Preview the narrowly scoped cleanup before applying it:
+
+```bash
+npx archloop project prune-test-fixtures
+npx archloop project prune-test-fixtures --apply --yes
+```
+
+The command identifies `cli-host-*` and `cli-resolve-*` entries that point at
+temp repositories, plus path-hash run directories whose recorded
+`run_started.repoRoot` matches that pattern. It preserves every other
+registered project and any run history that cannot be classified from
+`run_started` evidence.

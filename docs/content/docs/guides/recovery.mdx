@@ -123,5 +123,19 @@ The preview separates safe managed, blocked managed, and unowned historical
 branches. Historical unowned branches stay preserved unless
 `--include-unowned` is explicitly combined with confirmation.
 
+## Leaked CLI-test Hub fixtures
+
+If `project list` is dominated by `cli-host-*` or `cli-resolve-*` names that
+point at missing `/tmp` repositories, preview the dedicated cleanup:
+
+```bash
+npx archloop project prune-test-fixtures
+npx archloop project prune-test-fixtures --apply --yes
+```
+
+The dry run lists exact registry entries and path-hash run directories. Apply
+writes a recoverable backup first, preserves durable projects, and clears or
+repairs selection when the selected project is removed.
+
 For symptom-specific entries, see
 [Troubleshooting](/docs/reference/troubleshooting).

@@ -73,15 +73,16 @@ npx archloop project status
 
 ## 4 项目管理
 
-| 操作               | 命令                                                     |
-| ------------------ | -------------------------------------------------------- |
-| 查看全部项目       | `archloop project list`                                  |
-| 选择默认项目       | `archloop project select <name>`                         |
-| 查看项目状态       | `archloop project status`                                |
-| 修改项目类型约定   | `archloop project configure --project-profile <profile>` |
-| 配置落地与发布策略 | `archloop project configure --publish-policy off\|best_effort\|required [--remote-target] [--delivery-timeout-ms]` |
-| 修改显示名称       | `archloop project rename <project> <new-name>`           |
-| 仓库移动后重新关联 | `archloop project relink <project> --path <repo-path>`   |
+| 操作                    | 命令                                                                                                               |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| 查看全部项目            | `archloop project list`                                                                                            |
+| 选择默认项目            | `archloop project select <name>`                                                                                   |
+| 查看项目状态            | `archloop project status`                                                                                          |
+| 修改项目类型约定        | `archloop project configure --project-profile <profile>`                                                           |
+| 配置落地与发布策略      | `archloop project configure --publish-policy off\|best_effort\|required [--remote-target] [--delivery-timeout-ms]` |
+| 修改显示名称            | `archloop project rename <project> <new-name>`                                                                     |
+| 仓库移动后重新关联      | `archloop project relink <project> --path <repo-path>`                                                             |
+| 清理测试泄漏的 Hub 项目 | `archloop project prune-test-fixtures`                                                                             |
 
 项目选择保存在共享用户数据目录中，因此不依赖当前工作目录。所有主要 Hub
 命令都可以使用 `--project <name>` 临时覆盖当前选择。
@@ -277,20 +278,21 @@ npx archloop tasks recover <task-id>
 
 常见情况：
 
-| 现象                        | 处理方式                                                                                  |
-| --------------------------- | ----------------------------------------------------------------------------------------- |
-| 没有默认项目                | `project list` 后执行 `project select`                                                    |
-| 仓库路径失效                | 使用 `project relink` 指向新的 Git 仓库路径                                               |
-| role 或凭据缺失             | 使用 `agent-config show`、`env show`、`auth show`                                         |
-| 没有初始提交                | 先在目标仓库创建一次 Git 提交                                                             |
-| 运行被中断                  | 重新执行同一 Flow，或先用 `tasks recover --stale` 预览                                    |
-| 任务状态和运行事件不一致    | 先运行 `tasks doctor`，再按建议 repair 或 recover                                         |
-| 落地后工作区看不到改动      | 权威结果在 Hub publish target；宿主分支仅在安全时快进，否则 `checkout_sync_pending`，清理或切换工作区后再跑同一 Flow |
+| 现象                        | 处理方式                                                                                                               |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 没有默认项目                | `project list` 后执行 `project select`                                                                                 |
+| 列表里出现大量 `cli-host-*` | 先 `project prune-test-fixtures` 预览，再 `--apply --yes` 删除测试夹具                                                 |
+| 仓库路径失效                | 使用 `project relink` 指向新的 Git 仓库路径                                                                            |
+| role 或凭据缺失             | 使用 `agent-config show`、`env show`、`auth show`                                                                      |
+| 没有初始提交                | 先在目标仓库创建一次 Git 提交                                                                                          |
+| 运行被中断                  | 重新执行同一 Flow，或先用 `tasks recover --stale` 预览                                                                 |
+| 任务状态和运行事件不一致    | 先运行 `tasks doctor`，再按建议 repair 或 recover                                                                      |
+| 落地后工作区看不到改动      | 权威结果在 Hub publish target；宿主分支仅在安全时快进，否则 `checkout_sync_pending`，清理或切换工作区后再跑同一 Flow   |
 | 代码已 shipped 但远程未更新 | 显式 `best_effort` 发布会记 `target_publish_pending`；检查 `--remote-target`、凭证与受保护分支，再跑同一 Flow 自动重试 |
-| required 仍在 publishing | 检查远程 proof / FIFO 前置任务；超时是 `completed_with_pending_delivery`，不是任务失败；继续跑同一 Flow 自动重试 |
-| GitHub 同步冲突             | 使用 `tasks resolve --keep local` 或 `--keep remote`                                      |
-| 工作分支仍有可恢复内容      | 使用 `tasks recover`，不要手动强删 worktree 或分支                                        |
-| 后续 iteration 启动即 abort | 只要还有剩余 iteration，运行会继续并带上进度摘要；全部用尽且无完成信号才记 `agent_failed` |
+| required 仍在 publishing    | 检查远程 proof / FIFO 前置任务；超时是 `completed_with_pending_delivery`，不是任务失败；继续跑同一 Flow 自动重试       |
+| GitHub 同步冲突             | 使用 `tasks resolve --keep local` 或 `--keep remote`                                                                   |
+| 工作分支仍有可恢复内容      | 使用 `tasks recover`，不要手动强删 worktree 或分支                                                                     |
+| 后续 iteration 启动即 abort | 只要还有剩余 iteration，运行会继续并带上进度摘要；全部用尽且无完成信号才记 `agent_failed`                              |
 
 完整诊断索引见
 [Troubleshooting](./docs/content/docs/reference/troubleshooting.mdx)。
@@ -334,24 +336,25 @@ API 参数、返回值和生命周期说明见
 
 ## 文档修改记录
 
-| 修改日期   | 修改项                                                      |
-| ---------- | ----------------------------------------------------------- |
-| 2026-06-12 | 创建 Unified Interface 用户指南                             |
-| 2026-08-01 | 按用户任务重组指南，统一 Hub 优先路径并拆出详细参考链接     |
-| 2026-08-13 | 补充中断自动恢复、批量恢复与任务诊断输出说明                |
-| 2026-08-13 | 说明后续 iteration 启动 abort 会继续运行，而不是整次失败    |
-| 2026-08-13 | 新 Hub 项目将 Beads 任务表放到 Hub 项目目录，并保留 bd 跳转 |
-| 2026-08-13 | Hub 执行 agent 使用不可变任务快照，notes 由 Hub 写回        |
-| 2026-08-13 | 已有仓库内 Beads 库在首次变更型命令时自动迁移并可崩溃续跑   |
-| 2026-08-13 | 不安全迁移会延期，split brain 会停止自动写入                |
-| 2026-08-13 | 单任务通过 fenced local landing 落到 Hub publish target     |
-| 2026-08-14 | 中断的落地事务从物理证据自动续跑，doctor 保持只读           |
-| 2026-08-14 | 独立兄弟任务分别落地；有界 Agent 修复隔离坏任务             |
-| 2026-08-14 | 旧任务分支上的 allowlist Beads runtime 文件会从 candidate 剥离 |
-| 2026-08-14 | 并发落地用 lease 与 fence CAS 互斥；target drift 会重建并重验 |
-| 2026-08-14 | 升级时接纳旧落地历史：已关闭保持完成，无祖先证明不视为落地 |
-| 2026-08-14 | 落地后安全快进宿主分支；不安全 WIP 保持 checkout_sync_pending |
-| 2026-08-14 | best-effort 远程发布 outbox；失败保持 target_publish_pending |
-| 2026-08-14 | FIFO 投机链并行验证；宿主贡献入链；target_quiet_wait 防超车 |
+| 修改日期   | 修改项                                                                          |
+| ---------- | ------------------------------------------------------------------------------- |
+| 2026-06-12 | 创建 Unified Interface 用户指南                                                 |
+| 2026-08-01 | 按用户任务重组指南，统一 Hub 优先路径并拆出详细参考链接                         |
+| 2026-08-13 | 补充中断自动恢复、批量恢复与任务诊断输出说明                                    |
+| 2026-08-13 | 说明后续 iteration 启动 abort 会继续运行，而不是整次失败                        |
+| 2026-08-13 | 新 Hub 项目将 Beads 任务表放到 Hub 项目目录，并保留 bd 跳转                     |
+| 2026-08-13 | Hub 执行 agent 使用不可变任务快照，notes 由 Hub 写回                            |
+| 2026-08-13 | 已有仓库内 Beads 库在首次变更型命令时自动迁移并可崩溃续跑                       |
+| 2026-08-13 | 不安全迁移会延期，split brain 会停止自动写入                                    |
+| 2026-08-13 | 单任务通过 fenced local landing 落到 Hub publish target                         |
+| 2026-08-14 | 中断的落地事务从物理证据自动续跑，doctor 保持只读                               |
+| 2026-08-14 | 独立兄弟任务分别落地；有界 Agent 修复隔离坏任务                                 |
+| 2026-08-14 | 旧任务分支上的 allowlist Beads runtime 文件会从 candidate 剥离                  |
+| 2026-08-14 | 并发落地用 lease 与 fence CAS 互斥；target drift 会重建并重验                   |
+| 2026-08-14 | 升级时接纳旧落地历史：已关闭保持完成，无祖先证明不视为落地                      |
+| 2026-08-14 | 落地后安全快进宿主分支；不安全 WIP 保持 checkout_sync_pending                   |
+| 2026-08-14 | best-effort 远程发布 outbox；失败保持 target_publish_pending                    |
+| 2026-08-14 | FIFO 投机链并行验证；宿主贡献入链；target_quiet_wait 防超车                     |
 | 2026-08-14 | required 远程交付：publishing、有序 proof、超时 completed_with_pending_delivery |
-| 2026-08-15 | 宿主贡献冲突记为 host_contribution_conflict / pending，不算 shipped 或失败 |
+| 2026-08-15 | 宿主贡献冲突记为 host_contribution_conflict / pending，不算 shipped 或失败      |
+| 2026-08-19 | CLI 测试不再写入真实 Hub registry；`project prune-test-fixtures` 清理历史泄漏   |
