@@ -1,6 +1,7 @@
 import { join } from "node:path";
 
 import type { HubRunEvent, HubRunStopReason } from "./hubExecution.js";
+import type { HubBatchMergeSelectionDiagnostic } from "./hubBatchMerge.js";
 import type { RunHubFlowResult } from "./hubFlowExecution.js";
 import type { HubGitCommandDiagnostic } from "./hubGitRepositoryIntegrity.js";
 import {
@@ -184,45 +185,63 @@ const projectFailedTaskDetails = (
     ];
   });
 
+const MERGE_BLOCKER_REASONS = new Set<HubBatchMergeSelectionDiagnostic["reason"]>([
+  "state_inconsistent",
+  "dirty_worktree",
+  "repository_integrity",
+]);
+
+const resolveMergeBlockerFallbackMessage = (
+  diagnostic: HubBatchMergeSelectionDiagnostic,
+): string => {
+  if (diagnostic.message) {
+    return diagnostic.message;
+  }
+  if (diagnostic.reason === "repository_integrity") {
+    return "Git could not resolve the task branch.";
+  }
+  if (diagnostic.reason === "state_inconsistent") {
+    return "Task projection state is inconsistent.";
+  }
+  return "Dirty source files overlap this task branch. Commit, stash, or discard them, then rerun the same flow.";
+};
+
+const resolveMergeBlockerRecoveryFields = (
+  diagnostic: HubBatchMergeSelectionDiagnostic,
+): Pick<HubRunTaskDetail, "recoveryCommand" | "gitDiagnostic"> => {
+  if (diagnostic.reason === "state_inconsistent") {
+    return {
+      recoveryCommand:
+        diagnostic.suggestedRecovery ??
+        `archloop tasks repair-state ${diagnostic.taskId}`,
+    };
+  }
+  if (diagnostic.reason === "repository_integrity") {
+    return {
+      recoveryCommand: diagnostic.suggestedRecovery,
+      ...(diagnostic.gitDiagnostic
+        ? { gitDiagnostic: diagnostic.gitDiagnostic }
+        : {}),
+    };
+  }
+  return {};
+};
+
 const projectMergeSelectionDetails = (
   result: RunHubFlowResult,
 ): readonly HubRunTaskDetail[] =>
   (result.mergeResult?.selectionDiagnostics ?? []).flatMap((diagnostic) => {
-    if (
-      diagnostic.reason !== "state_inconsistent" &&
-      diagnostic.reason !== "dirty_worktree" &&
-      diagnostic.reason !== "repository_integrity"
-    ) {
+    if (!MERGE_BLOCKER_REASONS.has(diagnostic.reason)) {
       return [];
     }
 
-    const isStateInconsistent = diagnostic.reason === "state_inconsistent";
     const isRepositoryIntegrity = diagnostic.reason === "repository_integrity";
     return [
       {
         taskId: diagnostic.taskId,
         stage: isRepositoryIntegrity ? "Repository integrity" : "Merge blocked",
-        diagnostic:
-          diagnostic.message ??
-          (isRepositoryIntegrity
-            ? "Git could not resolve the task branch."
-            : isStateInconsistent
-              ? "Task projection state is inconsistent."
-              : "Dirty source files overlap this task branch. Commit, stash, or discard them, then rerun the same flow."),
-        ...(isStateInconsistent
-          ? {
-              recoveryCommand:
-                diagnostic.suggestedRecovery ??
-                `archloop tasks repair-state ${diagnostic.taskId}`,
-            }
-          : isRepositoryIntegrity
-            ? {
-                recoveryCommand: diagnostic.suggestedRecovery,
-                ...(diagnostic.gitDiagnostic
-                  ? { gitDiagnostic: diagnostic.gitDiagnostic }
-                  : {}),
-              }
-            : {}),
+        diagnostic: resolveMergeBlockerFallbackMessage(diagnostic),
+        ...resolveMergeBlockerRecoveryFields(diagnostic),
         ...(diagnostic.blockingPaths
           ? { blockingPaths: diagnostic.blockingPaths }
           : {}),

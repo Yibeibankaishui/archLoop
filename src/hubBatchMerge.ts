@@ -10,6 +10,7 @@ import {
   formatHubGitRepositoryIntegrityMessage,
   HUB_REPOSITORY_INTEGRITY_RECOVERY_GUIDANCE,
   inspectHubGitBranch,
+  type HubGitBranchInspection,
   type HubGitCommandDiagnostic,
 } from "./hubGitRepositoryIntegrity.js";
 import {
@@ -277,12 +278,7 @@ export interface HubBatchMergeSelectionDiagnostic {
   readonly gitDiagnostic?: HubGitCommandDiagnostic;
 }
 
-export interface HubMergeBranchState {
-  readonly exists: boolean;
-  readonly hasUnmergedWork: boolean;
-  readonly changedFiles?: readonly string[];
-  readonly integrityFailure?: HubGitCommandDiagnostic;
-}
+export type HubMergeBranchState = HubGitBranchInspection;
 
 export type HubMergeBranchInspector = (
   branch: string,

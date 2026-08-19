@@ -6,6 +6,7 @@ import {
   formatHubGitRepositoryIntegrityMessage,
   HUB_REPOSITORY_INTEGRITY_RECOVERY_GUIDANCE,
   inspectHubGitBranch,
+  type HubGitBranchInspection,
   type HubGitCommandDiagnostic,
 } from "./hubGitRepositoryIntegrity.js";
 import type { HubTaskEvent } from "./hubExecution.js";
@@ -65,11 +66,10 @@ import { listWorktreeLeases } from "./worktreeLeaseStore.js";
 
 const execFileAsync = promisify(execFile);
 
-export interface HubTaskStateBranchState {
-  readonly exists: boolean;
-  readonly hasUnmergedWork: boolean;
-  readonly integrityFailure?: HubGitCommandDiagnostic;
-}
+export type HubTaskStateBranchState = Pick<
+  HubGitBranchInspection,
+  "exists" | "hasUnmergedWork" | "integrityFailure"
+>;
 
 export interface HubTaskStateWorktreeState {
   readonly dirtySourceFiles: readonly string[];

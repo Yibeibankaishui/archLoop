@@ -86,15 +86,18 @@ export const extractHubGitCommandDiagnostic = (input: {
   };
 };
 
+const firstNonEmptyLine = (value: string | undefined): string | undefined =>
+  value
+    ?.split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+
 export const formatHubGitRepositoryIntegrityMessage = (input: {
   readonly branch: string;
   readonly diagnostic: HubGitCommandDiagnostic;
 }): string => {
   const stderrLine =
-    input.diagnostic.stderr
-      ?.split(/\r?\n/)
-      .map((line) => line.trim())
-      .find((line) => line.length > 0) ??
+    firstNonEmptyLine(input.diagnostic.stderr) ??
     "Git could not resolve the branch tip.";
 
   const objectSuffix = input.diagnostic.object
