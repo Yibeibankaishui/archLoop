@@ -252,6 +252,9 @@ export interface HubTaskEvent {
   readonly suffixInvalidatedTaskIds?: readonly string[];
   readonly hostContributionRelation?: string;
   readonly blockingPaths?: readonly string[];
+  readonly observedHostBranchOid?: string;
+  readonly expectedPublishBranchOid?: string;
+  readonly branchRelation?: string;
 }
 
 type HubRunEventData =

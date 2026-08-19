@@ -239,7 +239,11 @@ npx archloop project prune-test-fixtures
   leave user state unchanged, and retry on a later run. Dirty checkouts persist
   the exact blocking host paths in the outbox, task results, and run output.
   Commit or stash those paths, then retry; do not run `tasks recover`.
-  Projection never stashes, switches branches, force-resets, or runs user
+  Branch divergence persists observed host and publish-target OIDs plus the
+  ahead/behind/diverged/missing relation, reports
+  `completed_with_pending_checkout_sync`, and tells you to reconcile histories
+  manually; archLoop never stashes, resets, force-updates, or overwrites the
+  host branch. Projection never stashes, switches branches, force-resets, or runs user
   hooks. Pending checkout sync does not change `shipped`.
 - With `--publish-policy best_effort` and an explicit `--remote-target`, local
   shipped proof enqueues a durable publication outbox keyed by transaction,

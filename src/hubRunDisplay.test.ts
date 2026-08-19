@@ -704,6 +704,84 @@ describe("plain Hub run lifecycle output", () => {
     });
   });
 
+  it("returns completed_with_pending_checkout_sync for branch divergence pending", () => {
+    const result = makeRunResult({
+      flowId: "with-review",
+      stopReason: "no_ready_tasks",
+      completedBatchCount: 1,
+      completedTaskCount: 1,
+      batchResults: [
+        {
+          batchId: "batch-1",
+          selectedTaskIds: ["bd-land"],
+          completedTaskCount: 1,
+          batchStatus: "completed",
+        },
+      ],
+      mergeResult: {
+        runId: "run-1",
+        batchId: "batch-1",
+        selectedTaskIds: ["bd-land"],
+        batchStatus: "done",
+        results: [
+          {
+            taskId: "bd-land",
+            title: "Landed task",
+            branch: "archloop/bd-land",
+            outcome: "merged",
+            hubStatus: "done",
+            candidateOid: "c".repeat(40),
+            transactionId: "ltx-bd-land-abc123",
+          },
+        ],
+        selectionDiagnostics: [],
+      },
+      checkoutSync: {
+        items: [
+          {
+            version: 1,
+            id: "cpo-1",
+            transactionId: "ltx-bd-land-abc123",
+            taskId: "bd-land",
+            hostTargetBranch: "main",
+            branchRef: "refs/heads/main",
+            candidateOid: "c".repeat(40),
+            expectedBranchOid: "b".repeat(40),
+            publishTargetRef: "refs/archloop/publish/main",
+            status: "pending",
+            createdAt: "2026-08-19T00:00:00.000Z",
+            updatedAt: "2026-08-19T00:00:00.000Z",
+            pendingReason: "branch_diverged",
+            observedHostBranchOid: "d".repeat(40),
+            expectedPublishBranchOid: "c".repeat(40),
+            branchRelation: "diverged",
+            message:
+              "Checkout sync pending for bd-land (branch_diverged): host branch main was not updated. archLoop will not stash, reset, force-update, or overwrite the host branch.",
+          },
+        ],
+        pendingCount: 1,
+        succeededCount: 0,
+        message:
+          "Checkout sync pending for bd-land (branch_diverged): host branch main was not updated.",
+        nextAction:
+          "Inspect the host branch and Hub publish-target histories, reconcile them manually, then retry the same run. archLoop will not stash, reset, force-update, or overwrite the host branch.",
+      },
+    });
+
+    const projection = projectHubRunOutcome(result);
+    expect(projection.outcome).toBe("completed_with_pending_checkout_sync");
+    expect(projection.summary).toBe("Run completed with pending checkout sync");
+    expect(projection.taskDetails).toContainEqual({
+      taskId: "bd-land",
+      stage: "Checkout sync pending",
+      diagnostic: result.checkoutSync!.items[0]!.message,
+      branchRelation: "diverged",
+      observedHostBranchOid: "d".repeat(40),
+      expectedPublishBranchOid: "c".repeat(40),
+      recoveryCommand: "archloop run --flow with-review",
+    });
+  });
+
   it("exposes checkout-sync-pending blocking paths without failing a shipped task", () => {
     const result = makeRunResult({
       flowId: "with-review",
@@ -1173,6 +1251,23 @@ describe("plain Hub run lifecycle output", () => {
     expect(pending).toContain(`candidate_oid="${base.candidateOid}"`);
     expect(pending).toContain('blocking_paths=["hello.txt"]');
     expect(pending).not.toMatch(/tasks recover/);
+
+    const branchPending = formatPlainHubRunEvent(
+      {
+        ...base,
+        type: "checkout_sync_pending",
+        reason: "branch_diverged",
+        branchRelation: "diverged",
+        observedHostBranchOid: "d".repeat(40),
+        expectedPublishBranchOid: base.candidateOid,
+        message:
+          "Checkout sync pending for bd-land (branch_diverged): archLoop will not stash, reset, force-update, or overwrite the host branch.",
+      },
+      state,
+    );
+    expect(branchPending).toContain('branch_relation="diverged"');
+    expect(branchPending).toContain(`observed_host_branch_oid="${"d".repeat(40)}"`);
+    expect(branchPending).toContain(`expected_publish_branch_oid="${base.candidateOid}"`);
 
     const synced = formatPlainHubRunEvent(
       { ...base, type: "checkout_sync_succeeded" },

@@ -12,6 +12,7 @@ export type HubRunOutcome =
   | "completed_with_failures"
   | "completed_with_pending_delivery"
   | "completed_with_pending_merge"
+  | "completed_with_pending_checkout_sync"
   | "failed"
   | "cancelled";
 
@@ -22,6 +23,9 @@ export interface HubRunTaskDetail {
   readonly logPath?: string;
   readonly recoveryCommand?: string;
   readonly blockingPaths?: readonly string[];
+  readonly branchRelation?: string;
+  readonly observedHostBranchOid?: string;
+  readonly expectedPublishBranchOid?: string;
 }
 
 export interface HubRunOutcomeProjection {
@@ -347,6 +351,7 @@ const resolveHubRunOutcomeKind = (
   options: { readonly cancelled?: boolean },
   hasPendingDelivery: boolean,
   hasPendingMerge: boolean,
+  hasPendingCheckoutSync: boolean,
   hasPartialProgress: boolean,
 ): HubRunOutcome => {
   if (options.cancelled === true) {
@@ -357,6 +362,15 @@ const resolveHubRunOutcomeKind = (
   }
   if (hasPendingMerge && result.stopReason !== "batch_failed") {
     return "completed_with_pending_merge";
+  }
+  if (hasPendingCheckoutSync && result.stopReason !== "batch_failed") {
+    const hasBranchDivergencePending = (result.checkoutSync?.items ?? []).some(
+      (item) =>
+        item.status === "pending" && item.pendingReason === "branch_diverged",
+    );
+    if (hasBranchDivergencePending) {
+      return "completed_with_pending_checkout_sync";
+    }
   }
   if (result.stopReason !== "batch_failed") {
     return "completed";
@@ -375,6 +389,8 @@ const summarizeHubRunOutcome = (
       return "Run completed with pending required delivery";
     case "completed_with_pending_merge":
       return "Run completed with pending merge";
+    case "completed_with_pending_checkout_sync":
+      return "Run completed with pending checkout sync";
     case "completed_with_failures":
       return "Run completed with failures";
     case "failed":
@@ -406,6 +422,15 @@ const projectCheckoutSyncDetails = (
             ...(item.blockingPaths
               ? { blockingPaths: item.blockingPaths }
               : {}),
+            ...(item.branchRelation
+              ? { branchRelation: item.branchRelation }
+              : {}),
+            ...(item.observedHostBranchOid
+              ? { observedHostBranchOid: item.observedHostBranchOid }
+              : {}),
+            ...(item.expectedPublishBranchOid
+              ? { expectedPublishBranchOid: item.expectedPublishBranchOid }
+              : {}),
             recoveryCommand: `archloop run --flow ${result.flowId}`,
           },
         ]
@@ -427,11 +452,14 @@ export const projectHubRunOutcome = (
       true ||
     result.batchResults.some((batch) => batch.batchStatus === "pending") ||
     result.stopReason === "batch_pending";
+  const hasPendingCheckoutSync =
+    (result.checkoutSync?.pendingCount ?? 0) > 0;
   const outcome = resolveHubRunOutcomeKind(
     result,
     options,
     hasPendingDelivery,
     hasPendingMerge,
+    hasPendingCheckoutSync,
     hasPartialProgress,
   );
 
@@ -967,6 +995,9 @@ export const formatPlainHubRunEvent = (
         ["reason", event.reason],
         ["message", event.message],
         ["host_contribution", event.hostContributionRelation],
+        ["observed_host_branch_oid", event.observedHostBranchOid],
+        ["expected_publish_branch_oid", event.expectedPublishBranchOid],
+        ["branch_relation", event.branchRelation],
       ]),
       ...(typeof event.fifoPosition === "number"
         ? [numberField("fifo_position", event.fifoPosition)]

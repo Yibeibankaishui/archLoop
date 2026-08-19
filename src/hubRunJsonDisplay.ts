@@ -390,6 +390,18 @@ export const createHubRunJsonRenderer = (input: {
                       ...(item.blockingPaths
                         ? { blockingPaths: item.blockingPaths }
                         : {}),
+                      ...(item.observedHostBranchOid
+                        ? { observedHostBranchOid: item.observedHostBranchOid }
+                        : {}),
+                      ...(item.expectedPublishBranchOid
+                        ? {
+                            expectedPublishBranchOid:
+                              item.expectedPublishBranchOid,
+                          }
+                        : {}),
+                      ...(item.branchRelation
+                        ? { branchRelation: item.branchRelation }
+                        : {}),
                     })),
                 },
               }

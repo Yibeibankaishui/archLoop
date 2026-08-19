@@ -107,7 +107,13 @@ include the expected and observed target/fence OIDs and distinguish rebuild,
 pending contention, stale-owner rejection, and successful landing. Checkout
 pending and checkout success are distinct events (`checkout_sync_pending`,
 `checkout_sync_succeeded`) in plain and JSON output. Dirty pending events
-include the exact blocking host paths. With an explicit
+include the exact blocking host paths. Branch divergence persists observed
+host-branch and publish-target OIDs plus the ahead/behind/diverged/missing
+relation on the outbox and in plain/JSON/live events. Hub reports
+`completed_with_pending_checkout_sync` instead of a generic run failure,
+explains that it will not stash, reset, force-update, or overwrite the host
+branch, and asks you to reconcile histories manually before retrying the same
+flow. With an explicit
 `--publish-policy best_effort` and `--remote-target`, local shipped proof also
 enqueues a durable code-publication outbox. Network, credential,
 protected-branch, and unknown push outcomes stay `target_publish_pending`
