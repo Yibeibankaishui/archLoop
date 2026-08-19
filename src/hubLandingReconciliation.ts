@@ -175,6 +175,78 @@ export const hubLandingReconciliationHasVisibleOutput = (
 ): boolean =>
   outcome.kind !== "clean" || hasHubLegacyLandingHistory(outcome.legacyHistory);
 
+/**
+ * Non-fatal landing integrity warnings. Historical or stale incidents must not
+ * change current-batch stopReason, completed counts, or run success.
+ */
+export interface HubLandingReconciliationIncidentWarning {
+  readonly kind: "landing_reconciliation_incident";
+  readonly transactionId?: string;
+  readonly taskId?: string;
+  readonly evidence: string;
+  readonly message: string;
+  readonly nextAction: string;
+  readonly affectsCurrentBatch: false;
+}
+
+export const projectHubLandingReconciliationIncidentWarnings = (
+  outcome: HubLandingReconciliationOutcome | undefined,
+): readonly HubLandingReconciliationIncidentWarning[] => {
+  if (!outcome || outcome.kind !== "integrity_incident") {
+    return [];
+  }
+
+  const fromTransactions = outcome.transactions.flatMap((entry) => {
+    if (!entry.integrityIncident) {
+      return [];
+    }
+    return [
+      {
+        kind: "landing_reconciliation_incident" as const,
+        transactionId: entry.transactionId,
+        ...(entry.taskId ? { taskId: entry.taskId } : {}),
+        evidence: entry.integrityIncident,
+        message: transactionMessage(entry),
+        nextAction: entry.nextAction,
+        affectsCurrentBatch: false as const,
+      },
+    ];
+  });
+  if (fromTransactions.length > 0) {
+    return fromTransactions;
+  }
+
+  const legacyIncident = outcome.legacyHistory?.find(
+    (entry) => entry.integrityIncident,
+  );
+  if (legacyIncident?.integrityIncident) {
+    return [
+      {
+        kind: "landing_reconciliation_incident",
+        taskId: legacyIncident.taskId,
+        evidence: legacyIncident.integrityIncident,
+        message: legacyIncident.message,
+        nextAction: legacyIncident.nextAction,
+        affectsCurrentBatch: false,
+      },
+    ];
+  }
+
+  if (!outcome.integrityIncident) {
+    return [];
+  }
+
+  return [
+    {
+      kind: "landing_reconciliation_incident",
+      evidence: outcome.integrityIncident,
+      message: formatHubLandingReconciliationMessage(outcome),
+      nextAction: outcome.nextAction,
+      affectsCurrentBatch: false,
+    },
+  ];
+};
+
 export const formatHubLandingReconciliationMessage = (
   inspection:
     | HubLandingReconciliationInspection

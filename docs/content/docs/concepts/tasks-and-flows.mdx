@@ -63,7 +63,9 @@ historical tasks stay completed. In-flight pre-transaction history is adopted
 only when Git ancestry proves the source reached the configured target; a
 legacy `merge_succeeded` event never proves delivery. Ambiguous missing or
 diverged branches surface as `legacy_landing_integrity` instead of automatic
-close or reimplementation.
+close or reimplementation. A historical or stale `landing_integrity_incident`
+is a non-fatal warning with evidence and a next action; it does not turn a
+successful current batch into `batch_failed` or change completed-task counts.
 
 Legacy task branches that committed known Beads runtime/export files such as
 `.beads/issues.jsonl` still land their source changes. Candidate construction

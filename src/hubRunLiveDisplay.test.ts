@@ -188,6 +188,7 @@ describe("createHubRunLiveDisplay (fallback / append-only path)", () => {
           readyToMerge: 0,
         },
         taskDetails: [],
+        warnings: [],
         exitCode: 1,
       },
     );
@@ -782,6 +783,7 @@ describe("createHubRunLiveDisplay (alt-screen dashboard)", () => {
         readyToMerge: 0,
       },
       taskDetails: [],
+      warnings: [],
       exitCode: 0,
     });
     // Finalize does the whole cleanup dance inline — cli.ts owns exit code.

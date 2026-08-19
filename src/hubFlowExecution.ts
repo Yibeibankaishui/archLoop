@@ -45,6 +45,7 @@ import {
   beadsCloseEvidenceFromHubTask,
   formatHubLandingReconciliationMessage,
   hubLandingReconciliationHasVisibleOutput,
+  projectHubLandingReconciliationIncidentWarnings,
   reconcileHubLandingTransactions,
   type HubLandingReconciliationOutcome,
 } from "./hubLandingReconciliation.js";
@@ -1752,16 +1753,32 @@ const hubLandingReconciliationEventFields = (
   | "pendingCount"
   | "reconstructedCount"
   | "message"
+  | "nextAction"
   | "integrityIncident"
-> => ({
-  kind: outcome.kind,
-  pendingCount: outcome.pendingCount,
-  reconstructedCount: outcome.reconstructedCount,
-  message: formatHubLandingReconciliationMessage(outcome),
-  ...(outcome.integrityIncident
-    ? { integrityIncident: outcome.integrityIncident }
-    : {}),
-});
+  | "incidentTransactionId"
+  | "incidentTaskId"
+  | "affectsCurrentBatch"
+> => {
+  const warnings = projectHubLandingReconciliationIncidentWarnings(outcome);
+  const primary = warnings[0];
+  return {
+    kind: outcome.kind,
+    pendingCount: outcome.pendingCount,
+    reconstructedCount: outcome.reconstructedCount,
+    message: formatHubLandingReconciliationMessage(outcome),
+    nextAction: outcome.nextAction,
+    ...(outcome.integrityIncident
+      ? { integrityIncident: outcome.integrityIncident }
+      : {}),
+    ...(primary?.transactionId
+      ? { incidentTransactionId: primary.transactionId }
+      : {}),
+    ...(primary?.taskId ? { incidentTaskId: primary.taskId } : {}),
+    ...(outcome.kind === "integrity_incident"
+      ? { affectsCurrentBatch: false }
+      : {}),
+  };
+};
 
 const hubTaskStoreMigrationEventFields = (
   outcome: Exclude<HubTaskStoreMigrationOutcome, { kind: "not_needed" }>,
@@ -2341,6 +2358,11 @@ export const formatHubFlowResultLines = (
     lines.push(
       formatHubLandingReconciliationMessage(result.landingReconciliation),
     );
+    if (result.landingReconciliation.kind === "integrity_incident") {
+      lines.push(
+        `Landing reconciliation incident (non-fatal): next action: ${result.landingReconciliation.nextAction}`,
+      );
+    }
   }
   if (result.checkoutSync && result.checkoutSync.pendingCount > 0) {
     lines.push(result.checkoutSync.message);

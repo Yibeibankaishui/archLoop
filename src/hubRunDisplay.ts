@@ -12,6 +12,10 @@ import {
   HUB_HOST_CONTRIBUTION_CONFLICT,
   HUB_HOST_CONTRIBUTION_PENDING,
 } from "./hubLandingQueue.js";
+import {
+  projectHubLandingReconciliationIncidentWarnings,
+  type HubLandingReconciliationIncidentWarning,
+} from "./hubLandingReconciliation.js";
 
 export type HubRunOutcome =
   | "completed"
@@ -35,6 +39,8 @@ export interface HubRunTaskDetail {
   readonly gitDiagnostic?: HubGitCommandDiagnostic;
 }
 
+export type HubRunWarning = HubLandingReconciliationIncidentWarning;
+
 export interface HubRunOutcomeProjection {
   readonly outcome: HubRunOutcome;
   readonly summary: string;
@@ -46,6 +52,7 @@ export interface HubRunOutcomeProjection {
     readonly readyToMerge: number;
   };
   readonly taskDetails: readonly HubRunTaskDetail[];
+  readonly warnings: readonly HubRunWarning[];
   readonly exitCode: number;
 }
 
@@ -478,6 +485,8 @@ export const projectHubRunOutcome = (
     result.stopReason === "batch_pending";
   const hasPendingCheckoutSync =
     (result.checkoutSync?.pendingCount ?? 0) > 0;
+  // Landing reconciliation incidents are warnings only — never change stopReason
+  // or outcome derived from current-batch ship proof.
   const outcome = resolveHubRunOutcomeKind(
     result,
     options,
@@ -499,6 +508,11 @@ export const projectHubRunOutcome = (
       ...projectPendingMergeDetails(result),
       ...projectPendingDeliveryDetails(result),
       ...projectCheckoutSyncDetails(result),
+    ],
+    warnings: [
+      ...projectHubLandingReconciliationIncidentWarnings(
+        result.landingReconciliation,
+      ),
     ],
     exitCode: resolveHubRunExitCode(outcome),
   };
@@ -734,6 +748,7 @@ export const projectHubRunStateOutcome = (
       readyToMerge: countStatus("waiting_for_merge"),
     },
     taskDetails: tasks.flatMap((task) => (task.detail ? [task.detail] : [])),
+    warnings: [],
   };
 };
 
@@ -914,6 +929,21 @@ export const formatPlainHubRunOutcome = (
         : []),
     ].join(" "),
   ),
+  ...projection.warnings.map((warning) =>
+    [
+      "event=landing_reconciliation_incident",
+      textField("run_id", result.runId),
+      textField("kind", warning.kind),
+      ...(warning.transactionId
+        ? [textField("transaction_id", warning.transactionId)]
+        : []),
+      ...(warning.taskId ? [textField("task_id", warning.taskId)] : []),
+      textField("evidence", warning.evidence),
+      textField("message", warning.message),
+      textField("next_action", warning.nextAction),
+      textField("affects_current_batch", String(warning.affectsCurrentBatch)),
+    ].join(" "),
+  ),
   [
     "event=run_completed",
     textField("outcome", projection.outcome),
@@ -1084,6 +1114,16 @@ export const formatPlainHubRunEvent = (
         numberField("pending_count", event.pendingCount),
         ...(event.integrityIncident
           ? [textField("integrity_incident", event.integrityIncident)]
+          : []),
+        ...(event.incidentTransactionId
+          ? [textField("transaction_id", event.incidentTransactionId)]
+          : []),
+        ...(event.incidentTaskId
+          ? [textField("incident_task_id", event.incidentTaskId)]
+          : []),
+        ...(event.nextAction ? [textField("next_action", event.nextAction)] : []),
+        ...(event.affectsCurrentBatch === false
+          ? [textField("affects_current_batch", "false")]
           : []),
         textField("message", event.message),
       ].join(" ");

@@ -94,7 +94,14 @@ export interface HubLandingReconciliationEvent {
   readonly pendingCount: number;
   readonly reconstructedCount?: number;
   readonly message: string;
+  readonly nextAction?: string;
   readonly integrityIncident?: string;
+  /** Affected historical transaction; not a HubTaskEvent taskId discriminant. */
+  readonly incidentTransactionId?: string;
+  /** Affected historical task id when known; not a HubTaskEvent discriminant. */
+  readonly incidentTaskId?: string;
+  /** False when the incident is historical/stale and must not fail the current batch. */
+  readonly affectsCurrentBatch?: boolean;
 }
 
 export interface HubBatchStartedEvent {

@@ -302,8 +302,22 @@ export const createHubRunJsonRenderer = (input: {
             : {}),
         }),
       );
+      const warningRecords = projection.warnings.map((warning) =>
+        serialize(result.runId, timestamp, "landing_reconciliation_incident", {
+          kind: warning.kind,
+          ...(warning.transactionId
+            ? { transactionId: warning.transactionId }
+            : {}),
+          ...(warning.taskId ? { taskId: warning.taskId } : {}),
+          evidence: warning.evidence,
+          message: warning.message,
+          nextAction: warning.nextAction,
+          affectsCurrentBatch: warning.affectsCurrentBatch,
+        }),
+      );
       return [
         ...taskRecords,
+        ...warningRecords,
         serialize(result.runId, timestamp, "run_completed", {
           ...(completedEvent
             ? {
@@ -361,10 +375,20 @@ export const createHubRunJsonRenderer = (input: {
                   reconstructedCount:
                     result.landingReconciliation.reconstructedCount,
                   message: result.landingReconciliation.message,
+                  nextAction: result.landingReconciliation.nextAction,
                   ...(result.landingReconciliation.integrityIncident
                     ? {
                         integrityIncident:
                           result.landingReconciliation.integrityIncident,
+                      }
+                    : {}),
+                  ...(result.landingReconciliation.kind === "integrity_incident"
+                    ? {
+                        affectsCurrentBatch: false,
+                        incidents: projection.warnings.filter(
+                          (warning) =>
+                            warning.kind === "landing_reconciliation_incident",
+                        ),
                       }
                     : {}),
                   ...landingLegacyHistoryJson(
