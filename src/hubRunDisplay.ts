@@ -1,5 +1,9 @@
 import { join } from "node:path";
 
+import {
+  hasBranchDivergenceCheckoutPending,
+  hubCheckoutSyncBranchEventFields,
+} from "./hubCheckoutProjection.js";
 import type { HubRunEvent, HubRunStopReason } from "./hubExecution.js";
 import type { RunHubFlowResult } from "./hubFlowExecution.js";
 import {
@@ -364,11 +368,7 @@ const resolveHubRunOutcomeKind = (
     return "completed_with_pending_merge";
   }
   if (hasPendingCheckoutSync && result.stopReason !== "batch_failed") {
-    const hasBranchDivergencePending = (result.checkoutSync?.items ?? []).some(
-      (item) =>
-        item.status === "pending" && item.pendingReason === "branch_diverged",
-    );
-    if (hasBranchDivergencePending) {
+    if (hasBranchDivergenceCheckoutPending(result.checkoutSync?.items ?? [])) {
       return "completed_with_pending_checkout_sync";
     }
   }
@@ -422,15 +422,7 @@ const projectCheckoutSyncDetails = (
             ...(item.blockingPaths
               ? { blockingPaths: item.blockingPaths }
               : {}),
-            ...(item.branchRelation
-              ? { branchRelation: item.branchRelation }
-              : {}),
-            ...(item.observedHostBranchOid
-              ? { observedHostBranchOid: item.observedHostBranchOid }
-              : {}),
-            ...(item.expectedPublishBranchOid
-              ? { expectedPublishBranchOid: item.expectedPublishBranchOid }
-              : {}),
+            ...hubCheckoutSyncBranchEventFields(item),
             recoveryCommand: `archloop run --flow ${result.flowId}`,
           },
         ]

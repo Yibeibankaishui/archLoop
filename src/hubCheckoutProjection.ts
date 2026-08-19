@@ -420,6 +420,33 @@ const hasBlockingPaths = (
   item: Pick<HubCheckoutOutboxItem, "blockingPaths">,
 ): boolean => (item.blockingPaths?.length ?? 0) > 0;
 
+export const hasBranchDivergenceCheckoutPending = (
+  items: readonly Pick<HubCheckoutOutboxItem, "status" | "pendingReason">[],
+): boolean =>
+  items.some(
+    (item) =>
+      item.status === "pending" && item.pendingReason === "branch_diverged",
+  );
+
+export const hubCheckoutSyncBranchEventFields = (
+  source: Pick<
+    HubCheckoutOutboxItem,
+    "observedHostBranchOid" | "expectedPublishBranchOid" | "branchRelation"
+  >,
+): {
+  readonly observedHostBranchOid?: string;
+  readonly expectedPublishBranchOid?: string;
+  readonly branchRelation?: HubCheckoutBranchRelation;
+} => ({
+  ...(source.observedHostBranchOid
+    ? { observedHostBranchOid: source.observedHostBranchOid }
+    : {}),
+  ...(source.expectedPublishBranchOid
+    ? { expectedPublishBranchOid: source.expectedPublishBranchOid }
+    : {}),
+  ...(source.branchRelation ? { branchRelation: source.branchRelation } : {}),
+});
+
 const resolveCheckoutNextAction = (
   items: readonly HubCheckoutOutboxItem[],
   pendingCount: number,
@@ -427,11 +454,7 @@ const resolveCheckoutNextAction = (
   if (pendingCount === 0) {
     return "";
   }
-  const hasBranchDivergence = items.some(
-    (item) =>
-      item.status === "pending" && item.pendingReason === "branch_diverged",
-  );
-  if (hasBranchDivergence) {
+  if (hasBranchDivergenceCheckoutPending(items)) {
     return branchDivergencePendingAction;
   }
   const hasDirtyPending = items.some(
@@ -857,13 +880,7 @@ const markPending = (
     pendingReason: hold.pendingReason,
     updatedAt: now,
     blockingPaths: hasBlockingPaths(hold) ? hold.blockingPaths : undefined,
-    ...(hold.observedHostBranchOid
-      ? { observedHostBranchOid: hold.observedHostBranchOid }
-      : {}),
-    ...(hold.expectedPublishBranchOid
-      ? { expectedPublishBranchOid: hold.expectedPublishBranchOid }
-      : {}),
-    ...(hold.branchRelation ? { branchRelation: hold.branchRelation } : {}),
+    ...hubCheckoutSyncBranchEventFields(hold),
   };
   return writeOutboxItem(hubProjectDir, {
     ...next,
@@ -960,6 +977,7 @@ const advanceHostBranchWithCrashWindows = async (input: {
   readonly pendingAfterFailure: (
     observedOid: string | undefined,
   ) => CheckoutSafetyHold;
+  readonly diagnosticHostOidFallback?: string;
   readonly worktreePath?: string;
 }): Promise<HubCheckoutOutboxItem> => {
   const { projection, item, now } = input;
@@ -986,11 +1004,17 @@ const advanceHostBranchWithCrashWindows = async (input: {
       return succeeded(observedOid);
     }
     const hold = input.pendingAfterFailure(observedOid);
+    const diagnosticHostOid = observedOid ?? input.diagnosticHostOidFallback;
     return markPending(
       projection.hubProjectDir,
       item,
       now,
-      withBranchDiagnostics(projection.repoRoot, item, observedOid, hold),
+      withBranchDiagnostics(
+        projection.repoRoot,
+        item,
+        diagnosticHostOid,
+        hold,
+      ),
     );
   }
   maybeCrash(projection.faultInjection, "after");
@@ -1050,14 +1074,13 @@ const projectOneItem = async (
       now,
       mutate: () =>
         attemptCas(input.repoRoot, input.hubProjectDir, item, currentOid),
-      pendingAfterFailure: (observedOid) =>
-        withBranchDiagnostics(input.repoRoot, item, observedOid, {
-          pendingReason: casFailureReason(
-            input.repoRoot,
-            item.candidateOid,
-            observedOid,
-          ),
-        }),
+      pendingAfterFailure: (observedOid) => ({
+        pendingReason: casFailureReason(
+          input.repoRoot,
+          item.candidateOid,
+          observedOid,
+        ),
+      }),
     });
   }
 
@@ -1077,15 +1100,11 @@ const projectOneItem = async (
     now,
     mutate: () =>
       attemptFastForward(owner.path, input.hubProjectDir, item.candidateOid),
-    pendingAfterFailure: (observedOid) =>
-      withBranchDiagnostics(
-        input.repoRoot,
-        item,
-        observedOid ?? currentOid,
-        inspectOwningWorktreeSafety(owner.path, item.candidateOid) ?? {
-          pendingReason: "operation_in_progress",
-        },
-      ),
+    pendingAfterFailure: () =>
+      inspectOwningWorktreeSafety(owner.path, item.candidateOid) ?? {
+        pendingReason: "operation_in_progress",
+      },
+    diagnosticHostOidFallback: currentOid,
     worktreePath: owner.path,
   });
 };
@@ -1104,35 +1123,8 @@ const toAttempt = (
   status: item.status,
   ...(item.pendingReason ? { pendingReason: item.pendingReason } : {}),
   ...(item.blockingPaths ? { blockingPaths: item.blockingPaths } : {}),
-  ...(item.observedHostBranchOid
-    ? { observedHostBranchOid: item.observedHostBranchOid }
-    : {}),
-  ...(item.expectedPublishBranchOid
-    ? { expectedPublishBranchOid: item.expectedPublishBranchOid }
-    : {}),
-  ...(item.branchRelation ? { branchRelation: item.branchRelation } : {}),
+  ...hubCheckoutSyncBranchEventFields(item),
   message: attemptMessage(item),
-});
-
-export const hubCheckoutSyncBranchEventFields = (
-  attempt: Pick<
-    HubCheckoutProjectionAttempt,
-    | "observedHostBranchOid"
-    | "expectedPublishBranchOid"
-    | "branchRelation"
-  >,
-): {
-  readonly observedHostBranchOid?: string;
-  readonly expectedPublishBranchOid?: string;
-  readonly branchRelation?: HubCheckoutBranchRelation;
-} => ({
-  ...(attempt.observedHostBranchOid
-    ? { observedHostBranchOid: attempt.observedHostBranchOid }
-    : {}),
-  ...(attempt.expectedPublishBranchOid
-    ? { expectedPublishBranchOid: attempt.expectedPublishBranchOid }
-    : {}),
-  ...(attempt.branchRelation ? { branchRelation: attempt.branchRelation } : {}),
 });
 
 export const projectHubCheckoutOutbox = async (
