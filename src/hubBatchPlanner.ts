@@ -362,43 +362,44 @@ const mapSelectedTasks = (
   });
 };
 
+const collectTaskDependencyBlockerIds = (
+  task: HubBatchPlannerCandidate,
+): readonly string[] => [
+  ...task.explicitBlockers,
+  ...task.blockersDeclared,
+  ...task.openBlockers,
+  ...task.unknownBlockers,
+  ...task.blockersResolved.flatMap((blocker) => [blocker.taskId, blocker.ref]),
+];
+
 const collectSelectedTaskBlockerIds = (
   selectedTasks: readonly HubBatchPlannerCandidate[],
-): ReadonlySet<string> => {
-  const blockerIds = new Set<string>();
-  for (const task of selectedTasks) {
-    for (const blocker of task.blockersResolved) {
-      blockerIds.add(blocker.taskId);
-      blockerIds.add(blocker.ref);
-    }
-    for (const ref of [
-      ...task.explicitBlockers,
-      ...task.blockersDeclared,
-      ...task.openBlockers,
-      ...task.unknownBlockers,
-    ]) {
-      blockerIds.add(ref);
-    }
-  }
-  return blockerIds;
-};
+): ReadonlySet<string> =>
+  new Set(selectedTasks.flatMap(collectTaskDependencyBlockerIds));
+
+const candidateHasNoEffectiveBlockers = (
+  candidate: HubBatchPlannerCandidate,
+): boolean =>
+  candidate.openBlockers.length === 0 &&
+  candidate.unknownBlockers.length === 0;
 
 const shouldRecoverExplicitBlockerDeferral = (input: {
   readonly deferred: HubBatchDeferredTask;
   readonly candidate?: HubBatchPlannerCandidate;
   readonly selectedDependencyBlockerIds: ReadonlySet<string>;
-}): input is {
-  readonly deferred: HubBatchDeferredTask & {
-    readonly reason: "explicit_blocker";
-  };
-  readonly candidate: HubBatchPlannerCandidate;
-  readonly selectedDependencyBlockerIds: ReadonlySet<string>;
-} =>
-  input.deferred.reason === "explicit_blocker" &&
-  input.candidate !== undefined &&
-  input.candidate.openBlockers.length === 0 &&
-  input.candidate.unknownBlockers.length === 0 &&
-  !input.selectedDependencyBlockerIds.has(input.candidate.id);
+}): boolean => {
+  if (
+    input.deferred.reason !== "explicit_blocker" ||
+    input.candidate === undefined
+  ) {
+    return false;
+  }
+
+  return (
+    candidateHasNoEffectiveBlockers(input.candidate) &&
+    !input.selectedDependencyBlockerIds.has(input.candidate.id)
+  );
+};
 
 const resolvePlannedBatchSelection = (input: {
   readonly eligible: readonly HubTaskProjection[];
@@ -427,17 +428,17 @@ const resolvePlannedBatchSelection = (input: {
   for (const deferred of input.parsed.deferred) {
     const candidate = eligibleById.get(deferred.taskId);
     if (
-      !shouldRecoverExplicitBlockerDeferral({
+      shouldRecoverExplicitBlockerDeferral({
         deferred,
         candidate,
         selectedDependencyBlockerIds,
       })
     ) {
-      deferredTasks.push(deferred);
+      invalidExplicitBlockerTaskIds.add(deferred.taskId);
       continue;
     }
 
-    invalidExplicitBlockerTaskIds.add(deferred.taskId);
+    deferredTasks.push(deferred);
   }
 
   const capacity = Math.max(0, input.maxTasks - selectedTasks.length);

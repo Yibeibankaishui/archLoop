@@ -303,16 +303,12 @@ const resolveDeclaredBlockers = (
   };
 };
 
+const hasNonEmptyText = (value: string | undefined): value is string =>
+  typeof value === "string" && value.trim().length > 0;
+
 const firstNonEmptyText = (
   ...values: readonly (string | undefined)[]
-): string | undefined => {
-  for (const value of values) {
-    if (typeof value === "string" && value.trim().length > 0) {
-      return value;
-    }
-  }
-  return undefined;
-};
+): string | undefined => values.find(hasNonEmptyText);
 
 const mergePlannerCandidateFields = (
   task: HubTaskProjection,
