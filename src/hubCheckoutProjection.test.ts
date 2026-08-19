@@ -482,6 +482,32 @@ describe("Hub checkout projection outbox", () => {
           );
         },
       },
+      {
+        label: "delete",
+        reason: "rename_or_delete",
+        blockingPaths: ["hello.txt"],
+        setup: async (repoDir) => {
+          await execFileAsync("git", ["rm", "hello.txt"], { cwd: repoDir });
+        },
+        readback: async (repoDir) => {
+          expect(existsSync(join(repoDir, "hello.txt"))).toBe(false);
+        },
+      },
+      {
+        label: "delete-mixed",
+        reason: "rename_or_delete",
+        blockingPaths: ["hello.txt", "notes.txt"],
+        setup: async (repoDir) => {
+          await execFileAsync("git", ["rm", "hello.txt"], { cwd: repoDir });
+          await writeFile(join(repoDir, "notes.txt"), "local notes\n");
+        },
+        readback: async (repoDir) => {
+          expect(existsSync(join(repoDir, "hello.txt"))).toBe(false);
+          await expect(readFile(join(repoDir, "notes.txt"), "utf8")).resolves.toBe(
+            "local notes\n",
+          );
+        },
+      },
     ];
 
     for (const testCase of cases) {
