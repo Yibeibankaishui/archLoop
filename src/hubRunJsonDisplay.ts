@@ -1,5 +1,6 @@
 import type { HubRunEvent } from "./hubExecution.js";
 import { join } from "node:path";
+import { hubCheckoutSyncBranchEventFields } from "./hubCheckoutProjection.js";
 import {
   projectHubRunStateOutcome,
   type HubRunDisplayState,
@@ -390,6 +391,7 @@ export const createHubRunJsonRenderer = (input: {
                       ...(item.blockingPaths
                         ? { blockingPaths: item.blockingPaths }
                         : {}),
+                      ...hubCheckoutSyncBranchEventFields(item),
                     })),
                 },
               }

@@ -50,6 +50,7 @@ import {
 } from "./hubLandingReconciliation.js";
 import {
   inspectHubCheckoutOutbox,
+  hubCheckoutSyncBranchEventFields,
   hubCheckoutSyncEventReason,
   hubCheckoutSyncEventType,
   syncHubCheckoutProjections,
@@ -1945,6 +1946,7 @@ const runObservedHubFlow = async (
         ...(attempt.blockingPaths
           ? { blockingPaths: attempt.blockingPaths }
           : {}),
+        ...hubCheckoutSyncBranchEventFields(attempt),
       });
     }
   };

@@ -17,6 +17,7 @@ import {
 import { ensureHubLandingPolicy } from "./hubLandingPolicy.js";
 import { deriveHubLandingShipped } from "./hubLandingTransaction.js";
 import {
+  classifyHostPublishBranchRelation,
   enqueueHubCheckoutProjection,
   inspectHubCheckoutOutbox,
   listHubCheckoutOutboxItems,
@@ -689,6 +690,11 @@ describe("Hub checkout projection outbox", () => {
 
     const fixtureDiverged = await prepareLandedFixture("bd-diverged");
     await commitFile(fixtureDiverged.repoDir, "other.txt", "other\n", "diverge");
+    const hostOid = await gitText(fixtureDiverged.repoDir, ["rev-parse", "HEAD"]);
+    const publishOid = await gitText(fixtureDiverged.repoDir, [
+      "rev-parse",
+      fixtureDiverged.policy.publishTargetRef,
+    ]);
     enqueueHubCheckoutProjection({
       repoRoot: fixtureDiverged.repoDir,
       hubProjectDir: fixtureDiverged.hubProjectDir,
@@ -700,8 +706,127 @@ describe("Hub checkout projection outbox", () => {
       hubProjectDir: fixtureDiverged.hubProjectDir,
     });
     expect(diverged.attempts[0]?.pendingReason).toBe("branch_diverged");
+    expect(diverged.attempts[0]?.branchRelation).toBe("diverged");
+    expect(diverged.attempts[0]?.observedHostBranchOid).toBe(hostOid);
+    expect(diverged.attempts[0]?.expectedPublishBranchOid).toBe(publishOid);
+    expect(diverged.message).toContain("will not stash, reset, force-update");
+    expect(diverged.message).toContain("reconcile them manually");
+    expect(diverged.message).not.toMatch(/tasks recover/);
+    expect(
+      inspectHubCheckoutOutbox({
+        hubProjectDir: fixtureDiverged.hubProjectDir,
+      }).nextAction,
+    ).toContain("will not stash, reset, force-update");
     expect(await gitText(fixtureDiverged.repoDir, ["rev-parse", "HEAD"])).not.toBe(
       fixtureDiverged.candidate.candidateOid,
+    );
+  });
+
+  it("persists branch-relation diagnostics for ahead, behind, diverged, and missing cases", async () => {
+    const behindFixture = await prepareLandedFixture("bd-rel-behind");
+    await writeFile(join(behindFixture.repoDir, "notes.txt"), "local notes\n");
+    enqueueHubCheckoutProjection({
+      repoRoot: behindFixture.repoDir,
+      hubProjectDir: behindFixture.hubProjectDir,
+      candidate: behindFixture.candidate,
+      candidateOid: behindFixture.candidate.candidateOid,
+    });
+    const behind = await projectHubCheckoutOutbox({
+      repoRoot: behindFixture.repoDir,
+      hubProjectDir: behindFixture.hubProjectDir,
+    });
+    expect(behind.attempts[0]?.pendingReason).toBe("untracked_paths");
+    expect(behind.attempts[0]?.branchRelation).toBe("behind");
+    expect(behind.attempts[0]?.expectedPublishBranchOid).toBe(
+      behindFixture.candidate.candidateOid,
+    );
+
+    const aheadFixture = await prepareLandedFixture("bd-rel-ahead");
+    await execFileAsync(
+      "git",
+      ["merge", "--ff-only", aheadFixture.candidate.candidateOid],
+      { cwd: aheadFixture.repoDir },
+    );
+    await commitFile(aheadFixture.repoDir, "ahead.txt", "ahead\n", "ahead");
+    const aheadHostOid = await gitText(aheadFixture.repoDir, [
+      "rev-parse",
+      "refs/heads/main",
+    ]);
+    const aheadPublishOid = await gitText(aheadFixture.repoDir, [
+      "rev-parse",
+      aheadFixture.policy.publishTargetRef,
+    ]);
+    expect(
+      classifyHostPublishBranchRelation(
+        aheadFixture.repoDir,
+        aheadHostOid,
+        aheadPublishOid,
+      ),
+    ).toBe("ahead");
+
+    const missingFixture = await prepareLandedFixture("bd-rel-missing");
+    await execFileAsync("git", ["checkout", "-b", "keep"], {
+      cwd: missingFixture.repoDir,
+    });
+    await execFileAsync("git", ["branch", "-D", "main"], {
+      cwd: missingFixture.repoDir,
+    });
+    enqueueHubCheckoutProjection({
+      repoRoot: missingFixture.repoDir,
+      hubProjectDir: missingFixture.hubProjectDir,
+      candidate: missingFixture.candidate,
+      candidateOid: missingFixture.candidate.candidateOid,
+    });
+    const missing = await projectHubCheckoutOutbox({
+      repoRoot: missingFixture.repoDir,
+      hubProjectDir: missingFixture.hubProjectDir,
+    });
+    expect(missing.attempts[0]?.pendingReason).toBe("branch_diverged");
+    expect(missing.attempts[0]?.branchRelation).toBe("missing");
+    expect(missing.attempts[0]?.observedHostBranchOid).toBeUndefined();
+    expect(missing.attempts[0]?.expectedPublishBranchOid).toBe(
+      missingFixture.candidate.candidateOid,
+    );
+
+    const divergedFixture = await prepareLandedFixture("bd-rel-diverged");
+    await commitFile(divergedFixture.repoDir, "other.txt", "other\n", "diverge");
+    enqueueHubCheckoutProjection({
+      repoRoot: divergedFixture.repoDir,
+      hubProjectDir: divergedFixture.hubProjectDir,
+      candidate: divergedFixture.candidate,
+      candidateOid: divergedFixture.candidate.candidateOid,
+    });
+    const diverged = await projectHubCheckoutOutbox({
+      repoRoot: divergedFixture.repoDir,
+      hubProjectDir: divergedFixture.hubProjectDir,
+    });
+    expect(diverged.attempts[0]?.branchRelation).toBe("diverged");
+    const stored = inspectHubCheckoutOutbox({
+      hubProjectDir: divergedFixture.hubProjectDir,
+    });
+    const raw = JSON.parse(
+      await readFile(
+        join(
+          divergedFixture.hubProjectDir,
+          "landing",
+          "checkout-outbox",
+          `${stored.items[0]!.id}.json`,
+        ),
+        "utf8",
+      ),
+    ) as {
+      observedHostBranchOid?: string;
+      expectedPublishBranchOid?: string;
+      branchRelation?: string;
+      candidateOid?: string;
+    };
+    expect(raw.branchRelation).toBe("diverged");
+    expect(raw.expectedPublishBranchOid).toBe(
+      diverged.attempts[0]?.expectedPublishBranchOid,
+    );
+    expect(raw.candidateOid).toBe(divergedFixture.candidate.candidateOid);
+    expect(raw.observedHostBranchOid).toBe(
+      diverged.attempts[0]?.observedHostBranchOid,
     );
   });
 

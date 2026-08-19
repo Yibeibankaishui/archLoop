@@ -40,6 +40,16 @@ export const HUB_CHECKOUT_PENDING_REASONS = [
 export type HubCheckoutPendingReason =
   (typeof HUB_CHECKOUT_PENDING_REASONS)[number];
 
+export const HUB_CHECKOUT_BRANCH_RELATIONS = [
+  "ahead",
+  "behind",
+  "diverged",
+  "missing",
+] as const;
+
+export type HubCheckoutBranchRelation =
+  (typeof HUB_CHECKOUT_BRANCH_RELATIONS)[number];
+
 export type HubCheckoutProjectionStatus = "pending" | "succeeded";
 
 export interface HubCheckoutOutboxItem {
@@ -57,6 +67,9 @@ export interface HubCheckoutOutboxItem {
   readonly updatedAt: string;
   readonly pendingReason?: HubCheckoutPendingReason;
   readonly blockingPaths?: readonly string[];
+  readonly observedHostBranchOid?: string;
+  readonly expectedPublishBranchOid?: string;
+  readonly branchRelation?: HubCheckoutBranchRelation;
   readonly message?: string;
   readonly projectedOid?: string;
   readonly worktreePath?: string;
@@ -75,6 +88,9 @@ export interface HubCheckoutProjectionAttempt {
   readonly status: HubCheckoutProjectionStatus;
   readonly pendingReason?: HubCheckoutPendingReason;
   readonly blockingPaths?: readonly string[];
+  readonly observedHostBranchOid?: string;
+  readonly expectedPublishBranchOid?: string;
+  readonly branchRelation?: HubCheckoutBranchRelation;
   readonly message: string;
 }
 
@@ -106,11 +122,16 @@ export interface ProjectHubCheckoutOutboxInput {
 const NO_RECOVER_SUFFIX =
   "This is not a task failure and does not require a recovery command.";
 
+const CHECKOUT_NO_HOST_MUTATION =
+  "archLoop will not stash, reset, force-update, or overwrite the host branch.";
+
 const pendingAction =
   "Wait for the automatic retry; Hub will fast-forward the host branch when Git can prove the checkout safe.";
 
 const dirtyPendingAction =
   "Commit or stash the listed host paths, then retry the same run. Hub will fast-forward the host branch when Git can prove the checkout safe.";
+
+const branchDivergencePendingAction = `Inspect the host branch and Hub publish-target histories, reconcile them manually, then retry the same run. ${CHECKOUT_NO_HOST_MUTATION}`;
 
 const gitEnv = (): NodeJS.ProcessEnv => ({
   ...process.env,
@@ -213,6 +234,12 @@ const isPendingReason = (value: unknown): value is HubCheckoutPendingReason =>
   typeof value === "string" &&
   (HUB_CHECKOUT_PENDING_REASONS as readonly string[]).includes(value);
 
+const isBranchRelation = (
+  value: unknown,
+): value is HubCheckoutBranchRelation =>
+  typeof value === "string" &&
+  (HUB_CHECKOUT_BRANCH_RELATIONS as readonly string[]).includes(value);
+
 const readStringArray = (
   record: Readonly<Record<string, unknown>>,
   key: string,
@@ -310,6 +337,21 @@ const parseOutboxItem = (value: unknown): HubCheckoutOutboxItem | undefined => {
   const message = readString(record, "message");
   const worktreePath = readString(record, "worktreePath");
   const blockingPaths = readStringArray(record, "blockingPaths");
+  const observedHostBranchOid = readString(record, "observedHostBranchOid");
+  const expectedPublishBranchOid = readString(record, "expectedPublishBranchOid");
+  const branchRelation = record.branchRelation;
+  if (
+    observedHostBranchOid !== undefined &&
+    !isGitOid(observedHostBranchOid)
+  ) {
+    return undefined;
+  }
+  if (
+    expectedPublishBranchOid !== undefined &&
+    !isGitOid(expectedPublishBranchOid)
+  ) {
+    return undefined;
+  }
   return {
     version: 1,
     id,
@@ -325,6 +367,9 @@ const parseOutboxItem = (value: unknown): HubCheckoutOutboxItem | undefined => {
     updatedAt,
     ...(isPendingReason(pendingReason) ? { pendingReason } : {}),
     ...(blockingPaths ? { blockingPaths } : {}),
+    ...(observedHostBranchOid ? { observedHostBranchOid } : {}),
+    ...(expectedPublishBranchOid ? { expectedPublishBranchOid } : {}),
+    ...(isBranchRelation(branchRelation) ? { branchRelation } : {}),
     ...(message ? { message } : {}),
     ...(projectedOid ? { projectedOid } : {}),
     ...(worktreePath ? { worktreePath } : {}),
@@ -375,6 +420,33 @@ const hasBlockingPaths = (
   item: Pick<HubCheckoutOutboxItem, "blockingPaths">,
 ): boolean => (item.blockingPaths?.length ?? 0) > 0;
 
+export const hasBranchDivergenceCheckoutPending = (
+  items: readonly Pick<HubCheckoutOutboxItem, "status" | "pendingReason">[],
+): boolean =>
+  items.some(
+    (item) =>
+      item.status === "pending" && item.pendingReason === "branch_diverged",
+  );
+
+export const hubCheckoutSyncBranchEventFields = (
+  source: Pick<
+    HubCheckoutOutboxItem,
+    "observedHostBranchOid" | "expectedPublishBranchOid" | "branchRelation"
+  >,
+): {
+  readonly observedHostBranchOid?: string;
+  readonly expectedPublishBranchOid?: string;
+  readonly branchRelation?: HubCheckoutBranchRelation;
+} => ({
+  ...(source.observedHostBranchOid
+    ? { observedHostBranchOid: source.observedHostBranchOid }
+    : {}),
+  ...(source.expectedPublishBranchOid
+    ? { expectedPublishBranchOid: source.expectedPublishBranchOid }
+    : {}),
+  ...(source.branchRelation ? { branchRelation: source.branchRelation } : {}),
+});
+
 const resolveCheckoutNextAction = (
   items: readonly HubCheckoutOutboxItem[],
   pendingCount: number,
@@ -382,10 +454,29 @@ const resolveCheckoutNextAction = (
   if (pendingCount === 0) {
     return "";
   }
+  if (hasBranchDivergenceCheckoutPending(items)) {
+    return branchDivergencePendingAction;
+  }
   const hasDirtyPending = items.some(
     (item) => item.status === "pending" && hasBlockingPaths(item),
   );
   return hasDirtyPending ? dirtyPendingAction : pendingAction;
+};
+
+const branchStateClause = (item: HubCheckoutOutboxItem): string => {
+  const parts: string[] = [];
+  if (item.observedHostBranchOid) {
+    parts.push(`observed host ${item.observedHostBranchOid}`);
+  } else if (item.branchRelation === "missing") {
+    parts.push("host branch ref is missing");
+  }
+  if (item.expectedPublishBranchOid) {
+    parts.push(`publish target ${item.expectedPublishBranchOid}`);
+  }
+  if (item.branchRelation) {
+    parts.push(`relation ${item.branchRelation}`);
+  }
+  return parts.length > 0 ? ` Branch state: ${parts.join(", ")}.` : "";
 };
 
 const pendingMessage = (item: HubCheckoutOutboxItem): string => {
@@ -393,11 +484,14 @@ const pendingMessage = (item: HubCheckoutOutboxItem): string => {
   const paths = item.blockingPaths ?? [];
   const pathClause =
     paths.length > 0 ? ` Blocking host paths: ${paths.join(", ")}.` : "";
+  if (reason === "branch_diverged") {
+    return `Checkout sync pending for ${item.taskId} (branch_diverged): host branch ${item.hostTargetBranch} was not updated.${branchStateClause(item)} Landed candidate ${item.candidateOid} remains on the Hub publish target and the task can stay shipped. ${CHECKOUT_NO_HOST_MUTATION} Next steps: inspect both histories, reconcile them manually, then retry the run. ${NO_RECOVER_SUFFIX}`;
+  }
   const recoveryClause =
     paths.length > 0
       ? " Next steps: commit or stash the listed paths, then retry the run."
       : "";
-  return `Checkout sync pending for ${item.taskId} (${reason}): host branch ${item.hostTargetBranch} was not updated.${pathClause} Landed candidate ${item.candidateOid} remains on the Hub publish target and the task can stay shipped.${recoveryClause} ${NO_RECOVER_SUFFIX}`;
+  return `Checkout sync pending for ${item.taskId} (${reason}): host branch ${item.hostTargetBranch} was not updated.${pathClause}${branchStateClause(item)} Landed candidate ${item.candidateOid} remains on the Hub publish target and the task can stay shipped.${recoveryClause} ${NO_RECOVER_SUFFIX}`;
 };
 
 const succeededMessage = (item: HubCheckoutOutboxItem): string =>
@@ -641,6 +735,9 @@ const classifyPorcelain = (
 type CheckoutSafetyHold = {
   readonly pendingReason: HubCheckoutPendingReason;
   readonly blockingPaths?: readonly string[];
+  readonly observedHostBranchOid?: string;
+  readonly expectedPublishBranchOid?: string;
+  readonly branchRelation?: HubCheckoutBranchRelation;
 };
 
 const inspectOwningWorktreeSafety = (
@@ -688,6 +785,66 @@ const isAncestor = (
     descendantOid,
   ]);
 
+export const classifyHostPublishBranchRelation = (
+  repoRoot: string,
+  hostOid: string | undefined,
+  publishOid: string,
+): HubCheckoutBranchRelation => {
+  if (hostOid === undefined) {
+    return "missing";
+  }
+  if (hostOid === publishOid) {
+    return "behind";
+  }
+  const hostIsBehindPublish = isAncestor(repoRoot, hostOid, publishOid);
+  const hostIsAheadOfPublish = isAncestor(repoRoot, publishOid, hostOid);
+  if (hostIsBehindPublish && !hostIsAheadOfPublish) {
+    return "behind";
+  }
+  if (hostIsAheadOfPublish && !hostIsBehindPublish) {
+    return "ahead";
+  }
+  return "diverged";
+};
+
+const resolvePublishBranchOid = (
+  repoRoot: string,
+  publishTargetRef: string,
+): string | undefined =>
+  tryGitTextSync(repoRoot, ["rev-parse", publishTargetRef]);
+
+const buildBranchDiagnostics = (
+  repoRoot: string,
+  item: HubCheckoutOutboxItem,
+  hostOid: string | undefined,
+): Pick<
+  CheckoutSafetyHold,
+  "observedHostBranchOid" | "expectedPublishBranchOid" | "branchRelation"
+> => {
+  const expectedPublishBranchOid =
+    resolvePublishBranchOid(repoRoot, item.publishTargetRef) ??
+    item.candidateOid;
+  return {
+    ...(hostOid ? { observedHostBranchOid: hostOid } : {}),
+    expectedPublishBranchOid,
+    branchRelation: classifyHostPublishBranchRelation(
+      repoRoot,
+      hostOid,
+      expectedPublishBranchOid,
+    ),
+  };
+};
+
+const withBranchDiagnostics = (
+  repoRoot: string,
+  item: HubCheckoutOutboxItem,
+  hostOid: string | undefined,
+  hold: CheckoutSafetyHold,
+): CheckoutSafetyHold => ({
+  ...hold,
+  ...buildBranchDiagnostics(repoRoot, item, hostOid),
+});
+
 const markSucceeded = (
   hubProjectDir: string,
   item: HubCheckoutOutboxItem,
@@ -704,6 +861,9 @@ const markSucceeded = (
     projectedOid: input.projectedOid,
     pendingReason: undefined,
     blockingPaths: undefined,
+    observedHostBranchOid: undefined,
+    expectedPublishBranchOid: undefined,
+    branchRelation: undefined,
     message: undefined,
     ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
   });
@@ -720,6 +880,7 @@ const markPending = (
     pendingReason: hold.pendingReason,
     updatedAt: now,
     blockingPaths: hasBlockingPaths(hold) ? hold.blockingPaths : undefined,
+    ...hubCheckoutSyncBranchEventFields(hold),
   };
   return writeOutboxItem(hubProjectDir, {
     ...next,
@@ -816,6 +977,7 @@ const advanceHostBranchWithCrashWindows = async (input: {
   readonly pendingAfterFailure: (
     observedOid: string | undefined,
   ) => CheckoutSafetyHold;
+  readonly diagnosticHostOidFallback?: string;
   readonly worktreePath?: string;
 }): Promise<HubCheckoutOutboxItem> => {
   const { projection, item, now } = input;
@@ -842,7 +1004,18 @@ const advanceHostBranchWithCrashWindows = async (input: {
       return succeeded(observedOid);
     }
     const hold = input.pendingAfterFailure(observedOid);
-    return markPending(projection.hubProjectDir, item, now, hold);
+    const diagnosticHostOid = observedOid ?? input.diagnosticHostOidFallback;
+    return markPending(
+      projection.hubProjectDir,
+      item,
+      now,
+      withBranchDiagnostics(
+        projection.repoRoot,
+        item,
+        diagnosticHostOid,
+        hold,
+      ),
+    );
   }
   maybeCrash(projection.faultInjection, "after");
   return succeeded(item.candidateOid);
@@ -872,17 +1045,27 @@ const projectOneItem = async (
   if (
     !candidateIsFastForwardOf(input.repoRoot, item.candidateOid, currentOid)
   ) {
-    return markPending(input.hubProjectDir, item, now, {
-      pendingReason: "branch_diverged",
-    });
+    return markPending(
+      input.hubProjectDir,
+      item,
+      now,
+      withBranchDiagnostics(input.repoRoot, item, currentOid, {
+        pendingReason: "branch_diverged",
+      }),
+    );
   }
 
   const worktrees = listUserWorktrees(input.repoRoot, input.hubProjectDir);
   const owners = owningWorktrees(worktrees, item.hostTargetBranch);
   if (owners.length > 1) {
-    return markPending(input.hubProjectDir, item, now, {
-      pendingReason: "multiple_worktrees",
-    });
+    return markPending(
+      input.hubProjectDir,
+      item,
+      now,
+      withBranchDiagnostics(input.repoRoot, item, currentOid, {
+        pendingReason: "multiple_worktrees",
+      }),
+    );
   }
   if (owners.length === 0) {
     return advanceHostBranchWithCrashWindows({
@@ -904,7 +1087,12 @@ const projectOneItem = async (
   const owner = owners[0]!;
   const unsafe = inspectOwningWorktreeSafety(owner.path, item.candidateOid);
   if (unsafe) {
-    return markPending(input.hubProjectDir, item, now, unsafe);
+    return markPending(
+      input.hubProjectDir,
+      item,
+      now,
+      withBranchDiagnostics(input.repoRoot, item, currentOid, unsafe),
+    );
   }
   return advanceHostBranchWithCrashWindows({
     projection: input,
@@ -916,6 +1104,7 @@ const projectOneItem = async (
       inspectOwningWorktreeSafety(owner.path, item.candidateOid) ?? {
         pendingReason: "operation_in_progress",
       },
+    diagnosticHostOidFallback: currentOid,
     worktreePath: owner.path,
   });
 };
@@ -934,6 +1123,7 @@ const toAttempt = (
   status: item.status,
   ...(item.pendingReason ? { pendingReason: item.pendingReason } : {}),
   ...(item.blockingPaths ? { blockingPaths: item.blockingPaths } : {}),
+  ...hubCheckoutSyncBranchEventFields(item),
   message: attemptMessage(item),
 });
 

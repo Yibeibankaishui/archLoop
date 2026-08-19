@@ -80,6 +80,7 @@ import {
   readHubLandingPolicy,
 } from "./hubLandingPolicy.js";
 import {
+  hubCheckoutSyncBranchEventFields,
   hubCheckoutSyncEventReason,
   hubCheckoutSyncEventType,
   syncHubCheckoutProjections,
@@ -413,6 +414,9 @@ type MergeProgressEventFields = {
   readonly suffixInvalidatedTaskIds?: readonly string[];
   readonly hostContributionRelation?: string;
   readonly blockingPaths?: readonly string[];
+  readonly observedHostBranchOid?: string;
+  readonly expectedPublishBranchOid?: string;
+  readonly branchRelation?: string;
 };
 
 const appendMergeProgressEvent = (
@@ -452,6 +456,9 @@ const appendMergeProgressEvent = (
     suffixInvalidatedTaskIds: event.suffixInvalidatedTaskIds,
     hostContributionRelation: event.hostContributionRelation,
     blockingPaths: event.blockingPaths,
+    observedHostBranchOid: event.observedHostBranchOid,
+    expectedPublishBranchOid: event.expectedPublishBranchOid,
+    branchRelation: event.branchRelation,
   });
 };
 
@@ -1756,6 +1763,7 @@ const emitCheckoutProjectionEvents = async (
       ...(attempt.blockingPaths
         ? { blockingPaths: attempt.blockingPaths }
         : {}),
+      ...hubCheckoutSyncBranchEventFields(attempt),
     });
   }
 };
