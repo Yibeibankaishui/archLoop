@@ -11,9 +11,12 @@
  * giving every worker its own gitconfig file and isolated XDG data/config/cache
  * roots so Hub registry I/O cannot touch the real user data directory.
  */
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { afterAll } from "vitest";
+
+import { removeTestTempDirectories } from "./testSetupCleanup.js";
 
 const tmpDir = mkdtempSync(join(tmpdir(), "test-gitconfig-worker-"));
 const globalConfigPath = join(tmpDir, ".gitconfig");
@@ -28,15 +31,12 @@ process.env.XDG_DATA_HOME = join(xdgRoot, "data");
 process.env.XDG_CONFIG_HOME = join(xdgRoot, "config");
 process.env.XDG_CACHE_HOME = join(xdgRoot, "cache");
 
-process.on("exit", () => {
-  try {
-    rmSync(tmpDir, { recursive: true });
-  } catch {
-    // best-effort cleanup
-  }
-  try {
-    rmSync(xdgRoot, { recursive: true });
-  } catch {
-    // best-effort cleanup
-  }
+const cleanup = (): void => removeTestTempDirectories([tmpDir, xdgRoot]);
+
+// `afterAll` runs on ordinary pass/failure paths; `exit` remains a fallback
+// for worker shutdown. SIGKILL cannot be cleaned up from inside the process.
+process.once("exit", cleanup);
+afterAll(() => {
+  process.removeListener("exit", cleanup);
+  cleanup();
 });

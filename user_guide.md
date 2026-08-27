@@ -279,21 +279,21 @@ npx archloop tasks recover <task-id>
 
 常见情况：
 
-| 现象                        | 处理方式                                                                                                               |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| 没有默认项目                | `project list` 后执行 `project select`                                                                                 |
-| 列表里出现大量 `cli-host-*` | 先 `project prune-test-fixtures` 预览，再 `--apply --yes` 删除测试夹具                                                 |
-| 仓库路径失效                | 使用 `project relink` 指向新的 Git 仓库路径                                                                            |
-| role 或凭据缺失             | 使用 `agent-config show`、`env show`、`auth show`                                                                      |
-| 没有初始提交                | 先在目标仓库创建一次 Git 提交                                                                                          |
-| 运行被中断                  | 重新执行同一 Flow，或先用 `tasks recover --stale` 预览                                                                 |
-| 任务状态和运行事件不一致    | 先运行 `tasks doctor`，再按建议 repair 或 recover                                                                      |
+| 现象                        | 处理方式                                                                                                                                 |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| 没有默认项目                | `project list` 后执行 `project select`                                                                                                   |
+| 列表里出现大量 `cli-host-*` | 先 `project prune-test-fixtures` 预览；确认无 blocked 路径后用 `--apply --yes`，命令会先完整备份并校验 payload                           |
+| 仓库路径失效                | 使用 `project relink` 指向新的 Git 仓库路径                                                                                              |
+| role 或凭据缺失             | 使用 `agent-config show`、`env show`、`auth show`                                                                                        |
+| 没有初始提交                | 先在目标仓库创建一次 Git 提交                                                                                                            |
+| 运行被中断                  | 重新执行同一 Flow，或先用 `tasks recover --stale` 预览                                                                                   |
+| 任务状态和运行事件不一致    | 先运行 `tasks doctor`，再按建议 repair 或 recover                                                                                        |
 | 落地后工作区看不到改动      | 权威结果在 Hub publish target；宿主分支仅在安全时快进，否则 `checkout_sync_pending` 并列出阻塞路径，提交或 stash 这些路径后再跑同一 Flow |
-| 代码已 shipped 但远程未更新 | 显式 `best_effort` 发布会记 `target_publish_pending`；检查 `--remote-target`、凭证与受保护分支，再跑同一 Flow 自动重试 |
-| required 仍在 publishing    | 检查远程 proof / FIFO 前置任务；超时是 `completed_with_pending_delivery`，不是任务失败；继续跑同一 Flow 自动重试       |
-| GitHub 同步冲突             | 使用 `tasks resolve --keep local` 或 `--keep remote`                                                                   |
-| 工作分支仍有可恢复内容      | 使用 `tasks recover`，不要手动强删 worktree 或分支                                                                     |
-| 后续 iteration 启动即 abort | 只要还有剩余 iteration，运行会继续并带上进度摘要；全部用尽且无完成信号才记 `agent_failed`                              |
+| 代码已 shipped 但远程未更新 | 显式 `best_effort` 发布会记 `target_publish_pending`；检查 `--remote-target`、凭证与受保护分支，再跑同一 Flow 自动重试                   |
+| required 仍在 publishing    | 检查远程 proof / FIFO 前置任务；超时是 `completed_with_pending_delivery`，不是任务失败；继续跑同一 Flow 自动重试                         |
+| GitHub 同步冲突             | 使用 `tasks resolve --keep local` 或 `--keep remote`                                                                                     |
+| 工作分支仍有可恢复内容      | 使用 `tasks recover`，不要手动强删 worktree 或分支                                                                                       |
+| 后续 iteration 启动即 abort | 只要还有剩余 iteration，运行会继续并带上进度摘要；全部用尽且无完成信号才记 `agent_failed`                                                |
 
 完整诊断索引见
 [Troubleshooting](./docs/content/docs/reference/troubleshooting.mdx)。

@@ -1,13 +1,19 @@
+import { createHash } from "node:crypto";
 import {
   copyFileSync,
+  cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
-  readdirSync,
   readFileSync,
+  readdirSync,
+  readlinkSync,
+  renameSync,
   rmSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { tmpdir } from "node:os";
 import {
   basename,
   dirname,
@@ -16,13 +22,13 @@ import {
   relative,
   resolve,
 } from "node:path";
-import { tmpdir } from "node:os";
 
 import {
   readHubProjectRegistry,
   readSelectedHubProject,
   resolveHubProjectRegistryPath,
   resolveHubProjectSelectionPath,
+  resolveRegisteredHubProjectDir,
   selectHubProject,
   type HubProjectRegistryEntry,
   type HubProjectRegistryOptions,
@@ -30,12 +36,30 @@ import {
 import { resolveArchloopUserDataDir } from "./projectStatus.js";
 
 export const LEAKED_CLI_TEST_FIXTURE_NAME_PATTERN = /^(cli-host-|cli-resolve-)/;
+export const LEAKED_PATH_HASH_REPO_NAME_PATTERN =
+  /^(cli-host-|cli-resolve-|hub-recover-cleanup-|hub-recover-blocked-)/;
 export const PATH_HASH_PROJECT_DIR_PATTERN = /^[a-f0-9]{12}$/;
+const STABLE_HUB_PROJECT_ID_PATTERN = /^project-[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export type LeakedCliTestFixtureSelectionAction = "keep" | "select" | "clear";
 
+export interface BlockedLeakedCliTestRegistryEntry {
+  readonly entry: HubProjectRegistryEntry;
+  readonly reason: string;
+}
+
+export interface BackupTreeDigest {
+  readonly entries: number;
+  readonly files: number;
+  readonly directories: number;
+  readonly symlinks: number;
+  readonly bytes: number;
+  readonly sha256: string;
+}
+
 export interface LeakedCliTestFixturesReport {
   readonly registryEntries: readonly HubProjectRegistryEntry[];
+  readonly blockedRegistryEntries: readonly BlockedLeakedCliTestRegistryEntry[];
   readonly pathHashProjectDirs: readonly string[];
   readonly selectedProjectId: string | undefined;
   readonly nextSelectedProjectId: string | undefined;
@@ -46,11 +70,25 @@ export interface LeakedCliTestFixturesReport {
 export interface ApplyLeakedCliTestFixturesInput extends HubProjectRegistryOptions {
   readonly apply?: boolean;
   readonly now?: Date;
+  /** Dependency-injection seam used by failure-path tests. */
+  readonly verifyBackupPayload?: (
+    source: string,
+    backup: string,
+  ) => BackupTreeDigest;
+  /** Dependency-injection seam used by failure-path tests. */
+  readonly removeProjectDirectory?: (path: string) => void;
 }
 
 export interface ApplyLeakedCliTestFixturesResult extends LeakedCliTestFixturesReport {
   readonly applied: boolean;
   readonly backupDir?: string;
+}
+
+interface BackupPayloadManifestEntry {
+  readonly kind: "registry-project" | "path-hash-run-directory";
+  readonly originalPath: string;
+  readonly backupRelativePath: string;
+  readonly digest: BackupTreeDigest;
 }
 
 const isPathInside = (parent: string, child: string): boolean => {
@@ -73,39 +111,46 @@ export const isLeakedCliTestRegistryEntry = (
   isLeakedCliTestFixtureName(project.name) &&
   isTemporaryRepoPath(project.repoRoot);
 
-const readJsonl = (path: string): readonly unknown[] => {
+const readJsonl = (path: string): readonly unknown[] | undefined => {
   if (!existsSync(path)) {
-    return [];
+    return undefined;
   }
-  return readFileSync(path, "utf8")
-    .split("\n")
-    .flatMap((line) => {
-      const trimmed = line.trim();
-      if (trimmed.length === 0) {
-        return [];
-      }
-      try {
-        return [JSON.parse(trimmed) as unknown];
-      } catch {
-        return [];
-      }
-    });
+  const records: unknown[] = [];
+  for (const line of readFileSync(path, "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.length === 0) {
+      continue;
+    }
+    try {
+      records.push(JSON.parse(trimmed) as unknown);
+    } catch {
+      return undefined;
+    }
+  }
+  return records;
 };
 
-const readRunStartedRepoRoots = (hubProjectDir: string): readonly string[] => {
+const readRunStartedRepoRoots = (
+  hubProjectDir: string,
+): readonly string[] | undefined => {
   const runsDir = join(hubProjectDir, "runs");
   if (!existsSync(runsDir)) {
-    return [];
+    return undefined;
   }
 
   const roots: string[] = [];
+  let runDirectoryCount = 0;
   for (const entry of readdirSync(runsDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) {
       continue;
     }
-    for (const event of readJsonl(
-      join(runsDir, entry.name, "events", "run.jsonl"),
-    )) {
+    runDirectoryCount += 1;
+    const events = readJsonl(join(runsDir, entry.name, "events", "run.jsonl"));
+    if (!events) {
+      return undefined;
+    }
+    const runRoots: string[] = [];
+    for (const event of events) {
       if (!event || typeof event !== "object" || Array.isArray(event)) {
         continue;
       }
@@ -115,27 +160,36 @@ const readRunStartedRepoRoots = (hubProjectDir: string): readonly string[] => {
         typeof record.repoRoot === "string" &&
         record.repoRoot.trim().length > 0
       ) {
-        roots.push(record.repoRoot);
+        runRoots.push(record.repoRoot);
       }
     }
+    if (runRoots.length === 0) {
+      return undefined;
+    }
+    roots.push(...runRoots);
   }
-  return roots;
+  return runDirectoryCount > 0 ? roots : undefined;
 };
+
+const resolveLegacyPathHashProjectId = (repoRoot: string): string =>
+  createHash("sha256").update(repoRoot).digest("hex").slice(0, 12);
 
 export const isLeakedCliTestPathHashProjectDir = (
   hubProjectDir: string,
 ): boolean => {
-  if (!PATH_HASH_PROJECT_DIR_PATTERN.test(basename(hubProjectDir))) {
+  const projectDirName = basename(hubProjectDir);
+  if (!PATH_HASH_PROJECT_DIR_PATTERN.test(projectDirName)) {
     return false;
   }
   const repoRoots = readRunStartedRepoRoots(hubProjectDir);
-  if (repoRoots.length === 0) {
+  if (!repoRoots || repoRoots.length === 0) {
     return false;
   }
   return repoRoots.every(
     (repoRoot) =>
       isTemporaryRepoPath(repoRoot) &&
-      isLeakedCliTestFixtureName(basename(repoRoot)),
+      LEAKED_PATH_HASH_REPO_NAME_PATTERN.test(basename(repoRoot)) &&
+      resolveLegacyPathHashProjectId(repoRoot) === projectDirName,
   );
 };
 
@@ -150,6 +204,40 @@ const listPathHashProjectDirs = (projectsDir: string): readonly string[] => {
     )
     .map((entry) => join(projectsDir, entry.name))
     .sort();
+};
+
+const validateRegistryFixtureDirectory = (
+  entry: HubProjectRegistryEntry,
+  userDataDir: string,
+): string | undefined => {
+  if (!STABLE_HUB_PROJECT_ID_PATTERN.test(entry.id)) {
+    return `project id ${JSON.stringify(entry.id)} is not a stable Hub project id`;
+  }
+  const expected = resolveRegisteredHubProjectDir(userDataDir, entry.id);
+  if (resolve(entry.hubProjectDir) !== resolve(expected)) {
+    return `Hub project directory is not the canonical path ${expected}`;
+  }
+  let stat: ReturnType<typeof lstatSync>;
+  try {
+    stat = lstatSync(expected);
+  } catch (error) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return undefined;
+    }
+    throw error;
+  }
+  if (stat.isSymbolicLink()) {
+    return "Hub project directory is a symbolic link";
+  }
+  if (!stat.isDirectory()) {
+    return "Hub project path is not a directory";
+  }
+  return undefined;
 };
 
 const resolveSelectionPlan = (
@@ -192,14 +280,31 @@ export const diagnoseLeakedCliTestFixtures = (
 ): LeakedCliTestFixturesReport => {
   const projects = readHubProjectRegistry(options);
   const selected = readSelectedHubProject(options);
-  const registryEntries = projects.filter(isLeakedCliTestRegistryEntry);
+  const userDataDir = resolveArchloopUserDataDir(options.env, options.homeDir);
+  const registryCandidates = projects.filter(isLeakedCliTestRegistryEntry);
+  const registryEntries: HubProjectRegistryEntry[] = [];
+  const blockedRegistryEntries: BlockedLeakedCliTestRegistryEntry[] = [];
+  for (const entry of registryCandidates) {
+    const reason = validateRegistryFixtureDirectory(entry, userDataDir);
+    if (reason) {
+      blockedRegistryEntries.push({ entry, reason });
+    } else {
+      registryEntries.push(entry);
+    }
+  }
+
   const removedIds = new Set(registryEntries.map((project) => project.id));
+  const blockedIds = new Set(
+    blockedRegistryEntries.map(({ entry }) => entry.id),
+  );
   const remaining = projects.filter((project) => !removedIds.has(project.id));
+  const selectableRemaining = remaining.filter(
+    (project) => !blockedIds.has(project.id),
+  );
   const keptProjectDirs = new Set(
     remaining.map((project) => resolve(project.hubProjectDir)),
   );
 
-  const userDataDir = resolveArchloopUserDataDir(options.env, options.homeDir);
   const projectsDir = join(userDataDir, "hub", "projects");
   const pathHashProjectDirs = listPathHashProjectDirs(projectsDir).filter(
     (projectDir) =>
@@ -207,10 +312,15 @@ export const diagnoseLeakedCliTestFixtures = (
       isLeakedCliTestPathHashProjectDir(projectDir),
   );
 
-  const selection = resolveSelectionPlan(remaining, selected?.id, removedIds);
+  const selection = resolveSelectionPlan(
+    selectableRemaining,
+    selected?.id,
+    removedIds,
+  );
 
   return {
     registryEntries,
+    blockedRegistryEntries,
     pathHashProjectDirs,
     selectedProjectId: selected?.id,
     ...selection,
@@ -223,11 +333,13 @@ const writeRegistryProjects = (
 ): void => {
   const registryPath = resolveHubProjectRegistryPath(options);
   mkdirSync(dirname(registryPath), { recursive: true });
+  const temporaryPath = `${registryPath}.prune-${process.pid}.tmp`;
   writeFileSync(
-    registryPath,
+    temporaryPath,
     `${JSON.stringify({ version: 1, projects }, null, 2)}\n`,
     "utf8",
   );
+  renameSync(temporaryPath, registryPath);
 };
 
 const copyIfExists = (from: string, to: string): void => {
@@ -235,10 +347,101 @@ const copyIfExists = (from: string, to: string): void => {
     return;
   }
   copyFileSync(from, to);
+  const sourceHash = createHash("sha256")
+    .update(readFileSync(from))
+    .digest("hex");
+  const backupHash = createHash("sha256")
+    .update(readFileSync(to))
+    .digest("hex");
+  if (sourceHash !== backupHash) {
+    throw new Error(`Backup verification failed for metadata file ${from}.`);
+  }
+};
+
+export const fingerprintBackupTree = (root: string): BackupTreeDigest => {
+  const hash = createHash("sha256");
+  let entries = 0;
+  let files = 0;
+  let directories = 0;
+  let symlinks = 0;
+  let bytes = 0;
+
+  const visit = (path: string, relativePath: string): void => {
+    const stat = lstatSync(path);
+    entries += 1;
+    if (stat.isSymbolicLink()) {
+      symlinks += 1;
+      const target = readlinkSync(path);
+      hash.update(`l\0${relativePath}\0${target}\0`);
+      return;
+    }
+    if (stat.isDirectory()) {
+      directories += 1;
+      hash.update(`d\0${relativePath}\0`);
+      for (const entry of readdirSync(path, { withFileTypes: true })
+        .map((item) => item.name)
+        .sort()) {
+        visit(
+          join(path, entry),
+          relativePath ? join(relativePath, entry) : entry,
+        );
+      }
+      return;
+    }
+    if (stat.isFile()) {
+      files += 1;
+      bytes += stat.size;
+      hash.update(`f\0${relativePath}\0${stat.size}\0`);
+      hash.update(readFileSync(path));
+      hash.update("\0");
+      return;
+    }
+    throw new Error(`Cannot back up unsupported filesystem entry: ${path}`);
+  };
+
+  visit(root, "");
+  return {
+    entries,
+    files,
+    directories,
+    symlinks,
+    bytes,
+    sha256: hash.digest("hex"),
+  };
+};
+
+export const verifyBackupTree = (
+  source: string,
+  backup: string,
+): BackupTreeDigest => {
+  const sourceDigest = fingerprintBackupTree(source);
+  const backupDigest = fingerprintBackupTree(backup);
+  if (JSON.stringify(sourceDigest) !== JSON.stringify(backupDigest)) {
+    throw new Error(
+      `Backup verification failed for ${source}; copied payload at ${backup} does not match the source.`,
+    );
+  }
+  return sourceDigest;
+};
+
+const copyAndVerifyPayload = (
+  source: string,
+  backup: string,
+  verify: (source: string, backup: string) => BackupTreeDigest,
+): BackupTreeDigest => {
+  cpSync(source, backup, {
+    recursive: true,
+    dereference: false,
+    errorOnExist: true,
+    force: false,
+    preserveTimestamps: true,
+    verbatimSymlinks: true,
+  });
+  return verify(source, backup);
 };
 
 const writeBackup = (
-  options: HubProjectRegistryOptions,
+  options: ApplyLeakedCliTestFixturesInput,
   report: LeakedCliTestFixturesReport,
   now: Date,
 ): string => {
@@ -249,33 +452,81 @@ const writeBackup = (
     "backups",
     `leaked-cli-test-fixtures-${now.toISOString().replace(/[:.]/g, "-")}`,
   );
-  mkdirSync(backupDir, { recursive: true });
-  copyIfExists(
-    resolveHubProjectRegistryPath(options),
-    join(backupDir, "project-registry.json"),
-  );
-  copyIfExists(
-    resolveHubProjectSelectionPath(options),
-    join(backupDir, "selected-project.json"),
-  );
-  writeFileSync(
-    join(backupDir, "manifest.json"),
-    `${JSON.stringify(
-      {
-        createdAt: now.toISOString(),
-        registryEntryIds: report.registryEntries.map((entry) => entry.id),
-        registryEntries: report.registryEntries,
-        pathHashProjectDirs: report.pathHashProjectDirs,
-        selectedProjectId: report.selectedProjectId,
-        selectionAction: report.selectionAction,
-        nextSelectedProjectId: report.nextSelectedProjectId,
-      },
-      null,
-      2,
-    )}\n`,
-    "utf8",
-  );
-  return backupDir;
+  const stagingDir = `${backupDir}.partial-${process.pid}`;
+  if (existsSync(backupDir)) {
+    throw new Error(`Backup destination already exists: ${backupDir}`);
+  }
+  rmSync(stagingDir, { recursive: true, force: true });
+  mkdirSync(stagingDir, { recursive: true });
+
+  try {
+    copyIfExists(
+      resolveHubProjectRegistryPath(options),
+      join(stagingDir, "project-registry.json"),
+    );
+    copyIfExists(
+      resolveHubProjectSelectionPath(options),
+      join(stagingDir, "selected-project.json"),
+    );
+
+    const verify = options.verifyBackupPayload ?? verifyBackupTree;
+    const payloads: BackupPayloadManifestEntry[] = [];
+    for (const entry of report.registryEntries) {
+      if (!existsSync(entry.hubProjectDir)) {
+        continue;
+      }
+      const backupRelativePath = join("payload", "registry-projects", entry.id);
+      const backupPath = join(stagingDir, backupRelativePath);
+      mkdirSync(dirname(backupPath), { recursive: true });
+      payloads.push({
+        kind: "registry-project",
+        originalPath: entry.hubProjectDir,
+        backupRelativePath,
+        digest: copyAndVerifyPayload(entry.hubProjectDir, backupPath, verify),
+      });
+    }
+    for (const projectDir of report.pathHashProjectDirs) {
+      const backupRelativePath = join(
+        "payload",
+        "path-hash-run-directories",
+        basename(projectDir),
+      );
+      const backupPath = join(stagingDir, backupRelativePath);
+      mkdirSync(dirname(backupPath), { recursive: true });
+      payloads.push({
+        kind: "path-hash-run-directory",
+        originalPath: projectDir,
+        backupRelativePath,
+        digest: copyAndVerifyPayload(projectDir, backupPath, verify),
+      });
+    }
+
+    writeFileSync(
+      join(stagingDir, "manifest.json"),
+      `${JSON.stringify(
+        {
+          version: 1,
+          createdAt: now.toISOString(),
+          registryEntryIds: report.registryEntries.map((entry) => entry.id),
+          registryEntries: report.registryEntries,
+          blockedRegistryEntries: report.blockedRegistryEntries,
+          pathHashProjectDirs: report.pathHashProjectDirs,
+          payloads,
+          selectedProjectId: report.selectedProjectId,
+          selectionAction: report.selectionAction,
+          nextSelectedProjectId: report.nextSelectedProjectId,
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+    renameSync(stagingDir, backupDir);
+    return backupDir;
+  } catch (error) {
+    rmSync(stagingDir, { recursive: true, force: true });
+    throw error;
+  }
 };
 
 export const applyLeakedCliTestFixtures = (
@@ -297,7 +548,19 @@ export const applyLeakedCliTestFixtures = (
   const remaining = readHubProjectRegistry(input).filter(
     (project) => !removedIds.has(project.id),
   );
-  writeRegistryProjects(remaining, input);
+
+  // Keep registry entries until every payload deletion has succeeded. If a
+  // deletion or selection update fails, the next invocation can still
+  // diagnose the same candidate and converge using the completed backup.
+  const removeProjectDirectory =
+    input.removeProjectDirectory ??
+    ((path: string): void => rmSync(path, { recursive: true, force: true }));
+  for (const entry of report.registryEntries) {
+    removeProjectDirectory(entry.hubProjectDir);
+  }
+  for (const projectDir of report.pathHashProjectDirs) {
+    removeProjectDirectory(projectDir);
+  }
 
   if (report.selectionAction === "clear") {
     const selectionPath = resolveHubProjectSelectionPath(input);
@@ -314,13 +577,7 @@ export const applyLeakedCliTestFixtures = (
       now,
     });
   }
-
-  for (const entry of report.registryEntries) {
-    rmSync(entry.hubProjectDir, { recursive: true, force: true });
-  }
-  for (const projectDir of report.pathHashProjectDirs) {
-    rmSync(projectDir, { recursive: true, force: true });
-  }
+  writeRegistryProjects(remaining, input);
 
   return {
     ...report,
@@ -340,6 +597,11 @@ export const formatLeakedCliTestFixturesLines = (
     ...result.registryEntries.map(
       (entry) =>
         `  - ${entry.name} (${entry.id}) repo=${entry.repoRoot} dir=${entry.hubProjectDir}`,
+    ),
+    `Blocked registry entries: ${result.blockedRegistryEntries.length}`,
+    ...result.blockedRegistryEntries.map(
+      ({ entry, reason }) =>
+        `  - ${entry.name} (${entry.id}) preserved: ${reason}`,
     ),
     `Path-hash run directories: ${result.pathHashProjectDirs.length}`,
     ...result.pathHashProjectDirs.map((dir) => `  - ${dir}`),
@@ -363,7 +625,7 @@ export const formatLeakedCliTestFixturesLines = (
     lines.push(`Backup: ${result.backupDir}`);
   } else if (!result.applied) {
     lines.push(
-      "Re-run with --apply --yes to remove these fixtures after writing a recoverable backup.",
+      "Re-run with --apply --yes to remove these fixtures after writing a verified, recoverable backup.",
     );
   }
 

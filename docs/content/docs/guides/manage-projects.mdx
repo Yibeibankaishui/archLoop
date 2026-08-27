@@ -67,7 +67,9 @@ npx archloop project prune-test-fixtures --apply --yes
 ```
 
 The command identifies `cli-host-*` and `cli-resolve-*` entries that point at
-temp repositories, plus path-hash run directories whose recorded
-`run_started.repoRoot` matches that pattern. It preserves every other
-registered project and any run history that cannot be classified from
-`run_started` evidence.
+temp repositories, plus legacy path-hash run directories from those tests and
+the known `hub-recover-cleanup-*` / `hub-recover-blocked-*` suites. A path-hash
+directory is eligible only when all recorded `run_started.repoRoot` values are
+known test roots and reproduce its SHA-256/12 id. Apply verifies a complete
+payload backup first. Non-canonical or symlinked registered directories are
+reported as blocked; every unclassified or durable project remains untouched.

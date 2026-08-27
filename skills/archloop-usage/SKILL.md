@@ -82,8 +82,11 @@ safer than the selected project.
 If `project list` is filled with `cli-host-*` or `cli-resolve-*` names that
 point at missing temp repositories, preview
 `archloop project prune-test-fixtures` and apply with `--apply --yes`. That
-recovery path only removes those known CLI-test fixtures and path-hash run
-directories classified from `run_started.repoRoot`; durable projects stay.
+recovery path only removes known CLI-test fixtures and exact SHA-256/12
+path-hash run directories classified from `run_started.repoRoot`. Apply stages
+and recursively verifies complete project/run payload backups first;
+non-canonical or symlinked registered paths are reported as blocked, and
+durable projects stay.
 
 Project profiles include `generic`, `node`, `python`, and `cpp`. Reconfiguring
 with the same profile refreshes detected facts while preserving user-edited

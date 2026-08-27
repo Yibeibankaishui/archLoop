@@ -31,10 +31,11 @@ npx archloop project prune-test-fixtures
 npx archloop project prune-test-fixtures --apply --yes
 ```
 
-Preview first. The command only removes `cli-host-*` / `cli-resolve-*` entries
-whose repository path is under the system temp directory, plus path-hash run
-directories classified from `run_started.repoRoot`. Durable projects stay
-registered.
+Preview first. The command only removes known temp test entries and legacy
+path-hash run directories whose exact SHA-256/12 identity is supported by all
+recorded `run_started.repoRoot` values. Apply verifies complete backup payloads
+before deletion. Non-canonical or symlinked paths are shown as blocked, and
+durable projects stay registered.
 
 ## Registered repository path is missing
 

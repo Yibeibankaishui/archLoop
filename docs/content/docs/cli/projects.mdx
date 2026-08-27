@@ -36,9 +36,13 @@ scripts should provide explicit names and paths.
 
 `project prune-test-fixtures` is a recovery tool for Hub registries that were
 polluted by older CLI tests. It only matches `cli-host-*` / `cli-resolve-*`
-names whose repository path is under the system temp directory, plus legacy
-path-hash run directories whose `run_started.repoRoot` has the same shape. The
-default invocation is a dry run. `--apply --yes` writes a recoverable backup,
-removes those fixtures, and either keeps a remaining selected project or leaves
-the Hub unselected. Durable registered projects and run histories whose
-`repoRoot` is not a temp CLI-test fixture are left unchanged.
+names whose repository path is under the system temp directory. Legacy
+path-hash run directories also recognize the exact `cli-host-*`,
+`cli-resolve-*`, `hub-recover-cleanup-*`, and `hub-recover-blocked-*` test
+prefixes, and require every `run_started.repoRoot` to reproduce the directory's
+SHA-256/12 id. The default invocation is a dry run. `--apply --yes` first copies
+the complete project/run payloads to a staged backup, verifies recursive file
+counts, bytes, and hashes, then removes the fixtures. Registry entries with a
+non-canonical or symlinked Hub project directory are reported as blocked and
+preserved. Durable registered projects and unclassified run histories stay
+unchanged.

@@ -135,9 +135,11 @@ npx archloop project prune-test-fixtures
 npx archloop project prune-test-fixtures --apply --yes
 ```
 
-The dry run lists exact registry entries and path-hash run directories. Apply
-writes a recoverable backup first, preserves durable projects, and clears or
-repairs selection when the selected project is removed.
+The dry run lists exact registry entries, blocked unsafe candidates, and
+path-hash run directories. Apply stages complete project/run payloads, verifies
+their recursive digests, and only then deletes them. The manifest maps every
+original directory to its backup path and digest. Durable projects are
+preserved, and selection is cleared or repaired when its fixture is removed.
 
 For symptom-specific entries, see
 [Troubleshooting](/docs/reference/troubleshooting).

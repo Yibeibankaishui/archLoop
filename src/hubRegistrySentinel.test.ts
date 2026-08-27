@@ -32,4 +32,19 @@ describe("Hub registry sentinel", () => {
       /project-registry\.json changed/,
     );
   });
+
+  it("fails when content inside an existing project directory changes", async () => {
+    const hubDir = await mkdtemp(join(tmpdir(), "hub-sentinel-"));
+    const projectDir = join(hubDir, "projects", "project-existing");
+    mkdirSync(join(projectDir, "runs"), { recursive: true });
+    const eventPath = join(projectDir, "runs", "event.jsonl");
+    writeFileSync(eventPath, '{"type":"run_started"}\n');
+    const snapshot = snapshotHubRegistry(hubDir);
+
+    writeFileSync(eventPath, '{"type":"run_completed"}\n');
+
+    expect(() => assertHubRegistryUnchanged(snapshot)).toThrow(
+      /project directory contents changed/,
+    );
+  });
 });
